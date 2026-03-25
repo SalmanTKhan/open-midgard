@@ -1990,7 +1990,7 @@ bool CPc::EnsureBillboardTexture(float cameraLongitude)
             s_vulkanBillboardUploadsThisTick = 0;
         }
         if (s_vulkanBillboardUploadsThisTick >= 4u) {
-            return false;
+            return m_billboardTexture != nullptr;
         }
         ++s_vulkanBillboardUploadsThisTick;
     }
