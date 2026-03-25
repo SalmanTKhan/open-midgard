@@ -3818,7 +3818,8 @@ int  CGameMode::OnRun() {
         g_framePerfStats.flipMs += static_cast<u64>(flipEnd - flipStart);
     } else {
         const DWORD uiDrawStart = GetTickCount();
-        const bool composedModernOverlayFrame = ComposeModernOverlayFrame(*this, m_cursorActNum, m_mouseAnimStartTick);
+        const bool composedModernOverlayFrame = GetActiveRenderBackend() == RenderBackendType::Direct3D11
+            && ComposeModernOverlayFrame(*this, m_cursorActNum, m_mouseAnimStartTick);
         const DWORD uiDrawEnd = GetTickCount();
         const DWORD flipStart = GetTickCount();
         g_renderer.Flip(false);
