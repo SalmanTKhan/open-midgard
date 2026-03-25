@@ -214,6 +214,32 @@ bool ShouldEnableD3D12DebugLayer()
 #endif
 }
 
+void LogD3D12InitFailure(const char* stage, HRESULT hr, int width, int height)
+{
+    DbgLog("[Render] D3D12 init failed at %s hr=0x%08X size=%dx%d.\n",
+        stage ? stage : "(unknown)",
+        static_cast<unsigned int>(hr),
+        width,
+        height);
+}
+
+void LogD3D12ResizeFailure(HRESULT hr, int width, int height)
+{
+    DbgLog("[Render] D3D12 swap-chain resize failed hr=0x%08X size=%dx%d.\n",
+        static_cast<unsigned int>(hr),
+        width,
+        height);
+}
+
+void LogD3D12PresentFailure(ID3D12Device* device, HRESULT hr, bool vertSync)
+{
+    const HRESULT removedReason = device ? device->GetDeviceRemovedReason() : S_OK;
+    DbgLog("[Render] D3D12 present failed hr=0x%08X vsync=%d removedReason=0x%08X.\n",
+        static_cast<unsigned int>(hr),
+        vertSync ? 1 : 0,
+        static_cast<unsigned int>(removedReason));
+}
+
 D3D11_PRIMITIVE_TOPOLOGY ConvertPrimitiveTopology(D3DPRIMITIVETYPE primitiveType)
 {
     switch (primitiveType) {
@@ -1731,6 +1757,7 @@ public:
         HRESULT hr = CreateDXGIFactory2(dxgiFactoryFlags, IID_PPV_ARGS(&m_factory));
         if (FAILED(hr) || !m_factory) {
             result.initHr = static_cast<int>(hr);
+            LogD3D12InitFailure("CreateDXGIFactory2", hr, m_renderWidth, m_renderHeight);
             Shutdown();
             if (outResult) {
                 *outResult = result;
@@ -1748,6 +1775,7 @@ public:
         }
         if (FAILED(hr) || !m_device) {
             result.initHr = static_cast<int>(hr);
+            LogD3D12InitFailure("D3D12CreateDevice", hr, m_renderWidth, m_renderHeight);
             Shutdown();
             if (outResult) {
                 *outResult = result;
@@ -1760,6 +1788,7 @@ public:
         hr = m_device->CreateCommandQueue(&queueDesc, IID_PPV_ARGS(&m_commandQueue));
         if (FAILED(hr) || !m_commandQueue) {
             result.initHr = static_cast<int>(hr);
+            LogD3D12InitFailure("CreateCommandQueue", hr, m_renderWidth, m_renderHeight);
             Shutdown();
             if (outResult) {
                 *outResult = result;
@@ -1786,6 +1815,7 @@ public:
         SafeRelease(swapChain);
         if (FAILED(hr) || !m_swapChain) {
             result.initHr = static_cast<int>(hr);
+            LogD3D12InitFailure("CreateSwapChainForHwnd", hr, m_renderWidth, m_renderHeight);
             Shutdown();
             if (outResult) {
                 *outResult = result;
@@ -1802,6 +1832,7 @@ public:
         hr = m_device->CreateDescriptorHeap(&rtvHeapDesc, IID_PPV_ARGS(&m_rtvHeap));
         if (FAILED(hr) || !m_rtvHeap) {
             result.initHr = static_cast<int>(hr);
+            LogD3D12InitFailure("CreateDescriptorHeap(RTV)", hr, m_renderWidth, m_renderHeight);
             Shutdown();
             if (outResult) {
                 *outResult = result;
@@ -1816,6 +1847,7 @@ public:
         hr = m_device->CreateDescriptorHeap(&dsvHeapDesc, IID_PPV_ARGS(&m_dsvHeap));
         if (FAILED(hr) || !m_dsvHeap) {
             result.initHr = static_cast<int>(hr);
+            LogD3D12InitFailure("CreateDescriptorHeap(DSV)", hr, m_renderWidth, m_renderHeight);
             Shutdown();
             if (outResult) {
                 *outResult = result;
@@ -1830,6 +1862,7 @@ public:
         hr = m_device->CreateDescriptorHeap(&srvHeapDesc, IID_PPV_ARGS(&m_srvHeap));
         if (FAILED(hr) || !m_srvHeap) {
             result.initHr = static_cast<int>(hr);
+            LogD3D12InitFailure("CreateDescriptorHeap(SRV)", hr, m_renderWidth, m_renderHeight);
             Shutdown();
             if (outResult) {
                 *outResult = result;
@@ -1841,6 +1874,7 @@ public:
         hr = m_device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&m_commandAllocator));
         if (FAILED(hr) || !m_commandAllocator) {
             result.initHr = static_cast<int>(hr);
+            LogD3D12InitFailure("CreateCommandAllocator", hr, m_renderWidth, m_renderHeight);
             Shutdown();
             if (outResult) {
                 *outResult = result;
@@ -1851,6 +1885,7 @@ public:
         hr = m_device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, m_commandAllocator, nullptr, IID_PPV_ARGS(&m_commandList));
         if (FAILED(hr) || !m_commandList) {
             result.initHr = static_cast<int>(hr);
+            LogD3D12InitFailure("CreateCommandList", hr, m_renderWidth, m_renderHeight);
             Shutdown();
             if (outResult) {
                 *outResult = result;
@@ -1862,6 +1897,7 @@ public:
         hr = m_device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&m_fence));
         if (FAILED(hr) || !m_fence) {
             result.initHr = static_cast<int>(hr);
+            LogD3D12InitFailure("CreateFence", hr, m_renderWidth, m_renderHeight);
             Shutdown();
             if (outResult) {
                 *outResult = result;
@@ -1872,6 +1908,7 @@ public:
         m_fenceEvent = CreateEventA(nullptr, FALSE, FALSE, nullptr);
         if (!m_fenceEvent) {
             result.initHr = static_cast<int>(HRESULT_FROM_WIN32(GetLastError()));
+            LogD3D12InitFailure("CreateEventA", static_cast<HRESULT>(result.initHr), m_renderWidth, m_renderHeight);
             Shutdown();
             if (outResult) {
                 *outResult = result;
@@ -1881,6 +1918,7 @@ public:
 
         if (!CreatePipelineResources()) {
             result.initHr = static_cast<int>(E_FAIL);
+            LogD3D12InitFailure("CreatePipelineResources", E_FAIL, m_renderWidth, m_renderHeight);
             Shutdown();
             if (outResult) {
                 *outResult = result;
@@ -1890,6 +1928,7 @@ public:
 
         if (!RefreshRenderTargets() || !CreateDepthStencilResources()) {
             result.initHr = static_cast<int>(E_FAIL);
+            LogD3D12InitFailure("RefreshRenderTargets/CreateDepthStencilResources", E_FAIL, m_renderWidth, m_renderHeight);
             Shutdown();
             if (outResult) {
                 *outResult = result;
@@ -2020,6 +2059,7 @@ public:
 
         const HRESULT presentHr = m_swapChain->Present(vertSync ? 1 : 0, 0);
         if (FAILED(presentHr)) {
+            LogD3D12PresentFailure(m_device, presentHr, vertSync);
             return static_cast<int>(presentHr);
         }
 
@@ -3230,7 +3270,7 @@ private:
             DXGI_FORMAT_B8G8R8A8_UNORM,
             0);
         if (FAILED(hr)) {
-            DbgLog("[Render] D3D12 swap-chain resize failed hr=0x%08X.\n", static_cast<unsigned int>(hr));
+            LogD3D12ResizeFailure(hr, m_renderWidth, m_renderHeight);
             return;
         }
 
