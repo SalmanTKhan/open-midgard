@@ -50,10 +50,10 @@ Goal: ship Direct3D12 and Vulkan as real renderer options, selectable from the i
 - [x] Make DX12 a user-facing selectable backend once stable.
 
 ### Milestone 6 — Renderer UI Expansion
-- [ ] Expand the renderer selector to show Direct3D7, Direct3D11, Direct3D12, and Vulkan.
+- [x] Expand the renderer selector to show Direct3D7, Direct3D11, Direct3D12, and Vulkan.
 - [ ] Surface backend state per entry: active, selected, restart required, unsupported, not implemented.
-- [ ] Prevent unimplemented backends from behaving like real selections.
-- [ ] Keep fallback/active-backend state visible in the option window and title bar.
+- [x] Prevent unimplemented backends from behaving like real selections.
+- [x] Keep fallback/active-backend state visible in the option window and title bar.
 
 ### Milestone 7 — Vulkan Bring-Up
 - [ ] Add `VulkanRenderDevice` shell to the routed render-device layer.

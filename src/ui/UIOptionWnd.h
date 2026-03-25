@@ -1,6 +1,7 @@
 #pragma once
 
 #include "UIFrameWnd.h"
+#include "render3d/RenderBackend.h"
 
 #include <string>
 #include <windows.h>
@@ -44,13 +45,14 @@ private:
     RECT GetCloseButtonRect() const;
     RECT GetSkinRect() const;
     RECT GetRendererRect() const;
+    RECT GetRendererEntryRect(int index) const;
     RECT GetRestartButtonRect() const;
     RECT GetBgmSliderRect() const;
     RECT GetSoundSliderRect() const;
     RECT GetSliderKnobRect(const RECT& sliderRect, int value) const;
     void DrawSlider(HDC hdc, const RECT& sliderRect, int value, const char* label) const;
     void DrawHeaderButton(HDC hdc, const RECT& rect, const char* text) const;
-    void CyclePreferredRenderBackend();
+    void SelectPreferredRenderBackend(RenderBackendType backend);
     bool HasPendingRendererRestart() const;
     void PromptForRendererRestart();
 
