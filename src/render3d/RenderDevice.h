@@ -12,6 +12,7 @@ class IRenderDevice {
 public:
     virtual ~IRenderDevice() = default;
 
+    virtual RenderBackendType GetBackendType() const = 0;
     virtual bool Initialize(HWND hwnd, RenderBackendBootstrapResult* outResult) = 0;
     virtual void Shutdown() = 0;
     virtual void RefreshRenderSize() = 0;

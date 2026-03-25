@@ -3650,13 +3650,13 @@ int  CGameMode::OnRun() {
         return 1;
     }
 
-    if (g_3dDevice.m_pd3dDevice) {
+    if (GetRenderDevice().GetLegacyDevice()) {
         g_renderer.ClearBackground();
     }
     const DWORD renderPrepStart = GetTickCount();
     m_view->OnRender();
     const DWORD renderPrepEnd = GetTickCount();
-    if (g_3dDevice.m_pd3dDevice) {
+    if (GetRenderDevice().GetLegacyDevice()) {
         const DWORD drawSceneStart = GetTickCount();
         g_renderer.DrawScene();
         const DWORD drawSceneEnd = GetTickCount();

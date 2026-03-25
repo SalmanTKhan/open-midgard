@@ -2,12 +2,26 @@
 
 #include "Device.h"
 #include "D3dutil.h"
+#include "DebugLog.h"
 #include "res/Texture.h"
 
+#include <d3d11.h>
 #include <algorithm>
 #include <cstring>
 
+#pragma comment(lib, "d3d11.lib")
+#pragma comment(lib, "dxgi.lib")
+
 namespace {
+
+template <typename T>
+void SafeRelease(T*& value)
+{
+    if (value) {
+        value->Release();
+        value = nullptr;
+    }
+}
 
 unsigned int CountTrailingZeros(unsigned int mask)
 {
@@ -107,15 +121,38 @@ public:
         m_bootstrap.initHr = -1;
     }
 
+    RenderBackendType GetBackendType() const override
+    {
+        return RenderBackendType::LegacyDirect3D7;
+    }
+
     bool Initialize(HWND hwnd, RenderBackendBootstrapResult* outResult) override
     {
+        Shutdown();
         m_hwnd = hwnd;
-        const bool ok = InitializeRenderBackend(hwnd, &m_bootstrap);
+        GUID deviceCandidates[] = {
+            IID_IDirect3DTnLHalDevice,
+            IID_IDirect3DHALDevice,
+            IID_IDirect3DRGBDevice
+        };
+
+        m_bootstrap.backend = RenderBackendType::LegacyDirect3D7;
+        m_bootstrap.initHr = -1;
+        for (GUID& deviceGuid : deviceCandidates) {
+            m_bootstrap.initHr = g_3dDevice.Init(hwnd, nullptr, &deviceGuid, nullptr, 0);
+            if (m_bootstrap.initHr >= 0) {
+                break;
+            }
+        }
+
         RefreshRenderSize();
         if (outResult) {
             *outResult = m_bootstrap;
         }
-        return ok;
+        if (m_bootstrap.initHr >= 0) {
+            DbgLog("[Render] Initialized backend '%s'.\n", GetRenderBackendName(m_bootstrap.backend));
+        }
+        return m_bootstrap.initHr >= 0;
     }
 
     void Shutdown() override
@@ -378,10 +415,494 @@ private:
     RenderBackendBootstrapResult m_bootstrap;
 };
 
+class D3D11RenderDevice final : public IRenderDevice {
+public:
+    D3D11RenderDevice()
+        : m_hwnd(nullptr), m_renderWidth(0), m_renderHeight(0),
+          m_swapChain(nullptr), m_device(nullptr), m_context(nullptr), m_renderTargetView(nullptr),
+          m_warnedLegacyOps(false), m_warnedTextureInterop(false)
+    {
+    }
+
+    RenderBackendType GetBackendType() const override
+    {
+        return RenderBackendType::Direct3D11;
+    }
+
+    bool Initialize(HWND hwnd, RenderBackendBootstrapResult* outResult) override
+    {
+        Shutdown();
+        m_hwnd = hwnd;
+
+        DXGI_SWAP_CHAIN_DESC swapChainDesc{};
+        swapChainDesc.BufferCount = 1;
+        swapChainDesc.BufferDesc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+        swapChainDesc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
+        swapChainDesc.OutputWindow = hwnd;
+        swapChainDesc.SampleDesc.Count = 1;
+        swapChainDesc.Windowed = TRUE;
+        swapChainDesc.SwapEffect = DXGI_SWAP_EFFECT_DISCARD;
+
+        D3D_FEATURE_LEVEL featureLevel = D3D_FEATURE_LEVEL_11_0;
+        const D3D_FEATURE_LEVEL featureLevels[] = {
+            D3D_FEATURE_LEVEL_11_0,
+            D3D_FEATURE_LEVEL_10_1,
+            D3D_FEATURE_LEVEL_10_0,
+        };
+
+        const UINT createFlags = D3D11_CREATE_DEVICE_BGRA_SUPPORT;
+        HRESULT hr = D3D11CreateDeviceAndSwapChain(
+            nullptr,
+            D3D_DRIVER_TYPE_HARDWARE,
+            nullptr,
+            createFlags,
+            featureLevels,
+            static_cast<UINT>(std::size(featureLevels)),
+            D3D11_SDK_VERSION,
+            &swapChainDesc,
+            &m_swapChain,
+            &m_device,
+            &featureLevel,
+            &m_context);
+        if (FAILED(hr)) {
+            hr = D3D11CreateDeviceAndSwapChain(
+                nullptr,
+                D3D_DRIVER_TYPE_WARP,
+                nullptr,
+                createFlags,
+                featureLevels,
+                static_cast<UINT>(std::size(featureLevels)),
+                D3D11_SDK_VERSION,
+                &swapChainDesc,
+                &m_swapChain,
+                &m_device,
+                &featureLevel,
+                &m_context);
+        }
+
+        RenderBackendBootstrapResult result{};
+        result.backend = RenderBackendType::Direct3D11;
+        result.initHr = static_cast<int>(hr);
+        if (FAILED(hr)) {
+            Shutdown();
+            if (outResult) {
+                *outResult = result;
+            }
+            return false;
+        }
+
+        if (!RefreshRenderTarget()) {
+            result.initHr = -1;
+            Shutdown();
+            if (outResult) {
+                *outResult = result;
+            }
+            return false;
+        }
+
+        RefreshRenderSize();
+        DbgLog("[Render] Initialized backend '%s' with feature level 0x%04X.\n",
+            GetRenderBackendName(result.backend),
+            static_cast<unsigned int>(featureLevel));
+
+        if (outResult) {
+            *outResult = result;
+        }
+        return true;
+    }
+
+    void Shutdown() override
+    {
+        SafeRelease(m_renderTargetView);
+        SafeRelease(m_context);
+        SafeRelease(m_device);
+        SafeRelease(m_swapChain);
+        m_renderWidth = 0;
+        m_renderHeight = 0;
+        m_hwnd = nullptr;
+        m_warnedLegacyOps = false;
+        m_warnedTextureInterop = false;
+    }
+
+    void RefreshRenderSize() override
+    {
+        if (!m_hwnd) {
+            m_renderWidth = 0;
+            m_renderHeight = 0;
+            return;
+        }
+
+        RECT clientRect{};
+        GetClientRect(m_hwnd, &clientRect);
+        const int newWidth = (std::max)(1L, clientRect.right - clientRect.left);
+        const int newHeight = (std::max)(1L, clientRect.bottom - clientRect.top);
+        if (newWidth != m_renderWidth || newHeight != m_renderHeight) {
+            m_renderWidth = newWidth;
+            m_renderHeight = newHeight;
+            ResizeSwapChainBuffers();
+        }
+    }
+
+    int GetRenderWidth() const override
+    {
+        return m_renderWidth;
+    }
+
+    int GetRenderHeight() const override
+    {
+        return m_renderHeight;
+    }
+
+    HWND GetWindowHandle() const override
+    {
+        return m_hwnd;
+    }
+
+    IDirect3DDevice7* GetLegacyDevice() const override
+    {
+        return nullptr;
+    }
+
+    int ClearColor(unsigned int color) override
+    {
+        if (!m_context || !m_renderTargetView) {
+            return -1;
+        }
+
+        const float clearColor[4] = {
+            static_cast<float>((color >> 16) & 0xFFu) / 255.0f,
+            static_cast<float>((color >> 8) & 0xFFu) / 255.0f,
+            static_cast<float>(color & 0xFFu) / 255.0f,
+            static_cast<float>((color >> 24) & 0xFFu) / 255.0f,
+        };
+
+        m_context->OMSetRenderTargets(1, &m_renderTargetView, nullptr);
+        m_context->ClearRenderTargetView(m_renderTargetView, clearColor);
+        return 0;
+    }
+
+    int ClearDepth() override
+    {
+        return 0;
+    }
+
+    int Present(bool vertSync) override
+    {
+        if (!m_swapChain) {
+            return -1;
+        }
+
+        return static_cast<int>(m_swapChain->Present(vertSync ? 1 : 0, 0));
+    }
+
+    bool AcquireBackBufferDC(HDC* outDc) override
+    {
+        if (!outDc || !m_hwnd) {
+            return false;
+        }
+
+        *outDc = GetDC(m_hwnd);
+        return *outDc != nullptr;
+    }
+
+    void ReleaseBackBufferDC(HDC dc) override
+    {
+        if (m_hwnd && dc) {
+            ReleaseDC(m_hwnd, dc);
+        }
+    }
+
+    bool BeginScene() override
+    {
+        if (m_context && m_renderTargetView) {
+            m_context->OMSetRenderTargets(1, &m_renderTargetView, nullptr);
+        }
+        return m_context != nullptr;
+    }
+
+    void EndScene() override
+    {
+    }
+
+    void SetTransform(D3DTRANSFORMSTATETYPE state, const D3DMATRIX* matrix) override
+    {
+        (void)state;
+        (void)matrix;
+        WarnLegacyFixedFunctionUnavailable("SetTransform");
+    }
+
+    void SetRenderState(D3DRENDERSTATETYPE state, DWORD value) override
+    {
+        (void)state;
+        (void)value;
+        WarnLegacyFixedFunctionUnavailable("SetRenderState");
+    }
+
+    void SetTextureStageState(DWORD stage, D3DTEXTURESTAGESTATETYPE type, DWORD value) override
+    {
+        (void)stage;
+        (void)type;
+        (void)value;
+        WarnLegacyFixedFunctionUnavailable("SetTextureStageState");
+    }
+
+    void BindTexture(DWORD stage, CTexture* texture) override
+    {
+        (void)stage;
+        (void)texture;
+        WarnLegacyFixedFunctionUnavailable("BindTexture");
+    }
+
+    void DrawPrimitive(D3DPRIMITIVETYPE primitiveType, DWORD vertexFormat,
+        const void* vertices, DWORD vertexCount, DWORD flags) override
+    {
+        (void)primitiveType;
+        (void)vertexFormat;
+        (void)vertices;
+        (void)vertexCount;
+        (void)flags;
+        WarnLegacyFixedFunctionUnavailable("DrawPrimitive");
+    }
+
+    void DrawIndexedPrimitive(D3DPRIMITIVETYPE primitiveType, DWORD vertexFormat,
+        const void* vertices, DWORD vertexCount, const unsigned short* indices,
+        DWORD indexCount, DWORD flags) override
+    {
+        (void)primitiveType;
+        (void)vertexFormat;
+        (void)vertices;
+        (void)vertexCount;
+        (void)indices;
+        (void)indexCount;
+        (void)flags;
+        WarnLegacyFixedFunctionUnavailable("DrawIndexedPrimitive");
+    }
+
+    void AdjustTextureSize(unsigned int* width, unsigned int* height) override
+    {
+        if (!width || !height) {
+            return;
+        }
+        *width = (std::max)(1u, *width);
+        *height = (std::max)(1u, *height);
+    }
+
+    bool CreateTextureSurface(unsigned int requestedWidth, unsigned int requestedHeight,
+        unsigned int* outSurfaceWidth, unsigned int* outSurfaceHeight, IDirectDrawSurface7** outSurface) override
+    {
+        (void)requestedWidth;
+        (void)requestedHeight;
+        if (outSurfaceWidth) {
+            *outSurfaceWidth = 0;
+        }
+        if (outSurfaceHeight) {
+            *outSurfaceHeight = 0;
+        }
+        if (outSurface) {
+            *outSurface = nullptr;
+        }
+        WarnTextureInteropUnavailable("CreateTextureSurface");
+        return false;
+    }
+
+    bool UploadTextureSurface(IDirectDrawSurface7* surface, int x, int y, int w, int h,
+        const unsigned int* data, bool skipColorKey, int pitch) override
+    {
+        (void)surface;
+        (void)x;
+        (void)y;
+        (void)w;
+        (void)h;
+        (void)data;
+        (void)skipColorKey;
+        (void)pitch;
+        WarnTextureInteropUnavailable("UploadTextureSurface");
+        return false;
+    }
+
+private:
+    bool RefreshRenderTarget()
+    {
+        if (!m_swapChain || !m_device) {
+            return false;
+        }
+
+        SafeRelease(m_renderTargetView);
+        ID3D11Texture2D* backBuffer = nullptr;
+        HRESULT hr = m_swapChain->GetBuffer(0, __uuidof(ID3D11Texture2D), reinterpret_cast<void**>(&backBuffer));
+        if (FAILED(hr) || !backBuffer) {
+            SafeRelease(backBuffer);
+            return false;
+        }
+
+        hr = m_device->CreateRenderTargetView(backBuffer, nullptr, &m_renderTargetView);
+        SafeRelease(backBuffer);
+        if (FAILED(hr) || !m_renderTargetView) {
+            return false;
+        }
+
+        m_context->OMSetRenderTargets(1, &m_renderTargetView, nullptr);
+        return true;
+    }
+
+    void ResizeSwapChainBuffers()
+    {
+        if (!m_swapChain || m_renderWidth <= 0 || m_renderHeight <= 0) {
+            return;
+        }
+
+        SafeRelease(m_renderTargetView);
+        HRESULT hr = m_swapChain->ResizeBuffers(0,
+            static_cast<UINT>(m_renderWidth),
+            static_cast<UINT>(m_renderHeight),
+            DXGI_FORMAT_UNKNOWN,
+            0);
+        if (FAILED(hr)) {
+            DbgLog("[Render] D3D11 swap-chain resize failed hr=0x%08X.\n", static_cast<unsigned int>(hr));
+            return;
+        }
+
+        RefreshRenderTarget();
+    }
+
+    void WarnLegacyFixedFunctionUnavailable(const char* operation)
+    {
+        if (!m_warnedLegacyOps) {
+            m_warnedLegacyOps = true;
+            DbgLog("[Render] D3D11 backend does not yet implement the legacy fixed-function renderer path. Operation '%s' is ignored.\n",
+                operation ? operation : "unknown");
+        }
+    }
+
+    void WarnTextureInteropUnavailable(const char* operation)
+    {
+        if (!m_warnedTextureInterop) {
+            m_warnedTextureInterop = true;
+            DbgLog("[Render] D3D11 backend does not yet implement DirectDraw texture interop. Operation '%s' is unavailable.\n",
+                operation ? operation : "unknown");
+        }
+    }
+
+    HWND m_hwnd;
+    int m_renderWidth;
+    int m_renderHeight;
+    IDXGISwapChain* m_swapChain;
+    ID3D11Device* m_device;
+    ID3D11DeviceContext* m_context;
+    ID3D11RenderTargetView* m_renderTargetView;
+    bool m_warnedLegacyOps;
+    bool m_warnedTextureInterop;
+};
+
+class RoutedRenderDevice final : public IRenderDevice {
+public:
+    RoutedRenderDevice()
+        : m_active(&m_legacy)
+    {
+    }
+
+    RenderBackendType GetBackendType() const override
+    {
+        return m_active->GetBackendType();
+    }
+
+    bool Initialize(HWND hwnd, RenderBackendBootstrapResult* outResult) override
+    {
+        Shutdown();
+
+        const RenderBackendType requestedBackend = GetRequestedRenderBackend();
+        RenderBackendBootstrapResult result{};
+        result.backend = requestedBackend;
+        result.initHr = -1;
+
+        switch (requestedBackend) {
+        case RenderBackendType::Direct3D11:
+            if (m_d3d11.Initialize(hwnd, &result)) {
+                m_active = &m_d3d11;
+            } else {
+                DbgLog("[Render] Failed to initialize backend '%s' (hr=0x%08X). Falling back to Direct3D7.\n",
+                    GetRenderBackendName(requestedBackend),
+                    static_cast<unsigned int>(result.initHr));
+                m_active = &m_legacy;
+                if (!m_legacy.Initialize(hwnd, &result)) {
+                    if (outResult) {
+                        *outResult = result;
+                    }
+                    return false;
+                }
+            }
+            break;
+
+        case RenderBackendType::Direct3D12:
+        case RenderBackendType::Vulkan:
+            DbgLog("[Render] Requested backend '%s' is not implemented yet. Falling back to Direct3D7.\n",
+                GetRenderBackendName(requestedBackend));
+            m_active = &m_legacy;
+            if (!m_legacy.Initialize(hwnd, &result)) {
+                if (outResult) {
+                    *outResult = result;
+                }
+                return false;
+            }
+            break;
+
+        case RenderBackendType::LegacyDirect3D7:
+        default:
+            m_active = &m_legacy;
+            if (!m_legacy.Initialize(hwnd, &result)) {
+                if (outResult) {
+                    *outResult = result;
+                }
+                return false;
+            }
+            break;
+        }
+
+        if (outResult) {
+            *outResult = result;
+        }
+        return true;
+    }
+
+    void Shutdown() override
+    {
+        m_d3d11.Shutdown();
+        m_legacy.Shutdown();
+        m_active = &m_legacy;
+    }
+
+    void RefreshRenderSize() override { m_active->RefreshRenderSize(); }
+    int GetRenderWidth() const override { return m_active->GetRenderWidth(); }
+    int GetRenderHeight() const override { return m_active->GetRenderHeight(); }
+    HWND GetWindowHandle() const override { return m_active->GetWindowHandle(); }
+    IDirect3DDevice7* GetLegacyDevice() const override { return m_active->GetLegacyDevice(); }
+    int ClearColor(unsigned int color) override { return m_active->ClearColor(color); }
+    int ClearDepth() override { return m_active->ClearDepth(); }
+    int Present(bool vertSync) override { return m_active->Present(vertSync); }
+    bool AcquireBackBufferDC(HDC* outDc) override { return m_active->AcquireBackBufferDC(outDc); }
+    void ReleaseBackBufferDC(HDC dc) override { m_active->ReleaseBackBufferDC(dc); }
+    bool BeginScene() override { return m_active->BeginScene(); }
+    void EndScene() override { m_active->EndScene(); }
+    void SetTransform(D3DTRANSFORMSTATETYPE state, const D3DMATRIX* matrix) override { m_active->SetTransform(state, matrix); }
+    void SetRenderState(D3DRENDERSTATETYPE state, DWORD value) override { m_active->SetRenderState(state, value); }
+    void SetTextureStageState(DWORD stage, D3DTEXTURESTAGESTATETYPE type, DWORD value) override { m_active->SetTextureStageState(stage, type, value); }
+    void BindTexture(DWORD stage, CTexture* texture) override { m_active->BindTexture(stage, texture); }
+    void DrawPrimitive(D3DPRIMITIVETYPE primitiveType, DWORD vertexFormat, const void* vertices, DWORD vertexCount, DWORD flags) override { m_active->DrawPrimitive(primitiveType, vertexFormat, vertices, vertexCount, flags); }
+    void DrawIndexedPrimitive(D3DPRIMITIVETYPE primitiveType, DWORD vertexFormat, const void* vertices, DWORD vertexCount, const unsigned short* indices, DWORD indexCount, DWORD flags) override { m_active->DrawIndexedPrimitive(primitiveType, vertexFormat, vertices, vertexCount, indices, indexCount, flags); }
+    void AdjustTextureSize(unsigned int* width, unsigned int* height) override { m_active->AdjustTextureSize(width, height); }
+    bool CreateTextureSurface(unsigned int requestedWidth, unsigned int requestedHeight, unsigned int* outSurfaceWidth, unsigned int* outSurfaceHeight, IDirectDrawSurface7** outSurface) override { return m_active->CreateTextureSurface(requestedWidth, requestedHeight, outSurfaceWidth, outSurfaceHeight, outSurface); }
+    bool UploadTextureSurface(IDirectDrawSurface7* surface, int x, int y, int w, int h, const unsigned int* data, bool skipColorKey, int pitch) override { return m_active->UploadTextureSurface(surface, x, y, w, h, data, skipColorKey, pitch); }
+
+private:
+    LegacyRenderDevice m_legacy;
+    D3D11RenderDevice m_d3d11;
+    IRenderDevice* m_active;
+};
+
 } // namespace
 
 IRenderDevice& GetRenderDevice()
 {
-    static LegacyRenderDevice s_renderDevice;
+    static RoutedRenderDevice s_renderDevice;
     return s_renderDevice;
 }
