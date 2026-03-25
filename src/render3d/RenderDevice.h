@@ -27,6 +27,7 @@ public:
     virtual int Present(bool vertSync) = 0;
     virtual bool AcquireBackBufferDC(HDC* outDc) = 0;
     virtual void ReleaseBackBufferDC(HDC dc) = 0;
+    virtual bool UpdateBackBufferFromMemory(const void* bgraPixels, int width, int height, int pitch) = 0;
 
     virtual bool BeginScene() = 0;
     virtual void EndScene() = 0;

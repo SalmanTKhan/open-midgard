@@ -43,11 +43,16 @@ private:
     RECT GetMiniButtonRect() const;
     RECT GetCloseButtonRect() const;
     RECT GetSkinRect() const;
+    RECT GetRendererRect() const;
+    RECT GetRestartButtonRect() const;
     RECT GetBgmSliderRect() const;
     RECT GetSoundSliderRect() const;
     RECT GetSliderKnobRect(const RECT& sliderRect, int value) const;
     void DrawSlider(HDC hdc, const RECT& sliderRect, int value, const char* label) const;
     void DrawHeaderButton(HDC hdc, const RECT& rect, const char* text) const;
+    void CyclePreferredRenderBackend();
+    bool HasPendingRendererRestart() const;
+    void PromptForRendererRestart();
 
     bool m_controlsCreated;
     bool m_assetsProbed;
@@ -71,6 +76,7 @@ private:
     int m_skillSnap;
     int m_itemSnap;
     int m_collapsed;
+    int m_preferredRenderBackend;
     int m_dragMode;
     int m_dragAnchorX;
     int m_dragAnchorY;

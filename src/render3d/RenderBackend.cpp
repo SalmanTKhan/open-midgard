@@ -9,10 +9,14 @@
 
 namespace {
 
+constexpr char kRenderBackendRegPath[] = "Software\\Gravity Soft\\Ragnarok Online";
+constexpr char kRenderBackendValueName[] = "RenderBackend";
+constexpr RenderBackendType kDefaultConfiguredBackend = RenderBackendType::Direct3D11;
+
 RenderBackendType ParseRenderBackendName(const char* value)
 {
     if (!value || !*value) {
-        return RenderBackendType::LegacyDirect3D7;
+        return kDefaultConfiguredBackend;
     }
 
     char normalized[32] = {};
@@ -35,7 +39,12 @@ RenderBackendType ParseRenderBackendName(const char* value)
     if (std::strcmp(normalized, "vk") == 0 || std::strcmp(normalized, "vulkan") == 0) {
         return RenderBackendType::Vulkan;
     }
-    return RenderBackendType::LegacyDirect3D7;
+    return kDefaultConfiguredBackend;
+}
+
+bool IsValidStoredBackend(DWORD rawValue)
+{
+    return rawValue <= static_cast<DWORD>(RenderBackendType::Vulkan);
 }
 
 int InitializeLegacyDirect3D7(HWND hwnd)
@@ -74,12 +83,70 @@ const char* GetRenderBackendName(RenderBackendType backend)
     }
 }
 
+bool IsRenderBackendImplemented(RenderBackendType backend)
+{
+    switch (backend) {
+    case RenderBackendType::LegacyDirect3D7:
+    case RenderBackendType::Direct3D11:
+        return true;
+
+    case RenderBackendType::Direct3D12:
+    case RenderBackendType::Vulkan:
+    default:
+        return false;
+    }
+}
+
+RenderBackendType GetConfiguredRenderBackend()
+{
+    HKEY key = nullptr;
+    if (RegOpenKeyExA(HKEY_CURRENT_USER, kRenderBackendRegPath, 0, KEY_READ, &key) != ERROR_SUCCESS) {
+        return kDefaultConfiguredBackend;
+    }
+
+    DWORD rawValue = static_cast<DWORD>(kDefaultConfiguredBackend);
+    DWORD valueSize = sizeof(rawValue);
+    const LONG status = RegQueryValueExA(
+        key,
+        kRenderBackendValueName,
+        nullptr,
+        nullptr,
+        reinterpret_cast<BYTE*>(&rawValue),
+        &valueSize);
+    RegCloseKey(key);
+
+    if (status != ERROR_SUCCESS || valueSize != sizeof(rawValue) || !IsValidStoredBackend(rawValue)) {
+        return kDefaultConfiguredBackend;
+    }
+
+    return static_cast<RenderBackendType>(rawValue);
+}
+
+bool SetConfiguredRenderBackend(RenderBackendType backend)
+{
+    HKEY key = nullptr;
+    if (RegCreateKeyExA(HKEY_CURRENT_USER, kRenderBackendRegPath, 0, nullptr, 0, KEY_SET_VALUE, nullptr, &key, nullptr) != ERROR_SUCCESS) {
+        return false;
+    }
+
+    const DWORD rawValue = static_cast<DWORD>(backend);
+    const LONG status = RegSetValueExA(
+        key,
+        kRenderBackendValueName,
+        0,
+        REG_DWORD,
+        reinterpret_cast<const BYTE*>(&rawValue),
+        sizeof(rawValue));
+    RegCloseKey(key);
+    return status == ERROR_SUCCESS;
+}
+
 RenderBackendType GetRequestedRenderBackend()
 {
     char buffer[64] = {};
     const DWORD length = GetEnvironmentVariableA("OPEN_MIDGARD_RENDER_BACKEND", buffer, static_cast<DWORD>(sizeof(buffer)));
     if (length == 0 || length >= sizeof(buffer)) {
-        return RenderBackendType::LegacyDirect3D7;
+        return GetConfiguredRenderBackend();
     }
     return ParseRenderBackendName(buffer);
 }

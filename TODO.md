@@ -4,6 +4,82 @@ Progress: **33 / 145 modules** have src/ files (most are stubs)
 
 ---
 
+## Renderer Backend Roadmap
+
+Goal: ship Direct3D12 and Vulkan as real renderer options, selectable from the in-game option window with a safe automatic relaunch flow when the renderer changes.
+
+### Milestone 0 — Backend Selection Foundation
+- [x] D3D11 backend renders the world correctly.
+- [x] D3D11 overlays/UI/cursor composition is stable.
+- [x] Backend routing exists in the render-device layer.
+- [x] Persist preferred renderer selection in client settings.
+- [x] Show active vs pending renderer in the option window.
+
+### Milestone 1 — Clean Restart / Relaunch Flow
+- [x] Add relaunch request API in the app entry layer.
+- [x] Preserve exe path / command line / working directory for relaunch.
+- [x] On successful relaunch request, let the current client exit through normal cleanup.
+- [x] Prompt from the option window to restart immediately after renderer changes.
+- [x] Add in-game specific confirmation text for map-session renderer restarts.
+- [x] Add a dedicated `Restart now` control when the selected backend differs from the active backend.
+
+### Milestone 2 — Backend Abstraction Hardening
+- [x] Extract backend-neutral modern-render helpers from the D3D11 implementation.
+- [x] Standardize modern frame lifecycle: scene render, overlay compose, upload, present.
+- [x] Normalize fixed-function state translation for modern backends.
+- [x] Keep D3D11 behavior unchanged after refactor.
+
+### Milestone 3 — Direct3D12 Bring-Up
+- [x] Add `D3D12RenderDevice` shell to the routed render-device layer.
+- [x] Implement DX12 device / queue / swapchain / descriptor heap setup.
+- [x] Implement DX12 render-target and depth-buffer lifecycle.
+- [x] Get DX12 clear / resize / present working.
+- [x] Fall back cleanly to D3D11 when DX12 initialization fails.
+
+### Milestone 4 — Direct3D12 Rendering Parity
+- [ ] Port transformed-vertex draw path to DX12.
+- [ ] Port texture creation / upload / binding to DX12.
+- [ ] Port alpha, blend, depth, and lightmap behavior to DX12.
+- [ ] Port overlay composition upload before present on DX12.
+- [ ] Validate login, char select, map load, world render, UI, and cursor on DX12.
+
+### Milestone 5 — Direct3D12 Stability And Diagnostics
+- [ ] Add DX12 debug-layer support in development builds.
+- [ ] Add DX12-targeted logs for init, resize, and present failures.
+- [ ] Validate alt-tab, minimize/restore, resize, and return-to-char-select on DX12.
+- [ ] Make DX12 a user-facing selectable backend once stable.
+
+### Milestone 6 — Renderer UI Expansion
+- [ ] Expand the renderer selector to show Direct3D7, Direct3D11, Direct3D12, and Vulkan.
+- [ ] Surface backend state per entry: active, selected, restart required, unsupported, not implemented.
+- [ ] Prevent unimplemented backends from behaving like real selections.
+- [ ] Keep fallback/active-backend state visible in the option window and title bar.
+
+### Milestone 7 — Vulkan Bring-Up
+- [ ] Add `VulkanRenderDevice` shell to the routed render-device layer.
+- [ ] Implement Vulkan instance / device / surface / swapchain bring-up.
+- [ ] Implement Vulkan clear / resize / present path.
+- [ ] Fall back cleanly to D3D11 when Vulkan initialization fails.
+
+### Milestone 8 — Vulkan Rendering Parity
+- [ ] Port transformed-vertex draw path to Vulkan.
+- [ ] Port texture creation / upload / binding to Vulkan.
+- [ ] Port alpha, blend, depth, and lightmap behavior to Vulkan.
+- [ ] Port overlay composition upload before present on Vulkan.
+- [ ] Validate login, char select, map load, world render, UI, and cursor on Vulkan.
+
+### Milestone 9 — Cross-Backend Validation
+- [ ] Validate startup, login, char select, map load, and in-game movement on all backends.
+- [ ] Validate overlays, cursor, alt-tab, resize, and restart flow on all backends.
+- [ ] Validate fallback behavior when a selected backend cannot initialize.
+
+### Milestone 10 — Cleanup And Documentation
+- [ ] Remove temporary backend bring-up logs that are no longer useful.
+- [ ] Document backend selection precedence: env var override, persisted setting, default backend.
+- [ ] Document backend fallback order and restart-required behavior.
+
+---
+
 ## Packet Version Alignment Plan
 
 Goal: align the client to one intentional packet profile instead of the current mixed old/new behavior, while keeping compatibility with `Ref/RunningServer` and preserving the now-improved actor visibility work.

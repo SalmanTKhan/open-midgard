@@ -110,7 +110,7 @@ void DrawLockedTargetName(CGameMode& mode, HDC hdc);
 void DrawLockedTargetArrow(CGameMode& mode, HDC hdc);
 void DrawPlayerVitalsOverlay(CGameMode& mode, HDC hdc);
 
-void ReleaseOverlayComposeSurface(HDC* composeDc, HBITMAP* composeBitmap, int* composeWidth, int* composeHeight)
+void ReleaseOverlayComposeSurface(HDC* composeDc, HBITMAP* composeBitmap, void** composeBits, int* composeWidth, int* composeHeight)
 {
     if (composeBitmap && *composeBitmap) {
         DeleteObject(*composeBitmap);
@@ -119,6 +119,9 @@ void ReleaseOverlayComposeSurface(HDC* composeDc, HBITMAP* composeBitmap, int* c
     if (composeDc && *composeDc) {
         DeleteDC(*composeDc);
         *composeDc = nullptr;
+    }
+    if (composeBits) {
+        *composeBits = nullptr;
     }
     if (composeWidth) {
         *composeWidth = 0;
@@ -129,26 +132,33 @@ void ReleaseOverlayComposeSurface(HDC* composeDc, HBITMAP* composeBitmap, int* c
 }
 
 bool EnsureOverlayComposeSurface(HDC referenceDc, int width, int height,
-    HDC* composeDc, HBITMAP* composeBitmap, int* composeWidth, int* composeHeight)
+    HDC* composeDc, HBITMAP* composeBitmap, void** composeBits, int* composeWidth, int* composeHeight)
 {
-    if (!referenceDc || !composeDc || !composeBitmap || !composeWidth || !composeHeight || width <= 0 || height <= 0) {
+    if (!referenceDc || !composeDc || !composeBitmap || !composeBits || !composeWidth || !composeHeight || width <= 0 || height <= 0) {
         return false;
     }
 
-    if (*composeDc && *composeBitmap && *composeWidth == width && *composeHeight == height) {
+    if (*composeDc && *composeBitmap && *composeBits && *composeWidth == width && *composeHeight == height) {
         return true;
     }
 
-    ReleaseOverlayComposeSurface(composeDc, composeBitmap, composeWidth, composeHeight);
+    ReleaseOverlayComposeSurface(composeDc, composeBitmap, composeBits, composeWidth, composeHeight);
 
     *composeDc = CreateCompatibleDC(referenceDc);
     if (!*composeDc) {
         return false;
     }
 
-    *composeBitmap = CreateCompatibleBitmap(referenceDc, width, height);
-    if (!*composeBitmap) {
-        ReleaseOverlayComposeSurface(composeDc, composeBitmap, composeWidth, composeHeight);
+    BITMAPINFO bmi{};
+    bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    bmi.bmiHeader.biWidth = width;
+    bmi.bmiHeader.biHeight = -height;
+    bmi.bmiHeader.biPlanes = 1;
+    bmi.bmiHeader.biBitCount = 32;
+    bmi.bmiHeader.biCompression = BI_RGB;
+    *composeBitmap = CreateDIBSection(*composeDc, &bmi, DIB_RGB_COLORS, composeBits, nullptr, 0);
+    if (!*composeBitmap || !*composeBits) {
+        ReleaseOverlayComposeSurface(composeDc, composeBitmap, composeBits, composeWidth, composeHeight);
         return false;
     }
 
@@ -158,14 +168,22 @@ bool EnsureOverlayComposeSurface(HDC referenceDc, int width, int height,
     return true;
 }
 
-bool DrawD3D11OverlayFrame(CGameMode& mode, int cursorActNum, u32 mouseAnimStartTick)
+void DrawGameplayOverlayToHdc(CGameMode& mode, HDC targetDc)
 {
-    if (!g_hMainWnd) {
-        return false;
+    if (!targetDc) {
+        return;
     }
 
-    HDC windowDc = GetDC(g_hMainWnd);
-    if (!windowDc) {
+    DrawPlayerVitalsOverlay(mode, targetDc);
+    DrawLockedTargetArrow(mode, targetDc);
+    DrawLockedTargetName(mode, targetDc);
+    DrawHoveredActorName(mode, targetDc);
+    DrawQueuedMsgEffects(targetDc);
+}
+
+bool ComposeModernOverlayFrame(CGameMode& mode, int cursorActNum, u32 mouseAnimStartTick)
+{
+    if (!g_hMainWnd) {
         return false;
     }
 
@@ -174,32 +192,27 @@ bool DrawD3D11OverlayFrame(CGameMode& mode, int cursorActNum, u32 mouseAnimStart
     const int clientWidth = clientRect.right - clientRect.left;
     const int clientHeight = clientRect.bottom - clientRect.top;
     if (clientWidth <= 0 || clientHeight <= 0) {
-        ReleaseDC(g_hMainWnd, windowDc);
-        return false;
-    }
-
-    static HDC s_overlayComposeDc = nullptr;
-    static HBITMAP s_overlayComposeBitmap = nullptr;
-    static int s_overlayComposeWidth = 0;
-    static int s_overlayComposeHeight = 0;
-    if (!EnsureOverlayComposeSurface(windowDc, clientWidth, clientHeight,
-        &s_overlayComposeDc, &s_overlayComposeBitmap, &s_overlayComposeWidth, &s_overlayComposeHeight)) {
-        ReleaseDC(g_hMainWnd, windowDc);
         return false;
     }
 
     HDC sceneDc = nullptr;
     if (!GetRenderDevice().AcquireBackBufferDC(&sceneDc) || !sceneDc) {
-        ReleaseDC(g_hMainWnd, windowDc);
+        return false;
+    }
+
+    static HDC s_overlayComposeDc = nullptr;
+    static HBITMAP s_overlayComposeBitmap = nullptr;
+    static void* s_overlayComposeBits = nullptr;
+    static int s_overlayComposeWidth = 0;
+    static int s_overlayComposeHeight = 0;
+    if (!EnsureOverlayComposeSurface(sceneDc, clientWidth, clientHeight,
+        &s_overlayComposeDc, &s_overlayComposeBitmap, &s_overlayComposeBits, &s_overlayComposeWidth, &s_overlayComposeHeight)) {
+        GetRenderDevice().ReleaseBackBufferDC(sceneDc);
         return false;
     }
 
     BitBlt(s_overlayComposeDc, 0, 0, clientWidth, clientHeight, sceneDc, 0, 0, SRCCOPY);
-    DrawPlayerVitalsOverlay(mode, s_overlayComposeDc);
-    DrawLockedTargetArrow(mode, s_overlayComposeDc);
-    DrawLockedTargetName(mode, s_overlayComposeDc);
-    DrawHoveredActorName(mode, s_overlayComposeDc);
-    DrawQueuedMsgEffects(s_overlayComposeDc);
+    DrawGameplayOverlayToHdc(mode, s_overlayComposeDc);
 
     HDC previousSharedDc = UIWindow::GetSharedDrawDC();
     UIWindow::SetSharedDrawDC(s_overlayComposeDc);
@@ -208,9 +221,11 @@ bool DrawD3D11OverlayFrame(CGameMode& mode, int cursorActNum, u32 mouseAnimStart
     UIWindow::SetSharedDrawDC(previousSharedDc);
     GetRenderDevice().ReleaseBackBufferDC(sceneDc);
 
-    BitBlt(windowDc, 0, 0, clientWidth, clientHeight, s_overlayComposeDc, 0, 0, SRCCOPY);
-    ReleaseDC(g_hMainWnd, windowDc);
-    return true;
+    return GetRenderDevice().UpdateBackBufferFromMemory(
+        s_overlayComposeBits,
+        clientWidth,
+        clientHeight,
+        clientWidth * static_cast<int>(sizeof(unsigned int)));
 }
 
 bool RequestReturnToCharSelect()
@@ -3772,11 +3787,7 @@ int  CGameMode::OnRun() {
         {
             HDC backBufferDc = nullptr;
             if (GetRenderDevice().AcquireBackBufferDC(&backBufferDc) && backBufferDc) {
-                DrawPlayerVitalsOverlay(*this, backBufferDc);
-                DrawLockedTargetArrow(*this, backBufferDc);
-                DrawLockedTargetName(*this, backBufferDc);
-                DrawHoveredActorName(*this, backBufferDc);
-                DrawQueuedMsgEffects(backBufferDc);
+                DrawGameplayOverlayToHdc(*this, backBufferDc);
                 GetRenderDevice().ReleaseBackBufferDC(backBufferDc);
             }
         }
@@ -3806,17 +3817,16 @@ int  CGameMode::OnRun() {
         g_framePerfStats.uiDrawMs += static_cast<u64>(uiDrawEnd - uiDrawStart);
         g_framePerfStats.flipMs += static_cast<u64>(flipEnd - flipStart);
     } else {
+        const DWORD uiDrawStart = GetTickCount();
+        const bool composedModernOverlayFrame = ComposeModernOverlayFrame(*this, m_cursorActNum, m_mouseAnimStartTick);
+        const DWORD uiDrawEnd = GetTickCount();
         const DWORD flipStart = GetTickCount();
         g_renderer.Flip(false);
         const DWORD flipEnd = GetTickCount();
-        if (!DrawD3D11OverlayFrame(*this, m_cursorActNum, m_mouseAnimStartTick)) {
+        if (!composedModernOverlayFrame) {
             HDC windowDc = GetDC(g_hMainWnd);
             if (windowDc) {
-                DrawPlayerVitalsOverlay(*this, windowDc);
-                DrawLockedTargetArrow(*this, windowDc);
-                DrawLockedTargetName(*this, windowDc);
-                DrawHoveredActorName(*this, windowDc);
-                DrawQueuedMsgEffects(windowDc);
+                DrawGameplayOverlayToHdc(*this, windowDc);
                 ReleaseDC(g_hMainWnd, windowDc);
             }
             g_windowMgr.OnDraw();
@@ -3828,6 +3838,7 @@ int  CGameMode::OnRun() {
         g_framePerfStats.processUiMs += static_cast<u64>(processUiEnd - processUiStart);
         g_framePerfStats.renderPrepMs += static_cast<u64>(renderPrepEnd - renderPrepStart);
         g_framePerfStats.drawSceneMs += static_cast<u64>(drawSceneEnd - drawSceneStart);
+        g_framePerfStats.uiDrawMs += static_cast<u64>(uiDrawEnd - uiDrawStart);
         g_framePerfStats.flipMs += static_cast<u64>(flipEnd - flipStart);
     }
 

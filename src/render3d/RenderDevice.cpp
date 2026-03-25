@@ -3,16 +3,20 @@
 #include "Device.h"
 #include "D3dutil.h"
 #include "DebugLog.h"
+#include "ModernRenderState.h"
 #include "render/Renderer.h"
 #include "res/Texture.h"
 
+#include <d3d12.h>
 #include <d3d11.h>
 #include <d3dcompiler.h>
+#include <dxgi1_4.h>
 #include <algorithm>
 #include <cstddef>
 #include <cstring>
 #include <vector>
 
+#pragma comment(lib, "d3d12.lib")
 #pragma comment(lib, "d3d11.lib")
 #pragma comment(lib, "d3dcompiler.lib")
 #pragma comment(lib, "dxgi.lib")
@@ -138,25 +142,6 @@ void WritePackedPixel(unsigned char* dst, unsigned int bytesPerPixel, unsigned i
         break;
     }
 }
-
-constexpr DWORD kLmFvf = D3DFVF_XYZRHW | D3DFVF_DIFFUSE | D3DFVF_SPECULAR | D3DFVF_TEX2;
-
-struct D3D11DrawConstants {
-    float screenWidth;
-    float screenHeight;
-    float alphaRef;
-    unsigned int flags;
-};
-
-enum D3D11DrawFlags : unsigned int {
-    D3D11DrawFlag_Texture0Enabled = 1u << 0,
-    D3D11DrawFlag_Texture1Enabled = 1u << 1,
-    D3D11DrawFlag_AlphaTestEnabled = 1u << 2,
-    D3D11DrawFlag_ColorKeyEnabled = 1u << 3,
-    D3D11DrawFlag_Stage0AlphaUseTexture = 1u << 4,
-    D3D11DrawFlag_Stage0AlphaModulate = 1u << 5,
-    D3D11DrawFlag_Stage1LightmapAlpha = 1u << 6,
-};
 
 D3D11_BLEND ConvertBlendFactor(D3DBLEND blend)
 {
@@ -475,6 +460,15 @@ public:
         }
     }
 
+    bool UpdateBackBufferFromMemory(const void* bgraPixels, int width, int height, int pitch) override
+    {
+        (void)bgraPixels;
+        (void)width;
+        (void)height;
+        (void)pitch;
+        return false;
+    }
+
     bool BeginScene() override
     {
         IDirect3DDevice7* device = g_3dDevice.m_pd3dDevice;
@@ -665,13 +659,10 @@ public:
           m_vertexShaderTl(nullptr), m_vertexShaderLm(nullptr), m_pixelShader(nullptr),
           m_inputLayoutTl(nullptr), m_inputLayoutLm(nullptr), m_constantBuffer(nullptr),
           m_vertexBuffer(nullptr), m_vertexBufferSize(0), m_indexBuffer(nullptr), m_indexBufferSize(0),
-          m_samplerState(nullptr), m_alphaRef(207), m_alphaTestEnable(TRUE),
-          m_alphaBlendEnable(FALSE), m_depthEnable(TRUE), m_depthWriteEnable(TRUE),
-          m_cullMode(D3DCULL_NONE), m_colorKeyEnable(TRUE), m_srcBlend(D3DBLEND_SRCALPHA),
-          m_destBlend(D3DBLEND_INVSRCALPHA),
+                    m_samplerState(nullptr),
           m_captureDc(nullptr), m_captureBitmap(nullptr), m_captureBits(nullptr), m_captureWidth(0), m_captureHeight(0)
     {
-        ResetTextureStageStates();
+                ResetModernFixedFunctionState(&m_pipelineState);
         m_boundTextures[0] = nullptr;
         m_boundTextures[1] = nullptr;
     }
@@ -787,7 +778,7 @@ public:
         m_renderWidth = 0;
         m_renderHeight = 0;
         m_hwnd = nullptr;
-        ResetTextureStageStates();
+        ResetModernFixedFunctionState(&m_pipelineState);
         m_boundTextures[0] = nullptr;
         m_boundTextures[1] = nullptr;
     }
@@ -855,6 +846,8 @@ public:
         if (!outDc) {
             return false;
         }
+        *outDc = nullptr;
+        CaptureRenderTargetSnapshot();
         *outDc = m_captureDc;
         return *outDc != nullptr;
     }
@@ -862,6 +855,41 @@ public:
     void ReleaseBackBufferDC(HDC dc) override
     {
         (void)dc;
+    }
+
+    bool UpdateBackBufferFromMemory(const void* bgraPixels, int width, int height, int pitch) override
+    {
+        if (!bgraPixels || width <= 0 || height <= 0 || pitch <= 0 || !m_context || !m_swapChain) {
+            return false;
+        }
+
+        if (width != m_renderWidth || height != m_renderHeight) {
+            return false;
+        }
+
+        ID3D11Texture2D* backBuffer = nullptr;
+        HRESULT hr = m_swapChain->GetBuffer(0, __uuidof(ID3D11Texture2D), reinterpret_cast<void**>(&backBuffer));
+        if (FAILED(hr) || !backBuffer) {
+            SafeRelease(backBuffer);
+            return false;
+        }
+
+        D3D11_BOX updateBox{};
+        updateBox.left = 0;
+        updateBox.top = 0;
+        updateBox.front = 0;
+        updateBox.right = static_cast<UINT>(width);
+        updateBox.bottom = static_cast<UINT>(height);
+        updateBox.back = 1;
+        m_context->UpdateSubresource(backBuffer, 0, &updateBox, bgraPixels, static_cast<UINT>(pitch), 0);
+        SafeRelease(backBuffer);
+
+        if (m_renderTargetView) {
+            m_context->OMSetRenderTargets(1, &m_renderTargetView, m_depthStencilView);
+            ApplyViewport();
+        }
+
+        return true;
     }
 
     bool BeginScene() override
@@ -878,37 +906,12 @@ public:
 
     void SetRenderState(D3DRENDERSTATETYPE state, DWORD value) override
     {
-        switch (state) {
-        case D3DRENDERSTATE_ALPHAREF: m_alphaRef = static_cast<unsigned int>(value & 0xFFu); break;
-        case D3DRENDERSTATE_ALPHATESTENABLE: m_alphaTestEnable = value; break;
-        case D3DRENDERSTATE_ALPHABLENDENABLE: m_alphaBlendEnable = value; break;
-        case D3DRENDERSTATE_ZENABLE: m_depthEnable = value; break;
-        case D3DRENDERSTATE_ZWRITEENABLE: m_depthWriteEnable = value; break;
-        case D3DRENDERSTATE_CULLMODE: m_cullMode = static_cast<D3DCULL>(value); break;
-        case D3DRENDERSTATE_COLORKEYENABLE: m_colorKeyEnable = value; break;
-        case D3DRENDERSTATE_SRCBLEND: m_srcBlend = static_cast<D3DBLEND>(value); break;
-        case D3DRENDERSTATE_DESTBLEND: m_destBlend = static_cast<D3DBLEND>(value); break;
-        default: break;
-        }
+        ApplyModernRenderState(&m_pipelineState, state, value);
     }
 
     void SetTextureStageState(DWORD stage, D3DTEXTURESTAGESTATETYPE type, DWORD value) override
     {
-        if (stage >= 2) {
-            return;
-        }
-
-        TextureStageState& stageState = m_textureStageStates[stage];
-        switch (type) {
-        case D3DTSS_TEXCOORDINDEX: stageState.texCoordIndex = value; break;
-        case D3DTSS_COLORARG1: stageState.colorArg1 = value; break;
-        case D3DTSS_COLOROP: stageState.colorOp = value; break;
-        case D3DTSS_COLORARG2: stageState.colorArg2 = value; break;
-        case D3DTSS_ALPHAARG1: stageState.alphaArg1 = value; break;
-        case D3DTSS_ALPHAOP: stageState.alphaOp = value; break;
-        case D3DTSS_ALPHAARG2: stageState.alphaArg2 = value; break;
-        default: break;
-        }
+        ApplyModernTextureStageState(&m_pipelineState, stage, type, value);
     }
 
     void BindTexture(DWORD stage, CTexture* texture) override
@@ -1022,25 +1025,9 @@ public:
     }
 
 private:
-    struct TextureStageState {
-        DWORD texCoordIndex;
-        DWORD colorArg1;
-        DWORD colorOp;
-        DWORD colorArg2;
-        DWORD alphaArg1;
-        DWORD alphaOp;
-        DWORD alphaArg2;
-    };
-
     struct BlendStateEntry { D3D11_BLEND_DESC desc; ID3D11BlendState* state; };
     struct DepthStateEntry { D3D11_DEPTH_STENCIL_DESC desc; ID3D11DepthStencilState* state; };
     struct RasterizerStateEntry { D3D11_RASTERIZER_DESC desc; ID3D11RasterizerState* state; };
-
-    void ResetTextureStageStates()
-    {
-        m_textureStageStates[0] = { 0, D3DTA_TEXTURE, D3DTOP_MODULATE, D3DTA_DIFFUSE, D3DTA_TEXTURE, D3DTOP_MODULATE, D3DTA_DIFFUSE };
-        m_textureStageStates[1] = { 1, D3DTA_TEXTURE, D3DTOP_DISABLE, D3DTA_CURRENT, D3DTA_TEXTURE, D3DTOP_DISABLE, D3DTA_CURRENT };
-    }
 
     bool CreateDepthStencilResources()
     {
@@ -1161,7 +1148,7 @@ private:
         }
 
         D3D11_BUFFER_DESC constantBufferDesc{};
-        constantBufferDesc.ByteWidth = static_cast<UINT>(sizeof(D3D11DrawConstants));
+        constantBufferDesc.ByteWidth = static_cast<UINT>(sizeof(ModernDrawConstants));
         constantBufferDesc.Usage = D3D11_USAGE_DYNAMIC;
         constantBufferDesc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
         constantBufferDesc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
@@ -1212,9 +1199,9 @@ private:
     ID3D11BlendState* GetBlendState()
     {
         D3D11_BLEND_DESC desc{};
-        desc.RenderTarget[0].BlendEnable = m_alphaBlendEnable ? TRUE : FALSE;
-        desc.RenderTarget[0].SrcBlend = ConvertBlendFactor(m_srcBlend);
-        desc.RenderTarget[0].DestBlend = ConvertBlendFactor(m_destBlend);
+        desc.RenderTarget[0].BlendEnable = m_pipelineState.alphaBlendEnable ? TRUE : FALSE;
+        desc.RenderTarget[0].SrcBlend = ConvertBlendFactor(m_pipelineState.srcBlend);
+        desc.RenderTarget[0].DestBlend = ConvertBlendFactor(m_pipelineState.destBlend);
         desc.RenderTarget[0].BlendOp = D3D11_BLEND_OP_ADD;
         desc.RenderTarget[0].SrcBlendAlpha = D3D11_BLEND_ONE;
         desc.RenderTarget[0].DestBlendAlpha = D3D11_BLEND_ZERO;
@@ -1238,8 +1225,8 @@ private:
     ID3D11DepthStencilState* GetDepthStencilState()
     {
         D3D11_DEPTH_STENCIL_DESC desc{};
-        desc.DepthEnable = m_depthEnable != D3DZB_FALSE ? TRUE : FALSE;
-        desc.DepthWriteMask = m_depthWriteEnable ? D3D11_DEPTH_WRITE_MASK_ALL : D3D11_DEPTH_WRITE_MASK_ZERO;
+        desc.DepthEnable = m_pipelineState.depthEnable != D3DZB_FALSE ? TRUE : FALSE;
+        desc.DepthWriteMask = m_pipelineState.depthWriteEnable ? D3D11_DEPTH_WRITE_MASK_ALL : D3D11_DEPTH_WRITE_MASK_ZERO;
         desc.DepthFunc = D3D11_COMPARISON_LESS_EQUAL;
 
         for (DepthStateEntry& entry : m_depthStates) {
@@ -1262,7 +1249,7 @@ private:
         desc.FillMode = D3D11_FILL_SOLID;
         desc.FrontCounterClockwise = FALSE;
         desc.DepthClipEnable = TRUE;
-        switch (m_cullMode) {
+        switch (m_pipelineState.cullMode) {
         case D3DCULL_CW: desc.CullMode = D3D11_CULL_FRONT; break;
         case D3DCULL_CCW: desc.CullMode = D3D11_CULL_BACK; break;
         default: desc.CullMode = D3D11_CULL_NONE; break;
@@ -1326,51 +1313,6 @@ private:
         return true;
     }
 
-    unsigned int BuildDrawFlags(DWORD vertexFormat, ID3D11ShaderResourceView* texture0View, ID3D11ShaderResourceView* texture1View) const
-    {
-        unsigned int flags = 0;
-        if (texture0View && m_textureStageStates[0].colorOp != D3DTOP_DISABLE) {
-            flags |= D3D11DrawFlag_Texture0Enabled;
-        }
-        if (texture1View && vertexFormat == kLmFvf
-            && m_textureStageStates[1].colorOp == D3DTOP_MODULATE
-            && m_textureStageStates[1].colorArg1 == (D3DTA_TEXTURE | D3DTA_ALPHAREPLICATE)
-            && m_textureStageStates[1].colorArg2 == D3DTA_CURRENT) {
-            flags |= D3D11DrawFlag_Texture1Enabled | D3D11DrawFlag_Stage1LightmapAlpha;
-        }
-        if (m_alphaTestEnable) {
-            flags |= D3D11DrawFlag_AlphaTestEnabled;
-        }
-        if (m_colorKeyEnable) {
-            flags |= D3D11DrawFlag_ColorKeyEnabled;
-        }
-        if (texture0View && m_textureStageStates[0].alphaOp == D3DTOP_SELECTARG1 && m_textureStageStates[0].alphaArg1 == D3DTA_TEXTURE) {
-            flags |= D3D11DrawFlag_Stage0AlphaUseTexture;
-        }
-        if (texture0View && m_textureStageStates[0].alphaOp == D3DTOP_MODULATE
-            && m_textureStageStates[0].alphaArg1 == D3DTA_TEXTURE
-            && m_textureStageStates[0].alphaArg2 == D3DTA_DIFFUSE) {
-            flags |= D3D11DrawFlag_Stage0AlphaModulate;
-        }
-        return flags;
-    }
-
-    std::vector<unsigned short> BuildTriangleFanIndices(const unsigned short* indices, DWORD vertexCount, DWORD indexCount) const
-    {
-        std::vector<unsigned short> expanded;
-        const DWORD sourceCount = indices && indexCount > 0 ? indexCount : vertexCount;
-        if (sourceCount < 3) {
-            return expanded;
-        }
-        expanded.reserve(static_cast<size_t>(sourceCount - 2) * 3u);
-        for (DWORD i = 1; i + 1 < sourceCount; ++i) {
-            expanded.push_back(indices ? indices[0] : static_cast<unsigned short>(0));
-            expanded.push_back(indices ? indices[i] : static_cast<unsigned short>(i));
-            expanded.push_back(indices ? indices[i + 1] : static_cast<unsigned short>(i + 1));
-        }
-        return expanded;
-    }
-
     void DrawTransformedPrimitive(D3DPRIMITIVETYPE primitiveType, DWORD vertexFormat,
         const void* vertices, DWORD vertexCount, const unsigned short* indices, DWORD indexCount)
     {
@@ -1378,7 +1320,7 @@ private:
             return;
         }
 
-        const bool isLightmap = vertexFormat == kLmFvf;
+        const bool isLightmap = vertexFormat == kModernLightmapFvf;
         if (!isLightmap && vertexFormat != D3DFVF_TLVERTEX) {
             return;
         }
@@ -1395,7 +1337,7 @@ private:
         DWORD drawIndexCount = indexCount;
         D3D11_PRIMITIVE_TOPOLOGY topology = ConvertPrimitiveTopology(primitiveType);
         if (primitiveType == D3DPT_TRIANGLEFAN) {
-            convertedIndices = BuildTriangleFanIndices(indices, vertexCount, indexCount);
+            convertedIndices = ::BuildTriangleFanIndices(indices, vertexCount, indexCount);
             if (convertedIndices.empty()) {
                 return;
             }
@@ -1423,11 +1365,15 @@ private:
             m_boundTextures[1] ? static_cast<ID3D11ShaderResourceView*>(m_boundTextures[1]->m_backendTextureView) : nullptr,
         };
 
-        D3D11DrawConstants constants{};
+        ModernDrawConstants constants{};
         constants.screenWidth = static_cast<float>((std::max)(1, m_renderWidth));
         constants.screenHeight = static_cast<float>((std::max)(1, m_renderHeight));
-        constants.alphaRef = static_cast<float>(m_alphaRef) / 255.0f;
-        constants.flags = BuildDrawFlags(vertexFormat, textureViews[0], textureViews[1]);
+        constants.alphaRef = static_cast<float>(m_pipelineState.alphaRef) / 255.0f;
+        constants.flags = BuildModernDrawFlags(
+            vertexFormat,
+            m_pipelineState,
+            textureViews[0] != nullptr,
+            textureViews[1] != nullptr);
         if (!UploadBuffer(m_constantBuffer, &constants, sizeof(constants))) {
             return;
         }
@@ -1633,16 +1579,7 @@ private:
     ID3D11Buffer* m_indexBuffer;
     size_t m_indexBufferSize;
     ID3D11SamplerState* m_samplerState;
-    unsigned int m_alphaRef;
-    DWORD m_alphaTestEnable;
-    DWORD m_alphaBlendEnable;
-    DWORD m_depthEnable;
-    DWORD m_depthWriteEnable;
-    D3DCULL m_cullMode;
-    DWORD m_colorKeyEnable;
-    D3DBLEND m_srcBlend;
-    D3DBLEND m_destBlend;
-    TextureStageState m_textureStageStates[2];
+    ModernFixedFunctionState m_pipelineState;
     CTexture* m_boundTextures[2];
     std::vector<BlendStateEntry> m_blendStates;
     std::vector<DepthStateEntry> m_depthStates;
@@ -1652,6 +1589,585 @@ private:
     void* m_captureBits;
     int m_captureWidth;
     int m_captureHeight;
+};
+
+class D3D12RenderDevice final : public IRenderDevice {
+public:
+    static constexpr UINT kFrameCount = 2;
+
+    D3D12RenderDevice()
+        : m_hwnd(nullptr), m_renderWidth(0), m_renderHeight(0),
+          m_factory(nullptr), m_device(nullptr), m_commandQueue(nullptr), m_swapChain(nullptr),
+          m_rtvHeap(nullptr), m_dsvHeap(nullptr), m_depthStencil(nullptr),
+          m_commandAllocator(nullptr), m_commandList(nullptr), m_fence(nullptr),
+          m_fenceEvent(nullptr), m_fenceValue(0), m_frameIndex(0), m_rtvDescriptorSize(0),
+          m_frameCommandsOpen(false)
+    {
+        for (UINT index = 0; index < kFrameCount; ++index) {
+            m_renderTargets[index] = nullptr;
+        }
+    }
+
+    RenderBackendType GetBackendType() const override
+    {
+        return RenderBackendType::Direct3D12;
+    }
+
+    bool Initialize(HWND hwnd, RenderBackendBootstrapResult* outResult) override
+    {
+        Shutdown();
+        m_hwnd = hwnd;
+        RefreshRenderSize();
+
+        RenderBackendBootstrapResult result{};
+        result.backend = RenderBackendType::Direct3D12;
+        result.initHr = static_cast<int>(E_FAIL);
+
+        if (!m_hwnd || m_renderWidth <= 0 || m_renderHeight <= 0) {
+            result.initHr = static_cast<int>(E_INVALIDARG);
+            if (outResult) {
+                *outResult = result;
+            }
+            return false;
+        }
+
+        HRESULT hr = CreateDXGIFactory1(IID_PPV_ARGS(&m_factory));
+        if (FAILED(hr) || !m_factory) {
+            result.initHr = static_cast<int>(hr);
+            Shutdown();
+            if (outResult) {
+                *outResult = result;
+            }
+            return false;
+        }
+
+        hr = D3D12CreateDevice(nullptr, D3D_FEATURE_LEVEL_11_0, IID_PPV_ARGS(&m_device));
+        if (FAILED(hr) || !m_device) {
+            IDXGIAdapter* warpAdapter = nullptr;
+            if (SUCCEEDED(m_factory->EnumWarpAdapter(IID_PPV_ARGS(&warpAdapter))) && warpAdapter) {
+                hr = D3D12CreateDevice(warpAdapter, D3D_FEATURE_LEVEL_11_0, IID_PPV_ARGS(&m_device));
+            }
+            SafeRelease(warpAdapter);
+        }
+        if (FAILED(hr) || !m_device) {
+            result.initHr = static_cast<int>(hr);
+            Shutdown();
+            if (outResult) {
+                *outResult = result;
+            }
+            return false;
+        }
+
+        D3D12_COMMAND_QUEUE_DESC queueDesc{};
+        queueDesc.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
+        hr = m_device->CreateCommandQueue(&queueDesc, IID_PPV_ARGS(&m_commandQueue));
+        if (FAILED(hr) || !m_commandQueue) {
+            result.initHr = static_cast<int>(hr);
+            Shutdown();
+            if (outResult) {
+                *outResult = result;
+            }
+            return false;
+        }
+
+        DXGI_SWAP_CHAIN_DESC1 swapChainDesc{};
+        swapChainDesc.BufferCount = kFrameCount;
+        swapChainDesc.Width = static_cast<UINT>(m_renderWidth);
+        swapChainDesc.Height = static_cast<UINT>(m_renderHeight);
+        swapChainDesc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+        swapChainDesc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
+        swapChainDesc.SampleDesc.Count = 1;
+        swapChainDesc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
+        swapChainDesc.Scaling = DXGI_SCALING_STRETCH;
+        swapChainDesc.AlphaMode = DXGI_ALPHA_MODE_IGNORE;
+
+        IDXGISwapChain1* swapChain = nullptr;
+        hr = m_factory->CreateSwapChainForHwnd(m_commandQueue, m_hwnd, &swapChainDesc, nullptr, nullptr, &swapChain);
+        if (SUCCEEDED(hr) && swapChain) {
+            hr = swapChain->QueryInterface(IID_PPV_ARGS(&m_swapChain));
+        }
+        SafeRelease(swapChain);
+        if (FAILED(hr) || !m_swapChain) {
+            result.initHr = static_cast<int>(hr);
+            Shutdown();
+            if (outResult) {
+                *outResult = result;
+            }
+            return false;
+        }
+
+        m_factory->MakeWindowAssociation(m_hwnd, DXGI_MWA_NO_ALT_ENTER);
+        m_frameIndex = m_swapChain->GetCurrentBackBufferIndex();
+
+        D3D12_DESCRIPTOR_HEAP_DESC rtvHeapDesc{};
+        rtvHeapDesc.NumDescriptors = kFrameCount;
+        rtvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
+        hr = m_device->CreateDescriptorHeap(&rtvHeapDesc, IID_PPV_ARGS(&m_rtvHeap));
+        if (FAILED(hr) || !m_rtvHeap) {
+            result.initHr = static_cast<int>(hr);
+            Shutdown();
+            if (outResult) {
+                *outResult = result;
+            }
+            return false;
+        }
+        m_rtvDescriptorSize = m_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
+
+        D3D12_DESCRIPTOR_HEAP_DESC dsvHeapDesc{};
+        dsvHeapDesc.NumDescriptors = 1;
+        dsvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_DSV;
+        hr = m_device->CreateDescriptorHeap(&dsvHeapDesc, IID_PPV_ARGS(&m_dsvHeap));
+        if (FAILED(hr) || !m_dsvHeap) {
+            result.initHr = static_cast<int>(hr);
+            Shutdown();
+            if (outResult) {
+                *outResult = result;
+            }
+            return false;
+        }
+
+        hr = m_device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&m_commandAllocator));
+        if (FAILED(hr) || !m_commandAllocator) {
+            result.initHr = static_cast<int>(hr);
+            Shutdown();
+            if (outResult) {
+                *outResult = result;
+            }
+            return false;
+        }
+
+        hr = m_device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, m_commandAllocator, nullptr, IID_PPV_ARGS(&m_commandList));
+        if (FAILED(hr) || !m_commandList) {
+            result.initHr = static_cast<int>(hr);
+            Shutdown();
+            if (outResult) {
+                *outResult = result;
+            }
+            return false;
+        }
+        m_commandList->Close();
+
+        hr = m_device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&m_fence));
+        if (FAILED(hr) || !m_fence) {
+            result.initHr = static_cast<int>(hr);
+            Shutdown();
+            if (outResult) {
+                *outResult = result;
+            }
+            return false;
+        }
+
+        m_fenceEvent = CreateEventA(nullptr, FALSE, FALSE, nullptr);
+        if (!m_fenceEvent) {
+            result.initHr = static_cast<int>(HRESULT_FROM_WIN32(GetLastError()));
+            Shutdown();
+            if (outResult) {
+                *outResult = result;
+            }
+            return false;
+        }
+
+        if (!RefreshRenderTargets() || !CreateDepthStencilResources()) {
+            result.initHr = static_cast<int>(E_FAIL);
+            Shutdown();
+            if (outResult) {
+                *outResult = result;
+            }
+            return false;
+        }
+
+        if (outResult) {
+            result.initHr = static_cast<int>(S_OK);
+            *outResult = result;
+        }
+
+        DbgLog("[Render] Initialized backend '%s' with %ux%u swap-chain buffers.\n",
+            GetRenderBackendName(RenderBackendType::Direct3D12),
+            static_cast<unsigned int>(m_renderWidth),
+            static_cast<unsigned int>(m_renderHeight));
+        return true;
+    }
+
+    void Shutdown() override
+    {
+        WaitForGpu();
+        ReleaseSwapChainResources();
+        SafeRelease(m_commandList);
+        SafeRelease(m_commandAllocator);
+        SafeRelease(m_fence);
+        if (m_fenceEvent) {
+            CloseHandle(m_fenceEvent);
+            m_fenceEvent = nullptr;
+        }
+        SafeRelease(m_dsvHeap);
+        SafeRelease(m_rtvHeap);
+        SafeRelease(m_swapChain);
+        SafeRelease(m_commandQueue);
+        SafeRelease(m_device);
+        SafeRelease(m_factory);
+        m_hwnd = nullptr;
+        m_renderWidth = 0;
+        m_renderHeight = 0;
+        m_fenceValue = 0;
+        m_frameIndex = 0;
+        m_rtvDescriptorSize = 0;
+        m_frameCommandsOpen = false;
+    }
+
+    void RefreshRenderSize() override
+    {
+        if (!m_hwnd) {
+            m_renderWidth = 0;
+            m_renderHeight = 0;
+            return;
+        }
+
+        RECT clientRect{};
+        GetClientRect(m_hwnd, &clientRect);
+        const int newWidth = (std::max)(1L, clientRect.right - clientRect.left);
+        const int newHeight = (std::max)(1L, clientRect.bottom - clientRect.top);
+        if (newWidth != m_renderWidth || newHeight != m_renderHeight) {
+            m_renderWidth = newWidth;
+            m_renderHeight = newHeight;
+            ResizeSwapChainBuffers();
+        }
+    }
+
+    int GetRenderWidth() const override { return m_renderWidth; }
+    int GetRenderHeight() const override { return m_renderHeight; }
+    HWND GetWindowHandle() const override { return m_hwnd; }
+    IDirect3DDevice7* GetLegacyDevice() const override { return nullptr; }
+    int ClearColor(unsigned int color) override
+    {
+        if (!EnsureFrameCommandsStarted()) {
+            return -1;
+        }
+
+        const float clearColor[4] = {
+            static_cast<float>((color >> 16) & 0xFFu) / 255.0f,
+            static_cast<float>((color >> 8) & 0xFFu) / 255.0f,
+            static_cast<float>(color & 0xFFu) / 255.0f,
+            static_cast<float>((color >> 24) & 0xFFu) / 255.0f,
+        };
+        const D3D12_CPU_DESCRIPTOR_HANDLE rtvHandle = GetCurrentRtvHandle();
+        m_commandList->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
+        return 0;
+    }
+    int ClearDepth() override
+    {
+        if (!EnsureFrameCommandsStarted() || !m_depthStencil || !m_dsvHeap) {
+            return -1;
+        }
+
+        m_commandList->ClearDepthStencilView(GetDsvHandle(), D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
+        return 0;
+    }
+    int Present(bool vertSync) override
+    {
+        if (!m_swapChain || !m_commandQueue) {
+            return -1;
+        }
+
+        if (m_frameCommandsOpen) {
+            const D3D12_RESOURCE_BARRIER barrier = TransitionBarrier(
+                GetCurrentBackBuffer(),
+                D3D12_RESOURCE_STATE_RENDER_TARGET,
+                D3D12_RESOURCE_STATE_PRESENT);
+            m_commandList->ResourceBarrier(1, &barrier);
+            if (FAILED(m_commandList->Close())) {
+                return -1;
+            }
+            ID3D12CommandList* commandLists[] = { m_commandList };
+            m_commandQueue->ExecuteCommandLists(1, commandLists);
+            m_frameCommandsOpen = false;
+        }
+
+        const HRESULT presentHr = m_swapChain->Present(vertSync ? 1 : 0, 0);
+        if (FAILED(presentHr)) {
+            return static_cast<int>(presentHr);
+        }
+
+        WaitForGpu();
+        m_frameIndex = m_swapChain->GetCurrentBackBufferIndex();
+        return static_cast<int>(presentHr);
+    }
+    bool AcquireBackBufferDC(HDC* outDc) override { if (outDc) { *outDc = nullptr; } return false; }
+    void ReleaseBackBufferDC(HDC dc) override { (void)dc; }
+    bool UpdateBackBufferFromMemory(const void* bgraPixels, int width, int height, int pitch) override
+    {
+        (void)bgraPixels;
+        (void)width;
+        (void)height;
+        (void)pitch;
+        return false;
+    }
+    bool BeginScene() override { return EnsureFrameCommandsStarted(); }
+    void EndScene() override {}
+    void SetTransform(D3DTRANSFORMSTATETYPE state, const D3DMATRIX* matrix) override { (void)state; (void)matrix; }
+    void SetRenderState(D3DRENDERSTATETYPE state, DWORD value) override { (void)state; (void)value; }
+    void SetTextureStageState(DWORD stage, D3DTEXTURESTAGESTATETYPE type, DWORD value) override { (void)stage; (void)type; (void)value; }
+    void BindTexture(DWORD stage, CTexture* texture) override { (void)stage; (void)texture; }
+    void DrawPrimitive(D3DPRIMITIVETYPE primitiveType, DWORD vertexFormat, const void* vertices, DWORD vertexCount, DWORD flags) override
+    {
+        (void)primitiveType;
+        (void)vertexFormat;
+        (void)vertices;
+        (void)vertexCount;
+        (void)flags;
+    }
+    void DrawIndexedPrimitive(D3DPRIMITIVETYPE primitiveType, DWORD vertexFormat,
+        const void* vertices, DWORD vertexCount, const unsigned short* indices,
+        DWORD indexCount, DWORD flags) override
+    {
+        (void)primitiveType;
+        (void)vertexFormat;
+        (void)vertices;
+        (void)vertexCount;
+        (void)indices;
+        (void)indexCount;
+        (void)flags;
+    }
+    void AdjustTextureSize(unsigned int* width, unsigned int* height) override
+    {
+        if (width && height) {
+            *width = (std::max)(1u, *width);
+            *height = (std::max)(1u, *height);
+        }
+    }
+    void ReleaseTextureResource(CTexture* texture) override { ReleaseTextureMembers(texture); }
+    bool CreateTextureResource(CTexture* texture, unsigned int requestedWidth, unsigned int requestedHeight,
+        int pixelFormat, unsigned int* outSurfaceWidth, unsigned int* outSurfaceHeight) override
+    {
+        (void)texture;
+        (void)requestedWidth;
+        (void)requestedHeight;
+        (void)pixelFormat;
+        (void)outSurfaceWidth;
+        (void)outSurfaceHeight;
+        return false;
+    }
+    bool UpdateTextureResource(CTexture* texture, int x, int y, int w, int h,
+        const unsigned int* data, bool skipColorKey, int pitch) override
+    {
+        (void)texture;
+        (void)x;
+        (void)y;
+        (void)w;
+        (void)h;
+        (void)data;
+        (void)skipColorKey;
+        (void)pitch;
+        return false;
+    }
+
+private:
+    D3D12_RESOURCE_BARRIER TransitionBarrier(ID3D12Resource* resource, D3D12_RESOURCE_STATES beforeState, D3D12_RESOURCE_STATES afterState) const
+    {
+        D3D12_RESOURCE_BARRIER barrier{};
+        barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+        barrier.Transition.pResource = resource;
+        barrier.Transition.StateBefore = beforeState;
+        barrier.Transition.StateAfter = afterState;
+        barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+        return barrier;
+    }
+
+    D3D12_CPU_DESCRIPTOR_HANDLE GetCurrentRtvHandle() const
+    {
+        D3D12_CPU_DESCRIPTOR_HANDLE handle = m_rtvHeap->GetCPUDescriptorHandleForHeapStart();
+        handle.ptr += static_cast<SIZE_T>(m_frameIndex) * static_cast<SIZE_T>(m_rtvDescriptorSize);
+        return handle;
+    }
+
+    D3D12_CPU_DESCRIPTOR_HANDLE GetDsvHandle() const
+    {
+        return m_dsvHeap->GetCPUDescriptorHandleForHeapStart();
+    }
+
+    ID3D12Resource* GetCurrentBackBuffer() const
+    {
+        return m_frameIndex < kFrameCount ? m_renderTargets[m_frameIndex] : nullptr;
+    }
+
+    bool RefreshRenderTargets()
+    {
+        if (!m_device || !m_swapChain || !m_rtvHeap) {
+            return false;
+        }
+
+        for (UINT index = 0; index < kFrameCount; ++index) {
+            SafeRelease(m_renderTargets[index]);
+        }
+
+        D3D12_CPU_DESCRIPTOR_HANDLE handle = m_rtvHeap->GetCPUDescriptorHandleForHeapStart();
+        for (UINT index = 0; index < kFrameCount; ++index) {
+            HRESULT hr = m_swapChain->GetBuffer(index, IID_PPV_ARGS(&m_renderTargets[index]));
+            if (FAILED(hr) || !m_renderTargets[index]) {
+                return false;
+            }
+            m_device->CreateRenderTargetView(m_renderTargets[index], nullptr, handle);
+            handle.ptr += static_cast<SIZE_T>(m_rtvDescriptorSize);
+        }
+
+        m_frameIndex = m_swapChain->GetCurrentBackBufferIndex();
+        return true;
+    }
+
+    bool CreateDepthStencilResources()
+    {
+        SafeRelease(m_depthStencil);
+        if (!m_device || !m_dsvHeap || m_renderWidth <= 0 || m_renderHeight <= 0) {
+            return false;
+        }
+
+        D3D12_HEAP_PROPERTIES heapProps{};
+        heapProps.Type = D3D12_HEAP_TYPE_DEFAULT;
+
+        D3D12_RESOURCE_DESC depthDesc{};
+        depthDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+        depthDesc.Width = static_cast<UINT64>(m_renderWidth);
+        depthDesc.Height = static_cast<UINT>(m_renderHeight);
+        depthDesc.DepthOrArraySize = 1;
+        depthDesc.MipLevels = 1;
+        depthDesc.Format = DXGI_FORMAT_D24_UNORM_S8_UINT;
+        depthDesc.SampleDesc.Count = 1;
+        depthDesc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
+        depthDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL;
+
+        D3D12_CLEAR_VALUE clearValue{};
+        clearValue.Format = DXGI_FORMAT_D24_UNORM_S8_UINT;
+        clearValue.DepthStencil.Depth = 1.0f;
+        clearValue.DepthStencil.Stencil = 0;
+
+        const HRESULT hr = m_device->CreateCommittedResource(
+            &heapProps,
+            D3D12_HEAP_FLAG_NONE,
+            &depthDesc,
+            D3D12_RESOURCE_STATE_DEPTH_WRITE,
+            &clearValue,
+            IID_PPV_ARGS(&m_depthStencil));
+        if (FAILED(hr) || !m_depthStencil) {
+            return false;
+        }
+
+        m_device->CreateDepthStencilView(m_depthStencil, nullptr, GetDsvHandle());
+        return true;
+    }
+
+    void ReleaseSwapChainResources()
+    {
+        SafeRelease(m_depthStencil);
+        for (UINT index = 0; index < kFrameCount; ++index) {
+            SafeRelease(m_renderTargets[index]);
+        }
+    }
+
+    void WaitForGpu()
+    {
+        if (!m_commandQueue || !m_fence || !m_fenceEvent) {
+            return;
+        }
+
+        const UINT64 fenceValue = ++m_fenceValue;
+        if (FAILED(m_commandQueue->Signal(m_fence, fenceValue))) {
+            return;
+        }
+        if (m_fence->GetCompletedValue() < fenceValue) {
+            if (SUCCEEDED(m_fence->SetEventOnCompletion(fenceValue, m_fenceEvent))) {
+                WaitForSingleObject(m_fenceEvent, INFINITE);
+            }
+        }
+    }
+
+    void ApplyViewportAndScissor()
+    {
+        if (!m_commandList || m_renderWidth <= 0 || m_renderHeight <= 0) {
+            return;
+        }
+
+        D3D12_VIEWPORT viewport{};
+        viewport.Width = static_cast<float>(m_renderWidth);
+        viewport.Height = static_cast<float>(m_renderHeight);
+        viewport.MaxDepth = 1.0f;
+        D3D12_RECT scissor{ 0, 0, m_renderWidth, m_renderHeight };
+        m_commandList->RSSetViewports(1, &viewport);
+        m_commandList->RSSetScissorRects(1, &scissor);
+    }
+
+    bool EnsureFrameCommandsStarted()
+    {
+        if (m_frameCommandsOpen) {
+            return true;
+        }
+        if (!m_commandAllocator || !m_commandList || !GetCurrentBackBuffer()) {
+            return false;
+        }
+
+        HRESULT hr = m_commandAllocator->Reset();
+        if (FAILED(hr)) {
+            return false;
+        }
+        hr = m_commandList->Reset(m_commandAllocator, nullptr);
+        if (FAILED(hr)) {
+            return false;
+        }
+
+        const D3D12_RESOURCE_BARRIER barrier = TransitionBarrier(
+            GetCurrentBackBuffer(),
+            D3D12_RESOURCE_STATE_PRESENT,
+            D3D12_RESOURCE_STATE_RENDER_TARGET);
+        m_commandList->ResourceBarrier(1, &barrier);
+        const D3D12_CPU_DESCRIPTOR_HANDLE rtvHandle = GetCurrentRtvHandle();
+        const D3D12_CPU_DESCRIPTOR_HANDLE dsvHandle = GetDsvHandle();
+        m_commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, m_depthStencil ? &dsvHandle : nullptr);
+        ApplyViewportAndScissor();
+        m_frameCommandsOpen = true;
+        return true;
+    }
+
+    void ResizeSwapChainBuffers()
+    {
+        if (!m_swapChain || m_renderWidth <= 0 || m_renderHeight <= 0) {
+            return;
+        }
+
+        WaitForGpu();
+        m_frameCommandsOpen = false;
+        ReleaseSwapChainResources();
+        const HRESULT hr = m_swapChain->ResizeBuffers(
+            kFrameCount,
+            static_cast<UINT>(m_renderWidth),
+            static_cast<UINT>(m_renderHeight),
+            DXGI_FORMAT_B8G8R8A8_UNORM,
+            0);
+        if (FAILED(hr)) {
+            DbgLog("[Render] D3D12 swap-chain resize failed hr=0x%08X.\n", static_cast<unsigned int>(hr));
+            return;
+        }
+
+        RefreshRenderTargets();
+        CreateDepthStencilResources();
+    }
+
+    HWND m_hwnd;
+    int m_renderWidth;
+    int m_renderHeight;
+    IDXGIFactory4* m_factory;
+    ID3D12Device* m_device;
+    ID3D12CommandQueue* m_commandQueue;
+    IDXGISwapChain3* m_swapChain;
+    ID3D12DescriptorHeap* m_rtvHeap;
+    ID3D12DescriptorHeap* m_dsvHeap;
+    ID3D12Resource* m_renderTargets[kFrameCount];
+    ID3D12Resource* m_depthStencil;
+    ID3D12CommandAllocator* m_commandAllocator;
+    ID3D12GraphicsCommandList* m_commandList;
+    ID3D12Fence* m_fence;
+    HANDLE m_fenceEvent;
+    UINT64 m_fenceValue;
+    UINT m_frameIndex;
+    UINT m_rtvDescriptorSize;
+    bool m_frameCommandsOpen;
 };
 
 class RoutedRenderDevice final : public IRenderDevice {
@@ -1694,6 +2210,28 @@ public:
             break;
 
         case RenderBackendType::Direct3D12:
+            if (m_d3d12.Initialize(hwnd, &result)) {
+                m_active = &m_d3d12;
+            } else {
+                DbgLog("[Render] Failed to initialize backend '%s' (hr=0x%08X). Falling back to Direct3D11.\n",
+                    GetRenderBackendName(requestedBackend),
+                    static_cast<unsigned int>(result.initHr));
+                m_active = &m_d3d11;
+                if (!m_d3d11.Initialize(hwnd, &result)) {
+                    DbgLog("[Render] Failed to initialize backend '%s' (hr=0x%08X). Falling back to Direct3D7.\n",
+                        GetRenderBackendName(RenderBackendType::Direct3D11),
+                        static_cast<unsigned int>(result.initHr));
+                    m_active = &m_legacy;
+                    if (!m_legacy.Initialize(hwnd, &result)) {
+                        if (outResult) {
+                            *outResult = result;
+                        }
+                        return false;
+                    }
+                }
+            }
+            break;
+
         case RenderBackendType::Vulkan:
             DbgLog("[Render] Requested backend '%s' is not implemented yet. Falling back to Direct3D7.\n",
                 GetRenderBackendName(requestedBackend));
@@ -1741,6 +2279,7 @@ public:
     int Present(bool vertSync) override { return m_active->Present(vertSync); }
     bool AcquireBackBufferDC(HDC* outDc) override { return m_active->AcquireBackBufferDC(outDc); }
     void ReleaseBackBufferDC(HDC dc) override { m_active->ReleaseBackBufferDC(dc); }
+    bool UpdateBackBufferFromMemory(const void* bgraPixels, int width, int height, int pitch) override { return m_active->UpdateBackBufferFromMemory(bgraPixels, width, height, pitch); }
     bool BeginScene() override { return m_active->BeginScene(); }
     void EndScene() override { m_active->EndScene(); }
     void SetTransform(D3DTRANSFORMSTATETYPE state, const D3DMATRIX* matrix) override { m_active->SetTransform(state, matrix); }
@@ -1757,6 +2296,7 @@ public:
 private:
     LegacyRenderDevice m_legacy;
     D3D11RenderDevice m_d3d11;
+    D3D12RenderDevice m_d3d12;
     IRenderDevice* m_active;
 };
 

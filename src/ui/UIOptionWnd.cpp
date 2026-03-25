@@ -256,6 +256,23 @@ int ClampSliderValue(int value)
     return (std::max)(kSliderMin, (std::min)(kSliderMax, value));
 }
 
+RenderBackendType NormalizePreferredBackend(RenderBackendType backend)
+{
+    return IsRenderBackendImplemented(backend) ? backend : RenderBackendType::Direct3D11;
+}
+
+RenderBackendType GetNextImplementedBackend(RenderBackendType backend)
+{
+    switch (backend) {
+    case RenderBackendType::LegacyDirect3D7:
+        return RenderBackendType::Direct3D11;
+
+    case RenderBackendType::Direct3D11:
+    default:
+        return RenderBackendType::LegacyDirect3D7;
+    }
+}
+
 void LoadDwordSetting(HKEY key, const char* valueName, int* target)
 {
     if (!key || !valueName || !target) {
@@ -302,6 +319,7 @@ UIOptionWnd::UIOptionWnd()
       m_skillSnap(0),
       m_itemSnap(0),
       m_collapsed(0),
+    m_preferredRenderBackend(static_cast<int>(GetConfiguredRenderBackend())),
       m_dragMode(DragMode_None),
       m_dragAnchorX(0),
       m_dragAnchorY(0),
@@ -413,6 +431,7 @@ void UIOptionWnd::LoadSettings()
     m_skillSnap = (m_skillSnap != 0) ? 1 : 0;
     m_itemSnap = (m_itemSnap != 0) ? 1 : 0;
     m_collapsed = (m_collapsed != 0) ? 1 : 0;
+    m_preferredRenderBackend = static_cast<int>(NormalizePreferredBackend(GetConfiguredRenderBackend()));
     if (m_collapsed) {
         m_h = kCollapsedHeight;
     }
@@ -550,6 +569,23 @@ RECT UIOptionWnd::GetSkinRect() const
     return rc;
 }
 
+RECT UIOptionWnd::GetRendererRect() const
+{
+    return GetSkinRect();
+}
+
+RECT UIOptionWnd::GetRestartButtonRect() const
+{
+    const RECT rendererRect = GetRendererRect();
+    RECT rc = {
+        rendererRect.right - 64,
+        rendererRect.top + 1,
+        rendererRect.right - 3,
+        rendererRect.bottom - 1,
+    };
+    return rc;
+}
+
 RECT UIOptionWnd::GetBgmSliderRect() const
 {
     RECT rc = { m_x + 71, m_y + 21, m_x + m_w - 44, m_y + 34 };
@@ -598,6 +634,44 @@ void UIOptionWnd::DrawHeaderButton(HDC hdc, const RECT& rect, const char* text) 
     SetBkMode(hdc, TRANSPARENT);
     SetTextColor(hdc, RGB(0, 0, 0));
     TextOutA(hdc, rect.left + 2, rect.top - 1, text, static_cast<int>(std::strlen(text)));
+}
+
+bool UIOptionWnd::HasPendingRendererRestart() const
+{
+    const RenderBackendType preferredBackend = NormalizePreferredBackend(static_cast<RenderBackendType>(m_preferredRenderBackend));
+    return preferredBackend != GetActiveRenderBackend();
+}
+
+void UIOptionWnd::PromptForRendererRestart()
+{
+    const int restartNow = MessageBoxA(
+        g_hMainWnd,
+        "Renderer changes require a client restart. If you are currently in-game, the client will disconnect from the map server before it relaunches. Restart now?",
+        "Restart Required",
+        MB_ICONQUESTION | MB_YESNO);
+    if (restartNow == IDYES) {
+        if (!RelaunchCurrentApplication()) {
+            MessageBoxA(
+                g_hMainWnd,
+                "Failed to relaunch the client. The renderer setting was saved and will apply the next time you start the game.",
+                "Restart Failed",
+                MB_ICONERROR | MB_OK);
+        }
+    }
+}
+
+void UIOptionWnd::CyclePreferredRenderBackend()
+{
+    const RenderBackendType current = NormalizePreferredBackend(static_cast<RenderBackendType>(m_preferredRenderBackend));
+    const RenderBackendType next = GetNextImplementedBackend(current);
+    if (SetConfiguredRenderBackend(next)) {
+        m_preferredRenderBackend = static_cast<int>(next);
+        SaveSettings();
+
+        if (next != GetActiveRenderBackend()) {
+            PromptForRendererRestart();
+        }
+    }
 }
 
 void UIOptionWnd::OnCreate(int cx, int cy)
@@ -692,10 +766,24 @@ void UIOptionWnd::OnDraw()
         DrawSlider(hdc, GetBgmSliderRect(), m_bgmVolume, "BGM");
         DrawSlider(hdc, GetSoundSliderRect(), m_soundVolume, "S");
 
-        RECT skinRect = GetSkinRect();
-        FillRectColor(hdc, skinRect, RGB(244, 239, 228));
-        DrawRectFrame(hdc, skinRect, RGB(118, 98, 80));
-        TextOutA(hdc, m_x + 78, m_y + 68, "default", 7);
+        const RECT rendererRect = GetRendererRect();
+        FillRectColor(hdc, rendererRect, RGB(244, 239, 228));
+        DrawRectFrame(hdc, rendererRect, RGB(118, 98, 80));
+        const RenderBackendType preferredBackend = NormalizePreferredBackend(static_cast<RenderBackendType>(m_preferredRenderBackend));
+        const RenderBackendType activeBackend = GetActiveRenderBackend();
+        const bool pendingRestart = preferredBackend != activeBackend;
+        RECT rendererTextRect = rendererRect;
+        if (pendingRestart) {
+            const RECT restartRect = GetRestartButtonRect();
+            rendererTextRect.right = restartRect.left - 2;
+            FillRectColor(hdc, restartRect, RGB(222, 208, 190));
+            DrawRectFrame(hdc, restartRect, RGB(82, 63, 45));
+            TextOutA(hdc, restartRect.left + 7, restartRect.top + 2, "Restart", 7);
+        }
+        std::string rendererText = std::string("Renderer: ") + GetRenderBackendName(preferredBackend);
+        TextOutA(hdc, rendererTextRect.left + 3, rendererTextRect.top + 1, rendererText.c_str(), static_cast<int>(rendererText.size()));
+        const char* restartText = pendingRestart ? "Restart required" : "Active now";
+        TextOutA(hdc, rendererTextRect.left + 3, rendererTextRect.top + 9, restartText, static_cast<int>(std::strlen(restartText)));
         TextOutA(hdc, m_x + 76, m_y + 100, "Snap", 4);
 
         TextOutA(hdc, m_x + 31, m_y + 100, "NoCtrl", 7);
@@ -730,6 +818,16 @@ void UIOptionWnd::OnLBtnDown(int x, int y)
 
     if (PointInRectXY(GetBaseButtonRect(), x, y)) {
         ResetToDefaultPlacement();
+        return;
+    }
+
+    if (!m_collapsed && HasPendingRendererRestart() && PointInRectXY(GetRestartButtonRect(), x, y)) {
+        PromptForRendererRestart();
+        return;
+    }
+
+    if (!m_collapsed && PointInRectXY(GetRendererRect(), x, y)) {
+        CyclePreferredRenderBackend();
         return;
     }
 

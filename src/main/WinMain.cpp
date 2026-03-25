@@ -101,6 +101,57 @@ void RefreshMainWindowTitle(const char* status)
     SetWindowTextA(g_hMainWnd, title.c_str());
 }
 
+RenderBackendType GetActiveRenderBackend()
+{
+    return g_activeRenderBackend;
+}
+
+bool RelaunchCurrentApplication()
+{
+    char exePath[MAX_PATH] = {};
+    if (GetModuleFileNameA(nullptr, exePath, MAX_PATH) == 0 || exePath[0] == '\0') {
+        return false;
+    }
+
+    char workingDirectory[MAX_PATH] = {};
+    if (GetCurrentDirectoryA(MAX_PATH, workingDirectory) == 0) {
+        workingDirectory[0] = '\0';
+    }
+
+    const char* originalCommandLine = GetCommandLineA();
+    if (!originalCommandLine || !*originalCommandLine) {
+        return false;
+    }
+
+    std::string commandLine(originalCommandLine);
+    std::vector<char> mutableCommandLine(commandLine.begin(), commandLine.end());
+    mutableCommandLine.push_back('\0');
+
+    STARTUPINFOA startupInfo{};
+    startupInfo.cb = sizeof(startupInfo);
+    PROCESS_INFORMATION processInfo{};
+    if (!CreateProcessA(
+            exePath,
+            mutableCommandLine.data(),
+            nullptr,
+            nullptr,
+            FALSE,
+            0,
+            nullptr,
+            workingDirectory[0] != '\0' ? workingDirectory : nullptr,
+            &startupInfo,
+            &processInfo)) {
+        return false;
+    }
+
+    CloseHandle(processInfo.hThread);
+    CloseHandle(processInfo.hProcess);
+
+    CRagConnection::instance()->Disconnect();
+    g_modeMgr.Quit();
+    return true;
+}
+
 // ---------------------------------------------------------------------------
 // Registry helper
 // ---------------------------------------------------------------------------
@@ -313,8 +364,7 @@ static bool InitClientSystems()
         return false;
     }
 
-    SetEnvironmentVariableA("OPEN_MIDGARD_RENDER_BACKEND", "d3d11");
-    DbgLog("[Render] Forcing requested backend to '%s' via OPEN_MIDGARD_RENDER_BACKEND.\n",
+    DbgLog("[Render] Requested backend is '%s'.\n",
         GetRenderBackendName(GetRequestedRenderBackend()));
 
     RenderBackendBootstrapResult renderBootstrap{};
@@ -324,11 +374,6 @@ static bool InitClientSystems()
     }
 
     g_activeRenderBackend = renderBootstrap.backend;
-    if (g_activeRenderBackend != RenderBackendType::Direct3D11) {
-        ErrorMsg("D3D11 was requested, but the renderer did not activate the D3D11 backend.");
-        return false;
-    }
-
     DbgLog("[Render] Active backend confirmed as '%s'.\n", GetRenderBackendName(g_activeRenderBackend));
     RefreshMainWindowTitle();
 
