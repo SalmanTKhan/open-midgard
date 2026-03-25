@@ -3,6 +3,7 @@
 // WinMain.h  –  Application entry point and Win32 window management
 // Clean C++17 rewrite.
 //===========================================================================
+#include "render3d/RenderBackend.h"
 #include <windows.h>
 
 // Win32 window / app lifecycle
@@ -15,6 +16,10 @@ void            ExitApp();
 void            CheckSystemMessage();
 void            SetWindowActiveMode(int active);
 bool            GetWindowActiveMode();
+void            RefreshMainWindowTitle(const char* status = nullptr);
+void            RecordMainWindowFrame();
+RenderBackendType GetActiveRenderBackend();
+bool            RelaunchCurrentApplication();
 
 // Patch-upgrade helpers
 bool            UpdatePatch(const char* patchExe, const char* patchUp);

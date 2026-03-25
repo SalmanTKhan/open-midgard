@@ -20,6 +20,8 @@
 #include "core/ClientInfoLocale.h"
 #include "ui/UIWindowMgr.h"
 #include "render3d/Device.h"
+#include "render3d/RenderBackend.h"
+#include "render3d/RenderDevice.h"
 #include "render/Renderer.h"
 #include "world/World.h"
 #include "res/GndRes.h"
@@ -30,6 +32,7 @@
 #include "res/PaletteRes.h"
 #include "res/ImfRes.h"
 #include "res/WorldRes.h"
+#include "DebugLog.h"
 #include <windows.h>
 #include <mmsystem.h>
 #include <commctrl.h>
@@ -38,6 +41,7 @@
 #include <io.h>
 #include <algorithm>
 #include <objbase.h>
+#include <string>
 
 // ---------------------------------------------------------------------------
 // Window constants
@@ -62,6 +66,11 @@ char      g_baseDir3[MAX_PATH] = {};
 
 CFileMgr  g_fileMgr;
 int       g_readFolderFirst = 0;   // 0=PAK-first, 1=disk-first
+static RenderBackendType g_activeRenderBackend = RenderBackendType::LegacyDirect3D7;
+static std::string g_windowTitleStatus = WINDOW_NAME;
+static int g_windowTitleFps = -1;
+static DWORD g_windowTitleFpsTick = 0;
+static unsigned int g_windowTitleFrameCount = 0;
 
 // Registry path used by the original client
 static const char g_regPath[] = "Software\\Gravity Soft\\Ragnarok Online";
@@ -82,6 +91,101 @@ void ErrorMsg(const char* msg)
 }
 
 void ErrorMsg(int /*msgId*/) {}
+
+static void ApplyMainWindowTitle()
+{
+    if (!g_hMainWnd) {
+        return;
+    }
+
+    std::string title = g_windowTitleStatus.empty() ? std::string(WINDOW_NAME) : g_windowTitleStatus;
+    title += " [";
+    title += GetRenderBackendName(g_activeRenderBackend);
+    title += "]";
+    if (g_windowTitleFps >= 0) {
+        char fpsText[32] = {};
+        std::snprintf(fpsText, sizeof(fpsText), " - %d FPS", g_windowTitleFps);
+        title += fpsText;
+    }
+    SetWindowTextA(g_hMainWnd, title.c_str());
+}
+
+void RefreshMainWindowTitle(const char* status)
+{
+    g_windowTitleStatus = (status && *status) ? std::string(status) : std::string(WINDOW_NAME);
+    ApplyMainWindowTitle();
+}
+
+void RecordMainWindowFrame()
+{
+    const DWORD now = GetTickCount();
+    if (g_windowTitleFpsTick == 0) {
+        g_windowTitleFpsTick = now;
+        g_windowTitleFrameCount = 0;
+    }
+
+    ++g_windowTitleFrameCount;
+    const DWORD elapsed = now - g_windowTitleFpsTick;
+    if (elapsed < 1000) {
+        return;
+    }
+
+    g_windowTitleFps = static_cast<int>((static_cast<unsigned long long>(g_windowTitleFrameCount) * 1000ull + (elapsed / 2ull)) / elapsed);
+    g_windowTitleFpsTick = now;
+    g_windowTitleFrameCount = 0;
+    ApplyMainWindowTitle();
+}
+
+RenderBackendType GetActiveRenderBackend()
+{
+    return g_activeRenderBackend;
+}
+
+bool RelaunchCurrentApplication()
+{
+    char exePath[MAX_PATH] = {};
+    if (GetModuleFileNameA(nullptr, exePath, MAX_PATH) == 0 || exePath[0] == '\0') {
+        return false;
+    }
+
+    char workingDirectory[MAX_PATH] = {};
+    if (GetCurrentDirectoryA(MAX_PATH, workingDirectory) == 0) {
+        workingDirectory[0] = '\0';
+    }
+
+    const char* originalCommandLine = GetCommandLineA();
+    if (!originalCommandLine || !*originalCommandLine) {
+        return false;
+    }
+
+    std::string commandLine(originalCommandLine);
+    std::vector<char> mutableCommandLine(commandLine.begin(), commandLine.end());
+    mutableCommandLine.push_back('\0');
+
+    STARTUPINFOA startupInfo{};
+    startupInfo.cb = sizeof(startupInfo);
+    PROCESS_INFORMATION processInfo{};
+    if (!CreateProcessA(
+            exePath,
+            mutableCommandLine.data(),
+            nullptr,
+            nullptr,
+            FALSE,
+            0,
+            nullptr,
+            workingDirectory[0] != '\0' ? workingDirectory : nullptr,
+            &startupInfo,
+            &processInfo)) {
+        return false;
+    }
+
+    CloseHandle(processInfo.hThread);
+    CloseHandle(processInfo.hProcess);
+
+    CRagConnection::instance()->Disconnect();
+    g_modeMgr.Quit();
+    return true;
+}
 
 // ---------------------------------------------------------------------------
 // Registry helper
@@ -215,7 +319,7 @@ bool InitApp(HINSTANCE hInstance, int nCmdShow)
     g_hInstance = hInstance;
 
     // Check for duplicate instance
-    if (FindWindowA(WINDOW_NAME, WINDOW_NAME))
+    if (FindWindowA(WINDOW_NAME, nullptr))
         g_multiSTOP = true;
 
     WNDCLASSA wc    = {};
@@ -295,29 +399,25 @@ static bool InitClientSystems()
         return false;
     }
 
-    GUID deviceCandidates[] = {
-        IID_IDirect3DTnLHalDevice,
-        IID_IDirect3DHALDevice,
-        IID_IDirect3DRGBDevice
-    };
+    DbgLog("[Render] Requested backend is '%s'.\n",
+        GetRenderBackendName(GetRequestedRenderBackend()));
 
-    int renderInitHr = -1;
-    for (GUID& deviceGuid : deviceCandidates) {
-        renderInitHr = g_3dDevice.Init(g_hMainWnd, nullptr, &deviceGuid, nullptr, 0);
-        if (renderInitHr >= 0) {
-            break;
-        }
-    }
-
-    if (renderInitHr < 0) {
+    RenderBackendBootstrapResult renderBootstrap{};
+    if (!GetRenderDevice().Initialize(g_hMainWnd, &renderBootstrap)) {
         ErrorMsg("3D device initialization failed. The game will exit.");
         return false;
     }
 
-    RECT clientRect{};
-    GetClientRect(g_hMainWnd, &clientRect);
-    const int renderW = (std::max)(1L, clientRect.right - clientRect.left);
-    const int renderH = (std::max)(1L, clientRect.bottom - clientRect.top);
+    g_activeRenderBackend = renderBootstrap.backend;
+    DbgLog("[Render] Active backend confirmed as '%s'.\n", GetRenderBackendName(g_activeRenderBackend));
+    g_windowTitleFps = -1;
+    g_windowTitleFpsTick = 0;
+    g_windowTitleFrameCount = 0;
+    RefreshMainWindowTitle();
+
+    GetRenderDevice().RefreshRenderSize();
+    const int renderW = GetRenderDevice().GetRenderWidth();
+    const int renderH = GetRenderDevice().GetRenderHeight();
 
     g_renderer.Init();
     g_renderer.SetSize(renderW, renderH);
@@ -442,7 +542,7 @@ int __stdcall WinMain(HINSTANCE hInstance, HINSTANCE /*hPrevInstance*/,
     // CDllMgr cleanup will happen automatically if we add it to a destructor or call it explicitly
     CConnection::Cleanup();
     g_windowMgr.Reset();
-    g_3dDevice.DestroyObjects();
+    GetRenderDevice().Shutdown();
 
     CoUninitialize();
     DestroyWindow(g_hMainWnd);

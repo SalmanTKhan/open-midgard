@@ -163,6 +163,7 @@ void CModeMgr::Run(int startMode, const char* worldName)
 
             if (m_curMode) {
                 m_curMode->OnRun();
+                RecordMainWindowFrame();
             } else {
                 Sleep(1);
             }

@@ -671,4 +671,13 @@ void CView::OnRender()
     g_viewPerfStats.hoverMs += static_cast<u64>(hoverEnd - hoverStart);
     g_viewPerfStats.actorMs += static_cast<u64>(actorEnd - actorStart);
     g_viewPerfStats.backgroundMs += static_cast<u64>(backgroundEnd - backgroundStart);
+
+    if (g_viewPerfStats.frames <= 20 || (g_viewPerfStats.frames % kPerfLogIntervalFrames) == 0) {
+        DbgLog("[View] frame=%llu ground=%lums hover=%lums actors=%lums background=%lums\n",
+            static_cast<unsigned long long>(g_viewPerfStats.frames),
+            static_cast<unsigned long>(groundEnd - groundStart),
+            static_cast<unsigned long>(hoverEnd - hoverStart),
+            static_cast<unsigned long>(actorEnd - actorStart),
+            static_cast<unsigned long>(backgroundEnd - backgroundStart));
+    }
 }

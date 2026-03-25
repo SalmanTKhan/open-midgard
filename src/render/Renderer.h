@@ -13,6 +13,7 @@
 
 // Forward declarations
 class CTexture;
+class IRenderDevice;
 struct SprImg;
 struct CacheInfo;
 class CBitmapRes;
@@ -44,7 +45,7 @@ struct RPFace {
     D3DBLEND destAlphaMode;
     float alphaSortKey;
 
-    static void DrawPri(RPFace* face, IDirect3DDevice7* device);
+    static void DrawPri(RPFace* face, IRenderDevice& renderDevice);
 };
 
 struct RPLmFace {
@@ -56,7 +57,7 @@ struct RPLmFace {
     CTexture* tex;
     CTexture* tex2;
 
-    static void DrawPri(RPLmFace* face, IDirect3DDevice7* device);
+    static void DrawPri(RPLmFace* face, IRenderDevice& renderDevice);
 };
 
 struct RPRaw {
@@ -67,7 +68,7 @@ struct RPRaw {
     int numIndices;
     CTexture* tex;
 
-    static void DrawPri(RPRaw* face, IDirect3DDevice7* device);
+    static void DrawPri(RPRaw* face, IRenderDevice& renderDevice);
 };
 
 struct RPQuadFace {
@@ -174,7 +175,7 @@ public:
     float m_screenXFactor, m_screenYFactor;
     
     PixelFormat m_pf;
-    IDirect3DDevice7* m_device;
+    IRenderDevice* m_renderDevice;
     void* m_lpSurfacePtr;
     int m_lPitch;
     int m_bRGBBitCount;

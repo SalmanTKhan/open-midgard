@@ -60,6 +60,9 @@ public:
     unsigned int m_timeStamp;
     char m_texName[128];
     unsigned int m_updateWidth, m_updateHeight;
+    IUnknown* m_backendTextureObject;
+    IUnknown* m_backendTextureView;
+    IUnknown* m_backendTextureUpload;
 
     static float m_uOffset;
     static float m_vOffset;

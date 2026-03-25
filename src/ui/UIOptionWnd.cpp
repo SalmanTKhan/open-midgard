@@ -36,13 +36,15 @@ constexpr char kOptionWndItemSnapValue[] = "OptionWndItemSnap";
 constexpr char kOptionWndCollapsedValue[] = "OptionWndCollapsed";
 
 constexpr int kDefaultWidth = 280;
-constexpr int kDefaultHeight = 120;
+constexpr int kDefaultHeight = 182;
 constexpr int kCollapsedHeight = 17;
 constexpr int kTitleBarHeight = 17;
 constexpr int kDefaultX = 185;
 constexpr int kDefaultY = 300;
 constexpr int kSliderMin = 0;
 constexpr int kSliderMax = 127;
+constexpr int kRendererEntryCount = 4;
+constexpr int kRendererRowHeight = 16;
 
 constexpr int kCheckIdBgm = 401;
 constexpr int kCheckIdSound = 402;
@@ -50,6 +52,13 @@ constexpr int kCheckIdNoCtrl = 403;
 constexpr int kCheckIdAttack = 404;
 constexpr int kCheckIdSkill = 405;
 constexpr int kCheckIdItem = 406;
+
+constexpr std::array<RenderBackendType, kRendererEntryCount> kRendererEntries = {
+    RenderBackendType::LegacyDirect3D7,
+    RenderBackendType::Direct3D11,
+    RenderBackendType::Direct3D12,
+    RenderBackendType::Vulkan,
+};
 
 ULONG_PTR EnsureGdiplusStarted()
 {
@@ -256,6 +265,55 @@ int ClampSliderValue(int value)
     return (std::max)(kSliderMin, (std::min)(kSliderMax, value));
 }
 
+RenderBackendType NormalizePreferredBackend(RenderBackendType backend)
+{
+    return IsRenderBackendImplemented(backend) ? backend : RenderBackendType::Direct3D11;
+}
+
+const char* GetRendererEntryStateText(
+    RenderBackendType entry,
+    RenderBackendType preferredBackend,
+    RenderBackendType activeBackend)
+{
+    if (!IsRenderBackendImplemented(entry)) {
+        return "Not implemented";
+    }
+
+    if (!IsRenderBackendSupported(entry)) {
+        return "Unsupported";
+    }
+
+    if (entry == preferredBackend && entry != activeBackend) {
+        return "Restart required";
+    }
+
+    if (entry == activeBackend) {
+        return "Active";
+    }
+
+    return "Available";
+}
+
+const char* GetRendererEntryPrefix(
+    RenderBackendType entry,
+    RenderBackendType preferredBackend,
+    RenderBackendType activeBackend)
+{
+    if (entry == preferredBackend && entry == activeBackend) {
+        return "*> ";
+    }
+
+    if (entry == preferredBackend) {
+        return "> ";
+    }
+
+    if (entry == activeBackend) {
+        return "* ";
+    }
+
+    return "";
+}
+
 void LoadDwordSetting(HKEY key, const char* valueName, int* target)
 {
     if (!key || !valueName || !target) {
@@ -302,6 +360,7 @@ UIOptionWnd::UIOptionWnd()
       m_skillSnap(0),
       m_itemSnap(0),
       m_collapsed(0),
+    m_preferredRenderBackend(static_cast<int>(GetConfiguredRenderBackend())),
       m_dragMode(DragMode_None),
       m_dragAnchorX(0),
       m_dragAnchorY(0),
@@ -384,11 +443,13 @@ void UIOptionWnd::LoadSettings()
     if (m_w <= 0) {
         m_w = kDefaultWidth;
     }
-    if (m_orgHeight < kTitleBarHeight) {
+    if (m_orgHeight < kDefaultHeight) {
         m_orgHeight = kDefaultHeight;
     }
     if (m_h <= 0) {
         m_h = m_collapsed ? kCollapsedHeight : m_orgHeight;
+    } else if (!m_collapsed && m_h < kDefaultHeight) {
+        m_h = kDefaultHeight;
     }
     if (m_x == 0 && m_y == 0) {
         if (g_hMainWnd) {
@@ -413,6 +474,7 @@ void UIOptionWnd::LoadSettings()
     m_skillSnap = (m_skillSnap != 0) ? 1 : 0;
     m_itemSnap = (m_itemSnap != 0) ? 1 : 0;
     m_collapsed = (m_collapsed != 0) ? 1 : 0;
+    m_preferredRenderBackend = static_cast<int>(NormalizePreferredBackend(GetConfiguredRenderBackend()));
     if (m_collapsed) {
         m_h = kCollapsedHeight;
     }
@@ -467,19 +529,19 @@ void UIOptionWnd::LayoutControls()
         m_soundOnCheckBox->SetShow(m_collapsed ? 0 : 1);
     }
     if (m_noCtrlCheckBox) {
-        m_noCtrlCheckBox->Move(m_x + 11, m_y + 100);
+        m_noCtrlCheckBox->Move(m_x + 11, m_y + 160);
         m_noCtrlCheckBox->SetShow(m_collapsed ? 0 : 1);
     }
     if (m_attackSnapCheckBox) {
-        m_attackSnapCheckBox->Move(m_x + 112, m_y + 100);
+        m_attackSnapCheckBox->Move(m_x + 112, m_y + 160);
         m_attackSnapCheckBox->SetShow(m_collapsed ? 0 : 1);
     }
     if (m_skillSnapCheckBox) {
-        m_skillSnapCheckBox->Move(m_x + 162, m_y + 100);
+        m_skillSnapCheckBox->Move(m_x + 162, m_y + 160);
         m_skillSnapCheckBox->SetShow(m_collapsed ? 0 : 1);
     }
     if (m_itemSnapCheckBox) {
-        m_itemSnapCheckBox->Move(m_x + 204, m_y + 100);
+        m_itemSnapCheckBox->Move(m_x + 204, m_y + 160);
         m_itemSnapCheckBox->SetShow(m_collapsed ? 0 : 1);
     }
 }
@@ -550,6 +612,42 @@ RECT UIOptionWnd::GetSkinRect() const
     return rc;
 }
 
+RECT UIOptionWnd::GetRendererRect() const
+{
+    RECT rc = { m_x + 75, m_y + 64, m_x + 256, m_y + 64 + 4 + (kRendererEntryCount * kRendererRowHeight) };
+    return rc;
+}
+
+RECT UIOptionWnd::GetRendererEntryRect(int index) const
+{
+    RECT rendererRect = GetRendererRect();
+    if (index < 0) {
+        index = 0;
+    } else if (index >= kRendererEntryCount) {
+        index = kRendererEntryCount - 1;
+    }
+
+    const int rowHeight = kRendererRowHeight;
+    RECT rc = {
+        rendererRect.left + 2,
+        rendererRect.top + 2 + (index * rowHeight),
+        rendererRect.right - 2,
+        rendererRect.top + 2 + ((index + 1) * rowHeight),
+    };
+    return rc;
+}
+
+RECT UIOptionWnd::GetRestartButtonRect() const
+{
+    RECT rc = {
+        m_x + 184,
+        m_y + 138,
+        m_x + 256,
+        m_y + 154,
+    };
+    return rc;
+}
+
 RECT UIOptionWnd::GetBgmSliderRect() const
 {
     RECT rc = { m_x + 71, m_y + 21, m_x + m_w - 44, m_y + 34 };
@@ -598,6 +696,51 @@ void UIOptionWnd::DrawHeaderButton(HDC hdc, const RECT& rect, const char* text) 
     SetBkMode(hdc, TRANSPARENT);
     SetTextColor(hdc, RGB(0, 0, 0));
     TextOutA(hdc, rect.left + 2, rect.top - 1, text, static_cast<int>(std::strlen(text)));
+}
+
+bool UIOptionWnd::HasPendingRendererRestart() const
+{
+    const RenderBackendType preferredBackend = NormalizePreferredBackend(static_cast<RenderBackendType>(m_preferredRenderBackend));
+    return preferredBackend != GetActiveRenderBackend();
+}
+
+void UIOptionWnd::PromptForRendererRestart()
+{
+    const int restartNow = MessageBoxA(
+        g_hMainWnd,
+        "Renderer changes require a client restart. If you are currently in-game, the client will disconnect from the map server before it relaunches. Restart now?",
+        "Restart Required",
+        MB_ICONQUESTION | MB_YESNO);
+    if (restartNow == IDYES) {
+        if (!RelaunchCurrentApplication()) {
+            MessageBoxA(
+                g_hMainWnd,
+                "Failed to relaunch the client. The renderer setting was saved and will apply the next time you start the game.",
+                "Restart Failed",
+                MB_ICONERROR | MB_OK);
+        }
+    }
+}
+
+void UIOptionWnd::SelectPreferredRenderBackend(RenderBackendType backend)
+{
+    if (!IsRenderBackendImplemented(backend) || !IsRenderBackendSupported(backend)) {
+        return;
+    }
+
+    const RenderBackendType preferredBackend = NormalizePreferredBackend(static_cast<RenderBackendType>(m_preferredRenderBackend));
+    if (backend == preferredBackend) {
+        return;
+    }
+
+    if (SetConfiguredRenderBackend(backend)) {
+        m_preferredRenderBackend = static_cast<int>(backend);
+        SaveSettings();
+
+        if (backend != GetActiveRenderBackend()) {
+            PromptForRendererRestart();
+        }
+    }
 }
 
 void UIOptionWnd::OnCreate(int cx, int cy)
@@ -672,7 +815,7 @@ void UIOptionWnd::OnDraw()
         } else {
             FillRectColor(hdc, bodyRect, RGB(231, 217, 197));
             DrawRectFrame(hdc, bodyRect, RGB(96, 76, 54));
-            RECT dividerRect = { m_x + 240, m_y + 64, m_x + m_w - 8, m_y + 80 };
+            RECT dividerRect = { m_x + 72, m_y + 62, m_x + m_w - 24, m_y + 154 };
             FillRectColor(hdc, dividerRect, RGB(215, 199, 177));
             DrawRectFrame(hdc, dividerRect, RGB(118, 98, 80));
         }
@@ -692,16 +835,67 @@ void UIOptionWnd::OnDraw()
         DrawSlider(hdc, GetBgmSliderRect(), m_bgmVolume, "BGM");
         DrawSlider(hdc, GetSoundSliderRect(), m_soundVolume, "S");
 
-        RECT skinRect = GetSkinRect();
-        FillRectColor(hdc, skinRect, RGB(244, 239, 228));
-        DrawRectFrame(hdc, skinRect, RGB(118, 98, 80));
-        TextOutA(hdc, m_x + 78, m_y + 68, "default", 7);
-        TextOutA(hdc, m_x + 76, m_y + 100, "Snap", 4);
+        const RECT rendererRect = GetRendererRect();
+        FillRectColor(hdc, rendererRect, RGB(244, 239, 228));
+        DrawRectFrame(hdc, rendererRect, RGB(118, 98, 80));
+        const RenderBackendType preferredBackend = NormalizePreferredBackend(static_cast<RenderBackendType>(m_preferredRenderBackend));
+        const RenderBackendType activeBackend = GetActiveRenderBackend();
+        for (int index = 0; index < kRendererEntryCount; ++index) {
+            const RenderBackendType entry = kRendererEntries[static_cast<size_t>(index)];
+            const RECT entryRect = GetRendererEntryRect(index);
+            const bool implemented = IsRenderBackendImplemented(entry);
+            const bool supported = implemented && IsRenderBackendSupported(entry);
+            const bool selected = (entry == preferredBackend);
+            const bool active = (entry == activeBackend);
 
-        TextOutA(hdc, m_x + 31, m_y + 100, "NoCtrl", 7);
-        TextOutA(hdc, m_x + 130, m_y + 100, "Attack", 6);
-        TextOutA(hdc, m_x + 180, m_y + 100, "Skill", 5);
-        TextOutA(hdc, m_x + 222, m_y + 100, "Item", 4);
+            COLORREF fillColor = RGB(244, 239, 228);
+            if (!implemented) {
+                fillColor = RGB(223, 216, 206);
+            } else if (!supported) {
+                fillColor = RGB(230, 214, 206);
+            } else if (selected && active) {
+                fillColor = RGB(214, 228, 206);
+            } else if (selected) {
+                fillColor = RGB(235, 222, 196);
+            } else if (active) {
+                fillColor = RGB(222, 231, 214);
+            }
+
+            FillRectColor(hdc, entryRect, fillColor);
+            DrawRectFrame(hdc, entryRect, RGB(158, 137, 113));
+
+            const char* backendName = GetRenderBackendName(entry);
+            const char* stateText = GetRendererEntryStateText(entry, preferredBackend, activeBackend);
+            const char* prefixText = GetRendererEntryPrefix(entry, preferredBackend, activeBackend);
+            std::string label = std::string(prefixText) + backendName;
+            const int textY = entryRect.top + 2;
+            SetTextColor(hdc, (implemented && supported) ? RGB(0, 0, 0) : RGB(90, 82, 74));
+            TextOutA(hdc, entryRect.left + 4, textY, label.c_str(), static_cast<int>(label.size()));
+
+            SIZE stateSize{};
+            GetTextExtentPoint32A(hdc, stateText, static_cast<int>(std::strlen(stateText)), &stateSize);
+            TextOutA(
+                hdc,
+                entryRect.right - stateSize.cx - 4,
+                textY,
+                stateText,
+                static_cast<int>(std::strlen(stateText)));
+        }
+
+        if (preferredBackend != activeBackend) {
+            const RECT restartRect = GetRestartButtonRect();
+            FillRectColor(hdc, restartRect, RGB(222, 208, 190));
+            DrawRectFrame(hdc, restartRect, RGB(82, 63, 45));
+            TextOutA(hdc, restartRect.left + 10, restartRect.top + 3, "Restart", 7);
+        }
+
+        SetTextColor(hdc, RGB(0, 0, 0));
+        TextOutA(hdc, m_x + 76, m_y + 160, "Snap", 4);
+
+        TextOutA(hdc, m_x + 31, m_y + 160, "NoCtrl", 7);
+        TextOutA(hdc, m_x + 130, m_y + 160, "Attack", 6);
+        TextOutA(hdc, m_x + 180, m_y + 160, "Skill", 5);
+        TextOutA(hdc, m_x + 222, m_y + 160, "Item", 4);
     }
 
     DrawChildren();
@@ -731,6 +925,20 @@ void UIOptionWnd::OnLBtnDown(int x, int y)
     if (PointInRectXY(GetBaseButtonRect(), x, y)) {
         ResetToDefaultPlacement();
         return;
+    }
+
+    if (!m_collapsed && HasPendingRendererRestart() && PointInRectXY(GetRestartButtonRect(), x, y)) {
+        PromptForRendererRestart();
+        return;
+    }
+
+    if (!m_collapsed && PointInRectXY(GetRendererRect(), x, y)) {
+        for (int index = 0; index < kRendererEntryCount; ++index) {
+            if (PointInRectXY(GetRendererEntryRect(index), x, y)) {
+                SelectPreferredRenderBackend(kRendererEntries[static_cast<size_t>(index)]);
+                return;
+            }
+        }
     }
 
     if (!m_collapsed && PointInRectXY(GetBgmSliderRect(), x, y)) {

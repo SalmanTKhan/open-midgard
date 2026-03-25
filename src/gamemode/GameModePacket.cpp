@@ -2438,6 +2438,21 @@ void HandleActorMoveUpdate(CGameMode& mode, const PacketView& packet)
     // shell for move-only actors, but only seed player appearance when the id falls
     // inside the account-id range used for PCs.
     CGameActor* actor = EnsureRuntimeActor(mode, gid, true);
+    static u32 s_loggedMoveUpdateCount = 0;
+    if (s_loggedMoveUpdateCount < 24) {
+        ++s_loggedMoveUpdateCount;
+        DbgLog("[GameMode] move update gid=%u likelyPlayer=%d src=%d,%d dst=%d,%d dir=%d actor=%p pc=%d job=%d\n",
+            gid,
+            likelyPlayer ? 1 : 0,
+            sx,
+            sy,
+            dx,
+            dy,
+            ddir & 7,
+            static_cast<void*>(actor),
+            actor && actor->m_isPc ? 1 : 0,
+            actor ? actor->m_job : -1);
+    }
     if (likelyPlayer && actor && actor->m_isPc == 0 && actor->m_job == 0) {
         SeedMoveOnlyRemotePcAppearance(actor);
     }

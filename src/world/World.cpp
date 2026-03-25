@@ -4,6 +4,7 @@
 #include "render/Prim.h"
 #include "render/Renderer.h"
 #include "render3d/Device.h"
+#include "render3d/RenderDevice.h"
 #include "core/File.h"
 #include "res/GndRes.h"
 #include "res/ModelRes.h"
