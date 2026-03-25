@@ -20,6 +20,7 @@
 #include "core/ClientInfoLocale.h"
 #include "ui/UIWindowMgr.h"
 #include "render3d/Device.h"
+#include "render3d/RenderBackend.h"
 #include "render/Renderer.h"
 #include "world/World.h"
 #include "res/GndRes.h"
@@ -295,21 +296,8 @@ static bool InitClientSystems()
         return false;
     }
 
-    GUID deviceCandidates[] = {
-        IID_IDirect3DTnLHalDevice,
-        IID_IDirect3DHALDevice,
-        IID_IDirect3DRGBDevice
-    };
-
-    int renderInitHr = -1;
-    for (GUID& deviceGuid : deviceCandidates) {
-        renderInitHr = g_3dDevice.Init(g_hMainWnd, nullptr, &deviceGuid, nullptr, 0);
-        if (renderInitHr >= 0) {
-            break;
-        }
-    }
-
-    if (renderInitHr < 0) {
+    RenderBackendBootstrapResult renderBootstrap{};
+    if (!InitializeRenderBackend(g_hMainWnd, &renderBootstrap)) {
         ErrorMsg("3D device initialization failed. The game will exit.");
         return false;
     }

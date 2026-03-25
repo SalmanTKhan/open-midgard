@@ -5,6 +5,8 @@ add_library(ro_render3d STATIC
     D3dutil.cpp
     Device.h
     Device.cpp
+    RenderBackend.h
+    RenderBackend.cpp
 )
 
 target_include_directories(ro_render3d PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
