@@ -16,6 +16,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <map>
 
 namespace {
 
@@ -438,6 +439,47 @@ int ResolvePcFacingDir(const CPc* actor)
     }
 
     return g_session.m_playerDir & 7;
+}
+
+struct SharedNonPcBillboardKey {
+    int job = 0;
+    int action = 0;
+    int motion = 0;
+
+    bool operator<(const SharedNonPcBillboardKey& other) const
+    {
+        if (job != other.job) {
+            return job < other.job;
+        }
+        if (action != other.action) {
+            return action < other.action;
+        }
+        return motion < other.motion;
+    }
+};
+
+struct SharedNonPcBillboardValue {
+    CTexture* texture = nullptr;
+    tagRECT opaqueBounds{};
+    int width = 0;
+    int height = 0;
+    int anchorX = kPlayerBillboardAnchorX;
+    int anchorY = kPlayerBillboardAnchorY;
+};
+
+std::map<SharedNonPcBillboardKey, SharedNonPcBillboardValue>& GetSharedNonPcBillboardCache()
+{
+    static std::map<SharedNonPcBillboardKey, SharedNonPcBillboardValue> cache;
+    return cache;
+}
+
+void ReleaseActorBillboardTexture(CPc& actor)
+{
+    if (actor.m_billboardTextureOwned && actor.m_billboardTexture) {
+        delete actor.m_billboardTexture;
+    }
+    actor.m_billboardTexture = nullptr;
+    actor.m_billboardTextureOwned = 0;
 }
 
 } // namespace
@@ -1752,6 +1794,7 @@ void CGameActor::DeleteTotalNumber(int kind)
 
 CPc::CPc()
     : m_billboardTexture(nullptr)
+    , m_billboardTextureOwned(0)
     , m_billboardTextureWidth(0)
     , m_billboardTextureHeight(0)
     , m_billboardAnchorX(kPlayerBillboardAnchorX)
@@ -1784,8 +1827,7 @@ CPc::CPc()
 
 CPc::~CPc()
 {
-    delete m_billboardTexture;
-    m_billboardTexture = nullptr;
+    ReleaseActorBillboardTexture(*this);
 }
 
 void CPc::InvalidateBillboard()
@@ -1927,6 +1969,32 @@ bool CPc::EnsureBillboardTexture(float cameraLongitude)
         return true;
     }
 
+    if (isVulkanBackend && !isPlayerStyleActor) {
+        const SharedNonPcBillboardKey sharedKey{ m_job, bodyAction, headMotion };
+        const auto& sharedCache = GetSharedNonPcBillboardCache();
+        const auto sharedIt = sharedCache.find(sharedKey);
+        if (sharedIt != sharedCache.end() && sharedIt->second.texture) {
+            if (m_billboardTexture != sharedIt->second.texture) {
+                ReleaseActorBillboardTexture(*this);
+            }
+            m_billboardTexture = sharedIt->second.texture;
+            m_billboardTextureOwned = 0;
+            m_billboardTextureWidth = sharedIt->second.width;
+            m_billboardTextureHeight = sharedIt->second.height;
+            m_billboardAnchorX = sharedIt->second.anchorX;
+            m_billboardAnchorY = sharedIt->second.anchorY;
+            m_billboardOpaqueBounds = sharedIt->second.opaqueBounds;
+            m_cachedBillboardBodyAction = bodyAction;
+            m_cachedBillboardHeadMotion = headMotion;
+            m_cachedBillboardJob = m_job;
+            m_cachedBillboardHead = 0;
+            m_cachedBillboardSex = sex;
+            m_cachedBillboardBodyPalette = 0;
+            m_cachedBillboardHeadPalette = 0;
+            return true;
+        }
+    }
+
     CDCBitmap composeSurface(kPlayerBillboardComposeWidth, kPlayerBillboardComposeHeight);
     RECT clearRect{ 0, 0, kPlayerBillboardComposeWidth, kPlayerBillboardComposeHeight };
     composeSurface.ClearSurface(&clearRect, 0x00000000u);
@@ -1996,18 +2064,19 @@ bool CPc::EnsureBillboardTexture(float cameraLongitude)
     }
 
     if (!m_billboardTexture
+        || !m_billboardTextureOwned
         || m_billboardTextureWidth != kPlayerBillboardComposeWidth
         || m_billboardTextureHeight != kPlayerBillboardComposeHeight) {
-        delete m_billboardTexture;
+        ReleaseActorBillboardTexture(*this);
         m_billboardTexture = new CTexture();
         if (!m_billboardTexture) {
             return false;
         }
         if (!m_billboardTexture->Create(kPlayerBillboardComposeWidth, kPlayerBillboardComposeHeight, PF_A8R8G8B8)) {
-            delete m_billboardTexture;
-            m_billboardTexture = nullptr;
+            ReleaseActorBillboardTexture(*this);
             return false;
         }
+        m_billboardTextureOwned = 1;
         m_billboardTextureWidth = kPlayerBillboardComposeWidth;
         m_billboardTextureHeight = kPlayerBillboardComposeHeight;
     }
@@ -2030,6 +2099,20 @@ bool CPc::EnsureBillboardTexture(float cameraLongitude)
     m_cachedBillboardSex = resolvedSex;
     m_cachedBillboardBodyPalette = resolvedBodyPalette;
     m_cachedBillboardHeadPalette = resolvedHeadPalette;
+
+    if (isVulkanBackend && !isPlayerStyleActor && m_billboardTexture) {
+        SharedNonPcBillboardValue value{};
+        value.texture = m_billboardTexture;
+        value.opaqueBounds = opaqueBounds;
+        value.width = m_billboardTextureWidth;
+        value.height = m_billboardTextureHeight;
+        value.anchorX = m_billboardAnchorX;
+        value.anchorY = m_billboardAnchorY;
+
+        GetSharedNonPcBillboardCache()[SharedNonPcBillboardKey{ m_job, bodyAction, headMotion }] = value;
+        m_billboardTextureOwned = 0;
+    }
+
     return true;
 }
 

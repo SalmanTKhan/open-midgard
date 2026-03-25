@@ -337,6 +337,7 @@ public:
     std::vector<CSprRes*> m_sprResList;
     std::vector<CActRes*> m_actResList;
     CTexture* m_billboardTexture;
+    int m_billboardTextureOwned;
     int m_billboardTextureWidth;
     int m_billboardTextureHeight;
     int m_billboardAnchorX;
