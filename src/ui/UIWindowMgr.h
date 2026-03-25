@@ -130,6 +130,7 @@ public:
     CSurface* m_wallpaperSurface;
     HDC m_uiComposeDC;
     HBITMAP m_uiComposeBitmap;
+    void* m_uiComposeBits;
     int m_uiComposeWidth;
     int m_uiComposeHeight;
 

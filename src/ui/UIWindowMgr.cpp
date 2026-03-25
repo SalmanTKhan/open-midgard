@@ -15,6 +15,7 @@
 #include "render3d/Device.h"
 #include "render3d/RenderDevice.h"
 #include "res/Texture.h"
+#include "render/Renderer.h"
 #include "main/WinMain.h"
 #include "DebugLog.h"
 
@@ -154,8 +155,8 @@ UIWindowMgr::UIWindowMgr()
       m_isDragAll(0), m_conversionMode(0),
       m_captureWindow(nullptr), m_editWindow(nullptr), m_modalWindow(nullptr), m_lastHitWindow(nullptr),
       m_loadingWnd(nullptr), m_minimapZoomWnd(nullptr), m_statusWnd(nullptr), m_chatWnd(nullptr),
-                m_loginWnd(nullptr), m_selectCharWnd(nullptr), m_makeCharWnd(nullptr), m_chooseWnd(nullptr), m_optionWnd(nullptr), m_itemWnd(nullptr), m_questWnd(nullptr), m_basicInfoWnd(nullptr), m_equipWnd(nullptr),
-      m_wallpaperSurface(nullptr), m_uiComposeDC(nullptr), m_uiComposeBitmap(nullptr), m_uiComposeWidth(0), m_uiComposeHeight(0)
+      m_loginWnd(nullptr), m_selectCharWnd(nullptr), m_makeCharWnd(nullptr), m_chooseWnd(nullptr), m_optionWnd(nullptr), m_itemWnd(nullptr), m_questWnd(nullptr), m_basicInfoWnd(nullptr), m_equipWnd(nullptr),
+      m_wallpaperSurface(nullptr), m_uiComposeDC(nullptr), m_uiComposeBitmap(nullptr), m_uiComposeBits(nullptr), m_uiComposeWidth(0), m_uiComposeHeight(0)
 {
     m_loginStatus = "Login: idle";
 }
@@ -176,6 +177,7 @@ void UIWindowMgr::ReleaseComposeSurface()
     }
     m_uiComposeWidth = 0;
     m_uiComposeHeight = 0;
+    m_uiComposeBits = nullptr;
 }
 
 bool UIWindowMgr::EnsureComposeSurface(HDC referenceDC, int width, int height)
@@ -195,8 +197,15 @@ bool UIWindowMgr::EnsureComposeSurface(HDC referenceDC, int width, int height)
         return false;
     }
 
-    m_uiComposeBitmap = CreateCompatibleBitmap(referenceDC, width, height);
-    if (!m_uiComposeBitmap) {
+    BITMAPINFO bmi{};
+    bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    bmi.bmiHeader.biWidth = width;
+    bmi.bmiHeader.biHeight = -height;
+    bmi.bmiHeader.biPlanes = 1;
+    bmi.bmiHeader.biBitCount = 32;
+    bmi.bmiHeader.biCompression = BI_RGB;
+    m_uiComposeBitmap = CreateDIBSection(referenceDC, &bmi, DIB_RGB_COLORS, &m_uiComposeBits, nullptr, 0);
+    if (!m_uiComposeBitmap || !m_uiComposeBits) {
         ReleaseComposeSurface();
         return false;
     }
@@ -508,9 +517,23 @@ void UIWindowMgr::OnDraw() {
         m_itemWnd->DrawHoverOverlay(drawDC, clientRect);
     }
     UIWindow::SetSharedDrawDC(previousSharedDC);
+    const bool hasModernBackend = GetRenderDevice().GetLegacyDevice() == nullptr;
+    bool presentedModernUiFrame = false;
+    if (useCompose && hasModernBackend && m_uiComposeBits) {
+        presentedModernUiFrame = GetRenderDevice().UpdateBackBufferFromMemory(
+            m_uiComposeBits,
+            clientWidth,
+            clientHeight,
+            clientWidth * static_cast<int>(sizeof(unsigned int)));
+        if (presentedModernUiFrame) {
+            g_renderer.Flip(false);
+        }
+    }
 
     if (useCompose) {
-        BitBlt(targetDC, 0, 0, clientWidth, clientHeight, drawDC, 0, 0, SRCCOPY);
+        if (!presentedModernUiFrame) {
+            BitBlt(targetDC, 0, 0, clientWidth, clientHeight, drawDC, 0, 0, SRCCOPY);
+        }
     }
 
     ReleaseDC(g_hMainWnd, targetDC);
