@@ -120,6 +120,11 @@ void ReleaseTextureMembers(CTexture* texture)
         texture->m_backendTextureObject->Release();
         texture->m_backendTextureObject = nullptr;
     }
+
+    if (texture->m_backendTextureUpload) {
+        texture->m_backendTextureUpload->Release();
+        texture->m_backendTextureUpload = nullptr;
+    }
 }
 
 void WritePackedPixel(unsigned char* dst, unsigned int bytesPerPixel, unsigned int value)
@@ -1885,6 +1890,7 @@ public:
     {
         WaitForGpu();
         ReleaseSwapChainResources();
+        ReleasePendingUploadBuffers();
         ReleaseCachedStates();
         UnmapUploadBuffer(m_indexBuffer, &m_indexBufferMapped);
         SafeRelease(m_indexBuffer);
@@ -2052,26 +2058,170 @@ public:
     bool CreateTextureResource(CTexture* texture, unsigned int requestedWidth, unsigned int requestedHeight,
         int pixelFormat, unsigned int* outSurfaceWidth, unsigned int* outSurfaceHeight) override
     {
-        (void)texture;
-        (void)requestedWidth;
-        (void)requestedHeight;
         (void)pixelFormat;
-        (void)outSurfaceWidth;
-        (void)outSurfaceHeight;
-        return false;
+        if (!texture || !m_device) {
+            return false;
+        }
+
+        ReleaseTextureMembers(texture);
+
+        D3D12_RESOURCE_DESC textureDesc{};
+        textureDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+        textureDesc.Width = static_cast<UINT64>((std::max)(1u, requestedWidth));
+        textureDesc.Height = static_cast<UINT>((std::max)(1u, requestedHeight));
+        textureDesc.DepthOrArraySize = 1;
+        textureDesc.MipLevels = 1;
+        textureDesc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+        textureDesc.SampleDesc.Count = 1;
+        textureDesc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
+
+        D3D12_HEAP_PROPERTIES heapProps{};
+        heapProps.Type = D3D12_HEAP_TYPE_DEFAULT;
+
+        ID3D12Resource* textureObject = nullptr;
+        HRESULT hr = m_device->CreateCommittedResource(
+            &heapProps,
+            D3D12_HEAP_FLAG_NONE,
+            &textureDesc,
+            D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
+            nullptr,
+            IID_PPV_ARGS(&textureObject));
+        if (FAILED(hr) || !textureObject) {
+            SafeRelease(textureObject);
+            return false;
+        }
+
+        D3D12_DESCRIPTOR_HEAP_DESC descriptorHeapDesc{};
+        descriptorHeapDesc.NumDescriptors = 1;
+        descriptorHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
+        ID3D12DescriptorHeap* descriptorHeap = nullptr;
+        hr = m_device->CreateDescriptorHeap(&descriptorHeapDesc, IID_PPV_ARGS(&descriptorHeap));
+        if (FAILED(hr) || !descriptorHeap) {
+            SafeRelease(descriptorHeap);
+            SafeRelease(textureObject);
+            return false;
+        }
+
+        D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc{};
+        srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+        srvDesc.Format = textureDesc.Format;
+        srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+        srvDesc.Texture2D.MipLevels = 1;
+        m_device->CreateShaderResourceView(textureObject, &srvDesc, descriptorHeap->GetCPUDescriptorHandleForHeapStart());
+
+        texture->m_backendTextureObject = textureObject;
+        texture->m_backendTextureView = descriptorHeap;
+        if (outSurfaceWidth) {
+            *outSurfaceWidth = static_cast<unsigned int>(textureDesc.Width);
+        }
+        if (outSurfaceHeight) {
+            *outSurfaceHeight = textureDesc.Height;
+        }
+        return true;
     }
     bool UpdateTextureResource(CTexture* texture, int x, int y, int w, int h,
         const unsigned int* data, bool skipColorKey, int pitch) override
     {
-        (void)texture;
-        (void)x;
-        (void)y;
-        (void)w;
-        (void)h;
-        (void)data;
-        (void)skipColorKey;
-        (void)pitch;
-        return false;
+        if (!texture || !texture->m_backendTextureObject || !data || w <= 0 || h <= 0 || !m_device) {
+            return false;
+        }
+        if (!EnsureFrameCommandsStarted()) {
+            return false;
+        }
+
+        ID3D12Resource* textureObject = static_cast<ID3D12Resource*>(texture->m_backendTextureObject);
+        const UINT srcPitch = static_cast<UINT>(pitch > 0 ? pitch : w * static_cast<int>(sizeof(unsigned int)));
+        const UINT uploadRowPitch = AlignTo(static_cast<UINT>(w * static_cast<int>(sizeof(unsigned int))), D3D12_TEXTURE_DATA_PITCH_ALIGNMENT);
+        const UINT uploadBufferSize = uploadRowPitch * static_cast<UINT>(h);
+
+        std::vector<unsigned int> uploadPixels(static_cast<size_t>(w) * static_cast<size_t>(h));
+        for (int row = 0; row < h; ++row) {
+            const unsigned int* srcRow = reinterpret_cast<const unsigned int*>(reinterpret_cast<const unsigned char*>(data) + static_cast<size_t>(row) * srcPitch);
+            unsigned int* dstRow = uploadPixels.data() + static_cast<size_t>(row) * static_cast<size_t>(w);
+            for (int col = 0; col < w; ++col) {
+                unsigned int pixel = srcRow[col];
+                if (!skipColorKey && (pixel & 0x00FFFFFFu) == 0x00FF00FFu) {
+                    pixel = 0x00000000u;
+                }
+                dstRow[col] = pixel;
+            }
+        }
+
+        D3D12_HEAP_PROPERTIES heapProps{};
+        heapProps.Type = D3D12_HEAP_TYPE_UPLOAD;
+
+        D3D12_RESOURCE_DESC uploadDesc{};
+        uploadDesc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+        uploadDesc.Width = uploadBufferSize;
+        uploadDesc.Height = 1;
+        uploadDesc.DepthOrArraySize = 1;
+        uploadDesc.MipLevels = 1;
+        uploadDesc.SampleDesc.Count = 1;
+        uploadDesc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+
+        ID3D12Resource* uploadBuffer = nullptr;
+        HRESULT hr = m_device->CreateCommittedResource(
+            &heapProps,
+            D3D12_HEAP_FLAG_NONE,
+            &uploadDesc,
+            D3D12_RESOURCE_STATE_GENERIC_READ,
+            nullptr,
+            IID_PPV_ARGS(&uploadBuffer));
+        if (FAILED(hr) || !uploadBuffer) {
+            SafeRelease(uploadBuffer);
+            return false;
+        }
+
+        void* mapped = nullptr;
+        D3D12_RANGE readRange{};
+        hr = uploadBuffer->Map(0, &readRange, &mapped);
+        if (FAILED(hr) || !mapped) {
+            SafeRelease(uploadBuffer);
+            return false;
+        }
+
+        unsigned char* dstBytes = static_cast<unsigned char*>(mapped);
+        for (int row = 0; row < h; ++row) {
+            const unsigned char* srcBytes = reinterpret_cast<const unsigned char*>(uploadPixels.data() + static_cast<size_t>(row) * static_cast<size_t>(w));
+            std::memcpy(dstBytes + static_cast<size_t>(row) * uploadRowPitch, srcBytes, static_cast<size_t>(w) * sizeof(unsigned int));
+        }
+        D3D12_RANGE writtenRange{ 0, uploadBufferSize };
+        uploadBuffer->Unmap(0, &writtenRange);
+
+        D3D12_TEXTURE_COPY_LOCATION srcLocation{};
+        srcLocation.pResource = uploadBuffer;
+        srcLocation.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+        srcLocation.PlacedFootprint.Offset = 0;
+        srcLocation.PlacedFootprint.Footprint.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+        srcLocation.PlacedFootprint.Footprint.Width = static_cast<UINT>(w);
+        srcLocation.PlacedFootprint.Footprint.Height = static_cast<UINT>(h);
+        srcLocation.PlacedFootprint.Footprint.Depth = 1;
+        srcLocation.PlacedFootprint.Footprint.RowPitch = uploadRowPitch;
+
+        D3D12_TEXTURE_COPY_LOCATION dstLocation{};
+        dstLocation.pResource = textureObject;
+        dstLocation.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+        dstLocation.SubresourceIndex = 0;
+
+        const D3D12_RESOURCE_BARRIER toCopy = TransitionBarrier(
+            textureObject,
+            D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
+            D3D12_RESOURCE_STATE_COPY_DEST);
+        m_commandList->ResourceBarrier(1, &toCopy);
+        m_commandList->CopyTextureRegion(&dstLocation, static_cast<UINT>(x), static_cast<UINT>(y), 0, &srcLocation, nullptr);
+        const D3D12_RESOURCE_BARRIER toShader = TransitionBarrier(
+            textureObject,
+            D3D12_RESOURCE_STATE_COPY_DEST,
+            D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+        m_commandList->ResourceBarrier(1, &toShader);
+
+        if (texture->m_backendTextureUpload) {
+            texture->m_backendTextureUpload->Release();
+        }
+        texture->m_backendTextureUpload = uploadBuffer;
+        uploadBuffer->AddRef();
+        m_pendingUploadBuffers.push_back(uploadBuffer);
+        return true;
     }
 
 private:
@@ -2330,6 +2480,50 @@ private:
         return true;
     }
 
+    void WriteNullSrvDescriptor(UINT index)
+    {
+        if (!m_device || !m_srvHeap || index >= kSrvSlotCount) {
+            return;
+        }
+
+        D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc{};
+        srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+        srvDesc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+        srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+        srvDesc.Texture2D.MipLevels = 1;
+        m_device->CreateShaderResourceView(nullptr, &srvDesc, GetSrvCpuHandle(index));
+    }
+
+    bool CopyTextureDescriptor(UINT index, CTexture* texture)
+    {
+        if (!m_device || !m_srvHeap || index >= kSrvSlotCount || !texture) {
+            WriteNullSrvDescriptor(index);
+            return false;
+        }
+
+        ID3D12Resource* textureObject = static_cast<ID3D12Resource*>(texture->m_backendTextureObject);
+        ID3D12DescriptorHeap* textureDescriptorHeap = static_cast<ID3D12DescriptorHeap*>(texture->m_backendTextureView);
+        if (!textureObject || !textureDescriptorHeap) {
+            WriteNullSrvDescriptor(index);
+            return false;
+        }
+
+        m_device->CopyDescriptorsSimple(
+            1,
+            GetSrvCpuHandle(index),
+            textureDescriptorHeap->GetCPUDescriptorHandleForHeapStart(),
+            D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+        return true;
+    }
+
+    void ReleasePendingUploadBuffers()
+    {
+        for (ID3D12Resource* resource : m_pendingUploadBuffers) {
+            SafeRelease(resource);
+        }
+        m_pendingUploadBuffers.clear();
+    }
+
     void ReleaseCachedStates()
     {
         for (PipelineStateEntry& entry : m_pipelineStates) {
@@ -2502,8 +2696,8 @@ private:
             indexBufferView.Format = DXGI_FORMAT_R16_UINT;
         }
 
-        const bool hasTexture0 = false;
-        const bool hasTexture1 = false;
+        const bool hasTexture0 = CopyTextureDescriptor(0, m_boundTextures[0]);
+        const bool hasTexture1 = CopyTextureDescriptor(1, m_boundTextures[1]);
         ModernDrawConstants constants{};
         constants.screenWidth = static_cast<float>((std::max)(1, m_renderWidth));
         constants.screenHeight = static_cast<float>((std::max)(1, m_renderHeight));
@@ -2593,6 +2787,7 @@ private:
                 WaitForSingleObject(m_fenceEvent, INFINITE);
             }
         }
+        ReleasePendingUploadBuffers();
     }
 
     void ApplyViewportAndScissor()
@@ -2700,6 +2895,7 @@ private:
     ModernFixedFunctionState m_pipelineState;
     CTexture* m_boundTextures[kSrvSlotCount];
     std::vector<PipelineStateEntry> m_pipelineStates;
+    std::vector<ID3D12Resource*> m_pendingUploadBuffers;
     bool m_frameCommandsOpen;
 };
 

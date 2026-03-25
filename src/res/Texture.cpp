@@ -208,13 +208,13 @@ void CSurfaceWallpaper::Update(int x, int y, int w, int h, unsigned int* data, b
 
 CTexture::CTexture(unsigned int w, unsigned int h, PixelFormat format)
     : CSurface(w, h), m_pf(format), m_lockCnt(0), m_timeStamp(0), m_updateWidth(0), m_updateHeight(0),
-      m_backendTextureObject(nullptr), m_backendTextureView(nullptr) {
+            m_backendTextureObject(nullptr), m_backendTextureView(nullptr), m_backendTextureUpload(nullptr) {
     m_texName[0] = '\0';
 }
 
 CTexture::CTexture(unsigned int w, unsigned int h, PixelFormat format, IDirectDrawSurface7* pSurface)
     : CSurface(w, h, pSurface), m_pf(format), m_lockCnt(0), m_timeStamp(0), m_updateWidth(0), m_updateHeight(0),
-      m_backendTextureObject(nullptr), m_backendTextureView(nullptr) {
+            m_backendTextureObject(nullptr), m_backendTextureView(nullptr), m_backendTextureUpload(nullptr) {
     m_texName[0] = '\0';
 }
 
