@@ -107,7 +107,9 @@ std::string ResolveUiButtonSoundPath()
     }
     s_resolved = true;
 
-    const std::array<const char*, 12> directCandidates = {
+    const std::array<const char*, 14> directCandidates = {
+        "data\\wav\\\xB9\xF6\xC6\xB0\xBC\xD2\xB8\xAE.wav",
+        "wav\\\xB9\xF6\xC6\xB0\xBC\xD2\xB8\xAE.wav",
         "wav\\click.wav",
         "data\\wav\\click.wav",
         "wav\\button.wav",
