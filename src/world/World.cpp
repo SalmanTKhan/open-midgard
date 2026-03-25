@@ -997,44 +997,12 @@ u32 ResolveBackgroundActorUpdateInterval(const C3dActor& actor,
     return kBackgroundAnimVeryFarInterval;
 }
 
-bool RenderPcBillboard(CPc* actor, const matrix& viewMatrix, float cameraLongitude, float zoom)
+bool RenderCachedBillboard(const CWorld::BillboardScreenEntry& entry)
 {
     constexpr float kBillboardDepthBias = 0.0005f;
 
-    if (!actor || !actor->m_isVisible) {
-        return false;
-    }
-    if (!actor->EnsureBillboardTexture(cameraLongitude) || !actor->m_billboardTexture) {
-        return false;
-    }
-
-    const float textureWidth = static_cast<float>((std::max)(1, actor->m_billboardTextureWidth));
-    const float textureHeight = static_cast<float>((std::max)(1, actor->m_billboardTextureHeight));
-    const float anchorX = static_cast<float>(actor->m_billboardAnchorX);
-    const float anchorY = static_cast<float>((std::max)(1, actor->m_billboardAnchorY));
-    if (textureWidth <= 0.0f || textureHeight <= 0.0f) {
-        return false;
-    }
-
-    const float worldHeight = zoom * kPlayerBillboardWorldHeightScale;
-    const float unitsPerPixel = worldHeight / anchorY;
-    const float leftUnits = anchorX * unitsPerPixel;
-    const float rightUnits = (textureWidth - anchorX) * unitsPerPixel;
-    const float topUnits = anchorY * unitsPerPixel;
-    const float bottomUnits = (textureHeight - anchorY) * unitsPerPixel;
-
-    vector3d up = NormalizeVec3(ScaleVec3(g_renderer.m_eyeUp, -1.0f));
-    vector3d right = NormalizeVec3(g_renderer.m_eyeRight);
-    if (std::fabs(up.x) < 0.0001f && std::fabs(up.y) < 0.0001f && std::fabs(up.z) < 0.0001f) {
-        up = vector3d{ 0.0f, -1.0f, 0.0f };
-    }
-    if (std::fabs(right.x) < 0.0001f && std::fabs(right.y) < 0.0001f && std::fabs(right.z) < 0.0001f) {
-        right = vector3d{ 1.0f, 0.0f, 0.0f };
-    }
-
-    const vector3d base = actor->m_pos;
-    tlvertex3d baseVert{};
-    if (!ProjectPoint(g_renderer, viewMatrix, base, &baseVert)) {
+    CPc* actor = entry.actor;
+    if (!actor || !actor->m_isVisible || !actor->m_billboardTexture) {
         return false;
     }
 
@@ -1049,13 +1017,6 @@ bool RenderPcBillboard(CPc* actor, const matrix& viewMatrix, float cameraLongitu
         const u32 clampedAlpha = static_cast<u32>((std::max)(0, (std::min)(255, fadeAlpha)));
         billboardColor = (clampedAlpha << 24) | 0x00FFFFFFu;
     }
-
-    const vector3d worldVerts[4] = {
-        AddVec3(AddVec3(base, ScaleVec3(up, topUnits)), ScaleVec3(right, -leftUnits)),
-        AddVec3(AddVec3(base, ScaleVec3(up, topUnits)), ScaleVec3(right, rightUnits)),
-        AddVec3(AddVec3(base, ScaleVec3(up, -bottomUnits)), ScaleVec3(right, -leftUnits)),
-        AddVec3(AddVec3(base, ScaleVec3(up, -bottomUnits)), ScaleVec3(right, rightUnits)),
-    };
 
     RPFace* face = g_renderer.BorrowNullRP();
     if (!face) {
@@ -1075,12 +1036,17 @@ bool RenderPcBillboard(CPc* actor, const matrix& viewMatrix, float cameraLongitu
     face->alphaSortKey = 0.0f;
 
     tlvertex3d* verts = face->m_verts;
+    verts[0].x = entry.left;
+    verts[0].y = entry.top;
+    verts[1].x = entry.right;
+    verts[1].y = entry.top;
+    verts[2].x = entry.left;
+    verts[2].y = entry.bottom;
+    verts[3].x = entry.right;
+    verts[3].y = entry.bottom;
     for (int index = 0; index < 4; ++index) {
-        if (!ProjectPoint(g_renderer, viewMatrix, worldVerts[index], &verts[index])) {
-            return false;
-        }
-        verts[index].z = (std::max)(0.0f, baseVert.z - kBillboardDepthBias);
-        verts[index].oow = baseVert.oow;
+        verts[index].z = (std::max)(0.0f, entry.baseZ - kBillboardDepthBias);
+        verts[index].oow = entry.baseOow;
         verts[index].color = billboardColor;
         verts[index].specular = 0xFF000000u;
     }
@@ -1094,29 +1060,17 @@ bool RenderPcBillboard(CPc* actor, const matrix& viewMatrix, float cameraLongitu
     verts[3].tu = 1.0f;
     verts[3].tv = 1.0f;
 
-    face->alphaSortKey = baseVert.oow;
+    face->alphaSortKey = entry.baseOow;
 
     g_renderer.AddRP(face, 1);
     return true;
 }
 
-struct BillboardRenderEntry {
-    CPc* actor = nullptr;
-    float screenY = 0.0f;
-    float depthKey = 0.0f;
-    float left = 0.0f;
-    float top = 0.0f;
-    float right = 0.0f;
-    float bottom = 0.0f;
-    float labelX = 0.0f;
-    float labelY = 0.0f;
-};
-
 bool BuildBillboardRenderEntry(CPc* actor,
     const matrix& viewMatrix,
     float cameraLongitude,
     float zoom,
-    BillboardRenderEntry* outEntry)
+    CWorld::BillboardScreenEntry* outEntry)
 {
     if (!actor || !outEntry) {
         return false;
@@ -1205,10 +1159,14 @@ bool BuildBillboardRenderEntry(CPc* actor,
     outEntry->bottom = maxY;
     outEntry->labelX = (minX + maxX) * 0.5f;
     outEntry->labelY = maxY;
+    outEntry->baseX = projectedBase.x;
+    outEntry->baseY = projectedBase.y;
+    outEntry->baseZ = projectedBase.z;
+    outEntry->baseOow = projectedBase.oow;
     return true;
 }
 
-bool CompareBillboardRenderEntry(const BillboardRenderEntry& lhs, const BillboardRenderEntry& rhs)
+bool CompareBillboardRenderEntry(const CWorld::BillboardScreenEntry& lhs, const CWorld::BillboardScreenEntry& rhs)
 {
     if (lhs.screenY != rhs.screenY) {
         return lhs.screenY < rhs.screenY;
@@ -3145,6 +3103,8 @@ CWorld::CWorld()
     , m_bgObjCount(0), m_bgObjThread(0), m_isPKZone(0), m_isSiegeMode(0)
     , m_isBattleFieldMode(0), m_isEventPVPMode(0)
     , m_bgLightDir{ 0.0f, 1.0f, 0.0f }, m_bgDiffuseCol{ 1.0f, 1.0f, 1.0f }, m_bgAmbientCol{ 0.3f, 0.3f, 0.3f }
+    , m_billboardFrameCameraLongitude(0.0f), m_billboardFrameZoom(0.0f)
+    , m_billboardFrameCacheValid(false), m_billboardFrameCacheDirty(true)
     , m_Calculated(nullptr)
 {
 }
@@ -3160,6 +3120,7 @@ void CWorld::ClearGround()
 {
     delete m_ground;
     m_ground = nullptr;
+    InvalidateBillboardFrameCache();
     ResetSceneGraph();
 }
 
@@ -3189,6 +3150,82 @@ void CWorld::ResetSceneGraph()
         SetRect(&m_rootNode.m_attrArea, 0, 0, m_attr->m_width, m_attr->m_height);
     }
     m_Calculated = nullptr;
+}
+
+void CWorld::InvalidateBillboardFrameCache()
+{
+    m_billboardFrameEntries.clear();
+    m_billboardFrameEntryByGid.clear();
+    m_billboardFrameCacheValid = false;
+    m_billboardFrameCacheDirty = true;
+}
+
+void CWorld::EnsureBillboardFrameCache(const matrix& viewMatrix, float cameraLongitude) const
+{
+    const float zoom = m_ground ? m_ground->m_zoom : static_cast<float>(m_attr ? m_attr->m_zoom : 5);
+    if (!m_billboardFrameCacheDirty
+        && m_billboardFrameCacheValid
+        && std::memcmp(&m_billboardFrameViewMatrix, &viewMatrix, sizeof(matrix)) == 0
+        && m_billboardFrameCameraLongitude == cameraLongitude
+        && m_billboardFrameZoom == zoom) {
+        return;
+    }
+
+    m_billboardFrameEntries.clear();
+    m_billboardFrameEntryByGid.clear();
+    m_billboardFrameEntries.reserve(m_actorList.size() + (m_player ? 1u : 0u));
+
+    auto enqueueActor = [&](CGameActor* actor) {
+        if (!actor || !actor->m_isVisible) {
+            return;
+        }
+
+        CPc* pc = dynamic_cast<CPc*>(actor);
+        if (!pc || IsPortalActorJob(pc->m_job)) {
+            return;
+        }
+
+        BillboardScreenEntry entry{};
+        if (!BuildBillboardRenderEntry(pc, viewMatrix, cameraLongitude, zoom, &entry)) {
+            return;
+        }
+
+        m_billboardFrameEntries.push_back(entry);
+    };
+
+    enqueueActor(m_player);
+    for (CGameActor* actor : m_actorList) {
+        if (!actor || actor == m_player) {
+            continue;
+        }
+        enqueueActor(actor);
+    }
+
+    std::stable_sort(m_billboardFrameEntries.begin(), m_billboardFrameEntries.end(), CompareBillboardRenderEntry);
+    for (size_t index = 0; index < m_billboardFrameEntries.size(); ++index) {
+        const BillboardScreenEntry& entry = m_billboardFrameEntries[index];
+        if (entry.actor) {
+            m_billboardFrameEntryByGid[entry.actor->m_gid] = index;
+        }
+    }
+    m_billboardFrameViewMatrix = viewMatrix;
+    m_billboardFrameCameraLongitude = cameraLongitude;
+    m_billboardFrameZoom = zoom;
+    m_billboardFrameCacheValid = true;
+    m_billboardFrameCacheDirty = false;
+}
+
+const CWorld::BillboardScreenEntry* CWorld::FindBillboardFrameEntryByGid(u32 gid) const
+{
+    const auto it = m_billboardFrameEntryByGid.find(gid);
+    if (it == m_billboardFrameEntryByGid.end()) {
+        return nullptr;
+    }
+    const size_t index = it->second;
+    if (index >= m_billboardFrameEntries.size()) {
+        return nullptr;
+    }
+    return &m_billboardFrameEntries[index];
 }
 
 void CWorld::RebuildSceneGraph()
@@ -3277,6 +3314,7 @@ void CWorld::RegisterActor(CGameActor* actor)
     if (m_rootNode.m_child[0] || m_rootNode.m_child[1] || m_rootNode.m_child[2] || m_rootNode.m_child[3]) {
         m_rootNode.InsertActor(actor, actor->m_pos.x, actor->m_pos.z);
     }
+    InvalidateBillboardFrameCache();
 }
 
 void CWorld::UnregisterActor(CGameActor* actor)
@@ -3287,6 +3325,7 @@ void CWorld::UnregisterActor(CGameActor* actor)
 
     m_rootNode.RemoveActor(actor);
     m_actorList.remove(actor);
+    InvalidateBillboardFrameCache();
 }
 
 std::vector<CGameActor*>* CWorld::GetActorsAtWorldPos(float x, float z)
@@ -3567,6 +3606,7 @@ void CWorld::UpdateBackgroundObjects(const matrix* viewMatrix)
 
 void CWorld::UpdateActors()
 {
+    InvalidateBillboardFrameCache();
     UpdateGameObjects();
 
     if (m_player) {
@@ -3585,22 +3625,41 @@ void CWorld::RenderActors(const matrix& viewMatrix, float cameraLongitude)
 {
     RenderGameObjects(viewMatrix);
 
-    const float zoom = m_ground ? m_ground->m_zoom : static_cast<float>(m_attr ? m_attr->m_zoom : 5);
-
-    std::vector<BillboardRenderEntry> spriteActors;
-    spriteActors.reserve(m_actorList.size() + (m_player ? 1u : 0u));
-
-    auto enqueueActor = [&](CGameActor* actor) {
+    for (CGameActor* actor : m_actorList) {
         if (!actor || !actor->m_isVisible) {
-            return;
+            continue;
+        }
+        if (actor == m_player) {
+            continue;
         }
 
         CPc* pc = dynamic_cast<CPc*>(actor);
-        if (!pc) {
-            return;
+        if (!pc || !IsPortalActorJob(pc->m_job)) {
+            continue;
         }
 
-        if (IsPortalActorJob(pc->m_job)) {
+        const DWORD tick = timeGetTime();
+        const float timeSeconds = static_cast<float>(tick) * 0.001f;
+        const COLORREF portalColor = pc->m_job == kJobPreWarpPortal
+            ? RGB(255, 172, 92)
+            : RGB(86, 196, 255);
+        const PortalVisualStyle portalStyle = pc->m_job == kJobPreWarpPortal
+            ? PortalVisualStyle::Ready
+            : (pc->m_job == kJobWarpPortal ? PortalVisualStyle::WarpZone : PortalVisualStyle::Portal);
+        RenderPortalEffectAtPosition(pc->m_pos,
+            viewMatrix,
+            portalColor,
+            pc->m_job == kJobWarpNpc ? 6.5f : 5.0f,
+            pc->m_job == kJobWarpNpc ? 6.0f : 5.0f,
+            timeSeconds,
+            static_cast<float>(pc->m_gid & 0xFFu) * 0.19f,
+            false,
+            portalStyle);
+    }
+
+    if (m_player) {
+        CPc* pc = dynamic_cast<CPc*>(m_player);
+        if (pc && pc->m_isVisible && IsPortalActorJob(pc->m_job)) {
             const DWORD tick = timeGetTime();
             const float timeSeconds = static_cast<float>(tick) * 0.001f;
             const COLORREF portalColor = pc->m_job == kJobPreWarpPortal
@@ -3618,28 +3677,12 @@ void CWorld::RenderActors(const matrix& viewMatrix, float cameraLongitude)
                 static_cast<float>(pc->m_gid & 0xFFu) * 0.19f,
                 false,
                 portalStyle);
-            return;
         }
-
-        BillboardRenderEntry entry{};
-        if (BuildBillboardRenderEntry(pc, viewMatrix, cameraLongitude, zoom, &entry)) {
-            spriteActors.push_back(entry);
-        }
-    };
-
-    enqueueActor(m_player);
-
-    for (CGameActor* actor : m_actorList) {
-        if (!actor || actor == m_player) {
-            continue;
-        }
-        enqueueActor(actor);
     }
 
-    std::stable_sort(spriteActors.begin(), spriteActors.end(), CompareBillboardRenderEntry);
-
-    for (const BillboardRenderEntry& entry : spriteActors) {
-        RenderPcBillboard(entry.actor, viewMatrix, cameraLongitude, zoom);
+    EnsureBillboardFrameCache(viewMatrix, cameraLongitude);
+    for (const BillboardScreenEntry& entry : m_billboardFrameEntries) {
+        RenderCachedBillboard(entry);
     }
 }
 
@@ -3660,6 +3703,17 @@ bool CWorld::GetPlayerScreenLabel(const matrix& viewMatrix,
     CPc* pc = dynamic_cast<CPc*>(m_player);
     if (!pc) {
         return false;
+    }
+
+    EnsureBillboardFrameCache(viewMatrix, cameraLongitude);
+    if (const BillboardScreenEntry* entry = FindBillboardFrameEntryByGid(pc->m_gid)) {
+        if (outLabelX) {
+            *outLabelX = static_cast<int>(std::lround(entry->baseX));
+        }
+        if (outLabelY) {
+            *outLabelY = static_cast<int>(std::lround(entry->baseY)) + 18;
+        }
+        return true;
     }
 
     tlvertex3d projectedBase{};
@@ -3709,22 +3763,18 @@ bool CWorld::GetActorScreenMarker(const matrix& viewMatrix,
         return false;
     }
 
-    const float zoom = m_ground ? m_ground->m_zoom : static_cast<float>(m_attr ? m_attr->m_zoom : 5);
-    CPc* pc = dynamic_cast<CPc*>(actor);
-    if (pc && !IsPortalActorJob(pc->m_job)) {
-        BillboardRenderEntry entry{};
-        if (BuildBillboardRenderEntry(pc, viewMatrix, cameraLongitude, zoom, &entry)) {
-            if (outCenterX) {
-                *outCenterX = static_cast<int>(std::lround((entry.left + entry.right) * 0.5f));
-            }
-            if (outTopY) {
-                *outTopY = static_cast<int>(std::lround(entry.top));
-            }
-            if (outLabelY) {
-                *outLabelY = static_cast<int>(std::lround(entry.labelY));
-            }
-            return true;
+    EnsureBillboardFrameCache(viewMatrix, cameraLongitude);
+    if (const BillboardScreenEntry* entry = FindBillboardFrameEntryByGid(gid)) {
+        if (outCenterX) {
+            *outCenterX = static_cast<int>(std::lround((entry->left + entry->right) * 0.5f));
         }
+        if (outTopY) {
+            *outTopY = static_cast<int>(std::lround(entry->top));
+        }
+        if (outLabelY) {
+            *outLabelY = static_cast<int>(std::lround(entry->labelY));
+        }
+        return true;
     }
 
     tlvertex3d projectedBase{};
@@ -3762,39 +3812,11 @@ bool CWorld::FindHoveredActorScreen(const matrix& viewMatrix,
         *outLabelY = 0;
     }
 
-    const float zoom = m_ground ? m_ground->m_zoom : static_cast<float>(m_attr ? m_attr->m_zoom : 5);
-    std::vector<BillboardRenderEntry> spriteActors;
-    spriteActors.reserve(m_actorList.size() + (m_player ? 1u : 0u));
-
-    auto enqueueActor = [&](CGameActor* actor) {
-        if (!actor || !actor->m_isVisible) {
-            return;
-        }
-
-        CPc* pc = dynamic_cast<CPc*>(actor);
-        if (!pc || IsPortalActorJob(pc->m_job)) {
-            return;
-        }
-
-        BillboardRenderEntry entry{};
-        if (BuildBillboardRenderEntry(pc, viewMatrix, cameraLongitude, zoom, &entry)) {
-            spriteActors.push_back(entry);
-        }
-    };
-
-    enqueueActor(m_player);
-    for (CGameActor* actor : m_actorList) {
-        if (!actor || actor == m_player) {
-            continue;
-        }
-        enqueueActor(actor);
-    }
-
-    std::stable_sort(spriteActors.begin(), spriteActors.end(), CompareBillboardRenderEntry);
+    EnsureBillboardFrameCache(viewMatrix, cameraLongitude);
 
     const float mouseX = static_cast<float>(screenX);
     const float mouseY = static_cast<float>(screenY);
-    for (auto it = spriteActors.rbegin(); it != spriteActors.rend(); ++it) {
+    for (auto it = m_billboardFrameEntries.rbegin(); it != m_billboardFrameEntries.rend(); ++it) {
         if (mouseX < it->left || mouseX > it->right || mouseY < it->top || mouseY > it->bottom) {
             continue;
         }
@@ -3802,21 +3824,11 @@ bool CWorld::FindHoveredActorScreen(const matrix& viewMatrix,
         if (outActor) {
             *outActor = it->actor;
         }
-        tlvertex3d projectedBase{};
-        if (ProjectPoint(g_renderer, viewMatrix, it->actor->m_pos, &projectedBase)) {
-            if (outLabelX) {
-                *outLabelX = static_cast<int>(std::lround(projectedBase.x));
-            }
-            if (outLabelY) {
-                *outLabelY = static_cast<int>(std::lround(projectedBase.y));
-            }
-        } else {
-            if (outLabelX) {
-                *outLabelX = static_cast<int>(std::lround(it->labelX));
-            }
-            if (outLabelY) {
-                *outLabelY = static_cast<int>(std::lround(it->labelY));
-            }
+        if (outLabelX) {
+            *outLabelX = static_cast<int>(std::lround(it->baseX));
+        }
+        if (outLabelY) {
+            *outLabelY = static_cast<int>(std::lround(it->baseY));
         }
         return true;
     }

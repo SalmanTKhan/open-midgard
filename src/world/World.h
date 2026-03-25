@@ -2,6 +2,7 @@
 #include "Types.h"
 #include "world/GameActor.h"
 #include <string>
+#include <map>
 #include <list>
 #include <vector>
 
@@ -167,6 +168,22 @@ public:
     CWorld();
     virtual ~CWorld();
 
+    struct BillboardScreenEntry {
+        CPc* actor;
+        float screenY;
+        float depthKey;
+        float left;
+        float top;
+        float right;
+        float bottom;
+        float labelX;
+        float labelY;
+        float baseX;
+        float baseY;
+        float baseZ;
+        float baseOow;
+    };
+
     CMode* m_curMode;
     std::list<CGameObject*> m_gameObjectList;
     std::list<CGameActor*> m_actorList;
@@ -187,12 +204,22 @@ public:
     vector3d m_bgAmbientCol;
     SceneGraphNode m_rootNode;
     SceneGraphNode* m_Calculated;
+    mutable std::vector<BillboardScreenEntry> m_billboardFrameEntries;
+    mutable std::map<u32, size_t> m_billboardFrameEntryByGid;
+    mutable matrix m_billboardFrameViewMatrix;
+    mutable float m_billboardFrameCameraLongitude;
+    mutable float m_billboardFrameZoom;
+    mutable bool m_billboardFrameCacheValid;
+    mutable bool m_billboardFrameCacheDirty;
 
     void ClearGround();
     void ClearBackgroundObjects();
     void ClearFixedObjects();
     void ResetSceneGraph();
     void RebuildSceneGraph();
+    void InvalidateBillboardFrameCache();
+    void EnsureBillboardFrameCache(const matrix& viewMatrix, float cameraLongitude) const;
+    const BillboardScreenEntry* FindBillboardFrameEntryByGid(u32 gid) const;
     void UpdateCalculatedNodeForTile(int tileX, int tileY);
     void RegisterActor(CGameActor* actor);
     void UnregisterActor(CGameActor* actor);
