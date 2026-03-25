@@ -32,6 +32,7 @@
 #include "res/PaletteRes.h"
 #include "res/ImfRes.h"
 #include "res/WorldRes.h"
+#include "audio/Audio.h"
 #include "DebugLog.h"
 #include <windows.h>
 #include <mmsystem.h>
@@ -79,8 +80,8 @@ static const char g_regPath[] = "Software\\Gravity Soft\\Ragnarok Online";
 // MSS (Miles Sound System) shim stubs
 // Replace with real MSS calls if the SDK is available.
 // ---------------------------------------------------------------------------
-bool InitMSS()   { return true; }
-void UnInitMSS() {}
+bool InitMSS()   { return CAudio::GetInstance()->Init(); }
+void UnInitMSS() { CAudio::GetInstance()->Shutdown(); }
 
 // ---------------------------------------------------------------------------
 // ErrorMsg
@@ -393,6 +394,9 @@ static bool InitClientSystems()
     g_resMgr.RegisterType("pal", "", new CPaletteRes());
     g_resMgr.RegisterType("imf", "", new CImfRes());
     g_resMgr.RegisterType("rsw", "", new C3dWorldRes());
+    g_resMgr.RegisterType("wav", "", new CWave());
+
+    InitMSS();
 
     if (!g_windowMgr.Init()) {
         ErrorMsg("UI system initialization failed.");
@@ -543,6 +547,7 @@ int __stdcall WinMain(HINSTANCE hInstance, HINSTANCE /*hPrevInstance*/,
     CConnection::Cleanup();
     g_windowMgr.Reset();
     GetRenderDevice().Shutdown();
+    UnInitMSS();
 
     CoUninitialize();
     DestroyWindow(g_hMainWnd);

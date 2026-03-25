@@ -12,6 +12,7 @@
 #include "main/WinMain.h"
 #include "network/Connection.h"
 #include "network/Packet.h"
+#include "audio/Audio.h"
 #include "session/Session.h"
 #include "res/Sprite.h"
 #include "res/ActRes.h"
@@ -134,6 +135,12 @@ void CLoginMode::OnInit(const char* worldName) {
     m_selectedCharIndex = 0;
     m_selectedCharSlot = 0;
     SetLoginStatus("Login: ready.");
+
+    CAudio* audio = CAudio::GetInstance();
+    if (audio) {
+        audio->PlayBGM("bgm\\01.mp3");
+    }
+
     OnChangeState(m_subMode);
 }
 

@@ -93,6 +93,9 @@ constexpr float kRefIndoorLatitudeMin = -55.0f;
 constexpr float kRefIndoorLatitudeMax = -35.0f;
 constexpr float kRefOutdoorLatitudeMin = -65.0f;
 constexpr float kRefOutdoorLatitudeMax = -25.0f;
+constexpr u32 kAmbientSoundRetryMs = 200;
+constexpr int kAmbientSoundMaxDist = 250;
+constexpr int kAmbientSoundMinDist = 40;
 
 float g_savedOutdoorCameraLatitude = -45.0f;
 float g_savedOutdoorCameraDistance = kRefAverageCameraDistance;
@@ -101,6 +104,77 @@ float g_savedIndoorCameraDistance = kRefIndoorCameraDistance;
 
 u32 g_packetTraceStartTick = 0;
 std::map<u16, bool> g_packetTraceLoggedIds;
+
+void UpdateMapAudio(CGameMode& mode)
+{
+    CAudio* audio = CAudio::GetInstance();
+    if (!audio) {
+        return;
+    }
+
+    if (mode.m_rswName[0] != '\0') {
+        const std::string bgmPath = audio->ResolveMapBgmPath(mode.m_rswName);
+        if (!bgmPath.empty() && bgmPath != mode.m_streamFileName) {
+            mode.m_streamFileName = bgmPath;
+            audio->PlayBGM(mode.m_streamFileName.c_str());
+        }
+    }
+
+    if (!mode.m_world || !mode.m_world->m_player) {
+        return;
+    }
+
+    C3dWorldRes* worldRes = g_resMgr.GetAs<C3dWorldRes>(mode.m_rswName);
+    if (!worldRes) {
+        return;
+    }
+
+    const vector3d listenerPos = mode.m_world->m_player->m_pos;
+    const u32 now = GetTickCount();
+    size_t soundIndex = 0;
+    for (C3dWorldRes::soundSrcInfo* sound : worldRes->m_sounds) {
+        if (!sound || sound->waveName[0] == '\0') {
+            ++soundIndex;
+            continue;
+        }
+
+        const std::string wavName = sound->waveName;
+        const float volumeFactor = (std::max)(0.0f, sound->vol);
+        const u32 cycleMs = sound->cycle > 0.0f ? static_cast<u32>(sound->cycle * 1000.0f) : kAmbientSoundRetryMs;
+        bool found = false;
+        for (PLAY_WAVE_INFO& playing : mode.m_playWaveList) {
+            if (playing.wavName == wavName && playing.nAID == static_cast<u32>(soundIndex)) {
+                found = true;
+                if (playing.endTick <= now) {
+                    if (audio->PlaySound3D(wavName.c_str(), sound->pos, listenerPos,
+                            sound->range > 0.0f ? static_cast<int>(sound->range) : kAmbientSoundMaxDist,
+                            kAmbientSoundMinDist,
+                            volumeFactor)) {
+                        playing.endTick = now + cycleMs;
+                    } else {
+                        playing.endTick = now + kAmbientSoundRetryMs;
+                    }
+                }
+                break;
+            }
+        }
+
+        if (!found) {
+            PLAY_WAVE_INFO info{};
+            info.wavName = wavName;
+            info.nAID = static_cast<u32>(soundIndex);
+            info.term = cycleMs;
+            info.endTick = now;
+            info.pos = sound->pos;
+            info.volumeFactor = volumeFactor;
+            info.volumeMaxDist = sound->range > 0.0f ? static_cast<int>(sound->range) : kAmbientSoundMaxDist;
+            info.volumeMinDist = kAmbientSoundMinDist;
+            mode.m_playWaveList.push_back(info);
+        }
+
+        ++soundIndex;
+    }
+}
 
 void ResetGamePacketTrace(u32 startTick)
 {
@@ -3932,6 +4006,7 @@ void CGameMode::OnInit(const char* worldName) {
     RegisterDefaultGameModePacketHandlers(g_gameModePacketRouter);
     ClearRuntimeActors(*this);
     m_groundItemList.clear();
+    m_playWaveList.clear();
 
     DbgLog("[Build] marker=%s pkt0078=%d pkt0209=%d\n",
         kGameModeBuildMarker,
@@ -4002,6 +4077,12 @@ void CGameMode::OnInit(const char* worldName) {
 
     SendTimeSyncRequest(*this, true);
 
+    CAudio* audio = CAudio::GetInstance();
+    if (audio && m_rswName[0] != '\0') {
+        m_streamFileName = audio->ResolveMapBgmPath(m_rswName);
+        audio->PlayBGM(m_streamFileName.c_str());
+    }
+
     g_renderer.m_nClearColor = RGB(0, 0, 0);
 }
 void CGameMode::OnExit() {
@@ -4009,6 +4090,8 @@ void CGameMode::OnExit() {
     g_windowMgr.RemoveAllWindows();
     ClearRuntimeActors(*this);
     m_groundItemList.clear();
+    m_playWaveList.clear();
+    m_streamFileName.clear();
     if (GetCapture() == g_hMainWnd) {
         ReleaseCapture();
     }
@@ -4218,6 +4301,8 @@ void CGameMode::OnUpdate() {
     const DWORD actorSummaryStart = GetTickCount();
     LogRuntimeActorSummary(*this);
     const DWORD actorSummaryEnd = GetTickCount();
+
+    UpdateMapAudio(*this);
 
     if (IsMapLoadingActive(*this)) {
         AdvanceMapLoading(*this);
