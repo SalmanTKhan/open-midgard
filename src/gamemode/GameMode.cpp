@@ -2171,6 +2171,12 @@ void EnsureBootstrapSelfActor(CGameMode& mode)
         actor->m_isPc = 1;
         actor->m_objectType = 0;
         actor->m_actorType = 0;
+        actor->m_bodyState = 0;
+        actor->m_healthState = 0;
+        actor->m_effectState = 0;
+        actor->m_pkState = 0;
+        actor->m_bodyPalette = 0;
+        actor->m_birdEffect = nullptr;
         actor->m_sex = g_session.GetSex();
         actor->m_roty = static_cast<float>(45 * ((g_session.m_playerDir & 7) + 4));
         actor->m_speed = 150;
@@ -2182,10 +2188,24 @@ void EnsureBootstrapSelfActor(CGameMode& mode)
         actor->m_moveEndTime = 0;
         actor->m_isMoving = 0;
         actor->m_dist = 0.0f;
+        actor->m_Hp = 0;
+        actor->m_MaxHp = 0;
+        actor->m_Sp = 0;
+        actor->m_MaxSp = 0;
+        actor->m_targetGid = 0;
+        actor->m_willBeDead = 0;
+        actor->m_vanishTime = 0;
+        actor->m_motionSpeed = 1.0f;
+        actor->m_modifyFactorOfmotionSpeed = 1.0f;
+        actor->m_modifyFactorOfmotionSpeed2 = 1.0f;
+        actor->m_attackMotion = -1.0f;
+        actor->m_sprRes = nullptr;
+        actor->m_actRes = nullptr;
         actor->m_pos = vector3d{ 0.0f, 0.0f, 0.0f };
         actor->m_moveStartPos = actor->m_pos;
         actor->m_moveEndPos = actor->m_pos;
         actor->m_path.Reset();
+        actor->m_msgEffectList.clear();
         mode.m_runtimeActors.emplace(g_session.m_gid, actor);
 
         DbgLog("[GameMode] bootstrap self actor gid=%u map='%s' pos=%d,%d dir=%d\n",
