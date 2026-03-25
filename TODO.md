@@ -37,7 +37,7 @@ Goal: ship Direct3D12 and Vulkan as real renderer options, selectable from the i
 - [x] Fall back cleanly to D3D11 when DX12 initialization fails.
 
 ### Milestone 4 — Direct3D12 Rendering Parity
-- [ ] Port transformed-vertex draw path to DX12.
+- [x] Port transformed-vertex draw path to DX12.
 - [ ] Port texture creation / upload / binding to DX12.
 - [ ] Port alpha, blend, depth, and lightmap behavior to DX12.
 - [ ] Port overlay composition upload before present on DX12.
