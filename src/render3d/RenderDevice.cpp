@@ -15,7 +15,14 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <limits>
 #include <vector>
+
+#if RO_HAS_VULKAN
+#define VK_USE_PLATFORM_WIN32_KHR
+#define VK_NO_PROTOTYPES
+#include <vulkan/vulkan.h>
+#endif
 
 #pragma comment(lib, "d3d12.lib")
 #pragma comment(lib, "d3d11.lib")
@@ -23,6 +30,187 @@
 #pragma comment(lib, "dxgi.lib")
 
 namespace {
+
+#if RO_HAS_VULKAN
+HMODULE g_vulkanModule = nullptr;
+
+PFN_vkGetInstanceProcAddr vkGetInstanceProcAddr = nullptr;
+PFN_vkGetDeviceProcAddr vkGetDeviceProcAddr = nullptr;
+PFN_vkCreateInstance vkCreateInstance = nullptr;
+PFN_vkDestroyInstance vkDestroyInstance = nullptr;
+PFN_vkEnumeratePhysicalDevices vkEnumeratePhysicalDevices = nullptr;
+PFN_vkGetPhysicalDeviceQueueFamilyProperties vkGetPhysicalDeviceQueueFamilyProperties = nullptr;
+PFN_vkEnumerateDeviceExtensionProperties vkEnumerateDeviceExtensionProperties = nullptr;
+PFN_vkCreateDevice vkCreateDevice = nullptr;
+PFN_vkDestroyDevice vkDestroyDevice = nullptr;
+PFN_vkGetDeviceQueue vkGetDeviceQueue = nullptr;
+PFN_vkQueueSubmit vkQueueSubmit = nullptr;
+PFN_vkDeviceWaitIdle vkDeviceWaitIdle = nullptr;
+PFN_vkCreateFence vkCreateFence = nullptr;
+PFN_vkDestroyFence vkDestroyFence = nullptr;
+PFN_vkResetFences vkResetFences = nullptr;
+PFN_vkWaitForFences vkWaitForFences = nullptr;
+PFN_vkCreateSemaphore vkCreateSemaphore = nullptr;
+PFN_vkDestroySemaphore vkDestroySemaphore = nullptr;
+PFN_vkCreateImageView vkCreateImageView = nullptr;
+PFN_vkDestroyImageView vkDestroyImageView = nullptr;
+PFN_vkCreateCommandPool vkCreateCommandPool = nullptr;
+PFN_vkDestroyCommandPool vkDestroyCommandPool = nullptr;
+PFN_vkAllocateCommandBuffers vkAllocateCommandBuffers = nullptr;
+PFN_vkFreeCommandBuffers vkFreeCommandBuffers = nullptr;
+PFN_vkBeginCommandBuffer vkBeginCommandBuffer = nullptr;
+PFN_vkEndCommandBuffer vkEndCommandBuffer = nullptr;
+PFN_vkResetCommandBuffer vkResetCommandBuffer = nullptr;
+PFN_vkCreateFramebuffer vkCreateFramebuffer = nullptr;
+PFN_vkDestroyFramebuffer vkDestroyFramebuffer = nullptr;
+PFN_vkCreateRenderPass vkCreateRenderPass = nullptr;
+PFN_vkDestroyRenderPass vkDestroyRenderPass = nullptr;
+PFN_vkCmdSetViewport vkCmdSetViewport = nullptr;
+PFN_vkCmdSetScissor vkCmdSetScissor = nullptr;
+PFN_vkCmdBeginRenderPass vkCmdBeginRenderPass = nullptr;
+PFN_vkCmdEndRenderPass vkCmdEndRenderPass = nullptr;
+PFN_vkCreateWin32SurfaceKHR vkCreateWin32SurfaceKHR = nullptr;
+PFN_vkDestroySurfaceKHR vkDestroySurfaceKHR = nullptr;
+PFN_vkGetPhysicalDeviceSurfaceSupportKHR vkGetPhysicalDeviceSurfaceSupportKHR = nullptr;
+PFN_vkGetPhysicalDeviceSurfaceCapabilitiesKHR vkGetPhysicalDeviceSurfaceCapabilitiesKHR = nullptr;
+PFN_vkGetPhysicalDeviceSurfaceFormatsKHR vkGetPhysicalDeviceSurfaceFormatsKHR = nullptr;
+PFN_vkGetPhysicalDeviceSurfacePresentModesKHR vkGetPhysicalDeviceSurfacePresentModesKHR = nullptr;
+PFN_vkCreateSwapchainKHR vkCreateSwapchainKHR = nullptr;
+PFN_vkDestroySwapchainKHR vkDestroySwapchainKHR = nullptr;
+PFN_vkGetSwapchainImagesKHR vkGetSwapchainImagesKHR = nullptr;
+PFN_vkAcquireNextImageKHR vkAcquireNextImageKHR = nullptr;
+PFN_vkQueuePresentKHR vkQueuePresentKHR = nullptr;
+
+bool LoadVulkanLoader()
+{
+    if (vkGetInstanceProcAddr) {
+        return true;
+    }
+
+    if (!g_vulkanModule) {
+        g_vulkanModule = LoadLibraryA("vulkan-1.dll");
+    }
+    if (!g_vulkanModule) {
+        DbgLog("[Render] Vulkan loader 'vulkan-1.dll' not found.\n");
+        return false;
+    }
+
+    vkGetInstanceProcAddr = reinterpret_cast<PFN_vkGetInstanceProcAddr>(GetProcAddress(g_vulkanModule, "vkGetInstanceProcAddr"));
+    if (!vkGetInstanceProcAddr) {
+        DbgLog("[Render] Vulkan loader missing vkGetInstanceProcAddr.\n");
+        return false;
+    }
+
+    vkCreateInstance = reinterpret_cast<PFN_vkCreateInstance>(vkGetInstanceProcAddr(nullptr, "vkCreateInstance"));
+    return vkCreateInstance != nullptr;
+}
+
+bool LoadVulkanInstanceFunctions(VkInstance instance)
+{
+    if (!vkGetInstanceProcAddr || !instance) {
+        return false;
+    }
+
+    vkDestroyInstance = reinterpret_cast<PFN_vkDestroyInstance>(vkGetInstanceProcAddr(instance, "vkDestroyInstance"));
+    vkEnumeratePhysicalDevices = reinterpret_cast<PFN_vkEnumeratePhysicalDevices>(vkGetInstanceProcAddr(instance, "vkEnumeratePhysicalDevices"));
+    vkGetPhysicalDeviceQueueFamilyProperties = reinterpret_cast<PFN_vkGetPhysicalDeviceQueueFamilyProperties>(vkGetInstanceProcAddr(instance, "vkGetPhysicalDeviceQueueFamilyProperties"));
+    vkEnumerateDeviceExtensionProperties = reinterpret_cast<PFN_vkEnumerateDeviceExtensionProperties>(vkGetInstanceProcAddr(instance, "vkEnumerateDeviceExtensionProperties"));
+    vkCreateDevice = reinterpret_cast<PFN_vkCreateDevice>(vkGetInstanceProcAddr(instance, "vkCreateDevice"));
+    vkCreateWin32SurfaceKHR = reinterpret_cast<PFN_vkCreateWin32SurfaceKHR>(vkGetInstanceProcAddr(instance, "vkCreateWin32SurfaceKHR"));
+    vkDestroySurfaceKHR = reinterpret_cast<PFN_vkDestroySurfaceKHR>(vkGetInstanceProcAddr(instance, "vkDestroySurfaceKHR"));
+    vkGetPhysicalDeviceSurfaceSupportKHR = reinterpret_cast<PFN_vkGetPhysicalDeviceSurfaceSupportKHR>(vkGetInstanceProcAddr(instance, "vkGetPhysicalDeviceSurfaceSupportKHR"));
+    vkGetPhysicalDeviceSurfaceCapabilitiesKHR = reinterpret_cast<PFN_vkGetPhysicalDeviceSurfaceCapabilitiesKHR>(vkGetInstanceProcAddr(instance, "vkGetPhysicalDeviceSurfaceCapabilitiesKHR"));
+    vkGetPhysicalDeviceSurfaceFormatsKHR = reinterpret_cast<PFN_vkGetPhysicalDeviceSurfaceFormatsKHR>(vkGetInstanceProcAddr(instance, "vkGetPhysicalDeviceSurfaceFormatsKHR"));
+    vkGetPhysicalDeviceSurfacePresentModesKHR = reinterpret_cast<PFN_vkGetPhysicalDeviceSurfacePresentModesKHR>(vkGetInstanceProcAddr(instance, "vkGetPhysicalDeviceSurfacePresentModesKHR"));
+    vkGetDeviceProcAddr = reinterpret_cast<PFN_vkGetDeviceProcAddr>(vkGetInstanceProcAddr(instance, "vkGetDeviceProcAddr"));
+
+    return vkDestroyInstance
+        && vkEnumeratePhysicalDevices
+        && vkGetPhysicalDeviceQueueFamilyProperties
+        && vkEnumerateDeviceExtensionProperties
+        && vkCreateDevice
+        && vkCreateWin32SurfaceKHR
+        && vkDestroySurfaceKHR
+        && vkGetPhysicalDeviceSurfaceSupportKHR
+        && vkGetPhysicalDeviceSurfaceCapabilitiesKHR
+        && vkGetPhysicalDeviceSurfaceFormatsKHR
+        && vkGetPhysicalDeviceSurfacePresentModesKHR
+        && vkGetDeviceProcAddr;
+}
+
+bool LoadVulkanDeviceFunctions(VkDevice device)
+{
+    if (!vkGetDeviceProcAddr || !device) {
+        return false;
+    }
+
+    vkDestroyDevice = reinterpret_cast<PFN_vkDestroyDevice>(vkGetDeviceProcAddr(device, "vkDestroyDevice"));
+    vkGetDeviceQueue = reinterpret_cast<PFN_vkGetDeviceQueue>(vkGetDeviceProcAddr(device, "vkGetDeviceQueue"));
+    vkQueueSubmit = reinterpret_cast<PFN_vkQueueSubmit>(vkGetDeviceProcAddr(device, "vkQueueSubmit"));
+    vkDeviceWaitIdle = reinterpret_cast<PFN_vkDeviceWaitIdle>(vkGetDeviceProcAddr(device, "vkDeviceWaitIdle"));
+    vkCreateFence = reinterpret_cast<PFN_vkCreateFence>(vkGetDeviceProcAddr(device, "vkCreateFence"));
+    vkDestroyFence = reinterpret_cast<PFN_vkDestroyFence>(vkGetDeviceProcAddr(device, "vkDestroyFence"));
+    vkResetFences = reinterpret_cast<PFN_vkResetFences>(vkGetDeviceProcAddr(device, "vkResetFences"));
+    vkWaitForFences = reinterpret_cast<PFN_vkWaitForFences>(vkGetDeviceProcAddr(device, "vkWaitForFences"));
+    vkCreateSemaphore = reinterpret_cast<PFN_vkCreateSemaphore>(vkGetDeviceProcAddr(device, "vkCreateSemaphore"));
+    vkDestroySemaphore = reinterpret_cast<PFN_vkDestroySemaphore>(vkGetDeviceProcAddr(device, "vkDestroySemaphore"));
+    vkCreateImageView = reinterpret_cast<PFN_vkCreateImageView>(vkGetDeviceProcAddr(device, "vkCreateImageView"));
+    vkDestroyImageView = reinterpret_cast<PFN_vkDestroyImageView>(vkGetDeviceProcAddr(device, "vkDestroyImageView"));
+    vkCreateCommandPool = reinterpret_cast<PFN_vkCreateCommandPool>(vkGetDeviceProcAddr(device, "vkCreateCommandPool"));
+    vkDestroyCommandPool = reinterpret_cast<PFN_vkDestroyCommandPool>(vkGetDeviceProcAddr(device, "vkDestroyCommandPool"));
+    vkAllocateCommandBuffers = reinterpret_cast<PFN_vkAllocateCommandBuffers>(vkGetDeviceProcAddr(device, "vkAllocateCommandBuffers"));
+    vkFreeCommandBuffers = reinterpret_cast<PFN_vkFreeCommandBuffers>(vkGetDeviceProcAddr(device, "vkFreeCommandBuffers"));
+    vkBeginCommandBuffer = reinterpret_cast<PFN_vkBeginCommandBuffer>(vkGetDeviceProcAddr(device, "vkBeginCommandBuffer"));
+    vkEndCommandBuffer = reinterpret_cast<PFN_vkEndCommandBuffer>(vkGetDeviceProcAddr(device, "vkEndCommandBuffer"));
+    vkResetCommandBuffer = reinterpret_cast<PFN_vkResetCommandBuffer>(vkGetDeviceProcAddr(device, "vkResetCommandBuffer"));
+    vkCreateFramebuffer = reinterpret_cast<PFN_vkCreateFramebuffer>(vkGetDeviceProcAddr(device, "vkCreateFramebuffer"));
+    vkDestroyFramebuffer = reinterpret_cast<PFN_vkDestroyFramebuffer>(vkGetDeviceProcAddr(device, "vkDestroyFramebuffer"));
+    vkCreateRenderPass = reinterpret_cast<PFN_vkCreateRenderPass>(vkGetDeviceProcAddr(device, "vkCreateRenderPass"));
+    vkDestroyRenderPass = reinterpret_cast<PFN_vkDestroyRenderPass>(vkGetDeviceProcAddr(device, "vkDestroyRenderPass"));
+    vkCmdSetViewport = reinterpret_cast<PFN_vkCmdSetViewport>(vkGetDeviceProcAddr(device, "vkCmdSetViewport"));
+    vkCmdSetScissor = reinterpret_cast<PFN_vkCmdSetScissor>(vkGetDeviceProcAddr(device, "vkCmdSetScissor"));
+    vkCmdBeginRenderPass = reinterpret_cast<PFN_vkCmdBeginRenderPass>(vkGetDeviceProcAddr(device, "vkCmdBeginRenderPass"));
+    vkCmdEndRenderPass = reinterpret_cast<PFN_vkCmdEndRenderPass>(vkGetDeviceProcAddr(device, "vkCmdEndRenderPass"));
+    vkCreateSwapchainKHR = reinterpret_cast<PFN_vkCreateSwapchainKHR>(vkGetDeviceProcAddr(device, "vkCreateSwapchainKHR"));
+    vkDestroySwapchainKHR = reinterpret_cast<PFN_vkDestroySwapchainKHR>(vkGetDeviceProcAddr(device, "vkDestroySwapchainKHR"));
+    vkGetSwapchainImagesKHR = reinterpret_cast<PFN_vkGetSwapchainImagesKHR>(vkGetDeviceProcAddr(device, "vkGetSwapchainImagesKHR"));
+    vkAcquireNextImageKHR = reinterpret_cast<PFN_vkAcquireNextImageKHR>(vkGetDeviceProcAddr(device, "vkAcquireNextImageKHR"));
+    vkQueuePresentKHR = reinterpret_cast<PFN_vkQueuePresentKHR>(vkGetDeviceProcAddr(device, "vkQueuePresentKHR"));
+
+    return vkDestroyDevice
+        && vkGetDeviceQueue
+        && vkQueueSubmit
+        && vkDeviceWaitIdle
+        && vkCreateFence
+        && vkDestroyFence
+        && vkResetFences
+        && vkWaitForFences
+        && vkCreateSemaphore
+        && vkDestroySemaphore
+        && vkCreateImageView
+        && vkDestroyImageView
+        && vkCreateCommandPool
+        && vkDestroyCommandPool
+        && vkAllocateCommandBuffers
+        && vkFreeCommandBuffers
+        && vkBeginCommandBuffer
+        && vkEndCommandBuffer
+        && vkResetCommandBuffer
+        && vkCreateFramebuffer
+        && vkDestroyFramebuffer
+        && vkCreateRenderPass
+        && vkDestroyRenderPass
+        && vkCmdSetViewport
+        && vkCmdSetScissor
+        && vkCmdBeginRenderPass
+        && vkCmdEndRenderPass
+        && vkCreateSwapchainKHR
+        && vkDestroySwapchainKHR
+        && vkGetSwapchainImagesKHR
+        && vkAcquireNextImageKHR
+        && vkQueuePresentKHR;
+}
+#endif
 
 template <typename T>
 void SafeRelease(T*& value)
@@ -3323,11 +3511,21 @@ private:
 
 class VulkanRenderDevice final : public IRenderDevice {
 public:
+#if RO_HAS_VULKAN
     VulkanRenderDevice()
-        : m_hwnd(nullptr), m_renderWidth(0), m_renderHeight(0)
+        : m_hwnd(nullptr), m_renderWidth(0), m_renderHeight(0),
+          m_instance(VK_NULL_HANDLE), m_surface(VK_NULL_HANDLE), m_physicalDevice(VK_NULL_HANDLE),
+          m_device(VK_NULL_HANDLE), m_graphicsQueue(VK_NULL_HANDLE), m_presentQueue(VK_NULL_HANDLE),
+          m_swapChain(VK_NULL_HANDLE), m_swapChainFormat(VK_FORMAT_UNDEFINED),
+          m_renderPass(VK_NULL_HANDLE), m_commandPool(VK_NULL_HANDLE),
+          m_imageAvailableSemaphore(VK_NULL_HANDLE), m_renderFinishedSemaphore(VK_NULL_HANDLE),
+          m_inFlightFence(VK_NULL_HANDLE), m_graphicsQueueFamilyIndex(kInvalidQueueFamilyIndex),
+          m_presentQueueFamilyIndex(kInvalidQueueFamilyIndex), m_currentImageIndex(0),
+          m_frameBegun(false), m_renderPassActive(false), m_pendingDepthClear(false)
     {
         m_bootstrap.backend = RenderBackendType::Vulkan;
         m_bootstrap.initHr = static_cast<int>(E_NOTIMPL);
+        std::memset(&m_pendingClearColor, 0, sizeof(m_pendingClearColor));
     }
 
     RenderBackendType GetBackendType() const override
@@ -3342,22 +3540,140 @@ public:
         RefreshRenderSize();
 
         m_bootstrap.backend = RenderBackendType::Vulkan;
-        m_bootstrap.initHr = static_cast<int>(E_NOTIMPL);
-        DbgLog("[Render] Vulkan backend shell is present but initialization is not implemented yet.\n");
+        m_bootstrap.initHr = static_cast<int>(VK_ERROR_INITIALIZATION_FAILED);
+
+        if (!m_hwnd || m_renderWidth <= 0 || m_renderHeight <= 0) {
+            m_bootstrap.initHr = static_cast<int>(VK_ERROR_INITIALIZATION_FAILED);
+            if (outResult) {
+                *outResult = m_bootstrap;
+            }
+            return false;
+        }
+
+        if (!LoadVulkanLoader()) {
+            m_bootstrap.initHr = static_cast<int>(E_NOINTERFACE);
+            if (outResult) {
+                *outResult = m_bootstrap;
+            }
+            return false;
+        }
+
+        if (!CreateInstance()) {
+            if (outResult) {
+                *outResult = m_bootstrap;
+            }
+            Shutdown();
+            return false;
+        }
+        if (!CreateSurface()) {
+            if (outResult) {
+                *outResult = m_bootstrap;
+            }
+            Shutdown();
+            return false;
+        }
+        if (!PickPhysicalDevice()) {
+            if (outResult) {
+                *outResult = m_bootstrap;
+            }
+            Shutdown();
+            return false;
+        }
+        if (!CreateLogicalDevice()) {
+            if (outResult) {
+                *outResult = m_bootstrap;
+            }
+            Shutdown();
+            return false;
+        }
+        if (!CreateCommandPool()) {
+            if (outResult) {
+                *outResult = m_bootstrap;
+            }
+            Shutdown();
+            return false;
+        }
+        if (!CreateSyncObjects()) {
+            if (outResult) {
+                *outResult = m_bootstrap;
+            }
+            Shutdown();
+            return false;
+        }
+        if (!CreateSwapChainResources(VK_NULL_HANDLE)) {
+            if (outResult) {
+                *outResult = m_bootstrap;
+            }
+            Shutdown();
+            return false;
+        }
+
+        m_bootstrap.initHr = static_cast<int>(VK_SUCCESS);
+        DbgLog("[Render] Initialized backend '%s' with %ux%u swapchain.\n",
+            GetRenderBackendName(RenderBackendType::Vulkan),
+            static_cast<unsigned int>(m_swapChainExtent.width),
+            static_cast<unsigned int>(m_swapChainExtent.height));
 
         if (outResult) {
             *outResult = m_bootstrap;
         }
-        return false;
+        return true;
     }
 
     void Shutdown() override
     {
+        if (m_device != VK_NULL_HANDLE) {
+            vkDeviceWaitIdle(m_device);
+        }
+
+        DestroySwapChainResources();
+
+        if (m_device != VK_NULL_HANDLE && m_imageAvailableSemaphore != VK_NULL_HANDLE) {
+            vkDestroySemaphore(m_device, m_imageAvailableSemaphore, nullptr);
+            m_imageAvailableSemaphore = VK_NULL_HANDLE;
+        }
+        if (m_device != VK_NULL_HANDLE && m_renderFinishedSemaphore != VK_NULL_HANDLE) {
+            vkDestroySemaphore(m_device, m_renderFinishedSemaphore, nullptr);
+            m_renderFinishedSemaphore = VK_NULL_HANDLE;
+        }
+        if (m_device != VK_NULL_HANDLE && m_inFlightFence != VK_NULL_HANDLE) {
+            vkDestroyFence(m_device, m_inFlightFence, nullptr);
+            m_inFlightFence = VK_NULL_HANDLE;
+        }
+        if (m_device != VK_NULL_HANDLE && m_commandPool != VK_NULL_HANDLE) {
+            vkDestroyCommandPool(m_device, m_commandPool, nullptr);
+            m_commandPool = VK_NULL_HANDLE;
+        }
+        if (m_device != VK_NULL_HANDLE) {
+            vkDestroyDevice(m_device, nullptr);
+            m_device = VK_NULL_HANDLE;
+        }
+        if (m_surface != VK_NULL_HANDLE && m_instance != VK_NULL_HANDLE) {
+            vkDestroySurfaceKHR(m_instance, m_surface, nullptr);
+            m_surface = VK_NULL_HANDLE;
+        }
+        if (m_instance != VK_NULL_HANDLE) {
+            vkDestroyInstance(m_instance, nullptr);
+            m_instance = VK_NULL_HANDLE;
+        }
+
         m_hwnd = nullptr;
         m_renderWidth = 0;
         m_renderHeight = 0;
+        m_swapChainFormat = VK_FORMAT_UNDEFINED;
+        m_swapChainExtent = {};
         m_bootstrap.backend = RenderBackendType::Vulkan;
         m_bootstrap.initHr = static_cast<int>(E_NOTIMPL);
+        m_physicalDevice = VK_NULL_HANDLE;
+        m_graphicsQueue = VK_NULL_HANDLE;
+        m_presentQueue = VK_NULL_HANDLE;
+        m_graphicsQueueFamilyIndex = kInvalidQueueFamilyIndex;
+        m_presentQueueFamilyIndex = kInvalidQueueFamilyIndex;
+        m_currentImageIndex = 0;
+        m_frameBegun = false;
+        m_renderPassActive = false;
+        m_pendingDepthClear = false;
+        std::memset(&m_pendingClearColor, 0, sizeof(m_pendingClearColor));
     }
 
     void RefreshRenderSize() override
@@ -3381,19 +3697,78 @@ public:
 
     int ClearColor(unsigned int color) override
     {
-        (void)color;
-        return -1;
+        m_pendingClearColor.float32[0] = static_cast<float>((color >> 16) & 0xFFu) / 255.0f;
+        m_pendingClearColor.float32[1] = static_cast<float>((color >> 8) & 0xFFu) / 255.0f;
+        m_pendingClearColor.float32[2] = static_cast<float>(color & 0xFFu) / 255.0f;
+        m_pendingClearColor.float32[3] = static_cast<float>((color >> 24) & 0xFFu) / 255.0f;
+        return EnsureFrameStarted() ? 0 : -1;
     }
 
     int ClearDepth() override
     {
-        return -1;
+        m_pendingDepthClear = true;
+        return 0;
     }
 
     int Present(bool vertSync) override
     {
-        (void)vertSync;
-        return -1;
+        if (!m_device || !m_swapChain || !m_frameBegun) {
+            return -1;
+        }
+
+        if (m_renderPassActive) {
+            vkCmdEndRenderPass(GetCurrentCommandBuffer());
+            m_renderPassActive = false;
+        }
+
+        const VkResult endResult = vkEndCommandBuffer(GetCurrentCommandBuffer());
+        if (endResult != VK_SUCCESS) {
+            m_bootstrap.initHr = static_cast<int>(endResult);
+            m_frameBegun = false;
+            return -1;
+        }
+
+        const VkPipelineStageFlags waitStage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+        VkSubmitInfo submitInfo{};
+        submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+        submitInfo.waitSemaphoreCount = 1;
+        submitInfo.pWaitSemaphores = &m_imageAvailableSemaphore;
+        submitInfo.pWaitDstStageMask = &waitStage;
+        const VkCommandBuffer commandBuffer = GetCurrentCommandBuffer();
+        submitInfo.commandBufferCount = 1;
+        submitInfo.pCommandBuffers = &commandBuffer;
+        submitInfo.signalSemaphoreCount = 1;
+        submitInfo.pSignalSemaphores = &m_renderFinishedSemaphore;
+
+        VkResult result = vkQueueSubmit(m_graphicsQueue, 1, &submitInfo, m_inFlightFence);
+        if (result != VK_SUCCESS) {
+            m_bootstrap.initHr = static_cast<int>(result);
+            m_frameBegun = false;
+            return -1;
+        }
+
+        VkPresentInfoKHR presentInfo{};
+        presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
+        presentInfo.waitSemaphoreCount = 1;
+        presentInfo.pWaitSemaphores = &m_renderFinishedSemaphore;
+        presentInfo.swapchainCount = 1;
+        presentInfo.pSwapchains = &m_swapChain;
+        presentInfo.pImageIndices = &m_currentImageIndex;
+        result = vkQueuePresentKHR(m_presentQueue, &presentInfo);
+
+        m_frameBegun = false;
+        m_pendingDepthClear = false;
+
+        if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR) {
+            ResizeSwapChain();
+            return 0;
+        }
+        if (result != VK_SUCCESS) {
+            m_bootstrap.initHr = static_cast<int>(result);
+            return -1;
+        }
+
+        return vertSync ? 1 : 0;
     }
 
     bool AcquireBackBufferDC(HDC* outDc) override
@@ -3418,7 +3793,7 @@ public:
         return false;
     }
 
-    bool BeginScene() override { return false; }
+    bool BeginScene() override { return EnsureFrameStarted(); }
     void EndScene() override {}
 
     void SetTransform(D3DTRANSFORMSTATETYPE state, const D3DMATRIX* matrix) override
@@ -3515,10 +3890,795 @@ public:
     }
 
 private:
+    static constexpr uint32_t kInvalidQueueFamilyIndex = std::numeric_limits<uint32_t>::max();
+
+    struct SwapChainSupportDetails {
+        VkSurfaceCapabilitiesKHR capabilities;
+        std::vector<VkSurfaceFormatKHR> formats;
+        std::vector<VkPresentModeKHR> presentModes;
+    };
+
+    bool CreateInstance()
+    {
+        if (!vkCreateInstance) {
+            m_bootstrap.initHr = static_cast<int>(E_NOINTERFACE);
+            return false;
+        }
+
+        const char* extensions[] = {
+            VK_KHR_SURFACE_EXTENSION_NAME,
+            VK_KHR_WIN32_SURFACE_EXTENSION_NAME,
+        };
+
+        VkApplicationInfo appInfo{};
+        appInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
+        appInfo.pApplicationName = "HighPriest";
+        appInfo.applicationVersion = VK_MAKE_API_VERSION(0, 1, 0, 0);
+        appInfo.pEngineName = "OpenMidgard";
+        appInfo.engineVersion = VK_MAKE_API_VERSION(0, 1, 0, 0);
+        appInfo.apiVersion = VK_API_VERSION_1_0;
+
+        VkInstanceCreateInfo createInfo{};
+        createInfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
+        createInfo.pApplicationInfo = &appInfo;
+        createInfo.enabledExtensionCount = static_cast<uint32_t>(std::size(extensions));
+        createInfo.ppEnabledExtensionNames = extensions;
+
+        const VkResult result = vkCreateInstance(&createInfo, nullptr, &m_instance);
+        if (result != VK_SUCCESS) {
+            m_bootstrap.initHr = static_cast<int>(result);
+            DbgLog("[Render] Vulkan vkCreateInstance failed (vk=%d).\n", static_cast<int>(result));
+            return false;
+        }
+
+        if (!LoadVulkanInstanceFunctions(m_instance)) {
+            m_bootstrap.initHr = static_cast<int>(E_NOINTERFACE);
+            DbgLog("[Render] Vulkan instance function resolution failed.\n");
+            return false;
+        }
+        return true;
+    }
+
+    bool CreateSurface()
+    {
+        VkWin32SurfaceCreateInfoKHR createInfo{};
+        createInfo.sType = VK_STRUCTURE_TYPE_WIN32_SURFACE_CREATE_INFO_KHR;
+        createInfo.hinstance = GetModuleHandleA(nullptr);
+        createInfo.hwnd = m_hwnd;
+
+        const VkResult result = vkCreateWin32SurfaceKHR(m_instance, &createInfo, nullptr, &m_surface);
+        if (result != VK_SUCCESS) {
+            m_bootstrap.initHr = static_cast<int>(result);
+            DbgLog("[Render] Vulkan vkCreateWin32SurfaceKHR failed (vk=%d).\n", static_cast<int>(result));
+            return false;
+        }
+        return true;
+    }
+
+    bool PickPhysicalDevice()
+    {
+        uint32_t deviceCount = 0;
+        VkResult result = vkEnumeratePhysicalDevices(m_instance, &deviceCount, nullptr);
+        if (result != VK_SUCCESS || deviceCount == 0) {
+            m_bootstrap.initHr = static_cast<int>(result != VK_SUCCESS ? result : VK_ERROR_INITIALIZATION_FAILED);
+            DbgLog("[Render] Vulkan physical device enumeration failed (vk=%d, count=%u).\n",
+                static_cast<int>(result), static_cast<unsigned int>(deviceCount));
+            return false;
+        }
+
+        std::vector<VkPhysicalDevice> devices(deviceCount);
+        result = vkEnumeratePhysicalDevices(m_instance, &deviceCount, devices.data());
+        if (result != VK_SUCCESS) {
+            m_bootstrap.initHr = static_cast<int>(result);
+            return false;
+        }
+
+        for (VkPhysicalDevice device : devices) {
+            uint32_t graphicsIndex = kInvalidQueueFamilyIndex;
+            uint32_t presentIndex = kInvalidQueueFamilyIndex;
+            if (IsPhysicalDeviceSuitable(device, &graphicsIndex, &presentIndex)) {
+                m_physicalDevice = device;
+                m_graphicsQueueFamilyIndex = graphicsIndex;
+                m_presentQueueFamilyIndex = presentIndex;
+                return true;
+            }
+        }
+
+        m_bootstrap.initHr = static_cast<int>(VK_ERROR_FEATURE_NOT_PRESENT);
+        DbgLog("[Render] Vulkan did not find a suitable physical device.\n");
+        return false;
+    }
+
+    bool IsPhysicalDeviceSuitable(VkPhysicalDevice device, uint32_t* outGraphicsIndex, uint32_t* outPresentIndex) const
+    {
+        if (!outGraphicsIndex || !outPresentIndex) {
+            return false;
+        }
+
+        *outGraphicsIndex = kInvalidQueueFamilyIndex;
+        *outPresentIndex = kInvalidQueueFamilyIndex;
+
+        uint32_t queueFamilyCount = 0;
+        vkGetPhysicalDeviceQueueFamilyProperties(device, &queueFamilyCount, nullptr);
+        if (queueFamilyCount == 0) {
+            return false;
+        }
+
+        std::vector<VkQueueFamilyProperties> queueFamilies(queueFamilyCount);
+        vkGetPhysicalDeviceQueueFamilyProperties(device, &queueFamilyCount, queueFamilies.data());
+        for (uint32_t index = 0; index < queueFamilyCount; ++index) {
+            if ((queueFamilies[index].queueFlags & VK_QUEUE_GRAPHICS_BIT) != 0) {
+                *outGraphicsIndex = index;
+            }
+
+            VkBool32 presentSupported = VK_FALSE;
+            const VkResult presentResult = vkGetPhysicalDeviceSurfaceSupportKHR(device, index, m_surface, &presentSupported);
+            if (presentResult == VK_SUCCESS && presentSupported == VK_TRUE) {
+                *outPresentIndex = index;
+            }
+        }
+
+        if (*outGraphicsIndex == kInvalidQueueFamilyIndex || *outPresentIndex == kInvalidQueueFamilyIndex) {
+            return false;
+        }
+
+        uint32_t extensionCount = 0;
+        const VkResult extResult = vkEnumerateDeviceExtensionProperties(device, nullptr, &extensionCount, nullptr);
+        if (extResult != VK_SUCCESS || extensionCount == 0) {
+            return false;
+        }
+
+        std::vector<VkExtensionProperties> extensions(extensionCount);
+        if (vkEnumerateDeviceExtensionProperties(device, nullptr, &extensionCount, extensions.data()) != VK_SUCCESS) {
+            return false;
+        }
+
+        bool hasSwapchainExtension = false;
+        for (const VkExtensionProperties& extension : extensions) {
+            if (std::strcmp(extension.extensionName, VK_KHR_SWAPCHAIN_EXTENSION_NAME) == 0) {
+                hasSwapchainExtension = true;
+                break;
+            }
+        }
+        if (!hasSwapchainExtension) {
+            return false;
+        }
+
+        const SwapChainSupportDetails support = QuerySwapChainSupport(device);
+        return !support.formats.empty() && !support.presentModes.empty();
+    }
+
+    bool CreateLogicalDevice()
+    {
+        const float queuePriority = 1.0f;
+        std::vector<VkDeviceQueueCreateInfo> queueCreateInfos;
+
+        VkDeviceQueueCreateInfo graphicsQueueInfo{};
+        graphicsQueueInfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+        graphicsQueueInfo.queueFamilyIndex = m_graphicsQueueFamilyIndex;
+        graphicsQueueInfo.queueCount = 1;
+        graphicsQueueInfo.pQueuePriorities = &queuePriority;
+        queueCreateInfos.push_back(graphicsQueueInfo);
+
+        if (m_presentQueueFamilyIndex != m_graphicsQueueFamilyIndex) {
+            VkDeviceQueueCreateInfo presentQueueInfo{};
+            presentQueueInfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+            presentQueueInfo.queueFamilyIndex = m_presentQueueFamilyIndex;
+            presentQueueInfo.queueCount = 1;
+            presentQueueInfo.pQueuePriorities = &queuePriority;
+            queueCreateInfos.push_back(presentQueueInfo);
+        }
+
+        const char* extensions[] = { VK_KHR_SWAPCHAIN_EXTENSION_NAME };
+        VkPhysicalDeviceFeatures deviceFeatures{};
+
+        VkDeviceCreateInfo createInfo{};
+        createInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+        createInfo.queueCreateInfoCount = static_cast<uint32_t>(queueCreateInfos.size());
+        createInfo.pQueueCreateInfos = queueCreateInfos.data();
+        createInfo.enabledExtensionCount = static_cast<uint32_t>(std::size(extensions));
+        createInfo.ppEnabledExtensionNames = extensions;
+        createInfo.pEnabledFeatures = &deviceFeatures;
+
+        const VkResult result = vkCreateDevice(m_physicalDevice, &createInfo, nullptr, &m_device);
+        if (result != VK_SUCCESS) {
+            m_bootstrap.initHr = static_cast<int>(result);
+            DbgLog("[Render] Vulkan vkCreateDevice failed (vk=%d).\n", static_cast<int>(result));
+            return false;
+        }
+
+        if (!LoadVulkanDeviceFunctions(m_device)) {
+            m_bootstrap.initHr = static_cast<int>(E_NOINTERFACE);
+            DbgLog("[Render] Vulkan device function resolution failed.\n");
+            return false;
+        }
+
+        vkGetDeviceQueue(m_device, m_graphicsQueueFamilyIndex, 0, &m_graphicsQueue);
+        vkGetDeviceQueue(m_device, m_presentQueueFamilyIndex, 0, &m_presentQueue);
+        return m_graphicsQueue != VK_NULL_HANDLE && m_presentQueue != VK_NULL_HANDLE;
+    }
+
+    bool CreateCommandPool()
+    {
+        VkCommandPoolCreateInfo poolInfo{};
+        poolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+        poolInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+        poolInfo.queueFamilyIndex = m_graphicsQueueFamilyIndex;
+
+        const VkResult result = vkCreateCommandPool(m_device, &poolInfo, nullptr, &m_commandPool);
+        if (result != VK_SUCCESS) {
+            m_bootstrap.initHr = static_cast<int>(result);
+            DbgLog("[Render] Vulkan vkCreateCommandPool failed (vk=%d).\n", static_cast<int>(result));
+            return false;
+        }
+        return true;
+    }
+
+    bool CreateSyncObjects()
+    {
+        VkSemaphoreCreateInfo semaphoreInfo{};
+        semaphoreInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+
+        VkFenceCreateInfo fenceInfo{};
+        fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+        fenceInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
+
+        VkResult result = vkCreateSemaphore(m_device, &semaphoreInfo, nullptr, &m_imageAvailableSemaphore);
+        if (result == VK_SUCCESS) {
+            result = vkCreateSemaphore(m_device, &semaphoreInfo, nullptr, &m_renderFinishedSemaphore);
+        }
+        if (result == VK_SUCCESS) {
+            result = vkCreateFence(m_device, &fenceInfo, nullptr, &m_inFlightFence);
+        }
+        if (result != VK_SUCCESS) {
+            m_bootstrap.initHr = static_cast<int>(result);
+            DbgLog("[Render] Vulkan sync object creation failed (vk=%d).\n", static_cast<int>(result));
+            return false;
+        }
+        return true;
+    }
+
+    SwapChainSupportDetails QuerySwapChainSupport(VkPhysicalDevice device) const
+    {
+        SwapChainSupportDetails details{};
+        vkGetPhysicalDeviceSurfaceCapabilitiesKHR(device, m_surface, &details.capabilities);
+
+        uint32_t formatCount = 0;
+        vkGetPhysicalDeviceSurfaceFormatsKHR(device, m_surface, &formatCount, nullptr);
+        if (formatCount > 0) {
+            details.formats.resize(formatCount);
+            vkGetPhysicalDeviceSurfaceFormatsKHR(device, m_surface, &formatCount, details.formats.data());
+        }
+
+        uint32_t presentModeCount = 0;
+        vkGetPhysicalDeviceSurfacePresentModesKHR(device, m_surface, &presentModeCount, nullptr);
+        if (presentModeCount > 0) {
+            details.presentModes.resize(presentModeCount);
+            vkGetPhysicalDeviceSurfacePresentModesKHR(device, m_surface, &presentModeCount, details.presentModes.data());
+        }
+
+        return details;
+    }
+
+    VkSurfaceFormatKHR ChooseSwapSurfaceFormat(const std::vector<VkSurfaceFormatKHR>& formats) const
+    {
+        for (const VkSurfaceFormatKHR& format : formats) {
+            if (format.format == VK_FORMAT_B8G8R8A8_UNORM && format.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) {
+                return format;
+            }
+        }
+        return formats.front();
+    }
+
+    VkPresentModeKHR ChooseSwapPresentMode(const std::vector<VkPresentModeKHR>& presentModes) const
+    {
+        for (VkPresentModeKHR presentMode : presentModes) {
+            if (presentMode == VK_PRESENT_MODE_FIFO_KHR) {
+                return presentMode;
+            }
+        }
+        return presentModes.empty() ? VK_PRESENT_MODE_FIFO_KHR : presentModes.front();
+    }
+
+    VkExtent2D ChooseSwapExtent(const VkSurfaceCapabilitiesKHR& capabilities) const
+    {
+        if (capabilities.currentExtent.width != std::numeric_limits<uint32_t>::max()) {
+            return capabilities.currentExtent;
+        }
+
+        const uint32_t width = static_cast<uint32_t>((std::max)(1, m_renderWidth));
+        const uint32_t height = static_cast<uint32_t>((std::max)(1, m_renderHeight));
+        VkExtent2D extent{};
+        extent.width = (std::max)(capabilities.minImageExtent.width, (std::min)(capabilities.maxImageExtent.width, width));
+        extent.height = (std::max)(capabilities.minImageExtent.height, (std::min)(capabilities.maxImageExtent.height, height));
+        return extent;
+    }
+
+    bool CreateSwapChainResources(VkSwapchainKHR oldSwapChain)
+    {
+        const SwapChainSupportDetails support = QuerySwapChainSupport(m_physicalDevice);
+        if (support.formats.empty() || support.presentModes.empty()) {
+            m_bootstrap.initHr = static_cast<int>(VK_ERROR_INITIALIZATION_FAILED);
+            return false;
+        }
+
+        const VkSurfaceFormatKHR surfaceFormat = ChooseSwapSurfaceFormat(support.formats);
+        const VkPresentModeKHR presentMode = ChooseSwapPresentMode(support.presentModes);
+        const VkExtent2D extent = ChooseSwapExtent(support.capabilities);
+        uint32_t imageCount = support.capabilities.minImageCount + 1;
+        if (support.capabilities.maxImageCount > 0 && imageCount > support.capabilities.maxImageCount) {
+            imageCount = support.capabilities.maxImageCount;
+        }
+
+        uint32_t queueFamilyIndices[] = { m_graphicsQueueFamilyIndex, m_presentQueueFamilyIndex };
+
+        VkSwapchainCreateInfoKHR createInfo{};
+        createInfo.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
+        createInfo.surface = m_surface;
+        createInfo.minImageCount = imageCount;
+        createInfo.imageFormat = surfaceFormat.format;
+        createInfo.imageColorSpace = surfaceFormat.colorSpace;
+        createInfo.imageExtent = extent;
+        createInfo.imageArrayLayers = 1;
+        createInfo.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+        if (m_graphicsQueueFamilyIndex != m_presentQueueFamilyIndex) {
+            createInfo.imageSharingMode = VK_SHARING_MODE_CONCURRENT;
+            createInfo.queueFamilyIndexCount = 2;
+            createInfo.pQueueFamilyIndices = queueFamilyIndices;
+        } else {
+            createInfo.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
+        }
+        createInfo.preTransform = support.capabilities.currentTransform;
+        createInfo.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
+        createInfo.presentMode = presentMode;
+        createInfo.clipped = VK_TRUE;
+        createInfo.oldSwapchain = oldSwapChain;
+
+        VkSwapchainKHR newSwapChain = VK_NULL_HANDLE;
+        VkResult result = vkCreateSwapchainKHR(m_device, &createInfo, nullptr, &newSwapChain);
+        if (result != VK_SUCCESS) {
+            m_bootstrap.initHr = static_cast<int>(result);
+            DbgLog("[Render] Vulkan vkCreateSwapchainKHR failed (vk=%d).\n", static_cast<int>(result));
+            return false;
+        }
+
+        uint32_t actualImageCount = 0;
+        result = vkGetSwapchainImagesKHR(m_device, newSwapChain, &actualImageCount, nullptr);
+        if (result != VK_SUCCESS || actualImageCount == 0) {
+            m_bootstrap.initHr = static_cast<int>(result != VK_SUCCESS ? result : VK_ERROR_INITIALIZATION_FAILED);
+            vkDestroySwapchainKHR(m_device, newSwapChain, nullptr);
+            return false;
+        }
+
+        std::vector<VkImage> newImages(actualImageCount);
+        result = vkGetSwapchainImagesKHR(m_device, newSwapChain, &actualImageCount, newImages.data());
+        if (result != VK_SUCCESS) {
+            m_bootstrap.initHr = static_cast<int>(result);
+            vkDestroySwapchainKHR(m_device, newSwapChain, nullptr);
+            return false;
+        }
+
+        VkRenderPass newRenderPass = VK_NULL_HANDLE;
+        if (!CreateRenderPass(surfaceFormat.format, &newRenderPass)) {
+            vkDestroySwapchainKHR(m_device, newSwapChain, nullptr);
+            return false;
+        }
+
+        std::vector<VkImageView> newImageViews;
+        if (!CreateImageViews(newImages, surfaceFormat.format, &newImageViews)) {
+            vkDestroyRenderPass(m_device, newRenderPass, nullptr);
+            vkDestroySwapchainKHR(m_device, newSwapChain, nullptr);
+            return false;
+        }
+
+        std::vector<VkFramebuffer> newFramebuffers;
+        if (!CreateFramebuffers(newRenderPass, newImageViews, extent, &newFramebuffers)) {
+            DestroyImageViews(newImageViews);
+            vkDestroyRenderPass(m_device, newRenderPass, nullptr);
+            vkDestroySwapchainKHR(m_device, newSwapChain, nullptr);
+            return false;
+        }
+
+        std::vector<VkCommandBuffer> newCommandBuffers;
+        if (!AllocateCommandBuffers(static_cast<uint32_t>(newFramebuffers.size()), &newCommandBuffers)) {
+            DestroyFramebuffers(newFramebuffers);
+            DestroyImageViews(newImageViews);
+            vkDestroyRenderPass(m_device, newRenderPass, nullptr);
+            vkDestroySwapchainKHR(m_device, newSwapChain, nullptr);
+            return false;
+        }
+
+        DestroySwapChainResources();
+        m_swapChain = newSwapChain;
+        m_swapChainImages = std::move(newImages);
+        m_swapChainImageViews = std::move(newImageViews);
+        m_swapChainFormat = surfaceFormat.format;
+        m_swapChainExtent = extent;
+        m_renderPass = newRenderPass;
+        m_framebuffers = std::move(newFramebuffers);
+        m_commandBuffers = std::move(newCommandBuffers);
+        m_currentImageIndex = 0;
+        return true;
+    }
+
+    bool CreateRenderPass(VkFormat format, VkRenderPass* outRenderPass)
+    {
+        if (!outRenderPass) {
+            return false;
+        }
+
+        *outRenderPass = VK_NULL_HANDLE;
+        VkAttachmentDescription colorAttachment{};
+        colorAttachment.format = format;
+        colorAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
+        colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+        colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+        colorAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+        colorAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+        colorAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        colorAttachment.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+
+        VkAttachmentReference colorRef{};
+        colorRef.attachment = 0;
+        colorRef.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+
+        VkSubpassDescription subpass{};
+        subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+        subpass.colorAttachmentCount = 1;
+        subpass.pColorAttachments = &colorRef;
+
+        VkSubpassDependency dependency{};
+        dependency.srcSubpass = VK_SUBPASS_EXTERNAL;
+        dependency.dstSubpass = 0;
+        dependency.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+        dependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+        dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+
+        VkRenderPassCreateInfo renderPassInfo{};
+        renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
+        renderPassInfo.attachmentCount = 1;
+        renderPassInfo.pAttachments = &colorAttachment;
+        renderPassInfo.subpassCount = 1;
+        renderPassInfo.pSubpasses = &subpass;
+        renderPassInfo.dependencyCount = 1;
+        renderPassInfo.pDependencies = &dependency;
+
+        const VkResult result = vkCreateRenderPass(m_device, &renderPassInfo, nullptr, outRenderPass);
+        if (result != VK_SUCCESS) {
+            m_bootstrap.initHr = static_cast<int>(result);
+            DbgLog("[Render] Vulkan vkCreateRenderPass failed (vk=%d).\n", static_cast<int>(result));
+            return false;
+        }
+        return true;
+    }
+
+    bool CreateImageViews(const std::vector<VkImage>& images, VkFormat format, std::vector<VkImageView>* outViews)
+    {
+        if (!outViews) {
+            return false;
+        }
+
+        outViews->clear();
+        outViews->reserve(images.size());
+        for (VkImage image : images) {
+            VkImageViewCreateInfo viewInfo{};
+            viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+            viewInfo.image = image;
+            viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+            viewInfo.format = format;
+            viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+            viewInfo.subresourceRange.baseMipLevel = 0;
+            viewInfo.subresourceRange.levelCount = 1;
+            viewInfo.subresourceRange.baseArrayLayer = 0;
+            viewInfo.subresourceRange.layerCount = 1;
+
+            VkImageView imageView = VK_NULL_HANDLE;
+            const VkResult result = vkCreateImageView(m_device, &viewInfo, nullptr, &imageView);
+            if (result != VK_SUCCESS) {
+                m_bootstrap.initHr = static_cast<int>(result);
+                DbgLog("[Render] Vulkan vkCreateImageView failed (vk=%d).\n", static_cast<int>(result));
+                DestroyImageViews(*outViews);
+                return false;
+            }
+            outViews->push_back(imageView);
+        }
+        return true;
+    }
+
+    bool CreateFramebuffers(VkRenderPass renderPass, const std::vector<VkImageView>& imageViews,
+        const VkExtent2D& extent, std::vector<VkFramebuffer>* outFramebuffers)
+    {
+        if (!outFramebuffers) {
+            return false;
+        }
+
+        outFramebuffers->clear();
+        outFramebuffers->reserve(imageViews.size());
+        for (VkImageView imageView : imageViews) {
+            VkFramebufferCreateInfo framebufferInfo{};
+            framebufferInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+            framebufferInfo.renderPass = renderPass;
+            framebufferInfo.attachmentCount = 1;
+            framebufferInfo.pAttachments = &imageView;
+            framebufferInfo.width = extent.width;
+            framebufferInfo.height = extent.height;
+            framebufferInfo.layers = 1;
+
+            VkFramebuffer framebuffer = VK_NULL_HANDLE;
+            const VkResult result = vkCreateFramebuffer(m_device, &framebufferInfo, nullptr, &framebuffer);
+            if (result != VK_SUCCESS) {
+                m_bootstrap.initHr = static_cast<int>(result);
+                DbgLog("[Render] Vulkan vkCreateFramebuffer failed (vk=%d).\n", static_cast<int>(result));
+                DestroyFramebuffers(*outFramebuffers);
+                return false;
+            }
+            outFramebuffers->push_back(framebuffer);
+        }
+        return true;
+    }
+
+    bool AllocateCommandBuffers(uint32_t count, std::vector<VkCommandBuffer>* outCommandBuffers)
+    {
+        if (!outCommandBuffers) {
+            return false;
+        }
+
+        outCommandBuffers->assign(count, VK_NULL_HANDLE);
+        VkCommandBufferAllocateInfo allocInfo{};
+        allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+        allocInfo.commandPool = m_commandPool;
+        allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+        allocInfo.commandBufferCount = count;
+
+        const VkResult result = vkAllocateCommandBuffers(m_device, &allocInfo, outCommandBuffers->data());
+        if (result != VK_SUCCESS) {
+            m_bootstrap.initHr = static_cast<int>(result);
+            DbgLog("[Render] Vulkan vkAllocateCommandBuffers failed (vk=%d).\n", static_cast<int>(result));
+            outCommandBuffers->clear();
+            return false;
+        }
+        return true;
+    }
+
+    void DestroyFramebuffers(std::vector<VkFramebuffer>& framebuffers)
+    {
+        for (VkFramebuffer framebuffer : framebuffers) {
+            vkDestroyFramebuffer(m_device, framebuffer, nullptr);
+        }
+        framebuffers.clear();
+    }
+
+    void DestroyImageViews(std::vector<VkImageView>& imageViews)
+    {
+        for (VkImageView imageView : imageViews) {
+            vkDestroyImageView(m_device, imageView, nullptr);
+        }
+        imageViews.clear();
+    }
+
+    void DestroySwapChainResources()
+    {
+        if (m_device == VK_NULL_HANDLE) {
+            return;
+        }
+
+        if (!m_commandBuffers.empty()) {
+            vkFreeCommandBuffers(m_device, m_commandPool, static_cast<uint32_t>(m_commandBuffers.size()), m_commandBuffers.data());
+            m_commandBuffers.clear();
+        }
+        DestroyFramebuffers(m_framebuffers);
+        DestroyImageViews(m_swapChainImageViews);
+        if (m_renderPass != VK_NULL_HANDLE) {
+            vkDestroyRenderPass(m_device, m_renderPass, nullptr);
+            m_renderPass = VK_NULL_HANDLE;
+        }
+        if (m_swapChain != VK_NULL_HANDLE) {
+            vkDestroySwapchainKHR(m_device, m_swapChain, nullptr);
+            m_swapChain = VK_NULL_HANDLE;
+        }
+        m_swapChainImages.clear();
+    }
+
+    bool EnsureFrameStarted()
+    {
+        if (m_frameBegun) {
+            return true;
+        }
+        if (m_device == VK_NULL_HANDLE || m_swapChain == VK_NULL_HANDLE || m_commandBuffers.empty()) {
+            return false;
+        }
+
+        VkResult result = vkWaitForFences(m_device, 1, &m_inFlightFence, VK_TRUE, UINT64_MAX);
+        if (result != VK_SUCCESS) {
+            m_bootstrap.initHr = static_cast<int>(result);
+            return false;
+        }
+        result = vkResetFences(m_device, 1, &m_inFlightFence);
+        if (result != VK_SUCCESS) {
+            m_bootstrap.initHr = static_cast<int>(result);
+            return false;
+        }
+
+        result = vkAcquireNextImageKHR(m_device, m_swapChain, UINT64_MAX, m_imageAvailableSemaphore, VK_NULL_HANDLE, &m_currentImageIndex);
+        if (result == VK_ERROR_OUT_OF_DATE_KHR) {
+            ResizeSwapChain();
+            return false;
+        }
+        if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR) {
+            m_bootstrap.initHr = static_cast<int>(result);
+            return false;
+        }
+
+        VkCommandBuffer commandBuffer = GetCurrentCommandBuffer();
+        vkResetCommandBuffer(commandBuffer, 0);
+
+        VkCommandBufferBeginInfo beginInfo{};
+        beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+        result = vkBeginCommandBuffer(commandBuffer, &beginInfo);
+        if (result != VK_SUCCESS) {
+            m_bootstrap.initHr = static_cast<int>(result);
+            return false;
+        }
+
+        VkClearValue clearValue{};
+        clearValue.color = m_pendingClearColor;
+        VkRenderPassBeginInfo renderPassInfo{};
+        renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+        renderPassInfo.renderPass = m_renderPass;
+        renderPassInfo.framebuffer = m_framebuffers[m_currentImageIndex];
+        renderPassInfo.renderArea.offset = { 0, 0 };
+        renderPassInfo.renderArea.extent = m_swapChainExtent;
+        renderPassInfo.clearValueCount = 1;
+        renderPassInfo.pClearValues = &clearValue;
+        vkCmdBeginRenderPass(commandBuffer, &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
+
+        VkViewport viewport{};
+        viewport.x = 0.0f;
+        viewport.y = 0.0f;
+        viewport.width = static_cast<float>(m_swapChainExtent.width);
+        viewport.height = static_cast<float>(m_swapChainExtent.height);
+        viewport.minDepth = 0.0f;
+        viewport.maxDepth = 1.0f;
+        vkCmdSetViewport(commandBuffer, 0, 1, &viewport);
+
+        VkRect2D scissor{};
+        scissor.offset = { 0, 0 };
+        scissor.extent = m_swapChainExtent;
+        vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
+
+        m_frameBegun = true;
+        m_renderPassActive = true;
+        return true;
+    }
+
+    void ResizeSwapChain()
+    {
+        if (m_device == VK_NULL_HANDLE || m_renderWidth <= 0 || m_renderHeight <= 0) {
+            return;
+        }
+
+        vkDeviceWaitIdle(m_device);
+        m_frameBegun = false;
+        m_renderPassActive = false;
+        CreateSwapChainResources(m_swapChain);
+    }
+
+    VkCommandBuffer GetCurrentCommandBuffer() const
+    {
+        return m_currentImageIndex < m_commandBuffers.size() ? m_commandBuffers[m_currentImageIndex] : VK_NULL_HANDLE;
+    }
+
     HWND m_hwnd;
     int m_renderWidth;
     int m_renderHeight;
     RenderBackendBootstrapResult m_bootstrap;
+    VkInstance m_instance;
+    VkSurfaceKHR m_surface;
+    VkPhysicalDevice m_physicalDevice;
+    VkDevice m_device;
+    VkQueue m_graphicsQueue;
+    VkQueue m_presentQueue;
+    VkSwapchainKHR m_swapChain;
+    VkFormat m_swapChainFormat;
+    VkExtent2D m_swapChainExtent;
+    VkRenderPass m_renderPass;
+    VkCommandPool m_commandPool;
+    VkSemaphore m_imageAvailableSemaphore;
+    VkSemaphore m_renderFinishedSemaphore;
+    VkFence m_inFlightFence;
+    uint32_t m_graphicsQueueFamilyIndex;
+    uint32_t m_presentQueueFamilyIndex;
+    uint32_t m_currentImageIndex;
+    bool m_frameBegun;
+    bool m_renderPassActive;
+    bool m_pendingDepthClear;
+    VkClearColorValue m_pendingClearColor;
+    std::vector<VkImage> m_swapChainImages;
+    std::vector<VkImageView> m_swapChainImageViews;
+    std::vector<VkFramebuffer> m_framebuffers;
+    std::vector<VkCommandBuffer> m_commandBuffers;
+
+#else
+    VulkanRenderDevice()
+        : m_hwnd(nullptr), m_renderWidth(0), m_renderHeight(0)
+    {
+        m_bootstrap.backend = RenderBackendType::Vulkan;
+        m_bootstrap.initHr = static_cast<int>(E_NOTIMPL);
+    }
+
+    RenderBackendType GetBackendType() const override
+    {
+        return RenderBackendType::Vulkan;
+    }
+
+    bool Initialize(HWND hwnd, RenderBackendBootstrapResult* outResult) override
+    {
+        Shutdown();
+        m_hwnd = hwnd;
+        RefreshRenderSize();
+
+        m_bootstrap.backend = RenderBackendType::Vulkan;
+        m_bootstrap.initHr = static_cast<int>(E_NOTIMPL);
+        DbgLog("[Render] Vulkan SDK unavailable at build time; Vulkan backend is disabled.\n");
+
+        if (outResult) {
+            *outResult = m_bootstrap;
+        }
+        return false;
+    }
+
+    void Shutdown() override
+    {
+        m_hwnd = nullptr;
+        m_renderWidth = 0;
+        m_renderHeight = 0;
+        m_bootstrap.backend = RenderBackendType::Vulkan;
+        m_bootstrap.initHr = static_cast<int>(E_NOTIMPL);
+    }
+
+    void RefreshRenderSize() override
+    {
+        if (!m_hwnd) {
+            m_renderWidth = 0;
+            m_renderHeight = 0;
+            return;
+        }
+
+        RECT clientRect{};
+        GetClientRect(m_hwnd, &clientRect);
+        m_renderWidth = (std::max)(1L, clientRect.right - clientRect.left);
+        m_renderHeight = (std::max)(1L, clientRect.bottom - clientRect.top);
+    }
+
+    int GetRenderWidth() const override { return m_renderWidth; }
+    int GetRenderHeight() const override { return m_renderHeight; }
+    HWND GetWindowHandle() const override { return m_hwnd; }
+    IDirect3DDevice7* GetLegacyDevice() const override { return nullptr; }
+    int ClearColor(unsigned int color) override { (void)color; return -1; }
+    int ClearDepth() override { return -1; }
+    int Present(bool vertSync) override { (void)vertSync; return -1; }
+    bool AcquireBackBufferDC(HDC* outDc) override { if (outDc) { *outDc = nullptr; } return false; }
+    void ReleaseBackBufferDC(HDC dc) override { (void)dc; }
+    bool UpdateBackBufferFromMemory(const void* bgraPixels, int width, int height, int pitch) override { (void)bgraPixels; (void)width; (void)height; (void)pitch; return false; }
+    bool BeginScene() override { return false; }
+    void EndScene() override {}
+    void SetTransform(D3DTRANSFORMSTATETYPE state, const D3DMATRIX* matrix) override { (void)state; (void)matrix; }
+    void SetRenderState(D3DRENDERSTATETYPE state, DWORD value) override { (void)state; (void)value; }
+    void SetTextureStageState(DWORD stage, D3DTEXTURESTAGESTATETYPE type, DWORD value) override { (void)stage; (void)type; (void)value; }
+    void BindTexture(DWORD stage, CTexture* texture) override { (void)stage; (void)texture; }
+    void DrawPrimitive(D3DPRIMITIVETYPE primitiveType, DWORD vertexFormat, const void* vertices, DWORD vertexCount, DWORD flags) override { (void)primitiveType; (void)vertexFormat; (void)vertices; (void)vertexCount; (void)flags; }
+    void DrawIndexedPrimitive(D3DPRIMITIVETYPE primitiveType, DWORD vertexFormat, const void* vertices, DWORD vertexCount, const unsigned short* indices, DWORD indexCount, DWORD flags) override { (void)primitiveType; (void)vertexFormat; (void)vertices; (void)vertexCount; (void)indices; (void)indexCount; (void)flags; }
+    void AdjustTextureSize(unsigned int* width, unsigned int* height) override { if (width && height) { *width = (std::max)(1u, *width); *height = (std::max)(1u, *height); } }
+    void ReleaseTextureResource(CTexture* texture) override { (void)texture; }
+    bool CreateTextureResource(CTexture* texture, unsigned int requestedWidth, unsigned int requestedHeight, int pixelFormat, unsigned int* outSurfaceWidth, unsigned int* outSurfaceHeight) override { (void)texture; (void)requestedWidth; (void)requestedHeight; (void)pixelFormat; if (outSurfaceWidth) { *outSurfaceWidth = 0; } if (outSurfaceHeight) { *outSurfaceHeight = 0; } return false; }
+    bool UpdateTextureResource(CTexture* texture, int x, int y, int w, int h, const unsigned int* data, bool skipColorKey, int pitch) override { (void)texture; (void)x; (void)y; (void)w; (void)h; (void)data; (void)skipColorKey; (void)pitch; return false; }
+
+private:
+    HWND m_hwnd;
+    int m_renderWidth;
+    int m_renderHeight;
+    RenderBackendBootstrapResult m_bootstrap;
+#endif
 };
 
 class RoutedRenderDevice final : public IRenderDevice {
