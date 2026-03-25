@@ -6,6 +6,7 @@
 #include "ModernRenderState.h"
 #include "render/Renderer.h"
 #include "res/Texture.h"
+#include "VulkanShaders.generated.h"
 
 #include <d3d12.h>
 #include <d3d11.h>
@@ -66,6 +67,12 @@ PFN_vkCreateFramebuffer vkCreateFramebuffer = nullptr;
 PFN_vkDestroyFramebuffer vkDestroyFramebuffer = nullptr;
 PFN_vkCreateRenderPass vkCreateRenderPass = nullptr;
 PFN_vkDestroyRenderPass vkDestroyRenderPass = nullptr;
+PFN_vkCreateShaderModule vkCreateShaderModule = nullptr;
+PFN_vkDestroyShaderModule vkDestroyShaderModule = nullptr;
+PFN_vkCreatePipelineLayout vkCreatePipelineLayout = nullptr;
+PFN_vkDestroyPipelineLayout vkDestroyPipelineLayout = nullptr;
+PFN_vkCreateGraphicsPipelines vkCreateGraphicsPipelines = nullptr;
+PFN_vkDestroyPipeline vkDestroyPipeline = nullptr;
 PFN_vkCreateBuffer vkCreateBuffer = nullptr;
 PFN_vkDestroyBuffer vkDestroyBuffer = nullptr;
 PFN_vkGetBufferMemoryRequirements vkGetBufferMemoryRequirements = nullptr;
@@ -78,6 +85,12 @@ PFN_vkCmdSetViewport vkCmdSetViewport = nullptr;
 PFN_vkCmdSetScissor vkCmdSetScissor = nullptr;
 PFN_vkCmdBeginRenderPass vkCmdBeginRenderPass = nullptr;
 PFN_vkCmdEndRenderPass vkCmdEndRenderPass = nullptr;
+PFN_vkCmdBindPipeline vkCmdBindPipeline = nullptr;
+PFN_vkCmdPushConstants vkCmdPushConstants = nullptr;
+PFN_vkCmdBindVertexBuffers vkCmdBindVertexBuffers = nullptr;
+PFN_vkCmdBindIndexBuffer vkCmdBindIndexBuffer = nullptr;
+PFN_vkCmdDraw vkCmdDraw = nullptr;
+PFN_vkCmdDrawIndexed vkCmdDrawIndexed = nullptr;
 PFN_vkCmdPipelineBarrier vkCmdPipelineBarrier = nullptr;
 PFN_vkCmdCopyBufferToImage vkCmdCopyBufferToImage = nullptr;
 PFN_vkCreateWin32SurfaceKHR vkCreateWin32SurfaceKHR = nullptr;
@@ -180,6 +193,12 @@ bool LoadVulkanDeviceFunctions(VkDevice device)
     vkDestroyFramebuffer = reinterpret_cast<PFN_vkDestroyFramebuffer>(vkGetDeviceProcAddr(device, "vkDestroyFramebuffer"));
     vkCreateRenderPass = reinterpret_cast<PFN_vkCreateRenderPass>(vkGetDeviceProcAddr(device, "vkCreateRenderPass"));
     vkDestroyRenderPass = reinterpret_cast<PFN_vkDestroyRenderPass>(vkGetDeviceProcAddr(device, "vkDestroyRenderPass"));
+    vkCreateShaderModule = reinterpret_cast<PFN_vkCreateShaderModule>(vkGetDeviceProcAddr(device, "vkCreateShaderModule"));
+    vkDestroyShaderModule = reinterpret_cast<PFN_vkDestroyShaderModule>(vkGetDeviceProcAddr(device, "vkDestroyShaderModule"));
+    vkCreatePipelineLayout = reinterpret_cast<PFN_vkCreatePipelineLayout>(vkGetDeviceProcAddr(device, "vkCreatePipelineLayout"));
+    vkDestroyPipelineLayout = reinterpret_cast<PFN_vkDestroyPipelineLayout>(vkGetDeviceProcAddr(device, "vkDestroyPipelineLayout"));
+    vkCreateGraphicsPipelines = reinterpret_cast<PFN_vkCreateGraphicsPipelines>(vkGetDeviceProcAddr(device, "vkCreateGraphicsPipelines"));
+    vkDestroyPipeline = reinterpret_cast<PFN_vkDestroyPipeline>(vkGetDeviceProcAddr(device, "vkDestroyPipeline"));
     vkCreateBuffer = reinterpret_cast<PFN_vkCreateBuffer>(vkGetDeviceProcAddr(device, "vkCreateBuffer"));
     vkDestroyBuffer = reinterpret_cast<PFN_vkDestroyBuffer>(vkGetDeviceProcAddr(device, "vkDestroyBuffer"));
     vkGetBufferMemoryRequirements = reinterpret_cast<PFN_vkGetBufferMemoryRequirements>(vkGetDeviceProcAddr(device, "vkGetBufferMemoryRequirements"));
@@ -192,6 +211,12 @@ bool LoadVulkanDeviceFunctions(VkDevice device)
     vkCmdSetScissor = reinterpret_cast<PFN_vkCmdSetScissor>(vkGetDeviceProcAddr(device, "vkCmdSetScissor"));
     vkCmdBeginRenderPass = reinterpret_cast<PFN_vkCmdBeginRenderPass>(vkGetDeviceProcAddr(device, "vkCmdBeginRenderPass"));
     vkCmdEndRenderPass = reinterpret_cast<PFN_vkCmdEndRenderPass>(vkGetDeviceProcAddr(device, "vkCmdEndRenderPass"));
+    vkCmdBindPipeline = reinterpret_cast<PFN_vkCmdBindPipeline>(vkGetDeviceProcAddr(device, "vkCmdBindPipeline"));
+    vkCmdPushConstants = reinterpret_cast<PFN_vkCmdPushConstants>(vkGetDeviceProcAddr(device, "vkCmdPushConstants"));
+    vkCmdBindVertexBuffers = reinterpret_cast<PFN_vkCmdBindVertexBuffers>(vkGetDeviceProcAddr(device, "vkCmdBindVertexBuffers"));
+    vkCmdBindIndexBuffer = reinterpret_cast<PFN_vkCmdBindIndexBuffer>(vkGetDeviceProcAddr(device, "vkCmdBindIndexBuffer"));
+    vkCmdDraw = reinterpret_cast<PFN_vkCmdDraw>(vkGetDeviceProcAddr(device, "vkCmdDraw"));
+    vkCmdDrawIndexed = reinterpret_cast<PFN_vkCmdDrawIndexed>(vkGetDeviceProcAddr(device, "vkCmdDrawIndexed"));
     vkCmdPipelineBarrier = reinterpret_cast<PFN_vkCmdPipelineBarrier>(vkGetDeviceProcAddr(device, "vkCmdPipelineBarrier"));
     vkCmdCopyBufferToImage = reinterpret_cast<PFN_vkCmdCopyBufferToImage>(vkGetDeviceProcAddr(device, "vkCmdCopyBufferToImage"));
     vkCreateSwapchainKHR = reinterpret_cast<PFN_vkCreateSwapchainKHR>(vkGetDeviceProcAddr(device, "vkCreateSwapchainKHR"));
@@ -223,6 +248,12 @@ bool LoadVulkanDeviceFunctions(VkDevice device)
         && vkDestroyFramebuffer
         && vkCreateRenderPass
         && vkDestroyRenderPass
+        && vkCreateShaderModule
+        && vkDestroyShaderModule
+        && vkCreatePipelineLayout
+        && vkDestroyPipelineLayout
+        && vkCreateGraphicsPipelines
+        && vkDestroyPipeline
         && vkCreateBuffer
         && vkDestroyBuffer
         && vkGetBufferMemoryRequirements
@@ -235,6 +266,12 @@ bool LoadVulkanDeviceFunctions(VkDevice device)
         && vkCmdSetScissor
         && vkCmdBeginRenderPass
         && vkCmdEndRenderPass
+        && vkCmdBindPipeline
+        && vkCmdPushConstants
+        && vkCmdBindVertexBuffers
+        && vkCmdBindIndexBuffer
+        && vkCmdDraw
+        && vkCmdDrawIndexed
         && vkCmdPipelineBarrier
         && vkCmdCopyBufferToImage
         && vkCreateSwapchainKHR
@@ -253,6 +290,14 @@ void SafeRelease(T*& value)
         value = nullptr;
     }
 }
+
+#if RO_HAS_VULKAN
+static constexpr UINT kModernTextureSlotCount = 2;
+
+VkPrimitiveTopology ConvertPrimitiveTopologyVk(D3DPRIMITIVETYPE primitiveType);
+VkBlendFactor ConvertBlendFactorVk(D3DBLEND blend);
+VkCullModeFlags ConvertCullModeVk(D3DCULL cullMode);
+#endif
 
 unsigned int CountTrailingZeros(unsigned int mask)
 {
@@ -3593,7 +3638,9 @@ public:
           m_instance(VK_NULL_HANDLE), m_surface(VK_NULL_HANDLE), m_physicalDevice(VK_NULL_HANDLE),
           m_device(VK_NULL_HANDLE), m_graphicsQueue(VK_NULL_HANDLE), m_presentQueue(VK_NULL_HANDLE),
           m_swapChain(VK_NULL_HANDLE), m_swapChainFormat(VK_FORMAT_UNDEFINED),
-          m_renderPass(VK_NULL_HANDLE), m_commandPool(VK_NULL_HANDLE),
+                    m_renderPass(VK_NULL_HANDLE), m_pipelineLayout(VK_NULL_HANDLE),
+                    m_vertexShaderTlModule(VK_NULL_HANDLE), m_vertexShaderLmModule(VK_NULL_HANDLE),
+                    m_fragmentShaderModule(VK_NULL_HANDLE), m_commandPool(VK_NULL_HANDLE),
           m_imageAvailableSemaphore(VK_NULL_HANDLE), m_renderFinishedSemaphore(VK_NULL_HANDLE),
           m_inFlightFence(VK_NULL_HANDLE), m_graphicsQueueFamilyIndex(kInvalidQueueFamilyIndex),
           m_presentQueueFamilyIndex(kInvalidQueueFamilyIndex), m_currentImageIndex(0),
@@ -3602,6 +3649,9 @@ public:
         m_bootstrap.backend = RenderBackendType::Vulkan;
         m_bootstrap.initHr = static_cast<int>(E_NOTIMPL);
         std::memset(&m_pendingClearColor, 0, sizeof(m_pendingClearColor));
+                ResetModernFixedFunctionState(&m_pipelineState);
+                m_boundTextures[0] = nullptr;
+                m_boundTextures[1] = nullptr;
     }
 
     RenderBackendType GetBackendType() const override
@@ -3669,6 +3719,13 @@ public:
             Shutdown();
             return false;
         }
+        if (!CreatePipelineResources()) {
+            if (outResult) {
+                *outResult = m_bootstrap;
+            }
+            Shutdown();
+            return false;
+        }
         if (!CreateSyncObjects()) {
             if (outResult) {
                 *outResult = m_bootstrap;
@@ -3703,6 +3760,7 @@ public:
         }
 
         DestroySwapChainResources();
+        DestroyPipelineResources();
 
         if (m_device != VK_NULL_HANDLE && m_imageAvailableSemaphore != VK_NULL_HANDLE) {
             vkDestroySemaphore(m_device, m_imageAvailableSemaphore, nullptr);
@@ -3750,6 +3808,9 @@ public:
         m_renderPassActive = false;
         m_pendingDepthClear = false;
         std::memset(&m_pendingClearColor, 0, sizeof(m_pendingClearColor));
+        ResetModernFixedFunctionState(&m_pipelineState);
+        m_boundTextures[0] = nullptr;
+        m_boundTextures[1] = nullptr;
     }
 
     void RefreshRenderSize() override
@@ -3762,8 +3823,15 @@ public:
 
         RECT clientRect{};
         GetClientRect(m_hwnd, &clientRect);
-        m_renderWidth = (std::max)(1L, clientRect.right - clientRect.left);
-        m_renderHeight = (std::max)(1L, clientRect.bottom - clientRect.top);
+        const int newWidth = (std::max)(1L, clientRect.right - clientRect.left);
+        const int newHeight = (std::max)(1L, clientRect.bottom - clientRect.top);
+        if (newWidth != m_renderWidth || newHeight != m_renderHeight) {
+            m_renderWidth = newWidth;
+            m_renderHeight = newHeight;
+            if (m_device != VK_NULL_HANDLE && m_swapChain != VK_NULL_HANDLE) {
+                ResizeSwapChain();
+            }
+        }
     }
 
     int GetRenderWidth() const override { return m_renderWidth; }
@@ -3977,44 +4045,34 @@ public:
 
     void SetRenderState(D3DRENDERSTATETYPE state, DWORD value) override
     {
-        (void)state;
-        (void)value;
+        ApplyModernRenderState(&m_pipelineState, state, value);
     }
 
     void SetTextureStageState(DWORD stage, D3DTEXTURESTAGESTATETYPE type, DWORD value) override
     {
-        (void)stage;
-        (void)type;
-        (void)value;
+        ApplyModernTextureStageState(&m_pipelineState, stage, type, value);
     }
 
     void BindTexture(DWORD stage, CTexture* texture) override
     {
-        (void)stage;
-        (void)texture;
+        if (stage < kModernTextureSlotCount) {
+            m_boundTextures[stage] = texture;
+        }
     }
 
     void DrawPrimitive(D3DPRIMITIVETYPE primitiveType, DWORD vertexFormat,
         const void* vertices, DWORD vertexCount, DWORD flags) override
     {
-        (void)primitiveType;
-        (void)vertexFormat;
-        (void)vertices;
-        (void)vertexCount;
         (void)flags;
+        DrawTransformedPrimitive(primitiveType, vertexFormat, vertices, vertexCount, nullptr, 0);
     }
 
     void DrawIndexedPrimitive(D3DPRIMITIVETYPE primitiveType, DWORD vertexFormat,
         const void* vertices, DWORD vertexCount, const unsigned short* indices,
         DWORD indexCount, DWORD flags) override
     {
-        (void)primitiveType;
-        (void)vertexFormat;
-        (void)vertices;
-        (void)vertexCount;
-        (void)indices;
-        (void)indexCount;
         (void)flags;
+        DrawTransformedPrimitive(primitiveType, vertexFormat, vertices, vertexCount, indices, indexCount);
     }
 
     void AdjustTextureSize(unsigned int* width, unsigned int* height) override
@@ -4070,6 +4128,424 @@ private:
         std::vector<VkSurfaceFormatKHR> formats;
         std::vector<VkPresentModeKHR> presentModes;
     };
+
+    struct PipelineEntry {
+        bool isLightmap;
+        VkPrimitiveTopology topology;
+        VkBool32 blendEnable;
+        VkBlendFactor srcBlend;
+        VkBlendFactor dstBlend;
+        VkCullModeFlags cullMode;
+        VkPipeline pipeline;
+    };
+
+    bool CreatePipelineResources()
+    {
+        if (m_device == VK_NULL_HANDLE) {
+            return false;
+        }
+
+        if (!CreateShaderModuleFromBytes(kVulkanVsTlSpirv, kVulkanVsTlSpirvSize, &m_vertexShaderTlModule)
+            || !CreateShaderModuleFromBytes(kVulkanVsLmSpirv, kVulkanVsLmSpirvSize, &m_vertexShaderLmModule)
+            || !CreateShaderModuleFromBytes(kVulkanPsSpirv, kVulkanPsSpirvSize, &m_fragmentShaderModule)) {
+            DestroyPipelineResources();
+            return false;
+        }
+
+        VkPushConstantRange pushConstantRange{};
+        pushConstantRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+        pushConstantRange.offset = 0;
+        pushConstantRange.size = static_cast<uint32_t>(sizeof(ModernDrawConstants));
+
+        VkPipelineLayoutCreateInfo layoutInfo{};
+        layoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+        layoutInfo.pushConstantRangeCount = 1;
+        layoutInfo.pPushConstantRanges = &pushConstantRange;
+
+        const VkResult result = vkCreatePipelineLayout(m_device, &layoutInfo, nullptr, &m_pipelineLayout);
+        if (result != VK_SUCCESS) {
+            m_bootstrap.initHr = static_cast<int>(result);
+            DestroyPipelineResources();
+            return false;
+        }
+
+        return true;
+    }
+
+    void DestroyPipelineResources()
+    {
+        ReleaseCachedPipelines();
+
+        if (m_device != VK_NULL_HANDLE && m_pipelineLayout != VK_NULL_HANDLE) {
+            vkDestroyPipelineLayout(m_device, m_pipelineLayout, nullptr);
+            m_pipelineLayout = VK_NULL_HANDLE;
+        }
+        if (m_device != VK_NULL_HANDLE && m_fragmentShaderModule != VK_NULL_HANDLE) {
+            vkDestroyShaderModule(m_device, m_fragmentShaderModule, nullptr);
+            m_fragmentShaderModule = VK_NULL_HANDLE;
+        }
+        if (m_device != VK_NULL_HANDLE && m_vertexShaderLmModule != VK_NULL_HANDLE) {
+            vkDestroyShaderModule(m_device, m_vertexShaderLmModule, nullptr);
+            m_vertexShaderLmModule = VK_NULL_HANDLE;
+        }
+        if (m_device != VK_NULL_HANDLE && m_vertexShaderTlModule != VK_NULL_HANDLE) {
+            vkDestroyShaderModule(m_device, m_vertexShaderTlModule, nullptr);
+            m_vertexShaderTlModule = VK_NULL_HANDLE;
+        }
+    }
+
+    bool CreateShaderModuleFromBytes(const uint8_t* bytes, size_t byteCount, VkShaderModule* outShaderModule)
+    {
+        if (!bytes || byteCount == 0 || !outShaderModule) {
+            return false;
+        }
+
+        *outShaderModule = VK_NULL_HANDLE;
+        std::vector<uint32_t> codeWords((byteCount + sizeof(uint32_t) - 1) / sizeof(uint32_t), 0);
+        std::memcpy(codeWords.data(), bytes, byteCount);
+
+        VkShaderModuleCreateInfo moduleInfo{};
+        moduleInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+        moduleInfo.codeSize = codeWords.size() * sizeof(uint32_t);
+        moduleInfo.pCode = codeWords.data();
+
+        const VkResult result = vkCreateShaderModule(m_device, &moduleInfo, nullptr, outShaderModule);
+        if (result != VK_SUCCESS) {
+            m_bootstrap.initHr = static_cast<int>(result);
+            return false;
+        }
+
+        return true;
+    }
+
+    void ReleaseCachedPipelines()
+    {
+        for (PipelineEntry& entry : m_pipelines) {
+            if (entry.pipeline != VK_NULL_HANDLE) {
+                vkDestroyPipeline(m_device, entry.pipeline, nullptr);
+            }
+        }
+        m_pipelines.clear();
+    }
+
+    VkPipeline GetPipelineState(bool isLightmap, VkPrimitiveTopology topology)
+    {
+        if (m_device == VK_NULL_HANDLE || m_renderPass == VK_NULL_HANDLE || m_pipelineLayout == VK_NULL_HANDLE) {
+            return VK_NULL_HANDLE;
+        }
+
+        const VkBool32 blendEnable = m_pipelineState.alphaBlendEnable ? VK_TRUE : VK_FALSE;
+        const VkBlendFactor srcBlend = ConvertBlendFactorVk(m_pipelineState.srcBlend);
+        const VkBlendFactor dstBlend = ConvertBlendFactorVk(m_pipelineState.destBlend);
+        const VkCullModeFlags cullMode = ConvertCullModeVk(m_pipelineState.cullMode);
+
+        for (const PipelineEntry& entry : m_pipelines) {
+            if (entry.isLightmap == isLightmap
+                && entry.topology == topology
+                && entry.blendEnable == blendEnable
+                && entry.srcBlend == srcBlend
+                && entry.dstBlend == dstBlend
+                && entry.cullMode == cullMode) {
+                return entry.pipeline;
+            }
+        }
+
+        const VkVertexInputBindingDescription bindingDesc = {
+            0,
+            static_cast<uint32_t>(isLightmap ? sizeof(lmtlvertex3d) : sizeof(tlvertex3d)),
+            VK_VERTEX_INPUT_RATE_VERTEX,
+        };
+
+        const VkVertexInputAttributeDescription tlAttributes[] = {
+            { 0, 0, VK_FORMAT_R32G32B32A32_SFLOAT, static_cast<uint32_t>(offsetof(tlvertex3d, x)) },
+            { 1, 0, VK_FORMAT_B8G8R8A8_UNORM, static_cast<uint32_t>(offsetof(tlvertex3d, color)) },
+            { 2, 0, VK_FORMAT_R32G32_SFLOAT, static_cast<uint32_t>(offsetof(tlvertex3d, tu)) },
+        };
+        const VkVertexInputAttributeDescription lmAttributes[] = {
+            { 0, 0, VK_FORMAT_R32G32B32A32_SFLOAT, static_cast<uint32_t>(offsetof(lmtlvertex3d, vert) + offsetof(tlvertex3d, x)) },
+            { 1, 0, VK_FORMAT_B8G8R8A8_UNORM, static_cast<uint32_t>(offsetof(lmtlvertex3d, vert) + offsetof(tlvertex3d, color)) },
+            { 2, 0, VK_FORMAT_R32G32_SFLOAT, static_cast<uint32_t>(offsetof(lmtlvertex3d, vert) + offsetof(tlvertex3d, tu)) },
+            { 3, 0, VK_FORMAT_R32G32_SFLOAT, static_cast<uint32_t>(offsetof(lmtlvertex3d, tu2)) },
+        };
+
+        VkPipelineVertexInputStateCreateInfo vertexInputInfo{};
+        vertexInputInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+        vertexInputInfo.vertexBindingDescriptionCount = 1;
+        vertexInputInfo.pVertexBindingDescriptions = &bindingDesc;
+        vertexInputInfo.vertexAttributeDescriptionCount = isLightmap ? static_cast<uint32_t>(std::size(lmAttributes)) : static_cast<uint32_t>(std::size(tlAttributes));
+        vertexInputInfo.pVertexAttributeDescriptions = isLightmap ? lmAttributes : tlAttributes;
+
+        VkPipelineInputAssemblyStateCreateInfo inputAssembly{};
+        inputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
+        inputAssembly.topology = topology;
+        inputAssembly.primitiveRestartEnable = VK_FALSE;
+
+        VkPipelineViewportStateCreateInfo viewportState{};
+        viewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+        VkViewport viewport{};
+        viewport.width = 1.0f;
+        viewport.height = 1.0f;
+        viewport.maxDepth = 1.0f;
+        VkRect2D scissor{};
+        scissor.extent.width = 1;
+        scissor.extent.height = 1;
+        viewportState.viewportCount = 1;
+        viewportState.pViewports = &viewport;
+        viewportState.scissorCount = 1;
+        viewportState.pScissors = &scissor;
+
+        VkPipelineRasterizationStateCreateInfo rasterizer{};
+        rasterizer.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+        rasterizer.depthClampEnable = VK_FALSE;
+        rasterizer.rasterizerDiscardEnable = VK_FALSE;
+        rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
+        rasterizer.cullMode = cullMode;
+        rasterizer.frontFace = VK_FRONT_FACE_CLOCKWISE;
+        rasterizer.depthBiasEnable = VK_FALSE;
+        rasterizer.lineWidth = 1.0f;
+
+        VkPipelineMultisampleStateCreateInfo multisampling{};
+        multisampling.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+        multisampling.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+
+        VkPipelineDepthStencilStateCreateInfo depthStencil{};
+        depthStencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
+        depthStencil.depthTestEnable = VK_FALSE;
+        depthStencil.depthWriteEnable = VK_FALSE;
+        depthStencil.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
+        depthStencil.stencilTestEnable = VK_FALSE;
+
+        VkPipelineColorBlendAttachmentState colorBlendAttachment{};
+        colorBlendAttachment.blendEnable = blendEnable;
+        colorBlendAttachment.srcColorBlendFactor = srcBlend;
+        colorBlendAttachment.dstColorBlendFactor = dstBlend;
+        colorBlendAttachment.colorBlendOp = VK_BLEND_OP_ADD;
+        colorBlendAttachment.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+        colorBlendAttachment.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
+        colorBlendAttachment.alphaBlendOp = VK_BLEND_OP_ADD;
+        colorBlendAttachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT
+            | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+
+        VkPipelineColorBlendStateCreateInfo colorBlending{};
+        colorBlending.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+        colorBlending.logicOpEnable = VK_FALSE;
+        colorBlending.attachmentCount = 1;
+        colorBlending.pAttachments = &colorBlendAttachment;
+
+        const VkDynamicState dynamicStates[] = {
+            VK_DYNAMIC_STATE_VIEWPORT,
+            VK_DYNAMIC_STATE_SCISSOR,
+        };
+        VkPipelineDynamicStateCreateInfo dynamicState{};
+        dynamicState.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
+        dynamicState.dynamicStateCount = static_cast<uint32_t>(std::size(dynamicStates));
+        dynamicState.pDynamicStates = dynamicStates;
+
+        VkPipelineShaderStageCreateInfo shaderStages[2]{};
+        shaderStages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+        shaderStages[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
+        shaderStages[0].module = isLightmap ? m_vertexShaderLmModule : m_vertexShaderTlModule;
+        shaderStages[0].pName = isLightmap ? "VSMainLM" : "VSMainTL";
+        shaderStages[1].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+        shaderStages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+        shaderStages[1].module = m_fragmentShaderModule;
+        shaderStages[1].pName = "PSMain";
+
+        VkGraphicsPipelineCreateInfo pipelineInfo{};
+        pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+        pipelineInfo.stageCount = static_cast<uint32_t>(std::size(shaderStages));
+        pipelineInfo.pStages = shaderStages;
+        pipelineInfo.pVertexInputState = &vertexInputInfo;
+        pipelineInfo.pInputAssemblyState = &inputAssembly;
+        pipelineInfo.pViewportState = &viewportState;
+        pipelineInfo.pRasterizationState = &rasterizer;
+        pipelineInfo.pMultisampleState = &multisampling;
+        pipelineInfo.pDepthStencilState = &depthStencil;
+        pipelineInfo.pColorBlendState = &colorBlending;
+        pipelineInfo.pDynamicState = &dynamicState;
+        pipelineInfo.layout = m_pipelineLayout;
+        pipelineInfo.renderPass = m_renderPass;
+        pipelineInfo.subpass = 0;
+
+        VkPipeline pipeline = VK_NULL_HANDLE;
+        const VkResult result = vkCreateGraphicsPipelines(m_device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &pipeline);
+        if (result != VK_SUCCESS) {
+            m_bootstrap.initHr = static_cast<int>(result);
+            return VK_NULL_HANDLE;
+        }
+
+        m_pipelines.push_back({ isLightmap, topology, blendEnable, srcBlend, dstBlend, cullMode, pipeline });
+        return pipeline;
+    }
+
+    bool CreateHostVisibleBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VkBuffer* outBuffer, VkDeviceMemory* outMemory)
+    {
+        if (!outBuffer || !outMemory || size == 0) {
+            return false;
+        }
+
+        *outBuffer = VK_NULL_HANDLE;
+        *outMemory = VK_NULL_HANDLE;
+
+        VkBufferCreateInfo bufferInfo{};
+        bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+        bufferInfo.size = size;
+        bufferInfo.usage = usage;
+        bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+        VkResult result = vkCreateBuffer(m_device, &bufferInfo, nullptr, outBuffer);
+        if (result != VK_SUCCESS) {
+            m_bootstrap.initHr = static_cast<int>(result);
+            return false;
+        }
+
+        VkMemoryRequirements memoryRequirements{};
+        vkGetBufferMemoryRequirements(m_device, *outBuffer, &memoryRequirements);
+
+        VkMemoryAllocateInfo allocInfo{};
+        allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+        allocInfo.allocationSize = memoryRequirements.size;
+        allocInfo.memoryTypeIndex = FindMemoryType(
+            memoryRequirements.memoryTypeBits,
+            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+        if (allocInfo.memoryTypeIndex == kInvalidQueueFamilyIndex) {
+            vkDestroyBuffer(m_device, *outBuffer, nullptr);
+            *outBuffer = VK_NULL_HANDLE;
+            m_bootstrap.initHr = static_cast<int>(VK_ERROR_MEMORY_MAP_FAILED);
+            return false;
+        }
+
+        result = vkAllocateMemory(m_device, &allocInfo, nullptr, outMemory);
+        if (result != VK_SUCCESS) {
+            vkDestroyBuffer(m_device, *outBuffer, nullptr);
+            *outBuffer = VK_NULL_HANDLE;
+            m_bootstrap.initHr = static_cast<int>(result);
+            return false;
+        }
+
+        result = vkBindBufferMemory(m_device, *outBuffer, *outMemory, 0);
+        if (result != VK_SUCCESS) {
+            vkDestroyBuffer(m_device, *outBuffer, nullptr);
+            vkFreeMemory(m_device, *outMemory, nullptr);
+            *outBuffer = VK_NULL_HANDLE;
+            *outMemory = VK_NULL_HANDLE;
+            m_bootstrap.initHr = static_cast<int>(result);
+            return false;
+        }
+
+        return true;
+    }
+
+    void DrawTransformedPrimitive(D3DPRIMITIVETYPE primitiveType, DWORD vertexFormat,
+        const void* vertices, DWORD vertexCount, const unsigned short* indices, DWORD indexCount)
+    {
+        if (!EnsureFrameStarted() || !vertices || vertexCount == 0) {
+            return;
+        }
+
+        const bool isLightmap = vertexFormat == kModernLightmapFvf;
+        if (!isLightmap && vertexFormat != D3DFVF_TLVERTEX) {
+            return;
+        }
+
+        std::vector<unsigned short> convertedIndices;
+        const unsigned short* drawIndices = indices;
+        DWORD drawIndexCount = indexCount;
+        VkPrimitiveTopology topology = ConvertPrimitiveTopologyVk(primitiveType);
+        if (primitiveType == D3DPT_TRIANGLEFAN) {
+            convertedIndices = ::BuildTriangleFanIndices(indices, vertexCount, indexCount);
+            if (convertedIndices.empty()) {
+                return;
+            }
+            drawIndices = convertedIndices.data();
+            drawIndexCount = static_cast<DWORD>(convertedIndices.size());
+            topology = ConvertPrimitiveTopologyVk(D3DPT_TRIANGLELIST);
+        }
+        if (topology == VK_PRIMITIVE_TOPOLOGY_MAX_ENUM) {
+            return;
+        }
+
+        VkPipeline pipeline = GetPipelineState(isLightmap, topology);
+        if (pipeline == VK_NULL_HANDLE) {
+            return;
+        }
+
+        const size_t vertexStride = isLightmap ? sizeof(lmtlvertex3d) : sizeof(tlvertex3d);
+        const VkDeviceSize vertexBytes = static_cast<VkDeviceSize>(vertexStride) * static_cast<VkDeviceSize>(vertexCount);
+        VkBuffer vertexBuffer = VK_NULL_HANDLE;
+        VkDeviceMemory vertexMemory = VK_NULL_HANDLE;
+        if (!CreateHostVisibleBuffer(vertexBytes, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, &vertexBuffer, &vertexMemory)) {
+            return;
+        }
+
+        void* mapped = nullptr;
+        VkResult result = vkMapMemory(m_device, vertexMemory, 0, vertexBytes, 0, &mapped);
+        if (result != VK_SUCCESS || !mapped) {
+            if (mapped) {
+                vkUnmapMemory(m_device, vertexMemory);
+            }
+            vkDestroyBuffer(m_device, vertexBuffer, nullptr);
+            vkFreeMemory(m_device, vertexMemory, nullptr);
+            m_bootstrap.initHr = static_cast<int>(result);
+            return;
+        }
+        std::memcpy(mapped, vertices, static_cast<size_t>(vertexBytes));
+        vkUnmapMemory(m_device, vertexMemory);
+
+        VkBuffer indexBuffer = VK_NULL_HANDLE;
+        VkDeviceMemory indexMemory = VK_NULL_HANDLE;
+        const bool hasIndices = drawIndices && drawIndexCount > 0;
+        if (hasIndices) {
+            const VkDeviceSize indexBytes = static_cast<VkDeviceSize>(drawIndexCount) * sizeof(unsigned short);
+            if (!CreateHostVisibleBuffer(indexBytes, VK_BUFFER_USAGE_INDEX_BUFFER_BIT, &indexBuffer, &indexMemory)) {
+                vkDestroyBuffer(m_device, vertexBuffer, nullptr);
+                vkFreeMemory(m_device, vertexMemory, nullptr);
+                return;
+            }
+
+            mapped = nullptr;
+            result = vkMapMemory(m_device, indexMemory, 0, indexBytes, 0, &mapped);
+            if (result != VK_SUCCESS || !mapped) {
+                if (mapped) {
+                    vkUnmapMemory(m_device, indexMemory);
+                }
+                vkDestroyBuffer(m_device, indexBuffer, nullptr);
+                vkFreeMemory(m_device, indexMemory, nullptr);
+                vkDestroyBuffer(m_device, vertexBuffer, nullptr);
+                vkFreeMemory(m_device, vertexMemory, nullptr);
+                m_bootstrap.initHr = static_cast<int>(result);
+                return;
+            }
+            std::memcpy(mapped, drawIndices, static_cast<size_t>(indexBytes));
+            vkUnmapMemory(m_device, indexMemory);
+        }
+
+        ModernDrawConstants constants{};
+        constants.screenWidth = static_cast<float>((std::max)(1, m_renderWidth));
+        constants.screenHeight = static_cast<float>((std::max)(1, m_renderHeight));
+        constants.alphaRef = static_cast<float>(m_pipelineState.alphaRef) / 255.0f;
+        constants.flags = BuildModernDrawFlags(vertexFormat, m_pipelineState, false, false);
+
+        VkCommandBuffer commandBuffer = GetCurrentCommandBuffer();
+        const VkDeviceSize vertexOffset = 0;
+        vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
+        vkCmdPushConstants(commandBuffer, m_pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+            0, static_cast<uint32_t>(sizeof(constants)), &constants);
+        vkCmdBindVertexBuffers(commandBuffer, 0, 1, &vertexBuffer, &vertexOffset);
+        if (hasIndices) {
+            vkCmdBindIndexBuffer(commandBuffer, indexBuffer, 0, VK_INDEX_TYPE_UINT16);
+            vkCmdDrawIndexed(commandBuffer, drawIndexCount, 1, 0, 0, 0);
+        } else {
+            vkCmdDraw(commandBuffer, vertexCount, 1, 0, 0);
+        }
+
+        m_pendingReleaseBuffers.push_back(vertexBuffer);
+        m_pendingReleaseMemory.push_back(vertexMemory);
+        if (hasIndices) {
+            m_pendingReleaseBuffers.push_back(indexBuffer);
+            m_pendingReleaseMemory.push_back(indexMemory);
+        }
+    }
 
     bool CreateInstance()
     {
@@ -4636,6 +5112,7 @@ private:
         }
 
         ReleasePendingTransferResources();
+        ReleaseCachedPipelines();
 
         if (!m_commandBuffers.empty()) {
             vkFreeCommandBuffers(m_device, m_commandPool, static_cast<uint32_t>(m_commandBuffers.size()), m_commandBuffers.data());
@@ -4870,6 +5347,10 @@ private:
     VkFormat m_swapChainFormat;
     VkExtent2D m_swapChainExtent;
     VkRenderPass m_renderPass;
+    VkPipelineLayout m_pipelineLayout;
+    VkShaderModule m_vertexShaderTlModule;
+    VkShaderModule m_vertexShaderLmModule;
+    VkShaderModule m_fragmentShaderModule;
     VkCommandPool m_commandPool;
     VkSemaphore m_imageAvailableSemaphore;
     VkSemaphore m_renderFinishedSemaphore;
@@ -4881,10 +5362,13 @@ private:
     bool m_renderPassActive;
     bool m_pendingDepthClear;
     VkClearColorValue m_pendingClearColor;
+    ModernFixedFunctionState m_pipelineState;
+    CTexture* m_boundTextures[kModernTextureSlotCount];
     std::vector<VkImage> m_swapChainImages;
     std::vector<VkImageView> m_swapChainImageViews;
     std::vector<VkFramebuffer> m_framebuffers;
     std::vector<VkCommandBuffer> m_commandBuffers;
+    std::vector<PipelineEntry> m_pipelines;
     std::vector<VkBuffer> m_pendingReleaseBuffers;
     std::vector<VkDeviceMemory> m_pendingReleaseMemory;
 
@@ -5122,3 +5606,67 @@ IRenderDevice& GetRenderDevice()
     static RoutedRenderDevice s_renderDevice;
     return s_renderDevice;
 }
+
+#if RO_HAS_VULKAN
+namespace {
+
+VkPrimitiveTopology ConvertPrimitiveTopologyVk(D3DPRIMITIVETYPE primitiveType)
+{
+    switch (primitiveType) {
+    case D3DPT_POINTLIST:
+        return VK_PRIMITIVE_TOPOLOGY_POINT_LIST;
+    case D3DPT_LINELIST:
+        return VK_PRIMITIVE_TOPOLOGY_LINE_LIST;
+    case D3DPT_LINESTRIP:
+        return VK_PRIMITIVE_TOPOLOGY_LINE_STRIP;
+    case D3DPT_TRIANGLELIST:
+        return VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+    case D3DPT_TRIANGLESTRIP:
+        return VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP;
+    default:
+        return VK_PRIMITIVE_TOPOLOGY_MAX_ENUM;
+    }
+}
+
+VkBlendFactor ConvertBlendFactorVk(D3DBLEND blend)
+{
+    switch (blend) {
+    case D3DBLEND_ZERO:
+        return VK_BLEND_FACTOR_ZERO;
+    case D3DBLEND_ONE:
+        return VK_BLEND_FACTOR_ONE;
+    case D3DBLEND_SRCCOLOR:
+        return VK_BLEND_FACTOR_SRC_COLOR;
+    case D3DBLEND_INVSRCCOLOR:
+        return VK_BLEND_FACTOR_ONE_MINUS_SRC_COLOR;
+    case D3DBLEND_SRCALPHA:
+        return VK_BLEND_FACTOR_SRC_ALPHA;
+    case D3DBLEND_INVSRCALPHA:
+        return VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+    case D3DBLEND_DESTALPHA:
+        return VK_BLEND_FACTOR_DST_ALPHA;
+    case D3DBLEND_INVDESTALPHA:
+        return VK_BLEND_FACTOR_ONE_MINUS_DST_ALPHA;
+    case D3DBLEND_DESTCOLOR:
+        return VK_BLEND_FACTOR_DST_COLOR;
+    case D3DBLEND_INVDESTCOLOR:
+        return VK_BLEND_FACTOR_ONE_MINUS_DST_COLOR;
+    default:
+        return VK_BLEND_FACTOR_ONE;
+    }
+}
+
+VkCullModeFlags ConvertCullModeVk(D3DCULL cullMode)
+{
+    switch (cullMode) {
+    case D3DCULL_CW:
+        return VK_CULL_MODE_FRONT_BIT;
+    case D3DCULL_CCW:
+        return VK_CULL_MODE_BACK_BIT;
+    default:
+        return VK_CULL_MODE_NONE;
+    }
+}
+
+} // namespace
+#endif

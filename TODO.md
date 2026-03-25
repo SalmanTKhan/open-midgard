@@ -62,7 +62,7 @@ Goal: ship Direct3D12 and Vulkan as real renderer options, selectable from the i
 - [x] Fall back cleanly to D3D11 when Vulkan initialization fails.
 
 ### Milestone 8 — Vulkan Rendering Parity
-- [ ] Port transformed-vertex draw path to Vulkan.
+- [x] Port transformed-vertex draw path to Vulkan.
 - [ ] Port texture creation / upload / binding to Vulkan.
 - [ ] Port alpha, blend, depth, and lightmap behavior to Vulkan.
 - [ ] Port overlay composition upload before present on Vulkan.
