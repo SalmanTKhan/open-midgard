@@ -137,7 +137,7 @@ void CLoginMode::OnInit(const char* worldName) {
 }
 
 void CLoginMode::OnExit() {
-    SetWindowTextA(g_hMainWnd, WINDOW_NAME);
+    RefreshMainWindowTitle();
 }
 
 int CLoginMode::OnRun() {
@@ -511,9 +511,7 @@ void CLoginMode::SetLoginStatus(const char* status)
 
     m_strErrorInfo = status;
     g_windowMgr.SetLoginStatus(m_strErrorInfo);
-    if (g_hMainWnd) {
-        SetWindowTextA(g_hMainWnd, status);
-    }
+    RefreshMainWindowTitle(status);
 }
 
 bool CLoginMode::LoadClientInfoCandidates()

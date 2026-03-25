@@ -32,6 +32,7 @@
 #include "res/PaletteRes.h"
 #include "res/ImfRes.h"
 #include "res/WorldRes.h"
+#include "DebugLog.h"
 #include <windows.h>
 #include <mmsystem.h>
 #include <commctrl.h>
@@ -40,6 +41,7 @@
 #include <io.h>
 #include <algorithm>
 #include <objbase.h>
+#include <string>
 
 // ---------------------------------------------------------------------------
 // Window constants
@@ -64,6 +66,7 @@ char      g_baseDir3[MAX_PATH] = {};
 
 CFileMgr  g_fileMgr;
 int       g_readFolderFirst = 0;   // 0=PAK-first, 1=disk-first
+static RenderBackendType g_activeRenderBackend = RenderBackendType::LegacyDirect3D7;
 
 // Registry path used by the original client
 static const char g_regPath[] = "Software\\Gravity Soft\\Ragnarok Online";
@@ -84,6 +87,19 @@ void ErrorMsg(const char* msg)
 }
 
 void ErrorMsg(int /*msgId*/) {}
+
+void RefreshMainWindowTitle(const char* status)
+{
+    if (!g_hMainWnd) {
+        return;
+    }
+
+    std::string title = (status && *status) ? std::string(status) : std::string(WINDOW_NAME);
+    title += " [";
+    title += GetRenderBackendName(g_activeRenderBackend);
+    title += "]";
+    SetWindowTextA(g_hMainWnd, title.c_str());
+}
 
 // ---------------------------------------------------------------------------
 // Registry helper
@@ -217,7 +233,7 @@ bool InitApp(HINSTANCE hInstance, int nCmdShow)
     g_hInstance = hInstance;
 
     // Check for duplicate instance
-    if (FindWindowA(WINDOW_NAME, WINDOW_NAME))
+    if (FindWindowA(WINDOW_NAME, nullptr))
         g_multiSTOP = true;
 
     WNDCLASSA wc    = {};
@@ -297,11 +313,24 @@ static bool InitClientSystems()
         return false;
     }
 
+    SetEnvironmentVariableA("OPEN_MIDGARD_RENDER_BACKEND", "d3d11");
+    DbgLog("[Render] Forcing requested backend to '%s' via OPEN_MIDGARD_RENDER_BACKEND.\n",
+        GetRenderBackendName(GetRequestedRenderBackend()));
+
     RenderBackendBootstrapResult renderBootstrap{};
     if (!GetRenderDevice().Initialize(g_hMainWnd, &renderBootstrap)) {
         ErrorMsg("3D device initialization failed. The game will exit.");
         return false;
     }
+
+    g_activeRenderBackend = renderBootstrap.backend;
+    if (g_activeRenderBackend != RenderBackendType::Direct3D11) {
+        ErrorMsg("D3D11 was requested, but the renderer did not activate the D3D11 backend.");
+        return false;
+    }
+
+    DbgLog("[Render] Active backend confirmed as '%s'.\n", GetRenderBackendName(g_activeRenderBackend));
+    RefreshMainWindowTitle();
 
     GetRenderDevice().RefreshRenderSize();
     const int renderW = GetRenderDevice().GetRenderWidth();

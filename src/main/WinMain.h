@@ -15,6 +15,7 @@ void            ExitApp();
 void            CheckSystemMessage();
 void            SetWindowActiveMode(int active);
 bool            GetWindowActiveMode();
+void            RefreshMainWindowTitle(const char* status = nullptr);
 
 // Patch-upgrade helpers
 bool            UpdatePatch(const char* patchExe, const char* patchUp);
