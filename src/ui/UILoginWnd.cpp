@@ -837,9 +837,11 @@ void UILoginWnd::OnKeyDown(int virtualKey)
 {
     if (virtualKey == VK_RETURN) {
         // Enter → fire Connect button (id 120)
+        PlayUiButtonSound();
         SendMsg(nullptr, 6, 120, 0, 0);
     } else if (virtualKey == VK_ESCAPE) {
         // Escape → fire Exit button (id 155)
+        PlayUiButtonSound();
         SendMsg(nullptr, 6, 155, 0, 0);
     } else if (virtualKey == VK_TAB) {
         // Tab → cycle focus between login and password fields

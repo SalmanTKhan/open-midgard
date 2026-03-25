@@ -1,12 +1,15 @@
 #include "UIWindow.h"
 
+#include "audio/Audio.h"
 #include "core/File.h"
+#include "DebugLog.h"
 #include "main/WinMain.h"
 
 #include <gdiplus.h>
 #include <windows.h>
 
 #include <algorithm>
+#include <array>
 #include <cstring>
 
 #pragma comment(lib, "gdiplus.lib")
@@ -15,6 +18,137 @@
 namespace {
 
 HDC g_sharedUiDrawDC = nullptr;
+
+std::string ToLowerAsciiUi(std::string value)
+{
+    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char ch) {
+        return static_cast<char>(std::tolower(ch));
+    });
+    return value;
+}
+
+std::string NormalizeSlashUi(std::string value)
+{
+    std::replace(value.begin(), value.end(), '/', '\\');
+    return value;
+}
+
+bool ContainsUiToken(const std::string& lowered, const char* token)
+{
+    return lowered.find(token) != std::string::npos;
+}
+
+int ScoreUiButtonSoundCandidate(const std::string& path)
+{
+    const std::string lowered = ToLowerAsciiUi(NormalizeSlashUi(path));
+    if (lowered.size() < 4 || lowered.substr(lowered.size() - 4) != ".wav") {
+        return -1000000;
+    }
+
+    const size_t slashPos = lowered.find_last_of('\\');
+    const std::string fileName = slashPos == std::string::npos ? lowered : lowered.substr(slashPos + 1);
+
+    int score = 0;
+    if (ContainsUiToken(lowered, "\\wav\\")) {
+        score += 80;
+    }
+    if (ContainsUiToken(lowered, "interface") || ContainsUiToken(lowered, "login")) {
+        score += 80;
+    }
+    if (fileName == "click.wav") {
+        score += 1000;
+    }
+    if (fileName == "button.wav") {
+        score += 900;
+    }
+    if (fileName == "btnok.wav" || fileName == "btn_ok.wav") {
+        score += 850;
+    }
+    if (fileName == "ok.wav") {
+        score += 700;
+    }
+    if (ContainsUiToken(fileName, "click")) {
+        score += 450;
+    }
+    if (ContainsUiToken(fileName, "button")) {
+        score += 350;
+    }
+    if (ContainsUiToken(fileName, "btn")) {
+        score += 300;
+    }
+    if (ContainsUiToken(fileName, "ok")) {
+        score += 200;
+    }
+    if (ContainsUiToken(fileName, "enter") || ContainsUiToken(fileName, "confirm")) {
+        score += 150;
+    }
+    if (ContainsUiToken(fileName, "cancel") || ContainsUiToken(fileName, "close") || ContainsUiToken(fileName, "back")) {
+        score += 40;
+    }
+
+    const std::array<const char*, 12> penalizedTokens = {
+        "attack", "atk", "monster", "mob", "npc", "skill", "magic", "foot", "step", "weapon", "arrow", "warp"
+    };
+    for (const char* token : penalizedTokens) {
+        if (ContainsUiToken(lowered, token)) {
+            score -= 250;
+        }
+    }
+
+    return score;
+}
+
+std::string ResolveUiButtonSoundPath()
+{
+    static bool s_resolved = false;
+    static std::string s_cachedPath;
+    if (s_resolved) {
+        return s_cachedPath;
+    }
+    s_resolved = true;
+
+    const std::array<const char*, 12> directCandidates = {
+        "wav\\click.wav",
+        "data\\wav\\click.wav",
+        "wav\\button.wav",
+        "data\\wav\\button.wav",
+        "wav\\btnok.wav",
+        "data\\wav\\btnok.wav",
+        "wav\\btn_ok.wav",
+        "data\\wav\\btn_ok.wav",
+        "wav\\ok.wav",
+        "data\\wav\\ok.wav",
+        "wav\\enter.wav",
+        "data\\wav\\enter.wav"
+    };
+
+    for (const char* candidate : directCandidates) {
+        if (g_fileMgr.IsDataExist(candidate)) {
+            s_cachedPath = candidate;
+            DbgLog("[UI] button sound resolved direct: %s\n", s_cachedPath.c_str());
+            return s_cachedPath;
+        }
+    }
+
+    std::vector<std::string> wavNames;
+    g_fileMgr.CollectDataNamesByExtension("wav", wavNames);
+
+    int bestScore = -1000000;
+    for (const std::string& name : wavNames) {
+        const int score = ScoreUiButtonSoundCandidate(name);
+        if (score > bestScore) {
+            bestScore = score;
+            s_cachedPath = NormalizeSlashUi(name);
+        }
+    }
+
+    if (!s_cachedPath.empty()) {
+        DbgLog("[UI] button sound resolved scored=%d path=%s\n", bestScore, s_cachedPath.c_str());
+    } else {
+        DbgLog("[UI] button sound unresolved\n");
+    }
+    return s_cachedPath;
+}
 
 ULONG_PTR EnsureGdiplusStarted()
 {
@@ -191,6 +325,18 @@ void UIWindow::DrawChildren()
         }
     }
 }
+
+    void PlayUiButtonSound()
+    {
+        const std::string path = ResolveUiButtonSoundPath();
+        if (path.empty()) {
+            return;
+        }
+
+        if (CAudio* audio = CAudio::GetInstance()) {
+            audio->PlaySound(path.c_str());
+        }
+    }
 
 void UIWindow::SetSharedDrawDC(HDC dc)
 {
@@ -491,6 +637,7 @@ void UIBitmapButton::OnLBtnUp(int x, int y)
     if (m_state == 1 && inside) {
         m_state = 2;
         Invalidate();
+        PlayUiButtonSound();
         if (m_parent) {
             m_parent->SendMsg(this, 6, m_id, 0, 0);
         }

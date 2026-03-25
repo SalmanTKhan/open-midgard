@@ -951,12 +951,14 @@ void UISelectCharWnd::OnKeyDown(int virtualKey)
         ChangePage(1);
         break;
     case VK_RETURN:
+        PlayUiButtonSound();
         ActivateSelectedSlot();
         break;
     case VK_DELETE:
         ActivateDelete();
         break;
     case VK_ESCAPE:
+        PlayUiButtonSound();
         g_modeMgr.SendMsg(CLoginMode::LoginMsg_ReturnToLogin, 0, 0, 0);
         break;
     default:

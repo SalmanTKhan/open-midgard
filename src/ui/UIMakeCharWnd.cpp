@@ -807,8 +807,10 @@ int UIMakeCharWnd::SendMsg(UIWindow* sender, int msg, int wparam, int lparam, in
 void UIMakeCharWnd::OnKeyDown(int virtualKey)
 {
     if (virtualKey == VK_RETURN) {
+        PlayUiButtonSound();
         SendMsg(nullptr, 6, 118, 0, 0);
     } else if (virtualKey == VK_ESCAPE) {
+        PlayUiButtonSound();
         SendMsg(nullptr, 6, 119, 0, 0);
     }
 }

@@ -6,6 +6,8 @@
 
 class CDC;
 
+void PlayUiButtonSound();
+
 struct BOXINFO {
     int x;
     int y;
