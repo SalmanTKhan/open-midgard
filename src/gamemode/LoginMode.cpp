@@ -5,6 +5,7 @@
 #include "ui/UIWaitWnd.h"
 #include "render/Renderer.h"
 #include "render3d/Device.h"
+#include "render3d/RenderDevice.h"
 #include "core/ClientInfoLocale.h"
 #include "core/File.h"
 #include "core/Globals.h"
@@ -162,8 +163,13 @@ void CLoginMode::OnUpdate() {
     }
 
     g_windowMgr.OnProcess();
+    const bool hasLegacyDevice = GetRenderDevice().GetLegacyDevice() != nullptr;
+    g_windowMgr.SetComposeCursorState(m_cursorActNum, m_mouseAnimStartTick, !hasLegacyDevice);
     g_windowMgr.OnDraw();
-    DrawModeCursor(m_cursorActNum, m_mouseAnimStartTick);
+    g_windowMgr.SetComposeCursorState(m_cursorActNum, m_mouseAnimStartTick, false);
+    if (hasLegacyDevice) {
+        DrawModeCursor(m_cursorActNum, m_mouseAnimStartTick);
+    }
 
     Sleep(16);
 }

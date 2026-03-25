@@ -9,6 +9,7 @@
 #include "UIOptionWnd.h"
 #include "UISelectCharWnd.h"
 #include "UIWaitWnd.h"
+#include "gamemode/CursorRenderer.h"
 
 #include "core/File.h"
 #include "res/Bitmap.h"
@@ -156,7 +157,8 @@ UIWindowMgr::UIWindowMgr()
       m_captureWindow(nullptr), m_editWindow(nullptr), m_modalWindow(nullptr), m_lastHitWindow(nullptr),
       m_loadingWnd(nullptr), m_minimapZoomWnd(nullptr), m_statusWnd(nullptr), m_chatWnd(nullptr),
       m_loginWnd(nullptr), m_selectCharWnd(nullptr), m_makeCharWnd(nullptr), m_chooseWnd(nullptr), m_optionWnd(nullptr), m_itemWnd(nullptr), m_questWnd(nullptr), m_basicInfoWnd(nullptr), m_equipWnd(nullptr),
-      m_wallpaperSurface(nullptr), m_uiComposeDC(nullptr), m_uiComposeBitmap(nullptr), m_uiComposeBits(nullptr), m_uiComposeWidth(0), m_uiComposeHeight(0)
+      m_wallpaperSurface(nullptr), m_uiComposeDC(nullptr), m_uiComposeBitmap(nullptr), m_uiComposeBits(nullptr), m_uiComposeWidth(0), m_uiComposeHeight(0),
+      m_composeCursorActNum(0), m_composeCursorStartTick(0), m_composeCursorEnabled(false)
 {
     m_loginStatus = "Login: idle";
 }
@@ -517,6 +519,9 @@ void UIWindowMgr::OnDraw() {
         m_itemWnd->DrawHoverOverlay(drawDC, clientRect);
     }
     UIWindow::SetSharedDrawDC(previousSharedDC);
+    if (useCompose && m_composeCursorEnabled) {
+        DrawModeCursorToHdc(drawDC, m_composeCursorActNum, m_composeCursorStartTick);
+    }
     const bool hasModernBackend = GetRenderDevice().GetLegacyDevice() == nullptr;
     bool presentedModernUiFrame = false;
     if (useCompose && hasModernBackend && m_uiComposeBits) {
@@ -678,6 +683,13 @@ void UIWindowMgr::HideLoadingScreen()
     }
     m_loadedWallpaperPath.clear();
     SetWallpaper(nullptr);
+}
+
+void UIWindowMgr::SetComposeCursorState(int cursorActNum, u32 mouseAnimStartTick, bool enabled)
+{
+    m_composeCursorActNum = cursorActNum;
+    m_composeCursorStartTick = mouseAnimStartTick;
+    m_composeCursorEnabled = enabled;
 }
 
 void UIWindowMgr::SendMsg(int msg, int wparam, int lparam) {
