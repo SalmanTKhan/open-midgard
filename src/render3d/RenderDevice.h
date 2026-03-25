@@ -24,6 +24,8 @@ public:
     virtual int ClearColor(unsigned int color) = 0;
     virtual int ClearDepth() = 0;
     virtual int Present(bool vertSync) = 0;
+    virtual bool AcquireBackBufferDC(HDC* outDc) = 0;
+    virtual void ReleaseBackBufferDC(HDC dc) = 0;
 
     virtual bool BeginScene() = 0;
     virtual void EndScene() = 0;

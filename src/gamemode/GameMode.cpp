@@ -23,6 +23,7 @@
 #include "render/Prim.h"
 #include "render/Renderer.h"
 #include "render3d/Device.h"
+#include "render3d/RenderDevice.h"
 #include "world/GameActor.h"
 #include "world/MsgEffect.h"
 #include "world/3dActor.h"
@@ -3659,26 +3660,26 @@ int  CGameMode::OnRun() {
         const DWORD drawSceneStart = GetTickCount();
         g_renderer.DrawScene();
         const DWORD drawSceneEnd = GetTickCount();
-        if (g_3dDevice.m_pddsBackBuffer) {
+        {
             HDC backBufferDc = nullptr;
-            if (SUCCEEDED(g_3dDevice.m_pddsBackBuffer->GetDC(&backBufferDc)) && backBufferDc) {
+            if (GetRenderDevice().AcquireBackBufferDC(&backBufferDc) && backBufferDc) {
                 DrawPlayerVitalsOverlay(*this, backBufferDc);
                 DrawLockedTargetArrow(*this, backBufferDc);
                 DrawLockedTargetName(*this, backBufferDc);
                 DrawHoveredActorName(*this, backBufferDc);
                 DrawQueuedMsgEffects(backBufferDc);
-                g_3dDevice.m_pddsBackBuffer->ReleaseDC(backBufferDc);
+                GetRenderDevice().ReleaseBackBufferDC(backBufferDc);
             }
         }
         const DWORD uiDrawStart = GetTickCount();
         g_windowMgr.OnDraw();
         const DWORD uiDrawEnd = GetTickCount();
         bool drewCursorOnBackBuffer = false;
-        if (g_3dDevice.m_pddsBackBuffer) {
+        {
             HDC backBufferDc = nullptr;
-            if (SUCCEEDED(g_3dDevice.m_pddsBackBuffer->GetDC(&backBufferDc)) && backBufferDc) {
+            if (GetRenderDevice().AcquireBackBufferDC(&backBufferDc) && backBufferDc) {
                 drewCursorOnBackBuffer = DrawModeCursorToHdc(backBufferDc, m_cursorActNum, m_mouseAnimStartTick);
-                g_3dDevice.m_pddsBackBuffer->ReleaseDC(backBufferDc);
+                GetRenderDevice().ReleaseBackBufferDC(backBufferDc);
             }
         }
         const DWORD flipStart = GetTickCount();

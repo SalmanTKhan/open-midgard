@@ -174,6 +174,39 @@ public:
         return g_3dDevice.ShowFrame(vertSync);
     }
 
+    bool AcquireBackBufferDC(HDC* outDc) override
+    {
+        if (!outDc) {
+            return false;
+        }
+
+        *outDc = nullptr;
+        IDirectDrawSurface7* backBuffer = g_3dDevice.m_pddsBackBuffer;
+        if (!backBuffer) {
+            return false;
+        }
+
+        HDC dc = nullptr;
+        if (FAILED(backBuffer->GetDC(&dc)) || !dc) {
+            return false;
+        }
+
+        *outDc = dc;
+        return true;
+    }
+
+    void ReleaseBackBufferDC(HDC dc) override
+    {
+        if (!dc) {
+            return;
+        }
+
+        IDirectDrawSurface7* backBuffer = g_3dDevice.m_pddsBackBuffer;
+        if (backBuffer) {
+            backBuffer->ReleaseDC(dc);
+        }
+    }
+
     bool BeginScene() override
     {
         IDirect3DDevice7* device = g_3dDevice.m_pd3dDevice;

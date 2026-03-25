@@ -13,6 +13,7 @@
 #include "core/File.h"
 #include "res/Bitmap.h"
 #include "render3d/Device.h"
+#include "render3d/RenderDevice.h"
 #include "res/Texture.h"
 #include "main/WinMain.h"
 #include "DebugLog.h"
@@ -434,9 +435,9 @@ void UIWindowMgr::OnDraw() {
         (m_makeCharWnd && m_makeCharWnd->m_show != 0) ||
         (m_loadingWnd && m_loadingWnd->m_show != 0);
 
-    if (!hasMenuUi && g_3dDevice.m_pddsBackBuffer) {
+    if (!hasMenuUi) {
         HDC backBufferDC = nullptr;
-        if (SUCCEEDED(g_3dDevice.m_pddsBackBuffer->GetDC(&backBufferDC)) && backBufferDC) {
+        if (GetRenderDevice().AcquireBackBufferDC(&backBufferDC) && backBufferDC) {
             RECT clientRect{};
             GetClientRect(g_hMainWnd, &clientRect);
             HDC previousSharedDC = UIWindow::GetSharedDrawDC();
@@ -450,9 +451,9 @@ void UIWindowMgr::OnDraw() {
                 m_itemWnd->DrawHoverOverlay(backBufferDC, clientRect);
             }
             UIWindow::SetSharedDrawDC(previousSharedDC);
-            g_3dDevice.m_pddsBackBuffer->ReleaseDC(backBufferDC);
+            GetRenderDevice().ReleaseBackBufferDC(backBufferDC);
+            return;
         }
-        return;
     }
 
     HDC targetDC = GetDC(g_hMainWnd);
