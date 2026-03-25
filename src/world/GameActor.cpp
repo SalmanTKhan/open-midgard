@@ -5,6 +5,7 @@
 #include "DebugLog.h"
 #include "render/DC.h"
 #include "render3d/Device.h"
+#include "render3d/RenderDevice.h"
 #include "res/ImfRes.h"
 #include "res/PaletteRes.h"
 #include "session/Session.h"
@@ -1883,6 +1884,8 @@ CActRes* ResolveRuntimeActorActRes(CRenderObject* object)
 
 bool CPc::EnsureBillboardTexture(float cameraLongitude)
 {
+    const bool isVulkanBackend = GetRenderDevice().GetBackendType() == RenderBackendType::Vulkan;
+
     const int actorDir = ResolvePcFacingDir(this);
     const float actorRotationDegrees = ActorRotationDegreesFromDir(actorDir);
     const bool isPlayerStyleActor = m_isPc != 0;
@@ -1977,6 +1980,20 @@ bool CPc::EnsureBillboardTexture(float cameraLongitude)
     std::vector<unsigned int> pixels(composeSurface.GetImageData(),
         composeSurface.GetImageData() + static_cast<size_t>(composeSurface.GetWidth()) * static_cast<size_t>(composeSurface.GetHeight()));
     UnpremultiplyPixels(pixels);
+
+    if (isVulkanBackend) {
+        static DWORD s_vulkanBillboardUploadTick = 0;
+        static unsigned int s_vulkanBillboardUploadsThisTick = 0;
+        const DWORD tick = timeGetTime();
+        if (tick != s_vulkanBillboardUploadTick) {
+            s_vulkanBillboardUploadTick = tick;
+            s_vulkanBillboardUploadsThisTick = 0;
+        }
+        if (s_vulkanBillboardUploadsThisTick >= 4u) {
+            return false;
+        }
+        ++s_vulkanBillboardUploadsThisTick;
+    }
 
     if (!m_billboardTexture
         || m_billboardTextureWidth != kPlayerBillboardComposeWidth

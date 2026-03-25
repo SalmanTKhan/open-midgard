@@ -77,7 +77,7 @@ HFONT FontMgr::GetFont(int fontType, int fontHeight, int charset, unsigned char 
         charset,
         OUT_DEFAULT_PRECIS,
         CLIP_DEFAULT_PRECIS,
-        DEFAULT_QUALITY,
+        ANTIALIASED_QUALITY,
         DEFAULT_PITCH | FF_DONTCARE,
         face
     );

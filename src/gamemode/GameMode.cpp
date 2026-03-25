@@ -60,7 +60,8 @@ constexpr u32 kBootstrapLoadBudgetMs = 6;
 constexpr size_t kBootstrapTextureBatch = 2;
 constexpr size_t kBootstrapBackgroundActorBatch = 6;
 constexpr size_t kBootstrapFixedEffectBatch = 12;
-constexpr int kHoverNameFontHeight = 16;
+constexpr int kHoverNameFontHeight = 20;
+constexpr unsigned char kHoverNameFontBold = 1;
 constexpr int kHoverNameTextPadding = 4;
 constexpr int kHoverNameVerticalOffset = 22;
 constexpr int kPlayerVitalsBarWidth = 56;
@@ -78,6 +79,7 @@ constexpr float kLockedTargetMarkerDepthBias = 0.0003f;
 constexpr float kLockedTargetMarkerNearPlane = 80.0f;
 constexpr float kLockedTargetMarkerRotationPerMs = 0.27f;
 constexpr int kLockedTargetArrowYOffset = 6;
+constexpr unsigned int kOverlayTransparentKey = 0x00FF00FFu;
 constexpr float kLockedTargetArrowBouncePerMs = 0.0045f;
 constexpr float kLockedTargetArrowBouncePixels = 4.0f;
 constexpr u32 kHoverNameRequestCooldownMs = 1000;
@@ -109,6 +111,7 @@ void DrawHoveredActorName(CGameMode& mode, HDC hdc);
 void DrawLockedTargetName(CGameMode& mode, HDC hdc);
 void DrawLockedTargetArrow(CGameMode& mode, HDC hdc);
 void DrawPlayerVitalsOverlay(CGameMode& mode, HDC hdc);
+void DrawGameplayOverlayToHdc(CGameMode& mode, HDC targetDc);
 
 void ReleaseOverlayComposeSurface(HDC* composeDc, HBITMAP* composeBitmap, void** composeBits, int* composeWidth, int* composeHeight)
 {
@@ -165,6 +168,127 @@ bool EnsureOverlayComposeSurface(HDC referenceDc, int width, int height,
     SelectObject(*composeDc, *composeBitmap);
     *composeWidth = width;
     *composeHeight = height;
+    return true;
+}
+
+void ClearOverlayComposeBits(void* composeBits, int width, int height)
+{
+    if (!composeBits || width <= 0 || height <= 0) {
+        return;
+    }
+
+    unsigned int* pixels = static_cast<unsigned int*>(composeBits);
+    std::fill_n(pixels, static_cast<size_t>(width) * static_cast<size_t>(height), kOverlayTransparentKey);
+}
+
+void ConvertOverlayComposeBitsToAlpha(void* composeBits, int width, int height)
+{
+    if (!composeBits || width <= 0 || height <= 0) {
+        return;
+    }
+
+    unsigned int* pixels = static_cast<unsigned int*>(composeBits);
+    const size_t pixelCount = static_cast<size_t>(width) * static_cast<size_t>(height);
+    for (size_t index = 0; index < pixelCount; ++index) {
+        const unsigned int rgb = pixels[index] & 0x00FFFFFFu;
+        pixels[index] = (rgb == (kOverlayTransparentKey & 0x00FFFFFFu)) ? 0u : (0xFF000000u | rgb);
+    }
+}
+
+bool QueueModernOverlayQuad(CGameMode& mode, int cursorActNum, u32 mouseAnimStartTick)
+{
+    if (!g_hMainWnd) {
+        return false;
+    }
+
+    RECT clientRect{};
+    GetClientRect(g_hMainWnd, &clientRect);
+    const int clientWidth = clientRect.right - clientRect.left;
+    const int clientHeight = clientRect.bottom - clientRect.top;
+    if (clientWidth <= 0 || clientHeight <= 0) {
+        return false;
+    }
+
+    HDC windowDc = GetDC(g_hMainWnd);
+    if (!windowDc) {
+        return false;
+    }
+
+    static HDC s_overlayComposeDc = nullptr;
+    static HBITMAP s_overlayComposeBitmap = nullptr;
+    static void* s_overlayComposeBits = nullptr;
+    static int s_overlayComposeWidth = 0;
+    static int s_overlayComposeHeight = 0;
+    const bool composeReady = EnsureOverlayComposeSurface(windowDc, clientWidth, clientHeight,
+        &s_overlayComposeDc, &s_overlayComposeBitmap, &s_overlayComposeBits, &s_overlayComposeWidth, &s_overlayComposeHeight);
+    ReleaseDC(g_hMainWnd, windowDc);
+    if (!composeReady) {
+        return false;
+    }
+
+    ClearOverlayComposeBits(s_overlayComposeBits, clientWidth, clientHeight);
+    DrawGameplayOverlayToHdc(mode, s_overlayComposeDc);
+
+    HDC previousSharedDc = UIWindow::GetSharedDrawDC();
+    UIWindow::SetSharedDrawDC(s_overlayComposeDc);
+    g_windowMgr.OnDraw();
+    UIWindow::SetSharedDrawDC(previousSharedDc);
+    DrawModeCursorToHdc(s_overlayComposeDc, cursorActNum, mouseAnimStartTick);
+
+    ConvertOverlayComposeBitsToAlpha(s_overlayComposeBits, clientWidth, clientHeight);
+
+    static CTexture* s_overlayTexture = nullptr;
+    static int s_overlayTextureWidth = 0;
+    static int s_overlayTextureHeight = 0;
+    if (!s_overlayTexture || s_overlayTextureWidth != clientWidth || s_overlayTextureHeight != clientHeight) {
+        delete s_overlayTexture;
+        s_overlayTexture = new CTexture();
+        if (!s_overlayTexture || !s_overlayTexture->Create(clientWidth, clientHeight, PF_A8R8G8B8)) {
+            delete s_overlayTexture;
+            s_overlayTexture = nullptr;
+            s_overlayTextureWidth = 0;
+            s_overlayTextureHeight = 0;
+            return false;
+        }
+        s_overlayTextureWidth = clientWidth;
+        s_overlayTextureHeight = clientHeight;
+    }
+
+    s_overlayTexture->Update(0,
+        0,
+        clientWidth,
+        clientHeight,
+        static_cast<unsigned int*>(s_overlayComposeBits),
+        true,
+        clientWidth * static_cast<int>(sizeof(unsigned int)));
+
+    RPFace* face = g_renderer.BorrowNullRP();
+    if (!face) {
+        return false;
+    }
+
+    const float right = static_cast<float>(clientWidth) - 0.5f;
+    const float bottom = static_cast<float>(clientHeight) - 0.5f;
+    const float maxU = s_overlayTexture->m_w != 0 ? static_cast<float>(clientWidth) / static_cast<float>(s_overlayTexture->m_w) : 1.0f;
+    const float maxV = s_overlayTexture->m_h != 0 ? static_cast<float>(clientHeight) / static_cast<float>(s_overlayTexture->m_h) : 1.0f;
+
+    face->primType = D3DPT_TRIANGLESTRIP;
+    face->verts = face->m_verts;
+    face->numVerts = 4;
+    face->indices = nullptr;
+    face->numIndices = 0;
+    face->tex = s_overlayTexture;
+    face->mtPreset = 0;
+    face->cullMode = D3DCULL_NONE;
+    face->srcAlphaMode = D3DBLEND_SRCALPHA;
+    face->destAlphaMode = D3DBLEND_INVSRCALPHA;
+    face->alphaSortKey = 1.0f;
+
+    face->m_verts[0] = { -0.5f, -0.5f, 0.0f, 1.0f, 0xFFFFFFFFu, 0xFF000000u, 0.0f, 0.0f };
+    face->m_verts[1] = { right, -0.5f, 0.0f, 1.0f, 0xFFFFFFFFu, 0xFF000000u, maxU, 0.0f };
+    face->m_verts[2] = { -0.5f, bottom, 0.0f, 1.0f, 0xFFFFFFFFu, 0xFF000000u, 0.0f, maxV };
+    face->m_verts[3] = { right, bottom, 0.0f, 1.0f, 0xFFFFFFFFu, 0xFF000000u, maxU, maxV };
+    g_renderer.AddRP(face, 1 | 8);
     return true;
 }
 
@@ -805,7 +929,7 @@ void DrawOutlinedScreenText(HDC hdc, int x, int y, const char* text)
     }
 
     DrawDC drawDc(hdc);
-    drawDc.SetFont(FONT_DEFAULT, kHoverNameFontHeight, 0);
+    drawDc.SetFont(FONT_DEFAULT, kHoverNameFontHeight, kHoverNameFontBold);
     SetBkMode(hdc, TRANSPARENT);
 
     const int textLen = static_cast<int>(std::strlen(text));
@@ -848,7 +972,7 @@ void DrawHoveredActorName(CGameMode& mode, HDC hdc)
     }
 
     DrawDC drawDc(hdc);
-    drawDc.SetFont(FONT_DEFAULT, kHoverNameFontHeight, 0);
+    drawDc.SetFont(FONT_DEFAULT, kHoverNameFontHeight, kHoverNameFontBold);
     SIZE textSize{};
     drawDc.GetTextExtentPoint32A(label.c_str(), static_cast<int>(label.size()), &textSize);
     const int textWidth = textSize.cx;
@@ -889,7 +1013,7 @@ void DrawLockedTargetName(CGameMode& mode, HDC hdc)
     }
 
     DrawDC drawDc(hdc);
-    drawDc.SetFont(FONT_DEFAULT, kHoverNameFontHeight, 0);
+    drawDc.SetFont(FONT_DEFAULT, kHoverNameFontHeight, kHoverNameFontBold);
     SIZE textSize{};
     drawDc.GetTextExtentPoint32A(label.c_str(), static_cast<int>(label.size()), &textSize);
     const int drawX = labelX - (textSize.cx / 2);
@@ -3747,6 +3871,7 @@ void CGameMode::OnExit() {
     m_loadingWallpaperName.clear();
 }
 int  CGameMode::OnRun() {
+    const bool mapLoadingWasActive = IsMapLoadingActive(*this);
     const DWORD updateStart = GetTickCount();
     OnUpdate();
     const DWORD updateEnd = GetTickCount();
@@ -3755,6 +3880,11 @@ int  CGameMode::OnRun() {
     const DWORD processUiStart = updateEnd;
     g_windowMgr.OnProcess();
     const DWORD processUiEnd = GetTickCount();
+    if (mapLoadingWasActive && !IsMapLoadingActive(*this)) {
+        DbgLog("[GameMode] deferring first gameplay render after map loading transition for world '%s'\n", m_rswName);
+        Sleep(1);
+        return 1;
+    }
     if (IsMapLoadingActive(*this)) {
         g_windowMgr.OnDraw();
         DrawModeCursor(m_cursorActNum, m_mouseAnimStartTick);
@@ -3775,11 +3905,22 @@ int  CGameMode::OnRun() {
     }
 
     const bool hasLegacyDevice = GetRenderDevice().GetLegacyDevice() != nullptr;
+    const bool isVulkanBackend = GetRenderDevice().GetBackendType() == RenderBackendType::Vulkan;
     g_renderer.ClearBackground();
     g_renderer.Clear(0);
+    static u32 s_gameplayRenderFrame = 0;
+    ++s_gameplayRenderFrame;
     const DWORD renderPrepStart = GetTickCount();
     m_view->OnRender();
     const DWORD renderPrepEnd = GetTickCount();
+    DWORD uiDrawStart = renderPrepEnd;
+    DWORD uiDrawEnd = renderPrepEnd;
+    bool queuedModernOverlayFrame = false;
+    if (!hasLegacyDevice && isVulkanBackend) {
+        uiDrawStart = GetTickCount();
+        queuedModernOverlayFrame = QueueModernOverlayQuad(*this, m_cursorActNum, m_mouseAnimStartTick);
+        uiDrawEnd = GetTickCount();
+    }
     const DWORD drawSceneStart = GetTickCount();
     g_renderer.DrawScene();
     const DWORD drawSceneEnd = GetTickCount();
@@ -3816,10 +3957,24 @@ int  CGameMode::OnRun() {
         g_framePerfStats.drawSceneMs += static_cast<u64>(drawSceneEnd - drawSceneStart);
         g_framePerfStats.uiDrawMs += static_cast<u64>(uiDrawEnd - uiDrawStart);
         g_framePerfStats.flipMs += static_cast<u64>(flipEnd - flipStart);
+
+        if (s_gameplayRenderFrame <= 20 || (s_gameplayRenderFrame % 120u) == 0) {
+            DbgLog("[GameMode] frame=%u legacy=1 update=%lu ui=%lu prep=%lu draw=%lu overlay=%lu flip=%lu\n",
+                static_cast<unsigned int>(s_gameplayRenderFrame),
+                static_cast<unsigned long>(updateEnd - updateStart),
+                static_cast<unsigned long>(processUiEnd - processUiStart),
+                static_cast<unsigned long>(renderPrepEnd - renderPrepStart),
+                static_cast<unsigned long>(drawSceneEnd - drawSceneStart),
+                static_cast<unsigned long>(uiDrawEnd - uiDrawStart),
+                static_cast<unsigned long>(flipEnd - flipStart));
+        }
     } else {
-        const DWORD uiDrawStart = GetTickCount();
-        const bool composedModernOverlayFrame = ComposeModernOverlayFrame(*this, m_cursorActNum, m_mouseAnimStartTick);
-        const DWORD uiDrawEnd = GetTickCount();
+        bool composedModernOverlayFrame = queuedModernOverlayFrame;
+        if (!isVulkanBackend) {
+            uiDrawStart = GetTickCount();
+            composedModernOverlayFrame = ComposeModernOverlayFrame(*this, m_cursorActNum, m_mouseAnimStartTick);
+            uiDrawEnd = GetTickCount();
+        }
         const DWORD flipStart = GetTickCount();
         g_renderer.Flip(false);
         const DWORD flipEnd = GetTickCount();
@@ -3827,10 +3982,15 @@ int  CGameMode::OnRun() {
             HDC windowDc = GetDC(g_hMainWnd);
             if (windowDc) {
                 DrawGameplayOverlayToHdc(*this, windowDc);
+                HDC previousSharedDc = UIWindow::GetSharedDrawDC();
+                UIWindow::SetSharedDrawDC(windowDc);
+                g_windowMgr.OnDraw();
+                UIWindow::SetSharedDrawDC(previousSharedDc);
+                DrawModeCursorToHdc(windowDc, m_cursorActNum, m_mouseAnimStartTick);
                 ReleaseDC(g_hMainWnd, windowDc);
+            } else if (!isVulkanBackend) {
+                DrawModeCursor(m_cursorActNum, m_mouseAnimStartTick);
             }
-            g_windowMgr.OnDraw();
-            DrawModeCursor(m_cursorActNum, m_mouseAnimStartTick);
         }
 
         g_framePerfStats.frames += 1;
@@ -3840,6 +4000,18 @@ int  CGameMode::OnRun() {
         g_framePerfStats.drawSceneMs += static_cast<u64>(drawSceneEnd - drawSceneStart);
         g_framePerfStats.uiDrawMs += static_cast<u64>(uiDrawEnd - uiDrawStart);
         g_framePerfStats.flipMs += static_cast<u64>(flipEnd - flipStart);
+
+        if (s_gameplayRenderFrame <= 20 || (s_gameplayRenderFrame % 120u) == 0) {
+            DbgLog("[GameMode] frame=%u legacy=0 update=%lu ui=%lu prep=%lu draw=%lu overlay=%lu flip=%lu composed=%d\n",
+                static_cast<unsigned int>(s_gameplayRenderFrame),
+                static_cast<unsigned long>(updateEnd - updateStart),
+                static_cast<unsigned long>(processUiEnd - processUiStart),
+                static_cast<unsigned long>(renderPrepEnd - renderPrepStart),
+                static_cast<unsigned long>(drawSceneEnd - drawSceneStart),
+                static_cast<unsigned long>(uiDrawEnd - uiDrawStart),
+                static_cast<unsigned long>(flipEnd - flipStart),
+                composedModernOverlayFrame ? 1 : 0);
+        }
     }
 
     Sleep(1);
@@ -3884,7 +4056,7 @@ void CGameMode::OnUpdate() {
             const matrix* viewMatrix = m_view ? &m_view->GetViewMatrix() : nullptr;
             m_world->UpdateBackgroundObjects(viewMatrix);
         }
-        UpdateGameplayCursor(*this);
+        SetModeCursorAction(*this, CursorAction::Arrow);
         return;
     }
 

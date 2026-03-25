@@ -17,6 +17,7 @@ void            CheckSystemMessage();
 void            SetWindowActiveMode(int active);
 bool            GetWindowActiveMode();
 void            RefreshMainWindowTitle(const char* status = nullptr);
+void            RecordMainWindowFrame();
 RenderBackendType GetActiveRenderBackend();
 bool            RelaunchCurrentApplication();
 

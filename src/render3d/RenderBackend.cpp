@@ -1,6 +1,6 @@
 #include "RenderBackend.h"
 
-#include "Device.h"
+#include "RenderDevice.h"
 #include "DebugLog.h"
 
 #include <d3d11.h>
@@ -32,9 +32,10 @@ void SafeRelease(T*& value)
 struct RenderBackendSupportCache {
     int d3d11;
     int d3d12;
+    int vulkan;
 };
 
-RenderBackendSupportCache g_supportCache = { -1, -1 };
+RenderBackendSupportCache g_supportCache = { -1, -1, -1 };
 
 RenderBackendType ParseRenderBackendName(const char* value)
 {
@@ -68,24 +69,6 @@ RenderBackendType ParseRenderBackendName(const char* value)
 bool IsValidStoredBackend(DWORD rawValue)
 {
     return rawValue <= static_cast<DWORD>(RenderBackendType::Vulkan);
-}
-
-int InitializeLegacyDirect3D7(HWND hwnd)
-{
-    GUID deviceCandidates[] = {
-        IID_IDirect3DTnLHalDevice,
-        IID_IDirect3DHALDevice,
-        IID_IDirect3DRGBDevice
-    };
-
-    int renderInitHr = -1;
-    for (GUID& deviceGuid : deviceCandidates) {
-        renderInitHr = g_3dDevice.Init(hwnd, nullptr, &deviceGuid, nullptr, 0);
-        if (renderInitHr >= 0) {
-            break;
-        }
-    }
-    return renderInitHr;
 }
 
 bool ProbeD3D11Support()
@@ -153,6 +136,23 @@ bool ProbeD3D12Support()
     return SUCCEEDED(hr);
 }
 
+bool ProbeVulkanSupport()
+{
+#if RO_HAS_VULKAN
+    HMODULE module = LoadLibraryA("vulkan-1.dll");
+    if (!module) {
+        return false;
+    }
+
+    const FARPROC getInstanceProcAddr = GetProcAddress(module, "vkGetInstanceProcAddr");
+    const FARPROC createInstance = GetProcAddress(module, "vkCreateInstance");
+    FreeLibrary(module);
+    return getInstanceProcAddr != nullptr && createInstance != nullptr;
+#else
+    return false;
+#endif
+}
+
 } // namespace
 
 const char* GetRenderBackendName(RenderBackendType backend)
@@ -180,6 +180,8 @@ bool IsRenderBackendImplemented(RenderBackendType backend)
         return true;
 
     case RenderBackendType::Vulkan:
+        return RO_HAS_VULKAN != 0;
+
     default:
         return false;
     }
@@ -204,6 +206,14 @@ bool IsRenderBackendSupported(RenderBackendType backend)
         return g_supportCache.d3d12 != 0;
 
     case RenderBackendType::Vulkan:
+        if (!IsRenderBackendImplemented(backend)) {
+            return false;
+        }
+        if (g_supportCache.vulkan < 0) {
+            g_supportCache.vulkan = ProbeVulkanSupport() ? 1 : 0;
+        }
+        return g_supportCache.vulkan != 0;
+
     default:
         return false;
     }
@@ -265,38 +275,5 @@ RenderBackendType GetRequestedRenderBackend()
 
 bool InitializeRenderBackend(HWND hwnd, RenderBackendBootstrapResult* outResult)
 {
-    const RenderBackendType requestedBackend = GetRequestedRenderBackend();
-    RenderBackendBootstrapResult result{};
-    result.backend = requestedBackend;
-    result.initHr = -1;
-
-    switch (requestedBackend) {
-    case RenderBackendType::Direct3D11:
-    case RenderBackendType::Direct3D12:
-        DbgLog("[Render] Requested backend '%s' is not implemented yet. Falling back to Direct3D7.\n",
-            GetRenderBackendName(requestedBackend));
-        result.backend = RenderBackendType::LegacyDirect3D7;
-        break;
-
-    case RenderBackendType::Vulkan:
-        DbgLog("[Render] Requested backend '%s' is not implemented yet. Falling back to Direct3D11, then Direct3D7 if needed.\n",
-            GetRenderBackendName(requestedBackend));
-        result.backend = RenderBackendType::LegacyDirect3D7;
-        break;
-
-    case RenderBackendType::LegacyDirect3D7:
-    default:
-        result.backend = RenderBackendType::LegacyDirect3D7;
-        break;
-    }
-
-    result.initHr = InitializeLegacyDirect3D7(hwnd);
-    if (result.initHr >= 0) {
-        DbgLog("[Render] Initialized backend '%s'.\n", GetRenderBackendName(result.backend));
-    }
-
-    if (outResult) {
-        *outResult = result;
-    }
-    return result.initHr >= 0;
+    return GetRenderDevice().Initialize(hwnd, outResult);
 }

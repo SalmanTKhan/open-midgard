@@ -523,8 +523,10 @@ void UIWindowMgr::OnDraw() {
         DrawModeCursorToHdc(drawDC, m_composeCursorActNum, m_composeCursorStartTick);
     }
     const bool hasModernBackend = GetRenderDevice().GetLegacyDevice() == nullptr;
+    const bool allowModernUiPresent = hasModernBackend
+        && GetRenderDevice().GetBackendType() != RenderBackendType::Vulkan;
     bool presentedModernUiFrame = false;
-    if (useCompose && hasModernBackend && m_uiComposeBits) {
+    if (useCompose && allowModernUiPresent && m_uiComposeBits) {
         presentedModernUiFrame = GetRenderDevice().UpdateBackBufferFromMemory(
             m_uiComposeBits,
             clientWidth,

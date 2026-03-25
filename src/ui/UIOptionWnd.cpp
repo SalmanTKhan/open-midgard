@@ -36,7 +36,7 @@ constexpr char kOptionWndItemSnapValue[] = "OptionWndItemSnap";
 constexpr char kOptionWndCollapsedValue[] = "OptionWndCollapsed";
 
 constexpr int kDefaultWidth = 280;
-constexpr int kDefaultHeight = 156;
+constexpr int kDefaultHeight = 182;
 constexpr int kCollapsedHeight = 17;
 constexpr int kTitleBarHeight = 17;
 constexpr int kDefaultX = 185;
@@ -44,6 +44,7 @@ constexpr int kDefaultY = 300;
 constexpr int kSliderMin = 0;
 constexpr int kSliderMax = 127;
 constexpr int kRendererEntryCount = 4;
+constexpr int kRendererRowHeight = 16;
 
 constexpr int kCheckIdBgm = 401;
 constexpr int kCheckIdSound = 402;
@@ -528,19 +529,19 @@ void UIOptionWnd::LayoutControls()
         m_soundOnCheckBox->SetShow(m_collapsed ? 0 : 1);
     }
     if (m_noCtrlCheckBox) {
-        m_noCtrlCheckBox->Move(m_x + 11, m_y + 136);
+        m_noCtrlCheckBox->Move(m_x + 11, m_y + 160);
         m_noCtrlCheckBox->SetShow(m_collapsed ? 0 : 1);
     }
     if (m_attackSnapCheckBox) {
-        m_attackSnapCheckBox->Move(m_x + 112, m_y + 136);
+        m_attackSnapCheckBox->Move(m_x + 112, m_y + 160);
         m_attackSnapCheckBox->SetShow(m_collapsed ? 0 : 1);
     }
     if (m_skillSnapCheckBox) {
-        m_skillSnapCheckBox->Move(m_x + 162, m_y + 136);
+        m_skillSnapCheckBox->Move(m_x + 162, m_y + 160);
         m_skillSnapCheckBox->SetShow(m_collapsed ? 0 : 1);
     }
     if (m_itemSnapCheckBox) {
-        m_itemSnapCheckBox->Move(m_x + 204, m_y + 136);
+        m_itemSnapCheckBox->Move(m_x + 204, m_y + 160);
         m_itemSnapCheckBox->SetShow(m_collapsed ? 0 : 1);
     }
 }
@@ -613,7 +614,7 @@ RECT UIOptionWnd::GetSkinRect() const
 
 RECT UIOptionWnd::GetRendererRect() const
 {
-    RECT rc = { m_x + 75, m_y + 64, m_x + 256, m_y + 112 };
+    RECT rc = { m_x + 75, m_y + 64, m_x + 256, m_y + 64 + 4 + (kRendererEntryCount * kRendererRowHeight) };
     return rc;
 }
 
@@ -626,7 +627,7 @@ RECT UIOptionWnd::GetRendererEntryRect(int index) const
         index = kRendererEntryCount - 1;
     }
 
-    const int rowHeight = 11;
+    const int rowHeight = kRendererRowHeight;
     RECT rc = {
         rendererRect.left + 2,
         rendererRect.top + 2 + (index * rowHeight),
@@ -639,10 +640,10 @@ RECT UIOptionWnd::GetRendererEntryRect(int index) const
 RECT UIOptionWnd::GetRestartButtonRect() const
 {
     RECT rc = {
-        m_x + 193,
-        m_y + 114,
+        m_x + 184,
+        m_y + 138,
         m_x + 256,
-        m_y + 128,
+        m_y + 154,
     };
     return rc;
 }
@@ -814,7 +815,7 @@ void UIOptionWnd::OnDraw()
         } else {
             FillRectColor(hdc, bodyRect, RGB(231, 217, 197));
             DrawRectFrame(hdc, bodyRect, RGB(96, 76, 54));
-            RECT dividerRect = { m_x + 72, m_y + 62, m_x + m_w - 24, m_y + 130 };
+            RECT dividerRect = { m_x + 72, m_y + 62, m_x + m_w - 24, m_y + 154 };
             FillRectColor(hdc, dividerRect, RGB(215, 199, 177));
             DrawRectFrame(hdc, dividerRect, RGB(118, 98, 80));
         }
@@ -867,15 +868,16 @@ void UIOptionWnd::OnDraw()
             const char* stateText = GetRendererEntryStateText(entry, preferredBackend, activeBackend);
             const char* prefixText = GetRendererEntryPrefix(entry, preferredBackend, activeBackend);
             std::string label = std::string(prefixText) + backendName;
+            const int textY = entryRect.top + 2;
             SetTextColor(hdc, (implemented && supported) ? RGB(0, 0, 0) : RGB(90, 82, 74));
-            TextOutA(hdc, entryRect.left + 4, entryRect.top + 1, label.c_str(), static_cast<int>(label.size()));
+            TextOutA(hdc, entryRect.left + 4, textY, label.c_str(), static_cast<int>(label.size()));
 
             SIZE stateSize{};
             GetTextExtentPoint32A(hdc, stateText, static_cast<int>(std::strlen(stateText)), &stateSize);
             TextOutA(
                 hdc,
                 entryRect.right - stateSize.cx - 4,
-                entryRect.top + 1,
+                textY,
                 stateText,
                 static_cast<int>(std::strlen(stateText)));
         }
@@ -884,16 +886,16 @@ void UIOptionWnd::OnDraw()
             const RECT restartRect = GetRestartButtonRect();
             FillRectColor(hdc, restartRect, RGB(222, 208, 190));
             DrawRectFrame(hdc, restartRect, RGB(82, 63, 45));
-            TextOutA(hdc, restartRect.left + 7, restartRect.top + 2, "Restart", 7);
+            TextOutA(hdc, restartRect.left + 10, restartRect.top + 3, "Restart", 7);
         }
 
         SetTextColor(hdc, RGB(0, 0, 0));
-        TextOutA(hdc, m_x + 76, m_y + 136, "Snap", 4);
+        TextOutA(hdc, m_x + 76, m_y + 160, "Snap", 4);
 
-        TextOutA(hdc, m_x + 31, m_y + 136, "NoCtrl", 7);
-        TextOutA(hdc, m_x + 130, m_y + 136, "Attack", 6);
-        TextOutA(hdc, m_x + 180, m_y + 136, "Skill", 5);
-        TextOutA(hdc, m_x + 222, m_y + 136, "Item", 4);
+        TextOutA(hdc, m_x + 31, m_y + 160, "NoCtrl", 7);
+        TextOutA(hdc, m_x + 130, m_y + 160, "Attack", 6);
+        TextOutA(hdc, m_x + 180, m_y + 160, "Skill", 5);
+        TextOutA(hdc, m_x + 222, m_y + 160, "Item", 4);
     }
 
     DrawChildren();

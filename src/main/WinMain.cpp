@@ -67,6 +67,10 @@ char      g_baseDir3[MAX_PATH] = {};
 CFileMgr  g_fileMgr;
 int       g_readFolderFirst = 0;   // 0=PAK-first, 1=disk-first
 static RenderBackendType g_activeRenderBackend = RenderBackendType::LegacyDirect3D7;
+static std::string g_windowTitleStatus = WINDOW_NAME;
+static int g_windowTitleFps = -1;
+static DWORD g_windowTitleFpsTick = 0;
+static unsigned int g_windowTitleFrameCount = 0;
 
 // Registry path used by the original client
 static const char g_regPath[] = "Software\\Gravity Soft\\Ragnarok Online";
@@ -88,17 +92,48 @@ void ErrorMsg(const char* msg)
 
 void ErrorMsg(int /*msgId*/) {}
 
-void RefreshMainWindowTitle(const char* status)
+static void ApplyMainWindowTitle()
 {
     if (!g_hMainWnd) {
         return;
     }
 
-    std::string title = (status && *status) ? std::string(status) : std::string(WINDOW_NAME);
+    std::string title = g_windowTitleStatus.empty() ? std::string(WINDOW_NAME) : g_windowTitleStatus;
     title += " [";
     title += GetRenderBackendName(g_activeRenderBackend);
     title += "]";
+    if (g_windowTitleFps >= 0) {
+        char fpsText[32] = {};
+        std::snprintf(fpsText, sizeof(fpsText), " - %d FPS", g_windowTitleFps);
+        title += fpsText;
+    }
     SetWindowTextA(g_hMainWnd, title.c_str());
+}
+
+void RefreshMainWindowTitle(const char* status)
+{
+    g_windowTitleStatus = (status && *status) ? std::string(status) : std::string(WINDOW_NAME);
+    ApplyMainWindowTitle();
+}
+
+void RecordMainWindowFrame()
+{
+    const DWORD now = GetTickCount();
+    if (g_windowTitleFpsTick == 0) {
+        g_windowTitleFpsTick = now;
+        g_windowTitleFrameCount = 0;
+    }
+
+    ++g_windowTitleFrameCount;
+    const DWORD elapsed = now - g_windowTitleFpsTick;
+    if (elapsed < 1000) {
+        return;
+    }
+
+    g_windowTitleFps = static_cast<int>((static_cast<unsigned long long>(g_windowTitleFrameCount) * 1000ull + (elapsed / 2ull)) / elapsed);
+    g_windowTitleFpsTick = now;
+    g_windowTitleFrameCount = 0;
+    ApplyMainWindowTitle();
 }
 
 RenderBackendType GetActiveRenderBackend()
@@ -375,6 +410,9 @@ static bool InitClientSystems()
 
     g_activeRenderBackend = renderBootstrap.backend;
     DbgLog("[Render] Active backend confirmed as '%s'.\n", GetRenderBackendName(g_activeRenderBackend));
+    g_windowTitleFps = -1;
+    g_windowTitleFpsTick = 0;
+    g_windowTitleFrameCount = 0;
     RefreshMainWindowTitle();
 
     GetRenderDevice().RefreshRenderSize();

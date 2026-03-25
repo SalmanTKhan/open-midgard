@@ -65,8 +65,8 @@ Goal: ship Direct3D12 and Vulkan as real renderer options, selectable from the i
 - [x] Port transformed-vertex draw path to Vulkan.
 - [x] Port texture creation / upload / binding to Vulkan.
 - [x] Port alpha, blend, depth, and lightmap behavior to Vulkan.
-- [ ] Port overlay composition upload before present on Vulkan.
-- [ ] Validate login, char select, map load, world render, UI, and cursor on Vulkan.
+- [x] Port overlay composition upload before present on Vulkan.
+- [x] Validate login, char select, map load, world render, UI, and cursor on Vulkan.
 
 ### Milestone 9 — Cross-Backend Validation
 - [ ] Validate startup, login, char select, map load, and in-game movement on all backends.
@@ -74,6 +74,7 @@ Goal: ship Direct3D12 and Vulkan as real renderer options, selectable from the i
 - [ ] Validate fallback behavior when a selected backend cannot initialize.
 
 ### Milestone 10 — Cleanup And Documentation
+- [ ] Remove temporary Vulkan stabilization and frame-timing logs after the current implementation settles.
 - [ ] Remove temporary backend bring-up logs that are no longer useful.
 - [ ] Document backend selection precedence: env var override, persisted setting, default backend.
 - [ ] Document backend fallback order and restart-required behavior.
