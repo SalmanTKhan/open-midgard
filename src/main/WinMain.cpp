@@ -21,6 +21,7 @@
 #include "ui/UIWindowMgr.h"
 #include "render3d/Device.h"
 #include "render3d/RenderBackend.h"
+#include "render3d/RenderDevice.h"
 #include "render/Renderer.h"
 #include "world/World.h"
 #include "res/GndRes.h"
@@ -297,15 +298,14 @@ static bool InitClientSystems()
     }
 
     RenderBackendBootstrapResult renderBootstrap{};
-    if (!InitializeRenderBackend(g_hMainWnd, &renderBootstrap)) {
+    if (!GetRenderDevice().Initialize(g_hMainWnd, &renderBootstrap)) {
         ErrorMsg("3D device initialization failed. The game will exit.");
         return false;
     }
 
-    RECT clientRect{};
-    GetClientRect(g_hMainWnd, &clientRect);
-    const int renderW = (std::max)(1L, clientRect.right - clientRect.left);
-    const int renderH = (std::max)(1L, clientRect.bottom - clientRect.top);
+    GetRenderDevice().RefreshRenderSize();
+    const int renderW = GetRenderDevice().GetRenderWidth();
+    const int renderH = GetRenderDevice().GetRenderHeight();
 
     g_renderer.Init();
     g_renderer.SetSize(renderW, renderH);
@@ -430,7 +430,7 @@ int __stdcall WinMain(HINSTANCE hInstance, HINSTANCE /*hPrevInstance*/,
     // CDllMgr cleanup will happen automatically if we add it to a destructor or call it explicitly
     CConnection::Cleanup();
     g_windowMgr.Reset();
-    g_3dDevice.DestroyObjects();
+    GetRenderDevice().Shutdown();
 
     CoUninitialize();
     DestroyWindow(g_hMainWnd);

@@ -1,4 +1,5 @@
 #include "Renderer.h"
+#include "render3d/RenderDevice.h"
 #include "render3d/Device.h"
 #include "render3d/D3dutil.h"
 #include "res/Bitmap.h"
@@ -335,7 +336,7 @@ CRenderer::~CRenderer() {
 }
 
 void CRenderer::Init() {
-    m_device = g_3dDevice.m_pd3dDevice;
+    m_device = GetRenderDevice().GetLegacyDevice();
     m_rpNullFaceListIter = m_rpNullFaceList.begin();
     m_rpQuadFaceListIter = m_rpQuadFaceList.begin();
     m_rpLmQuadFaceListIter = m_rpLmQuadFaceList.begin();
@@ -377,14 +378,14 @@ void CRenderer::SetPixelFormat(PixelFormat pf) {
 
 void CRenderer::Clear(int color) {
     if (color != 0) {
-        g_3dDevice.Clear(0xFF000000 | color);
+        GetRenderDevice().ClearColor(0xFF000000 | color);
     } else {
-        g_3dDevice.ClearZBuffer();
+        GetRenderDevice().ClearDepth();
     }
 }
 
 void CRenderer::ClearBackground() {
-    g_3dDevice.Clear(m_nClearColor);
+    GetRenderDevice().ClearColor(m_nClearColor);
 }
 
 bool CRenderer::DrawScene() {
@@ -401,7 +402,7 @@ void CRenderer::Flip(bool vertSync) {
     m_curFrame++;
     m_fpsFrameCount++;
     
-    g_3dDevice.ShowFrame(vertSync);
+    GetRenderDevice().Present(vertSync);
 }
 
 void CRenderer::AddRP(RPFace* face, int renderFlag) {
