@@ -2,6 +2,7 @@
 
 #include "Device.h"
 #include "D3dutil.h"
+#include "res/Texture.h"
 
 #include <algorithm>
 #include <cstring>
@@ -171,6 +172,75 @@ public:
     int Present(bool vertSync) override
     {
         return g_3dDevice.ShowFrame(vertSync);
+    }
+
+    bool BeginScene() override
+    {
+        IDirect3DDevice7* device = g_3dDevice.m_pd3dDevice;
+        return device && SUCCEEDED(device->BeginScene());
+    }
+
+    void EndScene() override
+    {
+        IDirect3DDevice7* device = g_3dDevice.m_pd3dDevice;
+        if (device) {
+            device->EndScene();
+        }
+    }
+
+    void SetTransform(D3DTRANSFORMSTATETYPE state, const D3DMATRIX* matrix) override
+    {
+        IDirect3DDevice7* device = g_3dDevice.m_pd3dDevice;
+        if (device && matrix) {
+            device->SetTransform(state, const_cast<D3DMATRIX*>(matrix));
+        }
+    }
+
+    void SetRenderState(D3DRENDERSTATETYPE state, DWORD value) override
+    {
+        IDirect3DDevice7* device = g_3dDevice.m_pd3dDevice;
+        if (device) {
+            device->SetRenderState(state, value);
+        }
+    }
+
+    void SetTextureStageState(DWORD stage, D3DTEXTURESTAGESTATETYPE type, DWORD value) override
+    {
+        IDirect3DDevice7* device = g_3dDevice.m_pd3dDevice;
+        if (device) {
+            device->SetTextureStageState(stage, type, value);
+        }
+    }
+
+    void BindTexture(DWORD stage, CTexture* texture) override
+    {
+        IDirect3DDevice7* device = g_3dDevice.m_pd3dDevice;
+        if (!device) {
+            return;
+        }
+
+        IDirectDrawSurface7* surface = texture ? texture->m_pddsSurface : nullptr;
+        device->SetTexture(stage, surface);
+    }
+
+    void DrawPrimitive(D3DPRIMITIVETYPE primitiveType, DWORD vertexFormat,
+        const void* vertices, DWORD vertexCount, DWORD flags) override
+    {
+        IDirect3DDevice7* device = g_3dDevice.m_pd3dDevice;
+        if (device && vertices && vertexCount > 0) {
+            device->DrawPrimitive(primitiveType, vertexFormat, const_cast<void*>(vertices), vertexCount, flags);
+        }
+    }
+
+    void DrawIndexedPrimitive(D3DPRIMITIVETYPE primitiveType, DWORD vertexFormat,
+        const void* vertices, DWORD vertexCount, const unsigned short* indices,
+        DWORD indexCount, DWORD flags) override
+    {
+        IDirect3DDevice7* device = g_3dDevice.m_pd3dDevice;
+        if (device && vertices && vertexCount > 0 && indices && indexCount > 0) {
+            device->DrawIndexedPrimitive(primitiveType, vertexFormat, const_cast<void*>(vertices), vertexCount,
+                const_cast<unsigned short*>(indices), indexCount, flags);
+        }
     }
 
     void AdjustTextureSize(unsigned int* width, unsigned int* height) override

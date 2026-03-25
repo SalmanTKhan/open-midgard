@@ -312,7 +312,7 @@ CTexture CTexMgr::s_dummy_texture;
 // --- CRenderer Implementation ---
 
 CRenderer::CRenderer() {
-    m_device = nullptr;
+    m_renderDevice = nullptr;
     m_oldTexture = nullptr;
     m_oldLmapTexture = nullptr;
     m_curFrame = 0;
@@ -336,7 +336,7 @@ CRenderer::~CRenderer() {
 }
 
 void CRenderer::Init() {
-    m_device = GetRenderDevice().GetLegacyDevice();
+    m_renderDevice = &GetRenderDevice();
     m_rpNullFaceListIter = m_rpNullFaceList.begin();
     m_rpQuadFaceListIter = m_rpQuadFaceList.begin();
     m_rpLmQuadFaceListIter = m_rpLmQuadFaceList.begin();
@@ -364,10 +364,10 @@ void CRenderer::SetSize(int cx, int cy) {
     m_screenXFactor = (float)cx * 0.0015625f; // cx / 640
     m_screenYFactor = (float)cy * 0.0020833334f; // cy / 480
 
-    if (m_device) {
+    if (m_renderDevice) {
         D3DMATRIX projection{};
         if (D3DUtil_SetProjectionMatrix(&projection, 15.0f * 0.017453292f, m_aspectRatio, 10.0f, 5000.0f) == 0) {
-            m_device->SetTransform(D3DTRANSFORMSTATE_PROJECTION, &projection);
+            m_renderDevice->SetTransform(D3DTRANSFORMSTATE_PROJECTION, &projection);
         }
     }
 }
@@ -389,12 +389,12 @@ void CRenderer::ClearBackground() {
 }
 
 bool CRenderer::DrawScene() {
-    if (FAILED(m_device->BeginScene()))
+    if (!m_renderDevice || !m_renderDevice->BeginScene())
         return false;
 
     FlushRenderList();
 
-    m_device->EndScene();
+    m_renderDevice->EndScene();
     return true;
 }
 
@@ -449,57 +449,63 @@ void CRenderer::AddRawRP(RPRaw* face, int renderFlag) {
 
 void CRenderer::SetLmapTexture(CTexture* tex) {
     if (m_oldLmapTexture != tex) {
-        if (tex && tex->m_pddsSurface) {
-            m_device->SetTexture(1, tex->m_pddsSurface);
-        } else {
-            m_device->SetTexture(1, nullptr);
+        if (m_renderDevice) {
+            m_renderDevice->BindTexture(1, tex);
         }
         m_oldLmapTexture = tex;
     }
 }
 
 void CRenderer::SetMultiTextureMode(int nMode) {
+    if (!m_renderDevice) {
+        return;
+    }
+
     switch (nMode) {
     case 0:
-        m_device->SetTextureStageState(0, D3DTSS_TEXCOORDINDEX, 0);
-        m_device->SetTextureStageState(0, D3DTSS_COLORARG1, D3DTA_TEXTURE);
-        m_device->SetTextureStageState(0, D3DTSS_COLOROP, D3DTOP_MODULATE);
-        m_device->SetTextureStageState(0, D3DTSS_COLORARG2, D3DTA_DIFFUSE);
-        m_device->SetTextureStageState(0, D3DTSS_ALPHAARG1, D3DTA_TEXTURE);
-        m_device->SetTextureStageState(0, D3DTSS_ALPHAOP, D3DTOP_MODULATE);
-        m_device->SetTextureStageState(0, D3DTSS_ALPHAARG2, D3DTA_DIFFUSE);
-        m_device->SetTextureStageState(1, D3DTSS_COLOROP, D3DTOP_DISABLE);
-        m_device->SetTextureStageState(1, D3DTSS_ALPHAOP, D3DTOP_DISABLE);
-        m_device->SetTexture(1, nullptr);
+        m_renderDevice->SetTextureStageState(0, D3DTSS_TEXCOORDINDEX, 0);
+        m_renderDevice->SetTextureStageState(0, D3DTSS_COLORARG1, D3DTA_TEXTURE);
+        m_renderDevice->SetTextureStageState(0, D3DTSS_COLOROP, D3DTOP_MODULATE);
+        m_renderDevice->SetTextureStageState(0, D3DTSS_COLORARG2, D3DTA_DIFFUSE);
+        m_renderDevice->SetTextureStageState(0, D3DTSS_ALPHAARG1, D3DTA_TEXTURE);
+        m_renderDevice->SetTextureStageState(0, D3DTSS_ALPHAOP, D3DTOP_MODULATE);
+        m_renderDevice->SetTextureStageState(0, D3DTSS_ALPHAARG2, D3DTA_DIFFUSE);
+        m_renderDevice->SetTextureStageState(1, D3DTSS_COLOROP, D3DTOP_DISABLE);
+        m_renderDevice->SetTextureStageState(1, D3DTSS_ALPHAOP, D3DTOP_DISABLE);
+        m_renderDevice->BindTexture(1, nullptr);
         break;
     case 1:
     case 2:
-        m_device->SetTextureStageState(0, D3DTSS_TEXCOORDINDEX, 0);
-        m_device->SetTextureStageState(0, D3DTSS_COLORARG1, D3DTA_TEXTURE);
-        m_device->SetTextureStageState(0, D3DTSS_COLOROP, D3DTOP_MODULATE);
-        m_device->SetTextureStageState(0, D3DTSS_COLORARG2, D3DTA_DIFFUSE);
-        m_device->SetTextureStageState(0, D3DTSS_ALPHAARG1, D3DTA_TEXTURE);
-        m_device->SetTextureStageState(0, D3DTSS_ALPHAOP, D3DTOP_SELECTARG1);
-        m_device->SetTextureStageState(1, D3DTSS_COLOROP, D3DTOP_DISABLE);
-        m_device->SetTextureStageState(1, D3DTSS_ALPHAOP, D3DTOP_DISABLE);
-        m_device->SetTexture(1, nullptr);
+        m_renderDevice->SetTextureStageState(0, D3DTSS_TEXCOORDINDEX, 0);
+        m_renderDevice->SetTextureStageState(0, D3DTSS_COLORARG1, D3DTA_TEXTURE);
+        m_renderDevice->SetTextureStageState(0, D3DTSS_COLOROP, D3DTOP_MODULATE);
+        m_renderDevice->SetTextureStageState(0, D3DTSS_COLORARG2, D3DTA_DIFFUSE);
+        m_renderDevice->SetTextureStageState(0, D3DTSS_ALPHAARG1, D3DTA_TEXTURE);
+        m_renderDevice->SetTextureStageState(0, D3DTSS_ALPHAOP, D3DTOP_SELECTARG1);
+        m_renderDevice->SetTextureStageState(1, D3DTSS_COLOROP, D3DTOP_DISABLE);
+        m_renderDevice->SetTextureStageState(1, D3DTSS_ALPHAOP, D3DTOP_DISABLE);
+        m_renderDevice->BindTexture(1, nullptr);
         break;
     default:
-        m_device->SetTextureStageState(0, D3DTSS_TEXCOORDINDEX, 0);
-        m_device->SetTextureStageState(0, D3DTSS_COLORARG1, D3DTA_TEXTURE);
-        m_device->SetTextureStageState(0, D3DTSS_COLOROP, D3DTOP_MODULATE);
-        m_device->SetTextureStageState(0, D3DTSS_COLORARG2, D3DTA_DIFFUSE);
-        m_device->SetTextureStageState(0, D3DTSS_ALPHAARG1, D3DTA_TEXTURE);
-        m_device->SetTextureStageState(0, D3DTSS_ALPHAOP, D3DTOP_MODULATE);
-        m_device->SetTextureStageState(0, D3DTSS_ALPHAARG2, D3DTA_DIFFUSE);
-        m_device->SetTextureStageState(1, D3DTSS_COLOROP, D3DTOP_DISABLE);
-        m_device->SetTextureStageState(1, D3DTSS_ALPHAOP, D3DTOP_DISABLE);
-        m_device->SetTexture(1, nullptr);
+        m_renderDevice->SetTextureStageState(0, D3DTSS_TEXCOORDINDEX, 0);
+        m_renderDevice->SetTextureStageState(0, D3DTSS_COLORARG1, D3DTA_TEXTURE);
+        m_renderDevice->SetTextureStageState(0, D3DTSS_COLOROP, D3DTOP_MODULATE);
+        m_renderDevice->SetTextureStageState(0, D3DTSS_COLORARG2, D3DTA_DIFFUSE);
+        m_renderDevice->SetTextureStageState(0, D3DTSS_ALPHAARG1, D3DTA_TEXTURE);
+        m_renderDevice->SetTextureStageState(0, D3DTSS_ALPHAOP, D3DTOP_MODULATE);
+        m_renderDevice->SetTextureStageState(0, D3DTSS_ALPHAARG2, D3DTA_DIFFUSE);
+        m_renderDevice->SetTextureStageState(1, D3DTSS_COLOROP, D3DTOP_DISABLE);
+        m_renderDevice->SetTextureStageState(1, D3DTSS_ALPHAOP, D3DTOP_DISABLE);
+        m_renderDevice->BindTexture(1, nullptr);
         break;
     }
 }
 
 void CRenderer::FlushRenderList() {
+    if (!m_renderDevice) {
+        return;
+    }
+
     // 1. Sort lists
     std::sort(m_rpFaceList.begin(), m_rpFaceList.end(), [](RPFace* a, RPFace* b) {
         return a->tex < b->tex;
@@ -510,12 +516,12 @@ void CRenderer::FlushRenderList() {
     
     // 2. Opaque faces
     SetMultiTextureMode(0);
-    m_device->SetRenderState(D3DRENDERSTATE_ALPHAREF, 207);
-    m_device->SetRenderState(D3DRENDERSTATE_ALPHATESTENABLE, TRUE);
-    m_device->SetRenderState(D3DRENDERSTATE_ALPHABLENDENABLE, FALSE);
-    m_device->SetRenderState(D3DRENDERSTATE_ZENABLE, D3DZB_TRUE);
-    m_device->SetRenderState(D3DRENDERSTATE_ZWRITEENABLE, TRUE);
-    m_device->SetRenderState(D3DRENDERSTATE_CULLMODE, D3DCULL_CW);
+    m_renderDevice->SetRenderState(D3DRENDERSTATE_ALPHAREF, 207);
+    m_renderDevice->SetRenderState(D3DRENDERSTATE_ALPHATESTENABLE, TRUE);
+    m_renderDevice->SetRenderState(D3DRENDERSTATE_ALPHABLENDENABLE, FALSE);
+    m_renderDevice->SetRenderState(D3DRENDERSTATE_ZENABLE, D3DZB_TRUE);
+    m_renderDevice->SetRenderState(D3DRENDERSTATE_ZWRITEENABLE, TRUE);
+    m_renderDevice->SetRenderState(D3DRENDERSTATE_CULLMODE, D3DCULL_CW);
     m_oldTexture = nullptr;
     m_oldLmapTexture = nullptr;
     int colorKeyEnabled = TRUE;
@@ -529,40 +535,40 @@ void CRenderer::FlushRenderList() {
 
         const D3DCULL wantCullMode = face->cullMode == 0 ? D3DCULL_CW : face->cullMode;
         if (wantCullMode != activeCullMode) {
-            m_device->SetRenderState(D3DRENDERSTATE_CULLMODE, wantCullMode);
+            m_renderDevice->SetRenderState(D3DRENDERSTATE_CULLMODE, wantCullMode);
             activeCullMode = wantCullMode;
         }
 
         const int wantColorKey = (face->mtPreset == 1 || face->mtPreset == 2) ? FALSE : TRUE;
         if (wantColorKey != colorKeyEnabled) {
-            m_device->SetRenderState(D3DRENDERSTATE_COLORKEYENABLE, wantColorKey);
+            m_renderDevice->SetRenderState(D3DRENDERSTATE_COLORKEYENABLE, wantColorKey);
             colorKeyEnabled = wantColorKey;
         }
         SetTexture(face->tex);
-        RPFace::DrawPri(face, m_device);
+        RPFace::DrawPri(face, *m_renderDevice);
     }
     SetMultiTextureMode(0);
     if (!colorKeyEnabled) {
-        m_device->SetRenderState(D3DRENDERSTATE_COLORKEYENABLE, TRUE);
+        m_renderDevice->SetRenderState(D3DRENDERSTATE_COLORKEYENABLE, TRUE);
     }
     if (activeCullMode != D3DCULL_CW) {
-        m_device->SetRenderState(D3DRENDERSTATE_CULLMODE, D3DCULL_CW);
+        m_renderDevice->SetRenderState(D3DRENDERSTATE_CULLMODE, D3DCULL_CW);
     }
     
     // 3. Raw primitives
     for (auto face : m_rpRawList) {
         SetTexture(face->tex);
-        RPRaw::DrawPri(face, m_device);
+        RPRaw::DrawPri(face, *m_renderDevice);
     }
 
     // 4. Ground list (reference client routes terrain here)
     activeMtPreset = 0;
     SetMultiTextureMode(0);
-    m_device->SetRenderState(D3DRENDERSTATE_ALPHABLENDENABLE, FALSE);
-    m_device->SetRenderState(D3DRENDERSTATE_SRCBLEND, D3DBLEND_ONE);
-    m_device->SetRenderState(D3DRENDERSTATE_DESTBLEND, D3DBLEND_ZERO);
-    m_device->SetRenderState(D3DRENDERSTATE_ALPHATESTENABLE, FALSE);
-    m_device->SetRenderState(D3DRENDERSTATE_COLORKEYENABLE, FALSE);
+    m_renderDevice->SetRenderState(D3DRENDERSTATE_ALPHABLENDENABLE, FALSE);
+    m_renderDevice->SetRenderState(D3DRENDERSTATE_SRCBLEND, D3DBLEND_ONE);
+    m_renderDevice->SetRenderState(D3DRENDERSTATE_DESTBLEND, D3DBLEND_ZERO);
+    m_renderDevice->SetRenderState(D3DRENDERSTATE_ALPHATESTENABLE, FALSE);
+    m_renderDevice->SetRenderState(D3DRENDERSTATE_COLORKEYENABLE, FALSE);
     colorKeyEnabled = FALSE;
     static bool loggedGroundDraw = false;
     for (auto face : m_rpLMGroundList) {
@@ -581,11 +587,11 @@ void CRenderer::FlushRenderList() {
                 static_cast<int>(face->primType),
                 face->mtPreset);
         }
-        RPFace::DrawPri(face, m_device);
+        RPFace::DrawPri(face, *m_renderDevice);
     }
     SetMultiTextureMode(0);
-    m_device->SetRenderState(D3DRENDERSTATE_COLORKEYENABLE, TRUE);
-    m_device->SetRenderState(D3DRENDERSTATE_ALPHATESTENABLE, TRUE);
+    m_renderDevice->SetRenderState(D3DRENDERSTATE_COLORKEYENABLE, TRUE);
+    m_renderDevice->SetRenderState(D3DRENDERSTATE_ALPHATESTENABLE, TRUE);
     colorKeyEnabled = TRUE;
 
     if (!m_rpLmList.empty()) {
@@ -596,40 +602,40 @@ void CRenderer::FlushRenderList() {
             return a->tex2 < b->tex2;
         });
 
-        m_device->SetRenderState(D3DRENDERSTATE_COLORKEYENABLE, FALSE);
-        m_device->SetRenderState(D3DRENDERSTATE_ALPHATESTENABLE, FALSE);
-        m_device->SetTextureStageState(0, D3DTSS_TEXCOORDINDEX, 0);
-        m_device->SetTextureStageState(0, D3DTSS_COLORARG1, D3DTA_TEXTURE);
-        m_device->SetTextureStageState(0, D3DTSS_COLOROP, D3DTOP_MODULATE);
-        m_device->SetTextureStageState(0, D3DTSS_COLORARG2, D3DTA_DIFFUSE);
-        m_device->SetTextureStageState(0, D3DTSS_ALPHAARG1, D3DTA_DIFFUSE);
-        m_device->SetTextureStageState(0, D3DTSS_ALPHAOP, D3DTOP_SELECTARG1);
-        m_device->SetTextureStageState(1, D3DTSS_TEXCOORDINDEX, 1);
-        m_device->SetTextureStageState(1, D3DTSS_COLORARG1, D3DTA_TEXTURE | D3DTA_ALPHAREPLICATE);
-        m_device->SetTextureStageState(1, D3DTSS_COLOROP, D3DTOP_MODULATE);
-        m_device->SetTextureStageState(1, D3DTSS_COLORARG2, D3DTA_CURRENT);
-        m_device->SetTextureStageState(1, D3DTSS_ALPHAOP, D3DTOP_DISABLE);
+        m_renderDevice->SetRenderState(D3DRENDERSTATE_COLORKEYENABLE, FALSE);
+        m_renderDevice->SetRenderState(D3DRENDERSTATE_ALPHATESTENABLE, FALSE);
+        m_renderDevice->SetTextureStageState(0, D3DTSS_TEXCOORDINDEX, 0);
+        m_renderDevice->SetTextureStageState(0, D3DTSS_COLORARG1, D3DTA_TEXTURE);
+        m_renderDevice->SetTextureStageState(0, D3DTSS_COLOROP, D3DTOP_MODULATE);
+        m_renderDevice->SetTextureStageState(0, D3DTSS_COLORARG2, D3DTA_DIFFUSE);
+        m_renderDevice->SetTextureStageState(0, D3DTSS_ALPHAARG1, D3DTA_DIFFUSE);
+        m_renderDevice->SetTextureStageState(0, D3DTSS_ALPHAOP, D3DTOP_SELECTARG1);
+        m_renderDevice->SetTextureStageState(1, D3DTSS_TEXCOORDINDEX, 1);
+        m_renderDevice->SetTextureStageState(1, D3DTSS_COLORARG1, D3DTA_TEXTURE | D3DTA_ALPHAREPLICATE);
+        m_renderDevice->SetTextureStageState(1, D3DTSS_COLOROP, D3DTOP_MODULATE);
+        m_renderDevice->SetTextureStageState(1, D3DTSS_COLORARG2, D3DTA_CURRENT);
+        m_renderDevice->SetTextureStageState(1, D3DTSS_ALPHAOP, D3DTOP_DISABLE);
         m_oldTexture = nullptr;
         m_oldLmapTexture = nullptr;
         for (RPLmFace* face : m_rpLmList) {
             SetTexture(face->tex);
             SetLmapTexture(face->tex2);
-            RPLmFace::DrawPri(face, m_device);
+            RPLmFace::DrawPri(face, *m_renderDevice);
         }
         SetMultiTextureMode(0);
-        m_device->SetRenderState(D3DRENDERSTATE_COLORKEYENABLE, TRUE);
-        m_device->SetRenderState(D3DRENDERSTATE_ALPHATESTENABLE, TRUE);
+        m_renderDevice->SetRenderState(D3DRENDERSTATE_COLORKEYENABLE, TRUE);
+        m_renderDevice->SetRenderState(D3DRENDERSTATE_ALPHATESTENABLE, TRUE);
         m_oldLmapTexture = nullptr;
     }
     
     // 5. Alpha blended (sorted by depth)
-    m_device->SetRenderState(D3DRENDERSTATE_CULLMODE, D3DCULL_NONE);
-    m_device->SetRenderState(D3DRENDERSTATE_ALPHABLENDENABLE, TRUE);
-    m_device->SetRenderState(D3DRENDERSTATE_SRCBLEND, D3DBLEND_SRCALPHA);
-    m_device->SetRenderState(D3DRENDERSTATE_DESTBLEND, D3DBLEND_INVSRCALPHA);
-    m_device->SetRenderState(D3DRENDERSTATE_ALPHATESTENABLE, FALSE);
-    m_device->SetRenderState(D3DRENDERSTATE_COLORKEYENABLE, FALSE);
-    m_device->SetRenderState(D3DRENDERSTATE_ZWRITEENABLE, FALSE);
+    m_renderDevice->SetRenderState(D3DRENDERSTATE_CULLMODE, D3DCULL_NONE);
+    m_renderDevice->SetRenderState(D3DRENDERSTATE_ALPHABLENDENABLE, TRUE);
+    m_renderDevice->SetRenderState(D3DRENDERSTATE_SRCBLEND, D3DBLEND_SRCALPHA);
+    m_renderDevice->SetRenderState(D3DRENDERSTATE_DESTBLEND, D3DBLEND_INVSRCALPHA);
+    m_renderDevice->SetRenderState(D3DRENDERSTATE_ALPHATESTENABLE, FALSE);
+    m_renderDevice->SetRenderState(D3DRENDERSTATE_COLORKEYENABLE, FALSE);
+    m_renderDevice->SetRenderState(D3DRENDERSTATE_ZWRITEENABLE, FALSE);
     
     struct BlendedFaceEntry {
         float sortKey;
@@ -658,55 +664,55 @@ void CRenderer::FlushRenderList() {
     D3DBLEND activeDestBlend = D3DBLEND_INVSRCALPHA;
     for (const BlendedFaceEntry& entry : blendedFaces) {
         if (entry.srcBlend != activeSrcBlend) {
-            m_device->SetRenderState(D3DRENDERSTATE_SRCBLEND, entry.srcBlend);
+            m_renderDevice->SetRenderState(D3DRENDERSTATE_SRCBLEND, entry.srcBlend);
             activeSrcBlend = entry.srcBlend;
         }
         if (entry.destBlend != activeDestBlend) {
-            m_device->SetRenderState(D3DRENDERSTATE_DESTBLEND, entry.destBlend);
+            m_renderDevice->SetRenderState(D3DRENDERSTATE_DESTBLEND, entry.destBlend);
             activeDestBlend = entry.destBlend;
         }
         SetTexture(entry.face->tex);
-        RPFace::DrawPri(entry.face, m_device);
+        RPFace::DrawPri(entry.face, *m_renderDevice);
     }
 
     if (activeSrcBlend != D3DBLEND_SRCALPHA) {
-        m_device->SetRenderState(D3DRENDERSTATE_SRCBLEND, D3DBLEND_SRCALPHA);
+        m_renderDevice->SetRenderState(D3DRENDERSTATE_SRCBLEND, D3DBLEND_SRCALPHA);
     }
     if (activeDestBlend != D3DBLEND_INVSRCALPHA) {
-        m_device->SetRenderState(D3DRENDERSTATE_DESTBLEND, D3DBLEND_INVSRCALPHA);
+        m_renderDevice->SetRenderState(D3DRENDERSTATE_DESTBLEND, D3DBLEND_INVSRCALPHA);
     }
 
     std::stable_sort(m_rpAlphaNoDepthList.begin(), m_rpAlphaNoDepthList.end(), [](const std::pair<float, RPFace*>& a, const std::pair<float, RPFace*>& b) {
         return a.first < b.first;
     });
 
-    m_device->SetRenderState(D3DRENDERSTATE_ZENABLE, D3DZB_FALSE);
+    m_renderDevice->SetRenderState(D3DRENDERSTATE_ZENABLE, D3DZB_FALSE);
     for (auto& pair : m_rpAlphaNoDepthList) {
         SetTexture(pair.second->tex);
-        RPFace::DrawPri(pair.second, m_device);
+        RPFace::DrawPri(pair.second, *m_renderDevice);
     }
 
     if (!m_rpEmissiveNoDepthList.empty()) {
-        m_device->SetRenderState(D3DRENDERSTATE_SRCBLEND, D3DBLEND_ONE);
-        m_device->SetRenderState(D3DRENDERSTATE_DESTBLEND, D3DBLEND_ONE);
+        m_renderDevice->SetRenderState(D3DRENDERSTATE_SRCBLEND, D3DBLEND_ONE);
+        m_renderDevice->SetRenderState(D3DRENDERSTATE_DESTBLEND, D3DBLEND_ONE);
         std::stable_sort(m_rpEmissiveNoDepthList.begin(), m_rpEmissiveNoDepthList.end(), [](const std::pair<float, RPFace*>& a, const std::pair<float, RPFace*>& b) {
             return a.first < b.first;
         });
 
         for (auto& pair : m_rpEmissiveNoDepthList) {
             SetTexture(pair.second->tex);
-            RPFace::DrawPri(pair.second, m_device);
+            RPFace::DrawPri(pair.second, *m_renderDevice);
         }
 
-        m_device->SetRenderState(D3DRENDERSTATE_SRCBLEND, D3DBLEND_SRCALPHA);
-        m_device->SetRenderState(D3DRENDERSTATE_DESTBLEND, D3DBLEND_INVSRCALPHA);
+        m_renderDevice->SetRenderState(D3DRENDERSTATE_SRCBLEND, D3DBLEND_SRCALPHA);
+        m_renderDevice->SetRenderState(D3DRENDERSTATE_DESTBLEND, D3DBLEND_INVSRCALPHA);
     }
-    m_device->SetRenderState(D3DRENDERSTATE_ZENABLE, D3DZB_TRUE);
+    m_renderDevice->SetRenderState(D3DRENDERSTATE_ZENABLE, D3DZB_TRUE);
     
-    m_device->SetRenderState(D3DRENDERSTATE_ALPHABLENDENABLE, FALSE);
-    m_device->SetRenderState(D3DRENDERSTATE_ALPHATESTENABLE, TRUE);
-    m_device->SetRenderState(D3DRENDERSTATE_COLORKEYENABLE, TRUE);
-    m_device->SetRenderState(D3DRENDERSTATE_ZWRITEENABLE, TRUE);
+    m_renderDevice->SetRenderState(D3DRENDERSTATE_ALPHABLENDENABLE, FALSE);
+    m_renderDevice->SetRenderState(D3DRENDERSTATE_ALPHATESTENABLE, TRUE);
+    m_renderDevice->SetRenderState(D3DRENDERSTATE_COLORKEYENABLE, TRUE);
+    m_renderDevice->SetRenderState(D3DRENDERSTATE_ZWRITEENABLE, TRUE);
     
     // 6. Clear lists for next frame
     m_rpFaceList.clear();
@@ -728,17 +734,15 @@ void CRenderer::FlushRenderList() {
 
 void CRenderer::SetTexture(CTexture* tex) {
     if (m_oldTexture != tex) {
-        if (tex && tex->m_pddsSurface) {
-            m_device->SetTexture(0, tex->m_pddsSurface);
-        } else {
-            m_device->SetTexture(0, nullptr);
+        if (m_renderDevice) {
+            m_renderDevice->BindTexture(0, tex);
         }
         m_oldTexture = tex;
     }
 }
 
 void CRenderer::SetLookAt(vector3d& eye, vector3d& at, vector3d& up) {
-    if (!m_device) {
+    if (!m_renderDevice) {
         return;
     }
 
@@ -751,7 +755,7 @@ void CRenderer::SetLookAt(vector3d& eye, vector3d& at, vector3d& up) {
 
     D3DMATRIX view{};
     BuildLookAtMatrix(eye, at, up, &view);
-    m_device->SetTransform(D3DTRANSFORMSTATE_VIEW, &view);
+    m_renderDevice->SetTransform(D3DTRANSFORMSTATE_VIEW, &view);
 }
 
 void CRenderer::SetLight(vector3d* dir, vector3d* diffuse, vector3d* ambient) {
@@ -795,26 +799,26 @@ RPLmQuadFace* CRenderer::BorrowLmQuadRP() {
     return &(*m_rpLmQuadFaceListIter++);
 }
 
-void RPFace::DrawPri(RPFace* face, IDirect3DDevice7* device) {
+void RPFace::DrawPri(RPFace* face, IRenderDevice& renderDevice) {
     if (face->indices && face->numIndices > 0) {
-        device->DrawIndexedPrimitive(face->primType, D3DFVF_TLVERTEX, face->verts, face->numVerts, face->indices, face->numIndices, 0);
+        renderDevice.DrawIndexedPrimitive(face->primType, D3DFVF_TLVERTEX, face->verts, face->numVerts, face->indices, face->numIndices, 0);
     } else {
-        device->DrawPrimitive(face->primType, D3DFVF_TLVERTEX, face->verts, face->numVerts, 0);
+        renderDevice.DrawPrimitive(face->primType, D3DFVF_TLVERTEX, face->verts, face->numVerts, 0);
     }
 }
 
-void RPLmFace::DrawPri(RPLmFace* face, IDirect3DDevice7* device) {
+void RPLmFace::DrawPri(RPLmFace* face, IRenderDevice& renderDevice) {
     if (face->indices && face->numIndices > 0) {
-        device->DrawIndexedPrimitive(face->primType, kLmFvf, face->lmverts, face->numVerts, face->indices, face->numIndices, 0);
+        renderDevice.DrawIndexedPrimitive(face->primType, kLmFvf, face->lmverts, face->numVerts, face->indices, face->numIndices, 0);
     } else {
-        device->DrawPrimitive(face->primType, kLmFvf, face->lmverts, face->numVerts, 0);
+        renderDevice.DrawPrimitive(face->primType, kLmFvf, face->lmverts, face->numVerts, 0);
     }
 }
 
-void RPRaw::DrawPri(RPRaw* face, IDirect3DDevice7* device) {
+void RPRaw::DrawPri(RPRaw* face, IRenderDevice& renderDevice) {
     if (face->indices && face->numIndices > 0) {
-        device->DrawIndexedPrimitive(face->primType, D3DFVF_TLVERTEX, face->verts, face->numVerts, face->indices, face->numIndices, 0);
+        renderDevice.DrawIndexedPrimitive(face->primType, D3DFVF_TLVERTEX, face->verts, face->numVerts, face->indices, face->numIndices, 0);
     } else {
-        device->DrawPrimitive(face->primType, D3DFVF_TLVERTEX, face->verts, face->numVerts, 0);
+        renderDevice.DrawPrimitive(face->primType, D3DFVF_TLVERTEX, face->verts, face->numVerts, 0);
     }
 }

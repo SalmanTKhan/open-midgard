@@ -6,6 +6,8 @@
 
 #include "RenderBackend.h"
 
+class CTexture;
+
 class IRenderDevice {
 public:
     virtual ~IRenderDevice() = default;
@@ -22,6 +24,18 @@ public:
     virtual int ClearColor(unsigned int color) = 0;
     virtual int ClearDepth() = 0;
     virtual int Present(bool vertSync) = 0;
+
+    virtual bool BeginScene() = 0;
+    virtual void EndScene() = 0;
+    virtual void SetTransform(D3DTRANSFORMSTATETYPE state, const D3DMATRIX* matrix) = 0;
+    virtual void SetRenderState(D3DRENDERSTATETYPE state, DWORD value) = 0;
+    virtual void SetTextureStageState(DWORD stage, D3DTEXTURESTAGESTATETYPE type, DWORD value) = 0;
+    virtual void BindTexture(DWORD stage, CTexture* texture) = 0;
+    virtual void DrawPrimitive(D3DPRIMITIVETYPE primitiveType, DWORD vertexFormat,
+        const void* vertices, DWORD vertexCount, DWORD flags) = 0;
+    virtual void DrawIndexedPrimitive(D3DPRIMITIVETYPE primitiveType, DWORD vertexFormat,
+        const void* vertices, DWORD vertexCount, const unsigned short* indices,
+        DWORD indexCount, DWORD flags) = 0;
 
     virtual void AdjustTextureSize(unsigned int* width, unsigned int* height) = 0;
     virtual bool CreateTextureSurface(unsigned int requestedWidth, unsigned int requestedHeight,
