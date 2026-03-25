@@ -41,9 +41,10 @@ public:
         DWORD indexCount, DWORD flags) = 0;
 
     virtual void AdjustTextureSize(unsigned int* width, unsigned int* height) = 0;
-    virtual bool CreateTextureSurface(unsigned int requestedWidth, unsigned int requestedHeight,
-        unsigned int* outSurfaceWidth, unsigned int* outSurfaceHeight, IDirectDrawSurface7** outSurface) = 0;
-    virtual bool UploadTextureSurface(IDirectDrawSurface7* surface, int x, int y, int w, int h,
+    virtual void ReleaseTextureResource(CTexture* texture) = 0;
+    virtual bool CreateTextureResource(CTexture* texture, unsigned int requestedWidth, unsigned int requestedHeight,
+        int pixelFormat, unsigned int* outSurfaceWidth, unsigned int* outSurfaceHeight) = 0;
+    virtual bool UpdateTextureResource(CTexture* texture, int x, int y, int w, int h,
         const unsigned int* data, bool skipColorKey, int pitch) = 0;
 };
 

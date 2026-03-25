@@ -207,28 +207,29 @@ void CSurfaceWallpaper::Update(int x, int y, int w, int h, unsigned int* data, b
 }
 
 CTexture::CTexture(unsigned int w, unsigned int h, PixelFormat format)
-    : CSurface(w, h), m_pf(format), m_lockCnt(0), m_timeStamp(0), m_updateWidth(0), m_updateHeight(0) {
+    : CSurface(w, h), m_pf(format), m_lockCnt(0), m_timeStamp(0), m_updateWidth(0), m_updateHeight(0),
+      m_backendTextureObject(nullptr), m_backendTextureView(nullptr) {
     m_texName[0] = '\0';
 }
 
 CTexture::CTexture(unsigned int w, unsigned int h, PixelFormat format, IDirectDrawSurface7* pSurface)
-    : CSurface(w, h, pSurface), m_pf(format), m_lockCnt(0), m_timeStamp(0), m_updateWidth(0), m_updateHeight(0) {
+    : CSurface(w, h, pSurface), m_pf(format), m_lockCnt(0), m_timeStamp(0), m_updateWidth(0), m_updateHeight(0),
+      m_backendTextureObject(nullptr), m_backendTextureView(nullptr) {
     m_texName[0] = '\0';
 }
 
-CTexture::~CTexture() {}
+CTexture::~CTexture() {
+    GetRenderDevice().ReleaseTextureResource(this);
+}
 
 bool CTexture::Create(unsigned int w, unsigned int h, PixelFormat format) {
-    if (m_pddsSurface) {
-        m_pddsSurface->Release();
-        m_pddsSurface = nullptr;
-    }
+    GetRenderDevice().ReleaseTextureResource(this);
 
     unsigned int textureW = 0;
     unsigned int textureH = 0;
-    if (!GetRenderDevice().CreateTextureSurface(w, h, &textureW, &textureH, &m_pddsSurface)) {
+    if (!GetRenderDevice().CreateTextureResource(this, w, h, static_cast<int>(format), &textureW, &textureH)) {
         if constexpr (kLogTexture) {
-            DbgLog("[Texture] CreateTextureSurface failed name='%s' requested=%ux%u\n", m_texName, w, h);
+            DbgLog("[Texture] CreateTextureResource failed name='%s' requested=%ux%u\n", m_texName, w, h);
         }
         return false;
     }
@@ -266,7 +267,7 @@ void CTexture::ClearSurface(RECT* r, unsigned int col) { CSurface::ClearSurface(
 void CTexture::DrawSurface(int x, int y, int w, int h, unsigned int flags) { CSurface::DrawSurface(x, y, w, h, flags); }
 void CTexture::DrawSurfaceStretch(int x, int y, int w, int h) { CSurface::DrawSurfaceStretch(x, y, w, h); }
 void CTexture::Update(int x, int y, int w, int h, unsigned int* data, bool b, int p) {
-    if (!GetRenderDevice().UploadTextureSurface(m_pddsSurface, x, y, w, h, data, b, p)) {
+    if (!GetRenderDevice().UpdateTextureResource(this, x, y, w, h, data, b, p)) {
         return;
     }
     m_updateWidth = (std::max)(m_updateWidth, static_cast<unsigned int>(x + w));

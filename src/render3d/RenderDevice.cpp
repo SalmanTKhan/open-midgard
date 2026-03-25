@@ -90,6 +90,28 @@ unsigned int GetSurfaceColorKey(const DDPIXELFORMAT& pf)
     return pf.dwRBitMask | pf.dwBBitMask;
 }
 
+void ReleaseTextureMembers(CTexture* texture)
+{
+    if (!texture) {
+        return;
+    }
+
+    if (texture->m_pddsSurface) {
+        texture->m_pddsSurface->Release();
+        texture->m_pddsSurface = nullptr;
+    }
+
+    if (texture->m_backendTextureView) {
+        texture->m_backendTextureView->Release();
+        texture->m_backendTextureView = nullptr;
+    }
+
+    if (texture->m_backendTextureObject) {
+        texture->m_backendTextureObject->Release();
+        texture->m_backendTextureObject = nullptr;
+    }
+}
+
 void WritePackedPixel(unsigned char* dst, unsigned int bytesPerPixel, unsigned int value)
 {
     switch (bytesPerPixel) {
@@ -321,12 +343,20 @@ public:
         g_3dDevice.AdjustTextureSize(width, height);
     }
 
-    bool CreateTextureSurface(unsigned int requestedWidth, unsigned int requestedHeight,
-        unsigned int* outSurfaceWidth, unsigned int* outSurfaceHeight, IDirectDrawSurface7** outSurface) override
+    void ReleaseTextureResource(CTexture* texture) override
     {
-        if (!outSurface || !g_3dDevice.m_pDD) {
+        ReleaseTextureMembers(texture);
+    }
+
+    bool CreateTextureResource(CTexture* texture, unsigned int requestedWidth, unsigned int requestedHeight,
+        int pixelFormat, unsigned int* outSurfaceWidth, unsigned int* outSurfaceHeight) override
+    {
+        (void)pixelFormat;
+        if (!texture || !g_3dDevice.m_pDD) {
             return false;
         }
+
+        ReleaseTextureMembers(texture);
 
         unsigned int surfaceWidth = requestedWidth;
         unsigned int surfaceHeight = requestedHeight;
@@ -370,13 +400,14 @@ public:
         if (outSurfaceHeight) {
             *outSurfaceHeight = surfaceHeight;
         }
-        *outSurface = surface;
+        texture->m_pddsSurface = surface;
         return true;
     }
 
-    bool UploadTextureSurface(IDirectDrawSurface7* surface, int x, int y, int w, int h,
+    bool UpdateTextureResource(CTexture* texture, int x, int y, int w, int h,
         const unsigned int* data, bool skipColorKey, int pitch) override
     {
+        IDirectDrawSurface7* surface = texture ? texture->m_pddsSurface : nullptr;
         if (!surface || !data || w <= 0 || h <= 0) {
             return false;
         }
@@ -420,7 +451,7 @@ public:
     D3D11RenderDevice()
         : m_hwnd(nullptr), m_renderWidth(0), m_renderHeight(0),
           m_swapChain(nullptr), m_device(nullptr), m_context(nullptr), m_renderTargetView(nullptr),
-          m_warnedLegacyOps(false), m_warnedTextureInterop(false)
+            m_warnedLegacyOps(false)
     {
     }
 
@@ -521,7 +552,6 @@ public:
         m_renderHeight = 0;
         m_hwnd = nullptr;
         m_warnedLegacyOps = false;
-        m_warnedTextureInterop = false;
     }
 
     void RefreshRenderSize() override
@@ -687,37 +717,89 @@ public:
         *height = (std::max)(1u, *height);
     }
 
-    bool CreateTextureSurface(unsigned int requestedWidth, unsigned int requestedHeight,
-        unsigned int* outSurfaceWidth, unsigned int* outSurfaceHeight, IDirectDrawSurface7** outSurface) override
+    void ReleaseTextureResource(CTexture* texture) override
     {
-        (void)requestedWidth;
-        (void)requestedHeight;
-        if (outSurfaceWidth) {
-            *outSurfaceWidth = 0;
-        }
-        if (outSurfaceHeight) {
-            *outSurfaceHeight = 0;
-        }
-        if (outSurface) {
-            *outSurface = nullptr;
-        }
-        WarnTextureInteropUnavailable("CreateTextureSurface");
-        return false;
+        ReleaseTextureMembers(texture);
     }
 
-    bool UploadTextureSurface(IDirectDrawSurface7* surface, int x, int y, int w, int h,
+    bool CreateTextureResource(CTexture* texture, unsigned int requestedWidth, unsigned int requestedHeight,
+        int pixelFormat, unsigned int* outSurfaceWidth, unsigned int* outSurfaceHeight) override
+    {
+        (void)pixelFormat;
+        if (!texture || !m_device) {
+            return false;
+        }
+
+        ReleaseTextureMembers(texture);
+
+        D3D11_TEXTURE2D_DESC desc{};
+        desc.Width = (std::max)(1u, requestedWidth);
+        desc.Height = (std::max)(1u, requestedHeight);
+        desc.MipLevels = 1;
+        desc.ArraySize = 1;
+        desc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+        desc.SampleDesc.Count = 1;
+        desc.Usage = D3D11_USAGE_DEFAULT;
+        desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+
+        ID3D11Texture2D* textureObject = nullptr;
+        HRESULT hr = m_device->CreateTexture2D(&desc, nullptr, &textureObject);
+        if (FAILED(hr) || !textureObject) {
+            SafeRelease(textureObject);
+            return false;
+        }
+
+        ID3D11ShaderResourceView* textureView = nullptr;
+        hr = m_device->CreateShaderResourceView(textureObject, nullptr, &textureView);
+        if (FAILED(hr) || !textureView) {
+            SafeRelease(textureView);
+            SafeRelease(textureObject);
+            return false;
+        }
+
+        texture->m_backendTextureObject = textureObject;
+        texture->m_backendTextureView = textureView;
+        if (outSurfaceWidth) {
+            *outSurfaceWidth = desc.Width;
+        }
+        if (outSurfaceHeight) {
+            *outSurfaceHeight = desc.Height;
+        }
+        return true;
+    }
+
+    bool UpdateTextureResource(CTexture* texture, int x, int y, int w, int h,
         const unsigned int* data, bool skipColorKey, int pitch) override
     {
-        (void)surface;
-        (void)x;
-        (void)y;
-        (void)w;
-        (void)h;
-        (void)data;
-        (void)skipColorKey;
-        (void)pitch;
-        WarnTextureInteropUnavailable("UploadTextureSurface");
-        return false;
+        if (!texture || !texture->m_backendTextureObject || !m_context || !data || w <= 0 || h <= 0) {
+            return false;
+        }
+
+        ID3D11Texture2D* textureObject = static_cast<ID3D11Texture2D*>(texture->m_backendTextureObject);
+        const int srcPitch = pitch > 0 ? pitch : w * static_cast<int>(sizeof(unsigned int));
+        std::vector<unsigned int> uploadBuffer(static_cast<size_t>(w) * static_cast<size_t>(h));
+
+        for (int row = 0; row < h; ++row) {
+            const unsigned int* srcRow = reinterpret_cast<const unsigned int*>(reinterpret_cast<const unsigned char*>(data) + static_cast<size_t>(row) * static_cast<size_t>(srcPitch));
+            unsigned int* dstRow = uploadBuffer.data() + static_cast<size_t>(row) * static_cast<size_t>(w);
+            for (int col = 0; col < w; ++col) {
+                unsigned int pixel = srcRow[col];
+                if (!skipColorKey && (pixel & 0x00FFFFFFu) == 0x00FF00FFu) {
+                    pixel = 0x00000000u;
+                }
+                dstRow[col] = pixel;
+            }
+        }
+
+        D3D11_BOX updateBox{};
+        updateBox.left = static_cast<UINT>(x);
+        updateBox.top = static_cast<UINT>(y);
+        updateBox.front = 0;
+        updateBox.right = static_cast<UINT>(x + w);
+        updateBox.bottom = static_cast<UINT>(y + h);
+        updateBox.back = 1;
+        m_context->UpdateSubresource(textureObject, 0, &updateBox, uploadBuffer.data(), static_cast<UINT>(w * sizeof(unsigned int)), 0);
+        return true;
     }
 
 private:
@@ -774,15 +856,6 @@ private:
         }
     }
 
-    void WarnTextureInteropUnavailable(const char* operation)
-    {
-        if (!m_warnedTextureInterop) {
-            m_warnedTextureInterop = true;
-            DbgLog("[Render] D3D11 backend does not yet implement DirectDraw texture interop. Operation '%s' is unavailable.\n",
-                operation ? operation : "unknown");
-        }
-    }
-
     HWND m_hwnd;
     int m_renderWidth;
     int m_renderHeight;
@@ -791,7 +864,6 @@ private:
     ID3D11DeviceContext* m_context;
     ID3D11RenderTargetView* m_renderTargetView;
     bool m_warnedLegacyOps;
-    bool m_warnedTextureInterop;
 };
 
 class RoutedRenderDevice final : public IRenderDevice {
@@ -890,8 +962,9 @@ public:
     void DrawPrimitive(D3DPRIMITIVETYPE primitiveType, DWORD vertexFormat, const void* vertices, DWORD vertexCount, DWORD flags) override { m_active->DrawPrimitive(primitiveType, vertexFormat, vertices, vertexCount, flags); }
     void DrawIndexedPrimitive(D3DPRIMITIVETYPE primitiveType, DWORD vertexFormat, const void* vertices, DWORD vertexCount, const unsigned short* indices, DWORD indexCount, DWORD flags) override { m_active->DrawIndexedPrimitive(primitiveType, vertexFormat, vertices, vertexCount, indices, indexCount, flags); }
     void AdjustTextureSize(unsigned int* width, unsigned int* height) override { m_active->AdjustTextureSize(width, height); }
-    bool CreateTextureSurface(unsigned int requestedWidth, unsigned int requestedHeight, unsigned int* outSurfaceWidth, unsigned int* outSurfaceHeight, IDirectDrawSurface7** outSurface) override { return m_active->CreateTextureSurface(requestedWidth, requestedHeight, outSurfaceWidth, outSurfaceHeight, outSurface); }
-    bool UploadTextureSurface(IDirectDrawSurface7* surface, int x, int y, int w, int h, const unsigned int* data, bool skipColorKey, int pitch) override { return m_active->UploadTextureSurface(surface, x, y, w, h, data, skipColorKey, pitch); }
+    void ReleaseTextureResource(CTexture* texture) override { m_active->ReleaseTextureResource(texture); }
+    bool CreateTextureResource(CTexture* texture, unsigned int requestedWidth, unsigned int requestedHeight, int pixelFormat, unsigned int* outSurfaceWidth, unsigned int* outSurfaceHeight) override { return m_active->CreateTextureResource(texture, requestedWidth, requestedHeight, pixelFormat, outSurfaceWidth, outSurfaceHeight); }
+    bool UpdateTextureResource(CTexture* texture, int x, int y, int w, int h, const unsigned int* data, bool skipColorKey, int pitch) override { return m_active->UpdateTextureResource(texture, x, y, w, h, data, skipColorKey, pitch); }
 
 private:
     LegacyRenderDevice m_legacy;

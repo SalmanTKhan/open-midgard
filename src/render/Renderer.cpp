@@ -301,6 +301,8 @@ CTexture* CTexMgr::CreateTexture(unsigned long w, unsigned long h, PixelFormat f
     tex->m_h = h;
     tex->m_pf = format;
     tex->m_pddsSurface = pSurface;
+    tex->m_backendTextureObject = nullptr;
+    tex->m_backendTextureView = nullptr;
     if (pSurface) {
         pSurface->AddRef();
     }
