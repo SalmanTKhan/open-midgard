@@ -172,6 +172,10 @@ public:
         CPc* actor;
         float screenY;
         float depthKey;
+        float renderLeft;
+        float renderTop;
+        float renderRight;
+        float renderBottom;
         float left;
         float top;
         float right;

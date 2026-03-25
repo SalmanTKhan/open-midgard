@@ -1036,14 +1036,14 @@ bool RenderCachedBillboard(const CWorld::BillboardScreenEntry& entry)
     face->alphaSortKey = 0.0f;
 
     tlvertex3d* verts = face->m_verts;
-    verts[0].x = entry.left;
-    verts[0].y = entry.top;
-    verts[1].x = entry.right;
-    verts[1].y = entry.top;
-    verts[2].x = entry.left;
-    verts[2].y = entry.bottom;
-    verts[3].x = entry.right;
-    verts[3].y = entry.bottom;
+    verts[0].x = entry.renderLeft;
+    verts[0].y = entry.renderTop;
+    verts[1].x = entry.renderRight;
+    verts[1].y = entry.renderTop;
+    verts[2].x = entry.renderLeft;
+    verts[2].y = entry.renderBottom;
+    verts[3].x = entry.renderRight;
+    verts[3].y = entry.renderBottom;
     for (int index = 0; index < 4; ++index) {
         verts[index].z = (std::max)(0.0f, entry.baseZ - kBillboardDepthBias);
         verts[index].oow = entry.baseOow;
@@ -1135,35 +1135,86 @@ bool BuildBillboardRenderEntry(CPc* actor,
         AddVec3(AddVec3(actor->m_pos, ScaleVec3(up, -bottomUnits)), ScaleVec3(right, rightUnits)),
     };
 
-    float minX = projectedBase.x;
-    float minY = projectedBase.y;
-    float maxX = projectedBase.x;
-    float maxY = projectedBase.y;
+    float renderMinX = projectedBase.x;
+    float renderMinY = projectedBase.y;
+    float renderMaxX = projectedBase.x;
+    float renderMaxY = projectedBase.y;
     for (const vector3d& worldVert : worldVerts) {
         tlvertex3d projected{};
         if (!ProjectPoint(g_renderer, viewMatrix, worldVert, &projected)) {
             return false;
         }
-        minX = (std::min)(minX, projected.x);
-        minY = (std::min)(minY, projected.y);
-        maxX = (std::max)(maxX, projected.x);
-        maxY = (std::max)(maxY, projected.y);
+        renderMinX = (std::min)(renderMinX, projected.x);
+        renderMinY = (std::min)(renderMinY, projected.y);
+        renderMaxX = (std::max)(renderMaxX, projected.x);
+        renderMaxY = (std::max)(renderMaxY, projected.y);
+    }
+
+    const float fullLeftUnits = anchorX * unitsPerPixel;
+    const float fullRightUnits = (textureWidth - anchorX) * unitsPerPixel;
+    const float fullTopUnits = anchorY * unitsPerPixel;
+    const float fullBottomUnits = (textureHeight - anchorY) * unitsPerPixel;
+    const vector3d fullWorldVerts[4] = {
+        AddVec3(AddVec3(actor->m_pos, ScaleVec3(up, fullTopUnits)), ScaleVec3(right, -fullLeftUnits)),
+        AddVec3(AddVec3(actor->m_pos, ScaleVec3(up, fullTopUnits)), ScaleVec3(right, fullRightUnits)),
+        AddVec3(AddVec3(actor->m_pos, ScaleVec3(up, -fullBottomUnits)), ScaleVec3(right, -fullLeftUnits)),
+        AddVec3(AddVec3(actor->m_pos, ScaleVec3(up, -fullBottomUnits)), ScaleVec3(right, fullRightUnits)),
+    };
+
+    float fullMinX = projectedBase.x;
+    float fullMinY = projectedBase.y;
+    float fullMaxX = projectedBase.x;
+    float fullMaxY = projectedBase.y;
+    for (const vector3d& worldVert : fullWorldVerts) {
+        tlvertex3d projected{};
+        if (!ProjectPoint(g_renderer, viewMatrix, worldVert, &projected)) {
+            return false;
+        }
+        fullMinX = (std::min)(fullMinX, projected.x);
+        fullMinY = (std::min)(fullMinY, projected.y);
+        fullMaxX = (std::max)(fullMaxX, projected.x);
+        fullMaxY = (std::max)(fullMaxY, projected.y);
     }
 
     outEntry->actor = actor;
     outEntry->screenY = projectedBase.y;
     outEntry->depthKey = projectedBase.oow;
-    outEntry->left = minX;
-    outEntry->top = minY;
-    outEntry->right = maxX;
-    outEntry->bottom = maxY;
-    outEntry->labelX = (minX + maxX) * 0.5f;
-    outEntry->labelY = maxY;
+    outEntry->renderLeft = fullMinX;
+    outEntry->renderTop = fullMinY;
+    outEntry->renderRight = fullMaxX;
+    outEntry->renderBottom = fullMaxY;
+    outEntry->left = renderMinX;
+    outEntry->top = renderMinY;
+    outEntry->right = renderMaxX;
+    outEntry->bottom = renderMaxY;
+    outEntry->labelX = (renderMinX + renderMaxX) * 0.5f;
+    outEntry->labelY = renderMaxY;
     outEntry->baseX = projectedBase.x;
     outEntry->baseY = projectedBase.y;
     outEntry->baseZ = projectedBase.z;
     outEntry->baseOow = projectedBase.oow;
     return true;
+}
+
+CPc* FindLiveBillboardActor(const CWorld& world, u32 gid)
+{
+    if (gid == 0) {
+        return nullptr;
+    }
+
+    if (world.m_player && world.m_player->m_gid == gid) {
+        return world.m_player;
+    }
+
+    for (CGameActor* actor : world.m_actorList) {
+        if (!actor || actor->m_gid != gid) {
+            continue;
+        }
+
+        return dynamic_cast<CPc*>(actor);
+    }
+
+    return nullptr;
 }
 
 bool CompareBillboardRenderEntry(const CWorld::BillboardScreenEntry& lhs, const CWorld::BillboardScreenEntry& rhs)
@@ -3821,8 +3872,13 @@ bool CWorld::FindHoveredActorScreen(const matrix& viewMatrix,
             continue;
         }
 
+        CPc* liveActor = FindLiveBillboardActor(*this, it->actor ? it->actor->m_gid : 0);
+        if (!liveActor || !liveActor->m_isVisible) {
+            continue;
+        }
+
         if (outActor) {
-            *outActor = it->actor;
+            *outActor = liveActor;
         }
         if (outLabelX) {
             *outLabelX = static_cast<int>(std::lround(it->baseX));
