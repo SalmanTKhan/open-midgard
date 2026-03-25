@@ -2599,17 +2599,20 @@ private:
         }
 
         ID3D12Resource* textureObject = static_cast<ID3D12Resource*>(texture->m_backendTextureObject);
-        ID3D12DescriptorHeap* textureDescriptorHeap = static_cast<ID3D12DescriptorHeap*>(texture->m_backendTextureView);
-        if (!textureObject || !textureDescriptorHeap) {
+        if (!textureObject) {
             WriteNullSrvDescriptor(index);
             return false;
         }
 
-        m_device->CopyDescriptorsSimple(
-            1,
-            GetSrvCpuHandle(index),
-            textureDescriptorHeap->GetCPUDescriptorHandleForHeapStart(),
-            D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+        D3D12_RESOURCE_DESC textureDesc = textureObject->GetDesc();
+        D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc{};
+        srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+        srvDesc.Format = textureDesc.Format;
+        srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+        srvDesc.Texture2D.MostDetailedMip = 0;
+        srvDesc.Texture2D.MipLevels = textureDesc.MipLevels;
+        srvDesc.Texture2D.ResourceMinLODClamp = 0.0f;
+        m_device->CreateShaderResourceView(textureObject, &srvDesc, GetSrvCpuHandle(index));
         return true;
     }
 
