@@ -1672,6 +1672,8 @@ public:
           m_constantBuffer(nullptr), m_constantBufferMapped(nullptr),
           m_vertexBuffer(nullptr), m_vertexBufferMapped(nullptr), m_vertexBufferSize(0),
           m_indexBuffer(nullptr), m_indexBufferMapped(nullptr), m_indexBufferSize(0),
+            m_captureReadbackBuffer(nullptr), m_captureDc(nullptr), m_captureBitmap(nullptr), m_captureBits(nullptr),
+            m_captureWidth(0), m_captureHeight(0), m_captureRowPitch(0),
           m_frameCommandsOpen(false)
     {
         ResetModernFixedFunctionState(&m_pipelineState);
@@ -1891,6 +1893,7 @@ public:
         WaitForGpu();
         ReleaseSwapChainResources();
         ReleasePendingUploadBuffers();
+        ReleaseCaptureResources();
         ReleaseCachedStates();
         UnmapUploadBuffer(m_indexBuffer, &m_indexBufferMapped);
         SafeRelease(m_indexBuffer);
@@ -2008,15 +2011,109 @@ public:
         m_frameIndex = m_swapChain->GetCurrentBackBufferIndex();
         return static_cast<int>(presentHr);
     }
-    bool AcquireBackBufferDC(HDC* outDc) override { if (outDc) { *outDc = nullptr; } return false; }
+    bool AcquireBackBufferDC(HDC* outDc) override
+    {
+        if (!outDc) {
+            return false;
+        }
+        *outDc = nullptr;
+        if (!CaptureRenderTargetSnapshot()) {
+            return false;
+        }
+        *outDc = m_captureDc;
+        return *outDc != nullptr;
+    }
     void ReleaseBackBufferDC(HDC dc) override { (void)dc; }
     bool UpdateBackBufferFromMemory(const void* bgraPixels, int width, int height, int pitch) override
     {
-        (void)bgraPixels;
-        (void)width;
-        (void)height;
-        (void)pitch;
-        return false;
+        if (!bgraPixels || width <= 0 || height <= 0 || pitch <= 0 || !m_device || !m_swapChain) {
+            return false;
+        }
+        if (width != m_renderWidth || height != m_renderHeight) {
+            return false;
+        }
+        if (!EnsureFrameCommandsStarted()) {
+            return false;
+        }
+
+        const UINT uploadRowPitch = AlignTo(static_cast<UINT>(width * static_cast<int>(sizeof(unsigned int))), D3D12_TEXTURE_DATA_PITCH_ALIGNMENT);
+        const UINT uploadBufferSize = uploadRowPitch * static_cast<UINT>(height);
+
+        D3D12_HEAP_PROPERTIES heapProps{};
+        heapProps.Type = D3D12_HEAP_TYPE_UPLOAD;
+
+        D3D12_RESOURCE_DESC uploadDesc{};
+        uploadDesc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+        uploadDesc.Width = uploadBufferSize;
+        uploadDesc.Height = 1;
+        uploadDesc.DepthOrArraySize = 1;
+        uploadDesc.MipLevels = 1;
+        uploadDesc.SampleDesc.Count = 1;
+        uploadDesc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+
+        ID3D12Resource* uploadBuffer = nullptr;
+        HRESULT hr = m_device->CreateCommittedResource(
+            &heapProps,
+            D3D12_HEAP_FLAG_NONE,
+            &uploadDesc,
+            D3D12_RESOURCE_STATE_GENERIC_READ,
+            nullptr,
+            IID_PPV_ARGS(&uploadBuffer));
+        if (FAILED(hr) || !uploadBuffer) {
+            SafeRelease(uploadBuffer);
+            return false;
+        }
+
+        void* mapped = nullptr;
+        D3D12_RANGE readRange{};
+        hr = uploadBuffer->Map(0, &readRange, &mapped);
+        if (FAILED(hr) || !mapped) {
+            SafeRelease(uploadBuffer);
+            return false;
+        }
+
+        unsigned char* dstBytes = static_cast<unsigned char*>(mapped);
+        for (int row = 0; row < height; ++row) {
+            const unsigned char* srcBytes = static_cast<const unsigned char*>(bgraPixels) + static_cast<size_t>(row) * static_cast<size_t>(pitch);
+            std::memcpy(dstBytes + static_cast<size_t>(row) * uploadRowPitch, srcBytes, static_cast<size_t>(width) * sizeof(unsigned int));
+        }
+        D3D12_RANGE writtenRange{ 0, uploadBufferSize };
+        uploadBuffer->Unmap(0, &writtenRange);
+
+        D3D12_TEXTURE_COPY_LOCATION srcLocation{};
+        srcLocation.pResource = uploadBuffer;
+        srcLocation.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+        srcLocation.PlacedFootprint.Offset = 0;
+        srcLocation.PlacedFootprint.Footprint.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+        srcLocation.PlacedFootprint.Footprint.Width = static_cast<UINT>(width);
+        srcLocation.PlacedFootprint.Footprint.Height = static_cast<UINT>(height);
+        srcLocation.PlacedFootprint.Footprint.Depth = 1;
+        srcLocation.PlacedFootprint.Footprint.RowPitch = uploadRowPitch;
+
+        D3D12_TEXTURE_COPY_LOCATION dstLocation{};
+        dstLocation.pResource = GetCurrentBackBuffer();
+        dstLocation.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+        dstLocation.SubresourceIndex = 0;
+
+        const D3D12_RESOURCE_BARRIER toCopy = TransitionBarrier(
+            GetCurrentBackBuffer(),
+            D3D12_RESOURCE_STATE_RENDER_TARGET,
+            D3D12_RESOURCE_STATE_COPY_DEST);
+        m_commandList->ResourceBarrier(1, &toCopy);
+        m_commandList->CopyTextureRegion(&dstLocation, 0, 0, 0, &srcLocation, nullptr);
+        const D3D12_RESOURCE_BARRIER toRender = TransitionBarrier(
+            GetCurrentBackBuffer(),
+            D3D12_RESOURCE_STATE_COPY_DEST,
+            D3D12_RESOURCE_STATE_RENDER_TARGET);
+        m_commandList->ResourceBarrier(1, &toRender);
+
+        const D3D12_CPU_DESCRIPTOR_HANDLE rtvHandle = GetCurrentRtvHandle();
+        const D3D12_CPU_DESCRIPTOR_HANDLE dsvHandle = GetDsvHandle();
+        m_commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, m_depthStencil ? &dsvHandle : nullptr);
+        ApplyViewportAndScissor();
+
+        m_pendingUploadBuffers.push_back(uploadBuffer);
+        return true;
     }
     bool BeginScene() override { return EnsureFrameCommandsStarted(); }
     void EndScene() override {}
@@ -2524,6 +2621,160 @@ private:
         m_pendingUploadBuffers.clear();
     }
 
+    void ReleaseCaptureResources()
+    {
+        SafeRelease(m_captureReadbackBuffer);
+        if (m_captureBitmap) {
+            DeleteObject(m_captureBitmap);
+            m_captureBitmap = nullptr;
+        }
+        if (m_captureDc) {
+            DeleteDC(m_captureDc);
+            m_captureDc = nullptr;
+        }
+        m_captureBits = nullptr;
+        m_captureWidth = 0;
+        m_captureHeight = 0;
+        m_captureRowPitch = 0;
+    }
+
+    bool EnsureCaptureResources()
+    {
+        if (!m_device || m_renderWidth <= 0 || m_renderHeight <= 0) {
+            return false;
+        }
+
+        const UINT desiredRowPitch = AlignTo(static_cast<UINT>(m_renderWidth * static_cast<int>(sizeof(unsigned int))), D3D12_TEXTURE_DATA_PITCH_ALIGNMENT);
+        const bool sizeMatches = m_captureReadbackBuffer && m_captureDc && m_captureBitmap
+            && m_captureWidth == m_renderWidth && m_captureHeight == m_renderHeight && m_captureRowPitch == desiredRowPitch;
+        if (sizeMatches) {
+            return true;
+        }
+
+        ReleaseCaptureResources();
+
+        const UINT64 readbackSize = static_cast<UINT64>(desiredRowPitch) * static_cast<UINT64>(m_renderHeight);
+        D3D12_HEAP_PROPERTIES heapProps{};
+        heapProps.Type = D3D12_HEAP_TYPE_READBACK;
+
+        D3D12_RESOURCE_DESC resourceDesc{};
+        resourceDesc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+        resourceDesc.Width = readbackSize;
+        resourceDesc.Height = 1;
+        resourceDesc.DepthOrArraySize = 1;
+        resourceDesc.MipLevels = 1;
+        resourceDesc.SampleDesc.Count = 1;
+        resourceDesc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+
+        HRESULT hr = m_device->CreateCommittedResource(
+            &heapProps,
+            D3D12_HEAP_FLAG_NONE,
+            &resourceDesc,
+            D3D12_RESOURCE_STATE_COPY_DEST,
+            nullptr,
+            IID_PPV_ARGS(&m_captureReadbackBuffer));
+        if (FAILED(hr) || !m_captureReadbackBuffer) {
+            ReleaseCaptureResources();
+            return false;
+        }
+
+        HDC screenDc = GetDC(nullptr);
+        if (!screenDc) {
+            ReleaseCaptureResources();
+            return false;
+        }
+
+        m_captureDc = CreateCompatibleDC(screenDc);
+        ReleaseDC(nullptr, screenDc);
+        if (!m_captureDc) {
+            ReleaseCaptureResources();
+            return false;
+        }
+
+        BITMAPINFO bmi{};
+        bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+        bmi.bmiHeader.biWidth = m_renderWidth;
+        bmi.bmiHeader.biHeight = -m_renderHeight;
+        bmi.bmiHeader.biPlanes = 1;
+        bmi.bmiHeader.biBitCount = 32;
+        bmi.bmiHeader.biCompression = BI_RGB;
+        m_captureBitmap = CreateDIBSection(m_captureDc, &bmi, DIB_RGB_COLORS, &m_captureBits, nullptr, 0);
+        if (!m_captureBitmap || !m_captureBits) {
+            ReleaseCaptureResources();
+            return false;
+        }
+
+        SelectObject(m_captureDc, m_captureBitmap);
+        m_captureWidth = m_renderWidth;
+        m_captureHeight = m_renderHeight;
+        m_captureRowPitch = desiredRowPitch;
+        return true;
+    }
+
+    bool CaptureRenderTargetSnapshot()
+    {
+        if (!EnsureCaptureResources() || !GetCurrentBackBuffer() || !EnsureFrameCommandsStarted()) {
+            return false;
+        }
+
+        D3D12_TEXTURE_COPY_LOCATION srcLocation{};
+        srcLocation.pResource = GetCurrentBackBuffer();
+        srcLocation.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+        srcLocation.SubresourceIndex = 0;
+
+        D3D12_TEXTURE_COPY_LOCATION dstLocation{};
+        dstLocation.pResource = m_captureReadbackBuffer;
+        dstLocation.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+        dstLocation.PlacedFootprint.Offset = 0;
+        dstLocation.PlacedFootprint.Footprint.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+        dstLocation.PlacedFootprint.Footprint.Width = static_cast<UINT>(m_renderWidth);
+        dstLocation.PlacedFootprint.Footprint.Height = static_cast<UINT>(m_renderHeight);
+        dstLocation.PlacedFootprint.Footprint.Depth = 1;
+        dstLocation.PlacedFootprint.Footprint.RowPitch = m_captureRowPitch;
+
+        const D3D12_RESOURCE_BARRIER toCopy = TransitionBarrier(
+            GetCurrentBackBuffer(),
+            D3D12_RESOURCE_STATE_RENDER_TARGET,
+            D3D12_RESOURCE_STATE_COPY_SOURCE);
+        m_commandList->ResourceBarrier(1, &toCopy);
+        m_commandList->CopyTextureRegion(&dstLocation, 0, 0, 0, &srcLocation, nullptr);
+        const D3D12_RESOURCE_BARRIER toPresent = TransitionBarrier(
+            GetCurrentBackBuffer(),
+            D3D12_RESOURCE_STATE_COPY_SOURCE,
+            D3D12_RESOURCE_STATE_PRESENT);
+        m_commandList->ResourceBarrier(1, &toPresent);
+
+        if (FAILED(m_commandList->Close())) {
+            return false;
+        }
+
+        ID3D12CommandList* commandLists[] = { m_commandList };
+        m_commandQueue->ExecuteCommandLists(1, commandLists);
+        m_frameCommandsOpen = false;
+        WaitForGpu();
+
+        void* mapped = nullptr;
+        D3D12_RANGE readRange{ 0, static_cast<SIZE_T>(m_captureRowPitch) * static_cast<SIZE_T>(m_captureHeight) };
+        HRESULT hr = m_captureReadbackBuffer->Map(0, &readRange, &mapped);
+        if (FAILED(hr) || !mapped || !m_captureBits) {
+            if (mapped) {
+                D3D12_RANGE writtenRange{};
+                m_captureReadbackBuffer->Unmap(0, &writtenRange);
+            }
+            return false;
+        }
+
+        const size_t dstPitch = static_cast<size_t>(m_captureWidth) * sizeof(unsigned int);
+        for (int row = 0; row < m_captureHeight; ++row) {
+            const unsigned char* srcRow = static_cast<const unsigned char*>(mapped) + static_cast<size_t>(row) * static_cast<size_t>(m_captureRowPitch);
+            unsigned char* dstRow = static_cast<unsigned char*>(m_captureBits) + static_cast<size_t>(row) * dstPitch;
+            std::memcpy(dstRow, srcRow, dstPitch);
+        }
+        D3D12_RANGE writtenRange{};
+        m_captureReadbackBuffer->Unmap(0, &writtenRange);
+        return true;
+    }
+
     void ReleaseCachedStates()
     {
         for (PipelineStateEntry& entry : m_pipelineStates) {
@@ -2844,6 +3095,7 @@ private:
 
         WaitForGpu();
         m_frameCommandsOpen = false;
+        ReleaseCaptureResources();
         ReleaseSwapChainResources();
         const HRESULT hr = m_swapChain->ResizeBuffers(
             kFrameCount,
@@ -2892,6 +3144,13 @@ private:
     ID3D12Resource* m_indexBuffer;
     void* m_indexBufferMapped;
     size_t m_indexBufferSize;
+    ID3D12Resource* m_captureReadbackBuffer;
+    HDC m_captureDc;
+    HBITMAP m_captureBitmap;
+    void* m_captureBits;
+    int m_captureWidth;
+    int m_captureHeight;
+    UINT m_captureRowPitch;
     ModernFixedFunctionState m_pipelineState;
     CTexture* m_boundTextures[kSrvSlotCount];
     std::vector<PipelineStateEntry> m_pipelineStates;
