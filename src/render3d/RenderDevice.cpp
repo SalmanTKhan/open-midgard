@@ -205,6 +205,15 @@ D3D12_BLEND ConvertBlendFactor12(D3DBLEND blend)
     }
 }
 
+bool ShouldEnableD3D12DebugLayer()
+{
+#if defined(_DEBUG) || !defined(NDEBUG)
+    return true;
+#else
+    return false;
+#endif
+}
+
 D3D11_PRIMITIVE_TOPOLOGY ConvertPrimitiveTopology(D3DPRIMITIVETYPE primitiveType)
 {
     switch (primitiveType) {
@@ -1705,7 +1714,21 @@ public:
             return false;
         }
 
-        HRESULT hr = CreateDXGIFactory1(IID_PPV_ARGS(&m_factory));
+        UINT dxgiFactoryFlags = 0;
+        if (ShouldEnableD3D12DebugLayer()) {
+            ID3D12Debug* debugController = nullptr;
+            const HRESULT debugHr = D3D12GetDebugInterface(IID_PPV_ARGS(&debugController));
+            if (SUCCEEDED(debugHr) && debugController) {
+                debugController->EnableDebugLayer();
+                dxgiFactoryFlags |= DXGI_CREATE_FACTORY_DEBUG;
+                DbgLog("[Render] D3D12 debug layer enabled for development build.\n");
+            } else {
+                DbgLog("[Render] D3D12 debug layer unavailable hr=0x%08X.\n", static_cast<unsigned int>(debugHr));
+            }
+            SafeRelease(debugController);
+        }
+
+        HRESULT hr = CreateDXGIFactory2(dxgiFactoryFlags, IID_PPV_ARGS(&m_factory));
         if (FAILED(hr) || !m_factory) {
             result.initHr = static_cast<int>(hr);
             Shutdown();
