@@ -3651,9 +3651,8 @@ int  CGameMode::OnRun() {
     }
 
     const bool hasLegacyDevice = GetRenderDevice().GetLegacyDevice() != nullptr;
-    if (hasLegacyDevice) {
-        g_renderer.ClearBackground();
-    }
+    g_renderer.ClearBackground();
+    g_renderer.Clear(0);
     const DWORD renderPrepStart = GetTickCount();
     m_view->OnRender();
     const DWORD renderPrepEnd = GetTickCount();
