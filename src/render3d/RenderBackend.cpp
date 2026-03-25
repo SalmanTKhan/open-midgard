@@ -88,9 +88,9 @@ bool IsRenderBackendImplemented(RenderBackendType backend)
     switch (backend) {
     case RenderBackendType::LegacyDirect3D7:
     case RenderBackendType::Direct3D11:
+    case RenderBackendType::Direct3D12:
         return true;
 
-    case RenderBackendType::Direct3D12:
     case RenderBackendType::Vulkan:
     default:
         return false;

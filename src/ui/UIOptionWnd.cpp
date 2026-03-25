@@ -268,6 +268,11 @@ RenderBackendType GetNextImplementedBackend(RenderBackendType backend)
         return RenderBackendType::Direct3D11;
 
     case RenderBackendType::Direct3D11:
+        return RenderBackendType::Direct3D12;
+
+    case RenderBackendType::Direct3D12:
+        return RenderBackendType::LegacyDirect3D7;
+
     default:
         return RenderBackendType::LegacyDirect3D7;
     }
