@@ -8,6 +8,8 @@
 
 class UICheckBox;
 
+void ApplySavedAudioSettings();
+
 class UIOptionWnd : public UIFrameWnd {
 public:
     UIOptionWnd();

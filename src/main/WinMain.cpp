@@ -18,6 +18,7 @@
 #include "network/Connection.h"
 #include "core/DllMgr.h"
 #include "core/ClientInfoLocale.h"
+#include "ui/UIOptionWnd.h"
 #include "ui/UIWindowMgr.h"
 #include "render3d/Device.h"
 #include "render3d/RenderBackend.h"
@@ -397,6 +398,7 @@ static bool InitClientSystems()
     g_resMgr.RegisterType("wav", "", new CWave());
 
     InitMSS();
+    ApplySavedAudioSettings();
 
     if (!g_windowMgr.Init()) {
         ErrorMsg("UI system initialization failed.");

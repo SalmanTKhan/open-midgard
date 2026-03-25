@@ -337,7 +337,47 @@ void SaveDwordSetting(HKEY key, const char* valueName, int value)
     RegSetValueExA(key, valueName, 0, REG_DWORD, reinterpret_cast<const BYTE*>(&raw), sizeof(raw));
 }
 
+void LoadSavedAudioSettingsFromRegistry(int* bgmVolume, int* soundVolume, int* bgmEnabled, int* soundEnabled)
+{
+    if (!bgmVolume || !soundVolume || !bgmEnabled || !soundEnabled) {
+        return;
+    }
+
+    HKEY key = nullptr;
+    if (RegOpenKeyExA(HKEY_CURRENT_USER, kRegPath, 0, KEY_READ, &key) == ERROR_SUCCESS) {
+        LoadDwordSetting(key, kOptionWndBgmVolumeValue, bgmVolume);
+        LoadDwordSetting(key, kOptionWndSoundVolumeValue, soundVolume);
+        LoadDwordSetting(key, kOptionWndBgmOnValue, bgmEnabled);
+        LoadDwordSetting(key, kOptionWndSoundOnValue, soundEnabled);
+        RegCloseKey(key);
+    }
+
+    *bgmVolume = ClampSliderValue(*bgmVolume);
+    *soundVolume = ClampSliderValue(*soundVolume);
+    *bgmEnabled = (*bgmEnabled != 0) ? 1 : 0;
+    *soundEnabled = (*soundEnabled != 0) ? 1 : 0;
+}
+
 } // namespace
+
+void ApplySavedAudioSettings()
+{
+    int bgmVolume = 100;
+    int soundVolume = 100;
+    int bgmEnabled = 1;
+    int soundEnabled = 1;
+    LoadSavedAudioSettingsFromRegistry(&bgmVolume, &soundVolume, &bgmEnabled, &soundEnabled);
+
+    CAudio* audio = CAudio::GetInstance();
+    if (!audio) {
+        return;
+    }
+
+    g_soundMode = soundEnabled ? 1 : 0;
+    audio->SetVolume(static_cast<float>(soundVolume) / 127.0f);
+    audio->SetBgmVolume(bgmVolume);
+    audio->SetBgmPaused(bgmEnabled == 0);
+}
 
 UIOptionWnd::UIOptionWnd()
     : m_controlsCreated(false),
@@ -428,10 +468,6 @@ void UIOptionWnd::LoadSettings()
         LoadDwordSetting(key, kOptionWndHValue, &m_h);
         LoadDwordSetting(key, kOptionWndOrgHValue, &m_orgHeight);
         LoadDwordSetting(key, kOptionWndShowValue, &m_show);
-        LoadDwordSetting(key, kOptionWndBgmVolumeValue, &m_bgmVolume);
-        LoadDwordSetting(key, kOptionWndSoundVolumeValue, &m_soundVolume);
-        LoadDwordSetting(key, kOptionWndBgmOnValue, &m_bgmEnabled);
-        LoadDwordSetting(key, kOptionWndSoundOnValue, &m_soundEnabled);
         LoadDwordSetting(key, kOptionWndNoCtrlValue, &m_noCtrl);
         LoadDwordSetting(key, kOptionWndAttackSnapValue, &m_attackSnap);
         LoadDwordSetting(key, kOptionWndSkillSnapValue, &m_skillSnap);
@@ -439,6 +475,8 @@ void UIOptionWnd::LoadSettings()
         LoadDwordSetting(key, kOptionWndCollapsedValue, &m_collapsed);
         RegCloseKey(key);
     }
+
+    LoadSavedAudioSettingsFromRegistry(&m_bgmVolume, &m_soundVolume, &m_bgmEnabled, &m_soundEnabled);
 
     if (m_w <= 0) {
         m_w = kDefaultWidth;
@@ -465,10 +503,6 @@ void UIOptionWnd::LoadSettings()
         }
     }
 
-    m_bgmVolume = ClampSliderValue(m_bgmVolume);
-    m_soundVolume = ClampSliderValue(m_soundVolume);
-    m_bgmEnabled = (m_bgmEnabled != 0) ? 1 : 0;
-    m_soundEnabled = (m_soundEnabled != 0) ? 1 : 0;
     m_noCtrl = (m_noCtrl != 0) ? 1 : 0;
     m_attackSnap = (m_attackSnap != 0) ? 1 : 0;
     m_skillSnap = (m_skillSnap != 0) ? 1 : 0;
@@ -766,8 +800,8 @@ void UIOptionWnd::OnCreate(int cx, int cy)
         return checkBox;
     };
 
-    m_bgmOnCheckBox = makeCheckBox(kCheckIdBgm, m_bgmEnabled);
-    m_soundOnCheckBox = makeCheckBox(kCheckIdSound, m_soundEnabled);
+    m_bgmOnCheckBox = makeCheckBox(kCheckIdBgm, m_bgmEnabled == 0);
+    m_soundOnCheckBox = makeCheckBox(kCheckIdSound, m_soundEnabled == 0);
     m_noCtrlCheckBox = makeCheckBox(kCheckIdNoCtrl, m_noCtrl);
     m_attackSnapCheckBox = makeCheckBox(kCheckIdAttack, m_attackSnap);
     m_skillSnapCheckBox = makeCheckBox(kCheckIdSkill, m_skillSnap);
@@ -1023,9 +1057,9 @@ int UIOptionWnd::SendMsg(UIWindow* sender, int msg, int wparam, int lparam, int 
     }
 
     if (sender == m_bgmOnCheckBox) {
-        m_bgmEnabled = (lparam != 0) ? 1 : 0;
+        m_bgmEnabled = (lparam != 0) ? 0 : 1;
     } else if (sender == m_soundOnCheckBox) {
-        m_soundEnabled = (lparam != 0) ? 1 : 0;
+        m_soundEnabled = (lparam != 0) ? 0 : 1;
     } else if (sender == m_noCtrlCheckBox) {
         m_noCtrl = (lparam != 0) ? 1 : 0;
     } else if (sender == m_attackSnapCheckBox) {
