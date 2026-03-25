@@ -1,6 +1,7 @@
 #pragma once
 
 #include <windows.h>
+#include <ddraw.h>
 #include <d3d.h>
 
 #include "RenderBackend.h"
@@ -21,6 +22,12 @@ public:
     virtual int ClearColor(unsigned int color) = 0;
     virtual int ClearDepth() = 0;
     virtual int Present(bool vertSync) = 0;
+
+    virtual void AdjustTextureSize(unsigned int* width, unsigned int* height) = 0;
+    virtual bool CreateTextureSurface(unsigned int requestedWidth, unsigned int requestedHeight,
+        unsigned int* outSurfaceWidth, unsigned int* outSurfaceHeight, IDirectDrawSurface7** outSurface) = 0;
+    virtual bool UploadTextureSurface(IDirectDrawSurface7* surface, int x, int y, int w, int h,
+        const unsigned int* data, bool skipColorKey, int pitch) = 0;
 };
 
 IRenderDevice& GetRenderDevice();

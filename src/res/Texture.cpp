@@ -2,6 +2,7 @@
 
 #include "render3d/D3dutil.h"
 #include "render3d/Device.h"
+#include "render3d/RenderDevice.h"
 
 #include <algorithm>
 #include <cstring>
@@ -134,20 +135,20 @@ void CSurface::DrawSurface(int x, int y, int w, int h, unsigned int flags) {(voi
 
 void CSurface::DrawSurfaceStretch(int x, int y, int w, int h) {
     DbgLog("[DrawSurfaceStretch] hBitmap=%p hWnd=%p x=%d y=%d w=%d h=%d\n",
-           (void*)m_hBitmap, (void*)g_3dDevice.m_hWnd, x, y, w, h);
-    if (!m_hBitmap || !g_3dDevice.m_hWnd) {
+           (void*)m_hBitmap, (void*)GetRenderDevice().GetWindowHandle(), x, y, w, h);
+    if (!m_hBitmap || !GetRenderDevice().GetWindowHandle()) {
         DbgLog("[DrawSurfaceStretch] SKIP: null handle\n");
         return;
     }
 
-    HDC target = GetDC(g_3dDevice.m_hWnd);
+    HDC target = GetDC(GetRenderDevice().GetWindowHandle());
     if (!target) {
         return;
     }
 
     HDC src = CreateCompatibleDC(target);
     if (!src) {
-        ReleaseDC(g_3dDevice.m_hWnd, target);
+        ReleaseDC(GetRenderDevice().GetWindowHandle(), target);
         return;
     }
 
@@ -162,7 +163,7 @@ void CSurface::DrawSurfaceStretch(int x, int y, int w, int h) {
     SelectObject(src, old);
 
     DeleteDC(src);
-    ReleaseDC(g_3dDevice.m_hWnd, target);
+    ReleaseDC(GetRenderDevice().GetWindowHandle(), target);
 }
 
 void CSurface::Update(int x, int y, int w, int h, unsigned int* data, bool b, int p) {
@@ -218,75 +219,18 @@ CTexture::CTexture(unsigned int w, unsigned int h, PixelFormat format, IDirectDr
 CTexture::~CTexture() {}
 
 bool CTexture::Create(unsigned int w, unsigned int h, PixelFormat format) {
-    if (!g_3dDevice.m_pDD) {
-        return false;
-    }
-
     if (m_pddsSurface) {
         m_pddsSurface->Release();
         m_pddsSurface = nullptr;
     }
 
-    unsigned int textureW = w;
-    unsigned int textureH = h;
-    g_3dDevice.AdjustTextureSize(&textureW, &textureH);
-
-    DDSURFACEDESC2 ddsd{};
-    auto initDesc = [&](DWORD caps) {
-        std::memset(&ddsd, 0, sizeof(ddsd));
-        D3DUtil_InitSurfaceDesc(&ddsd, DDSD_CAPS | DDSD_WIDTH | DDSD_HEIGHT | DDSD_PIXELFORMAT, caps);
-        ddsd.dwWidth = textureW;
-        ddsd.dwHeight = textureH;
-        ddsd.ddpfPixelFormat.dwFlags = DDPF_RGB | DDPF_ALPHAPIXELS;
-        ddsd.ddpfPixelFormat.dwRGBBitCount = 32;
-        ddsd.ddpfPixelFormat.dwRBitMask = 0x00FF0000;
-        ddsd.ddpfPixelFormat.dwGBitMask = 0x0000FF00;
-        ddsd.ddpfPixelFormat.dwBBitMask = 0x000000FF;
-        ddsd.ddpfPixelFormat.dwRGBAlphaBitMask = 0xFF000000;
-    };
-
-    HRESULT createHr = DD_OK;
-    const DWORD preferredCaps = DDSCAPS_TEXTURE | (g_3dDevice.m_dwDeviceMemType ? g_3dDevice.m_dwDeviceMemType : DDSCAPS_SYSTEMMEMORY);
-    initDesc(preferredCaps);
-    createHr = g_3dDevice.m_pDD->CreateSurface(&ddsd, &m_pddsSurface, nullptr);
-    if (createHr != DD_OK && (preferredCaps & DDSCAPS_VIDEOMEMORY)) {
-        initDesc(DDSCAPS_TEXTURE | DDSCAPS_SYSTEMMEMORY);
-        createHr = g_3dDevice.m_pDD->CreateSurface(&ddsd, &m_pddsSurface, nullptr);
-    }
-
-    if (createHr != DD_OK) {
+    unsigned int textureW = 0;
+    unsigned int textureH = 0;
+    if (!GetRenderDevice().CreateTextureSurface(w, h, &textureW, &textureH, &m_pddsSurface)) {
         if constexpr (kLogTexture) {
-            DbgLog("[Texture] CreateSurface failed name='%s' hr=%08lX caps=%08lX size=%ux%u\n",
-                m_texName,
-                static_cast<unsigned long>(createHr),
-                static_cast<unsigned long>(ddsd.ddsCaps.dwCaps),
-                textureW,
-                textureH);
+            DbgLog("[Texture] CreateTextureSurface failed name='%s' requested=%ux%u\n", m_texName, w, h);
         }
         return false;
-    }
-
-    DDCOLORKEY colorKey{};
-    colorKey.dwColorSpaceLowValue = GetSurfaceColorKey(ddsd.ddpfPixelFormat);
-    colorKey.dwColorSpaceHighValue = colorKey.dwColorSpaceLowValue;
-    m_pddsSurface->SetColorKey(DDCKEY_SRCBLT, &colorKey);
-
-    static int textureFormatLogCount = 0;
-    if (textureFormatLogCount < 12) {
-        ++textureFormatLogCount;
-        if constexpr (kLogTexture) {
-            DbgLog("[Texture] surface-format name='%s' bits=%u masks=(A:%08X R:%08X G:%08X B:%08X) requested=%ux%u actual=%ux%u\n",
-                m_texName,
-                ddsd.ddpfPixelFormat.dwRGBBitCount,
-                ddsd.ddpfPixelFormat.dwRGBAlphaBitMask,
-                ddsd.ddpfPixelFormat.dwRBitMask,
-                ddsd.ddpfPixelFormat.dwGBitMask,
-                ddsd.ddpfPixelFormat.dwBBitMask,
-                w,
-                h,
-                textureW,
-                textureH);
-        }
     }
 
     m_w = textureW;
@@ -322,34 +266,9 @@ void CTexture::ClearSurface(RECT* r, unsigned int col) { CSurface::ClearSurface(
 void CTexture::DrawSurface(int x, int y, int w, int h, unsigned int flags) { CSurface::DrawSurface(x, y, w, h, flags); }
 void CTexture::DrawSurfaceStretch(int x, int y, int w, int h) { CSurface::DrawSurfaceStretch(x, y, w, h); }
 void CTexture::Update(int x, int y, int w, int h, unsigned int* data, bool b, int p) {
-    if (!m_pddsSurface || !data || w <= 0 || h <= 0) {
+    if (!GetRenderDevice().UploadTextureSurface(m_pddsSurface, x, y, w, h, data, b, p)) {
         return;
     }
-
-    DDSURFACEDESC2 ddsd{};
-    ddsd.dwSize = sizeof(ddsd);
-    if (m_pddsSurface->Lock(nullptr, &ddsd, DDLOCK_WAIT, nullptr) != DD_OK) {
-        return;
-    }
-
-    unsigned char* dstBase = static_cast<unsigned char*>(ddsd.lpSurface);
-    const unsigned int bytesPerPixel = (ddsd.ddpfPixelFormat.dwRGBBitCount + 7u) / 8u;
-    const int srcPitch = p > 0 ? p : w * static_cast<int>(sizeof(unsigned int));
-    const unsigned int colorKey = GetSurfaceColorKey(ddsd.ddpfPixelFormat);
-    for (int row = 0; row < h; ++row) {
-        unsigned char* dstRow = dstBase + (y + row) * static_cast<int>(ddsd.lPitch) + x * static_cast<int>(bytesPerPixel);
-        const unsigned int* srcRow = reinterpret_cast<const unsigned int*>(reinterpret_cast<const unsigned char*>(data) + static_cast<size_t>(row) * static_cast<size_t>(srcPitch));
-        for (int col = 0; col < w; ++col) {
-            const unsigned int srcPixel = srcRow[col];
-            unsigned int packedPixel = ConvertArgbToSurfacePixel(srcPixel, ddsd.ddpfPixelFormat);
-            if (!b && (srcPixel & 0x00FFFFFFu) == 0x00FF00FFu) {
-                packedPixel = colorKey;
-            }
-            WritePackedPixel(dstRow + static_cast<size_t>(col) * bytesPerPixel, bytesPerPixel, packedPixel);
-        }
-    }
-
-    m_pddsSurface->Unlock(nullptr);
     m_updateWidth = (std::max)(m_updateWidth, static_cast<unsigned int>(x + w));
     m_updateHeight = (std::max)(m_updateHeight, static_cast<unsigned int>(y + h));
 }
