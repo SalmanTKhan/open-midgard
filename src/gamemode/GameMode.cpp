@@ -3650,16 +3650,17 @@ int  CGameMode::OnRun() {
         return 1;
     }
 
-    if (GetRenderDevice().GetLegacyDevice()) {
+    const bool hasLegacyDevice = GetRenderDevice().GetLegacyDevice() != nullptr;
+    if (hasLegacyDevice) {
         g_renderer.ClearBackground();
     }
     const DWORD renderPrepStart = GetTickCount();
     m_view->OnRender();
     const DWORD renderPrepEnd = GetTickCount();
-    if (GetRenderDevice().GetLegacyDevice()) {
-        const DWORD drawSceneStart = GetTickCount();
-        g_renderer.DrawScene();
-        const DWORD drawSceneEnd = GetTickCount();
+    const DWORD drawSceneStart = GetTickCount();
+    g_renderer.DrawScene();
+    const DWORD drawSceneEnd = GetTickCount();
+    if (hasLegacyDevice) {
         {
             HDC backBufferDc = nullptr;
             if (GetRenderDevice().AcquireBackBufferDC(&backBufferDc) && backBufferDc) {
@@ -3697,6 +3698,9 @@ int  CGameMode::OnRun() {
         g_framePerfStats.uiDrawMs += static_cast<u64>(uiDrawEnd - uiDrawStart);
         g_framePerfStats.flipMs += static_cast<u64>(flipEnd - flipStart);
     } else {
+        const DWORD flipStart = GetTickCount();
+        g_renderer.Flip(false);
+        const DWORD flipEnd = GetTickCount();
         HDC windowDc = GetDC(g_hMainWnd);
         if (windowDc) {
             DrawPlayerVitalsOverlay(*this, windowDc);
@@ -3708,6 +3712,13 @@ int  CGameMode::OnRun() {
         }
         g_windowMgr.OnDraw();
         DrawModeCursor(m_cursorActNum, m_mouseAnimStartTick);
+
+        g_framePerfStats.frames += 1;
+        g_framePerfStats.updateMs += static_cast<u64>(updateEnd - updateStart);
+        g_framePerfStats.processUiMs += static_cast<u64>(processUiEnd - processUiStart);
+        g_framePerfStats.renderPrepMs += static_cast<u64>(renderPrepEnd - renderPrepStart);
+        g_framePerfStats.drawSceneMs += static_cast<u64>(drawSceneEnd - drawSceneStart);
+        g_framePerfStats.flipMs += static_cast<u64>(flipEnd - flipStart);
     }
 
     Sleep(1);
