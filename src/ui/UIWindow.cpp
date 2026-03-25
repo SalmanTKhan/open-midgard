@@ -689,6 +689,27 @@ void UICheckBox::OnDraw()
             RECT dst = { m_x, m_y, m_x + bm.bmWidth, m_y + bm.bmHeight };
             DrawBitmapTransparent(hdc, drawBmp, dst);
         }
+    } else {
+        const int fallbackSize = (std::max)(12, (std::min)(m_w > 0 ? m_w : 16, m_h > 0 ? m_h : 16));
+        RECT boxRect = { m_x, m_y, m_x + fallbackSize, m_y + fallbackSize };
+        HBRUSH fillBrush = CreateSolidBrush(RGB(244, 239, 228));
+        FillRect(hdc, &boxRect, fillBrush);
+        DeleteObject(fillBrush);
+
+        HBRUSH frameBrush = CreateSolidBrush(RGB(82, 63, 45));
+        FrameRect(hdc, &boxRect, frameBrush);
+        DeleteObject(frameBrush);
+
+        if (m_isChecked) {
+            HPEN pen = CreatePen(PS_SOLID, 2, RGB(0, 0, 0));
+            HGDIOBJ oldPen = SelectObject(hdc, pen);
+            MoveToEx(hdc, boxRect.left + 3, boxRect.top + 3, nullptr);
+            LineTo(hdc, boxRect.right - 3, boxRect.bottom - 3);
+            MoveToEx(hdc, boxRect.right - 3, boxRect.top + 3, nullptr);
+            LineTo(hdc, boxRect.left + 3, boxRect.bottom - 3);
+            SelectObject(hdc, oldPen);
+            DeleteObject(pen);
+        }
     }
     if (!useShared) {
         ReleaseDC(g_hMainWnd, hdc);

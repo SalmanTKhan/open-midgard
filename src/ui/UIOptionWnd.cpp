@@ -521,11 +521,11 @@ void UIOptionWnd::ApplyAudioSettings() const
 void UIOptionWnd::LayoutControls()
 {
     if (m_bgmOnCheckBox) {
-        m_bgmOnCheckBox->Move(m_x + m_w - 31, m_y + 20);
+        m_bgmOnCheckBox->Move(m_x + m_w - 66, m_y + 20);
         m_bgmOnCheckBox->SetShow(m_collapsed ? 0 : 1);
     }
     if (m_soundOnCheckBox) {
-        m_soundOnCheckBox->Move(m_x + m_w - 31, m_y + 39);
+        m_soundOnCheckBox->Move(m_x + m_w - 66, m_y + 39);
         m_soundOnCheckBox->SetShow(m_collapsed ? 0 : 1);
     }
     if (m_noCtrlCheckBox) {
@@ -834,6 +834,14 @@ void UIOptionWnd::OnDraw()
     if (!m_collapsed) {
         DrawSlider(hdc, GetBgmSliderRect(), m_bgmVolume, "BGM");
         DrawSlider(hdc, GetSoundSliderRect(), m_soundVolume, "Sound");
+
+        SetTextColor(hdc, RGB(0, 0, 0));
+        if (m_bgmOnCheckBox) {
+            TextOutA(hdc, m_bgmOnCheckBox->m_x + 18, m_bgmOnCheckBox->m_y - 1, "Mute", 4);
+        }
+        if (m_soundOnCheckBox) {
+            TextOutA(hdc, m_soundOnCheckBox->m_x + 18, m_soundOnCheckBox->m_y - 1, "Mute", 4);
+        }
 
         const RECT rendererRect = GetRendererRect();
         FillRectColor(hdc, rendererRect, RGB(244, 239, 228));
