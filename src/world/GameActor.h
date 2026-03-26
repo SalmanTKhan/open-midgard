@@ -51,7 +51,15 @@ struct CPathInfo {
     }
 };
 
-struct WBA { u32 gid; };
+struct WBA {
+    u32 gid = 0;
+    u32 time = 0;
+    int message = 0;
+    int attackedMotionTime = 0;
+    float damageDestX = 0.0f;
+    float damageDestZ = 0.0f;
+    char waveName[128] = {};
+};
 struct _MSG2AI { u8 gap[32]; };
 struct PROCEEDTYPE { int type; };
 
@@ -219,10 +227,12 @@ public:
     virtual void SendMsg(CGameObject* src, int msg, int par1, int par2, int par3) override;
     virtual int  Get8Dir(float rot) override;
     virtual void SetState(int state);
+    virtual void ProcessWillBeAttacked();
     virtual void SetModifyFactorOfmotionSpeed(int attackMT);
     virtual int GetAttackMotion();
     virtual void RegisterPos();
     virtual void UnRegisterPos();
+    void QueueWillBeAttacked(const WBA& hitInfo);
     void DeleteMatchingEffect(CMsgEffect* effect);
     void DeleteTotalNumber(int kind);
 };

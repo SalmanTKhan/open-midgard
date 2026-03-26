@@ -392,7 +392,7 @@ bool QueueModernOverlayQuad(CGameMode& mode, int cursorActNum, u32 mouseAnimStar
     if (!s_overlayTexture || s_overlayTextureWidth != clientWidth || s_overlayTextureHeight != clientHeight) {
         delete s_overlayTexture;
         s_overlayTexture = new CTexture();
-        if (!s_overlayTexture || !s_overlayTexture->Create(clientWidth, clientHeight, PF_A8R8G8B8)) {
+        if (!s_overlayTexture || !s_overlayTexture->Create(clientWidth, clientHeight, PF_A8R8G8B8, false)) {
             delete s_overlayTexture;
             s_overlayTexture = nullptr;
             s_overlayTextureWidth = 0;
@@ -1778,8 +1778,10 @@ constexpr u16 kPacketCzRequestMove = PacketProfile::ActiveMapServerSend::kWalkTo
 constexpr u16 kPacketCzRequestTime = PacketProfile::ActiveMapServerSend::kTickSend;
 constexpr u16 kPacketCzNotifyActorInit = PacketProfile::ActiveMapServerSend::kNotifyActorInit;
 constexpr u32 kHeldMoveRequestIntervalMs = 75;
-constexpr u32 kAttackChaseRequestIntervalMs = 200;
-constexpr u32 kAttackRetryIntervalMs = 400;
+constexpr int kHeldMoveRetargetThresholdCells = 2;
+constexpr u32 kMoveAckTimeoutMs = 1000;
+constexpr u32 kAttackChaseRequestIntervalMs = 1200;
+constexpr u32 kAttackRetryIntervalMs = 1200;
 constexpr u32 kTimeSyncIntervalMs = 12000;
 
 bool SendLoadEndAckPacket()
@@ -1831,8 +1833,70 @@ bool EncodeMoveDestination(int dstX, int dstY, u8 outDest[3])
 }
 
 bool WorldToAttrCell(const CWorld* world, float worldX, float worldZ, int* outTileX, int* outTileY);
+bool ResolveMoveSourceTile(const CGameMode& mode, int* outTileX, int* outTileY);
 
-bool CanFindMovePath(const CGameMode& mode, int sx, int sy, int dx, int dy)
+void ClearAttackChaseHint(CGameMode& mode)
+{
+    mode.m_lastAttackChaseHintTick = 0;
+    mode.m_attackChaseTargetGid = 0;
+    mode.m_attackChaseTargetCellX = -1;
+    mode.m_attackChaseTargetCellY = -1;
+    mode.m_attackChaseSourceCellX = -1;
+    mode.m_attackChaseSourceCellY = -1;
+    mode.m_attackChaseRange = 1;
+    mode.m_hasAttackChaseHint = 0;
+}
+
+bool FindActivePathSegmentForChase(const CPathInfo& path, u32 now, size_t* outStartIndex)
+{
+    if (!outStartIndex || path.m_cells.size() < 2) {
+        return false;
+    }
+
+    for (size_t index = 0; index + 1 < path.m_cells.size(); ++index) {
+        if (now < path.m_cells[index + 1].arrivalTime) {
+            *outStartIndex = index;
+            return true;
+        }
+    }
+
+    return false;
+}
+
+bool ResolveAttackChaseSourceTile(const CGameMode& mode, int* outTileX, int* outTileY)
+{
+    if (!outTileX || !outTileY) {
+        return false;
+    }
+
+    if (mode.m_world && mode.m_world->m_player && mode.m_world->m_player->m_isMoving && g_session.m_gid != 0) {
+        const auto runtimeIt = mode.m_runtimeActors.find(g_session.m_gid);
+        if (runtimeIt != mode.m_runtimeActors.end() && runtimeIt->second) {
+            const CGameActor* actor = runtimeIt->second;
+            size_t activeIndex = 0;
+            if (FindActivePathSegmentForChase(actor->m_path, g_session.GetServerTime(), &activeIndex)) {
+                const PathCell& activeCell = actor->m_path.m_cells[activeIndex];
+                *outTileX = activeCell.x;
+                *outTileY = activeCell.y;
+                return true;
+            }
+        }
+    }
+
+    if (ResolveMoveSourceTile(mode, outTileX, outTileY)) {
+        return true;
+    }
+
+    if (mode.m_attackChaseSourceCellX >= 0 && mode.m_attackChaseSourceCellY >= 0) {
+        *outTileX = mode.m_attackChaseSourceCellX;
+        *outTileY = mode.m_attackChaseSourceCellY;
+        return true;
+    }
+
+    return false;
+}
+
+bool CanFindMovePath(const CGameMode& mode, int sx, int sy, int cellX, int cellY, int dx, int dy)
 {
     if (!mode.m_world || !mode.m_world->m_attr) {
         return false;
@@ -1840,7 +1904,61 @@ bool CanFindMovePath(const CGameMode& mode, int sx, int sy, int dx, int dy)
 
     g_pathFinder.SetMap(mode.m_world->m_attr);
     CPathInfo pathInfo;
-    return g_pathFinder.FindPath(timeGetTime(), sx, sy, dx, dy, 0, 0, 150, &pathInfo);
+    return g_pathFinder.FindPath(timeGetTime(), sx, sy, cellX, cellY, dx, dy, 150, &pathInfo);
+}
+
+bool CanFindMovePath(const CGameMode& mode, int sx, int sy, int dx, int dy)
+{
+    return CanFindMovePath(mode, sx, sy, dx, dy, dx, dy);
+}
+
+bool IsWalkableAttrCell(const CGameMode& mode, int tileX, int tileY)
+{
+    if (!mode.m_world || !mode.m_world->m_attr || tileX < 0 || tileY < 0
+        || tileX >= mode.m_world->m_attr->m_width || tileY >= mode.m_world->m_attr->m_height
+        || mode.m_world->m_attr->m_cells.empty()) {
+        return false;
+    }
+
+    const CAttrCell& cell = mode.m_world->m_attr->m_cells[
+        static_cast<size_t>(tileY) * static_cast<size_t>(mode.m_world->m_attr->m_width) + static_cast<size_t>(tileX)];
+    return cell.flag == 0;
+}
+
+bool IsOccupiedActorCell(const CGameMode& mode, int tileX, int tileY, u32 ignoredActorA = 0, u32 ignoredActorB = 0)
+{
+    for (const auto& entry : mode.m_actorPosList) {
+        if (entry.first == ignoredActorA || entry.first == ignoredActorB) {
+            continue;
+        }
+
+        if (entry.second.x == tileX && entry.second.y == tileY) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+bool IsValidMoveCell(const CGameMode& mode,
+    int sourceTileX,
+    int sourceTileY,
+    int requestedTileX,
+    int requestedTileY,
+    int candidateTileX,
+    int candidateTileY,
+    u32 ignoredActorA = 0,
+    u32 ignoredActorB = 0)
+{
+    if (!IsWalkableAttrCell(mode, candidateTileX, candidateTileY)) {
+        return false;
+    }
+
+    if (IsOccupiedActorCell(mode, candidateTileX, candidateTileY, ignoredActorA, ignoredActorB)) {
+        return false;
+    }
+
+    return CanFindMovePath(mode, sourceTileX, sourceTileY, requestedTileX, requestedTileY, candidateTileX, candidateTileY);
 }
 
 bool SendMoveRequestPacket(int dstX, int dstY)
@@ -1853,7 +1971,34 @@ bool SendMoveRequestPacket(int dstX, int dstY)
     }
 
     const bool sent = CRagConnection::instance()->SendPacket(reinterpret_cast<const char*>(&packet), sizeof(packet));
+    if (sent) {
+        if (CGameMode* gameMode = g_modeMgr.GetCurrentGameMode()) {
+            if (gameMode->m_world && gameMode->m_world->m_player) {
+                gameMode->m_world->m_player->m_isWaitingMoveAck = 1;
+                gameMode->m_world->m_player->m_moveReqTick = GetTickCount();
+            }
+        }
+    }
+    DbgLog("[GameMode] move request opcode=0x%04X dst=%d,%d sent=%d\n",
+        kPacketCzRequestMove,
+        dstX,
+        dstY,
+        sent ? 1 : 0);
     return sent;
+}
+
+bool LocalPlayerHasPendingMoveAck(const CGameMode& mode, u32 now)
+{
+    if (!mode.m_world || !mode.m_world->m_player) {
+        return false;
+    }
+
+    const CPlayer* player = mode.m_world->m_player;
+    if (!player->m_isWaitingMoveAck) {
+        return false;
+    }
+
+    return now - player->m_moveReqTick <= kMoveAckTimeoutMs;
 }
 
 bool SendGlobalChatMessage(const char* playerName, const std::string& message)
@@ -1891,10 +2036,12 @@ bool ResolveMoveSourceTile(const CGameMode& mode, int* outTileX, int* outTileY)
         return false;
     }
 
-    int tileX = mode.m_world->m_player->m_moveDestX;
-    int tileY = mode.m_world->m_player->m_moveDestY;
-    if (mode.m_world->m_player->m_isMoving) {
-        WorldToAttrCell(mode.m_world, mode.m_world->m_player->m_pos.x, mode.m_world->m_player->m_pos.z, &tileX, &tileY);
+    int tileX = g_session.m_playerPosX;
+    int tileY = g_session.m_playerPosY;
+    if (tileX < 0 || tileY < 0) {
+        if (!WorldToAttrCell(mode.m_world, mode.m_world->m_player->m_pos.x, mode.m_world->m_player->m_pos.z, &tileX, &tileY)) {
+            return false;
+        }
     }
 
     *outTileX = tileX;
@@ -1902,23 +2049,19 @@ bool ResolveMoveSourceTile(const CGameMode& mode, int* outTileX, int* outTileY)
     return true;
 }
 
-bool TryRequestMoveToCell(CGameMode& mode, int attrX, int attrY)
+bool TryRequestMoveToCell(CGameMode& mode, int sourceTileX, int sourceTileY, int attrX, int attrY, bool allowRepeatDestination = false)
 {
     if (!mode.m_view || !mode.m_world || !mode.m_world->m_player || mode.m_canRotateView) {
         return false;
     }
 
-    if (attrX == mode.m_lastMoveRequestCellX && attrY == mode.m_lastMoveRequestCellY) {
+    if (!allowRepeatDestination
+        && attrX == mode.m_lastMoveRequestCellX
+        && attrY == mode.m_lastMoveRequestCellY) {
         return false;
     }
 
-    int playerTileX = -1;
-    int playerTileY = -1;
-    if (!ResolveMoveSourceTile(mode, &playerTileX, &playerTileY)) {
-        return false;
-    }
-
-    if (!CanFindMovePath(mode, playerTileX, playerTileY, attrX, attrY)) {
+    if (!CanFindMovePath(mode, sourceTileX, sourceTileY, attrX, attrY)) {
         return false;
     }
 
@@ -1929,6 +2072,118 @@ bool TryRequestMoveToCell(CGameMode& mode, int attrX, int attrY)
     mode.m_lastMoveRequestCellX = attrX;
     mode.m_lastMoveRequestCellY = attrY;
     return true;
+}
+
+bool TryRequestMoveToCell(CGameMode& mode, int attrX, int attrY)
+{
+    int playerTileX = -1;
+    int playerTileY = -1;
+    if (!ResolveMoveSourceTile(mode, &playerTileX, &playerTileY)) {
+        return false;
+    }
+
+    return TryRequestMoveToCell(mode, playerTileX, playerTileY, attrX, attrY);
+}
+
+bool IsTargetWithinAttackRange(int sourceTileX, int sourceTileY, int targetTileX, int targetTileY, int attackRange)
+{
+    const int clampedRange = (std::max)(1, attackRange);
+    return (std::max)(std::abs(sourceTileX - targetTileX), std::abs(sourceTileY - targetTileY)) <= clampedRange;
+}
+
+int ApproachSign(int delta)
+{
+    if (delta > 0) {
+        return 1;
+    }
+    if (delta < 0) {
+        return -1;
+    }
+    return 0;
+}
+
+bool ResolveEathenaChaseCell(CGameMode& mode,
+    int sourceTileX,
+    int sourceTileY,
+    int targetTileX,
+    int targetTileY,
+    u32 targetGid,
+    int* outTileX,
+    int* outTileY)
+{
+    if (!outTileX || !outTileY) {
+        return false;
+    }
+
+    const int stepX = ApproachSign(targetTileX - sourceTileX);
+    const int stepY = ApproachSign(targetTileY - sourceTileY);
+
+    const int preferredX = targetTileX - stepX;
+    const int preferredY = targetTileY - stepY;
+
+    std::array<std::pair<int, int>, 9> candidates = {
+        std::make_pair(preferredX, preferredY),
+        std::make_pair(targetTileX - 1, targetTileY),
+        std::make_pair(targetTileX - 1, targetTileY - 1),
+        std::make_pair(targetTileX, targetTileY - 1),
+        std::make_pair(targetTileX + 1, targetTileY - 1),
+        std::make_pair(targetTileX + 1, targetTileY),
+        std::make_pair(targetTileX + 1, targetTileY + 1),
+        std::make_pair(targetTileX, targetTileY + 1),
+        std::make_pair(targetTileX - 1, targetTileY + 1),
+    };
+
+    for (const auto& candidate : candidates) {
+        if (candidate.first == targetTileX && candidate.second == targetTileY) {
+            continue;
+        }
+
+        if (!IsValidMoveCell(mode,
+            sourceTileX,
+            sourceTileY,
+            candidate.first,
+            candidate.second,
+            candidate.first,
+            candidate.second,
+            mode.m_world->m_player->m_gid,
+            targetGid)) {
+            continue;
+        }
+
+        *outTileX = candidate.first;
+        *outTileY = candidate.second;
+        return true;
+    }
+
+    return false;
+}
+
+bool ResolveAttackChaseCell(CGameMode& mode,
+    int sourceTileX,
+    int sourceTileY,
+    int targetTileX,
+    int targetTileY,
+    int attackRange,
+    u32 targetGid,
+    int* outTileX,
+    int* outTileY)
+{
+    if (!outTileX || !outTileY || !mode.m_world || !mode.m_world->m_attr) {
+        return false;
+    }
+
+    if (IsTargetWithinAttackRange(sourceTileX, sourceTileY, targetTileX, targetTileY, 1)) {
+        return false;
+    }
+
+    return ResolveEathenaChaseCell(mode,
+        sourceTileX,
+        sourceTileY,
+        targetTileX,
+        targetTileY,
+        targetGid,
+        outTileX,
+        outTileY);
 }
 
 bool ResolveAttackChaseCell(CGameMode& mode, const CGameActor& target, int* outTileX, int* outTileY)
@@ -1949,68 +2204,14 @@ bool ResolveAttackChaseCell(CGameMode& mode, const CGameActor& target, int* outT
         return false;
     }
 
-    if ((std::max)(std::abs(playerTileX - targetTileX), std::abs(playerTileY - targetTileY)) <= 1) {
-        return false;
-    }
-
-    struct ChaseCandidate {
-        int tileX;
-        int tileY;
-        int chebyshevDistance;
-        int manhattanDistance;
-    };
-
-    std::array<ChaseCandidate, 8> candidates{};
-    size_t candidateCount = 0;
-    for (int offsetY = -1; offsetY <= 1; ++offsetY) {
-        for (int offsetX = -1; offsetX <= 1; ++offsetX) {
-            if (offsetX == 0 && offsetY == 0) {
-                continue;
-            }
-
-            const int candidateX = targetTileX + offsetX;
-            const int candidateY = targetTileY + offsetY;
-            if (candidateX < 0 || candidateY < 0
-                || candidateX >= mode.m_world->m_attr->m_width
-                || candidateY >= mode.m_world->m_attr->m_height) {
-                continue;
-            }
-
-            candidates[candidateCount++] = ChaseCandidate{
-                candidateX,
-                candidateY,
-                (std::max)(std::abs(playerTileX - candidateX), std::abs(playerTileY - candidateY)),
-                std::abs(playerTileX - candidateX) + std::abs(playerTileY - candidateY)
-            };
-        }
-    }
-
-    std::sort(candidates.begin(), candidates.begin() + candidateCount,
-        [](const ChaseCandidate& lhs, const ChaseCandidate& rhs) {
-            if (lhs.chebyshevDistance != rhs.chebyshevDistance) {
-                return lhs.chebyshevDistance < rhs.chebyshevDistance;
-            }
-            return lhs.manhattanDistance < rhs.manhattanDistance;
-        });
-
-    for (size_t index = 0; index < candidateCount; ++index) {
-        if (!CanFindMovePath(mode, playerTileX, playerTileY, candidates[index].tileX, candidates[index].tileY)) {
-            continue;
-        }
-
-        *outTileX = candidates[index].tileX;
-        *outTileY = candidates[index].tileY;
-        return true;
-    }
-
-    return false;
+    return ResolveAttackChaseCell(mode, playerTileX, playerTileY, targetTileX, targetTileY, 1, target.m_gid, outTileX, outTileY);
 }
 
-bool IsAttackTargetAdjacent(CGameMode& mode, const CGameActor& target)
+bool IsAttackTargetWithinRange(CGameMode& mode, const CGameActor& target, int attackRange)
 {
     int playerTileX = -1;
     int playerTileY = -1;
-    if (!ResolveMoveSourceTile(mode, &playerTileX, &playerTileY)) {
+    if (!ResolveAttackChaseSourceTile(mode, &playerTileX, &playerTileY)) {
         return false;
     }
 
@@ -2020,7 +2221,54 @@ bool IsAttackTargetAdjacent(CGameMode& mode, const CGameActor& target)
         return false;
     }
 
-    return (std::max)(std::abs(playerTileX - targetTileX), std::abs(playerTileY - targetTileY)) <= 1;
+    return IsTargetWithinAttackRange(playerTileX, playerTileY, targetTileX, targetTileY, attackRange);
+}
+
+bool IsCurrentMoveDestinationWithinRange(CGameMode& mode, const CGameActor& target, int attackRange)
+{
+    if (!mode.m_world || !mode.m_world->m_player) {
+        return false;
+    }
+
+    const CPlayer* player = mode.m_world->m_player;
+    if (!player->m_isMoving) {
+        return false;
+    }
+
+    const int moveDestX = player->m_moveDestX;
+    const int moveDestY = player->m_moveDestY;
+    if (moveDestX < 0 || moveDestY < 0) {
+        return false;
+    }
+
+    int targetTileX = -1;
+    int targetTileY = -1;
+    if (!WorldToAttrCell(mode.m_world, target.m_pos.x, target.m_pos.z, &targetTileX, &targetTileY)) {
+        return false;
+    }
+
+    if (!IsTargetWithinAttackRange(moveDestX, moveDestY, targetTileX, targetTileY, attackRange)) {
+        return false;
+    }
+
+    // Only preserve the current move when the latest server chase hint also
+    // agrees that the player is effectively already in range. If the server is
+    // still reporting an older out-of-range source tile, keep pumping chase
+    // movement instead of assuming the queued destination is enough.
+    if (mode.m_hasAttackChaseHint
+        && mode.m_attackChaseTargetGid == target.m_gid
+        && mode.m_attackChaseSourceCellX >= 0
+        && mode.m_attackChaseSourceCellY >= 0
+        && !IsTargetWithinAttackRange(
+            mode.m_attackChaseSourceCellX,
+            mode.m_attackChaseSourceCellY,
+            targetTileX,
+            targetTileY,
+            attackRange)) {
+        return false;
+    }
+
+    return true;
 }
 
 bool TryRequestMoveFromScreenPoint(CGameMode& mode, int screenX, int screenY)
@@ -2096,6 +2344,7 @@ bool TryRequestAttackFromScreenPoint(CGameMode& mode, int screenX, int screenY)
     mode.m_hasHeldMoveTarget = 0;
     mode.m_lastMoveRequestTick = 0;
     mode.m_lastAttackRequestTick = 0;
+    ClearAttackChaseHint(mode);
     return true;
 }
 
@@ -2112,9 +2361,45 @@ void UpdateHeldMoveTargetFromScreenPoint(CGameMode& mode, int screenX, int scree
         return;
     }
 
+    if (mode.m_hasHeldMoveTarget && mode.m_world && mode.m_world->m_player && mode.m_world->m_player->m_isMoving) {
+        const int deltaFromHeldX = std::abs(attrX - mode.m_heldMoveTargetCellX);
+        const int deltaFromHeldY = std::abs(attrY - mode.m_heldMoveTargetCellY);
+        const int deltaFromLastReqX = mode.m_lastMoveRequestCellX >= 0 ? std::abs(attrX - mode.m_lastMoveRequestCellX) : 99;
+        const int deltaFromLastReqY = mode.m_lastMoveRequestCellY >= 0 ? std::abs(attrY - mode.m_lastMoveRequestCellY) : 99;
+
+        // Ignore one-cell wobble while dragging if the player is already moving.
+        // This keeps small cursor jitter from flipping the walk target back and forth.
+        if ((std::max)(deltaFromHeldX, deltaFromHeldY) <= 1
+            && (std::max)(deltaFromLastReqX, deltaFromLastReqY) <= 1) {
+            return;
+        }
+    }
+
     mode.m_heldMoveTargetCellX = attrX;
     mode.m_heldMoveTargetCellY = attrY;
     mode.m_hasHeldMoveTarget = 1;
+}
+
+bool ShouldPreserveCurrentHeldMove(const CGameMode& mode)
+{
+    if (!mode.m_hasHeldMoveTarget || !mode.m_world || !mode.m_world->m_player) {
+        return false;
+    }
+
+    const CPlayer* player = mode.m_world->m_player;
+    if (!player->m_isMoving) {
+        return false;
+    }
+
+    const int moveDestX = player->m_moveDestX;
+    const int moveDestY = player->m_moveDestY;
+    if (moveDestX < 0 || moveDestY < 0) {
+        return false;
+    }
+
+    return (std::max)(
+        std::abs(moveDestX - mode.m_heldMoveTargetCellX),
+        std::abs(moveDestY - mode.m_heldMoveTargetCellY)) <= kHeldMoveRetargetThresholdCells;
 }
 
 void PumpHeldMoveRequest(CGameMode& mode)
@@ -2124,7 +2409,15 @@ void PumpHeldMoveRequest(CGameMode& mode)
     }
 
     const u32 now = GetTickCount();
+    if (LocalPlayerHasPendingMoveAck(mode, now)) {
+        return;
+    }
+
     if (mode.m_lastMoveRequestTick != 0 && now - mode.m_lastMoveRequestTick < kHeldMoveRequestIntervalMs) {
+        return;
+    }
+
+    if (ShouldPreserveCurrentHeldMove(mode)) {
         return;
     }
 
@@ -2147,6 +2440,7 @@ void PumpAttackChaseRequest(CGameMode& mode)
     if (targetIt == mode.m_runtimeActors.end() || !targetIt->second) {
         mode.m_lastLockOnMonGid = 0;
         mode.m_lastAttackRequestTick = 0;
+        ClearAttackChaseHint(mode);
         return;
     }
 
@@ -2155,8 +2449,9 @@ void PumpAttackChaseRequest(CGameMode& mode)
         return;
     }
 
-    if (IsAttackTargetAdjacent(mode, *target)) {
-        const u32 now = GetTickCount();
+    const u32 now = GetTickCount();
+    const int attackRange = (std::max)(1, mode.m_attackChaseRange);
+    if (IsAttackTargetWithinRange(mode, *target, attackRange)) {
         if (mode.m_lastAttackRequestTick != 0 && now - mode.m_lastAttackRequestTick < kAttackRetryIntervalMs) {
             return;
         }
@@ -2168,20 +2463,69 @@ void PumpAttackChaseRequest(CGameMode& mode)
         return;
     }
 
-    int chaseTileX = -1;
-    int chaseTileY = -1;
-    if (!ResolveAttackChaseCell(mode, *target, &chaseTileX, &chaseTileY)) {
+    // If the server-authoritative move destination is already in attack range,
+    // keep that path instead of sending a new chase cell that can bounce us back.
+    if (IsCurrentMoveDestinationWithinRange(mode, *target, attackRange)) {
         return;
     }
 
-    const u32 now = GetTickCount();
+    if (mode.m_lastAttackRequestTick == 0 || now - mode.m_lastAttackRequestTick >= kAttackRetryIntervalMs) {
+        if (SendAttackRequestPacket(target->m_gid, kActionRequestContinuousAttack)) {
+            mode.m_lastAttackRequestTick = now;
+            DbgLog("[GameMode] chase refresh attack gid=%u\n", target->m_gid);
+        }
+    }
+
+    if (!mode.m_hasAttackChaseHint || mode.m_attackChaseTargetGid != target->m_gid) {
+        return;
+    }
+
+    int sourceTileX = -1;
+    int sourceTileY = -1;
+    if (!ResolveAttackChaseSourceTile(mode, &sourceTileX, &sourceTileY)) {
+        return;
+    }
+
+    int targetTileX = -1;
+    int targetTileY = -1;
+    if (!WorldToAttrCell(mode.m_world, target->m_pos.x, target->m_pos.z, &targetTileX, &targetTileY)) {
+        return;
+    }
+
+    int chaseTileX = -1;
+    int chaseTileY = -1;
+    if (!ResolveAttackChaseCell(mode,
+        sourceTileX,
+        sourceTileY,
+        targetTileX,
+        targetTileY,
+        attackRange,
+        target->m_gid,
+        &chaseTileX,
+        &chaseTileY)) {
+        return;
+    }
+
     if (mode.m_lastMoveRequestTick != 0 && now - mode.m_lastMoveRequestTick < kAttackChaseRequestIntervalMs) {
         return;
     }
 
-    if (TryRequestMoveToCell(mode, chaseTileX, chaseTileY)) {
+    if (TryRequestMoveToCell(mode,
+        sourceTileX,
+        sourceTileY,
+        chaseTileX,
+        chaseTileY,
+        true)) {
         mode.m_lastMoveRequestTick = now;
-        DbgLog("[GameMode] chase move gid=%u dst=%d,%d\n", target->m_gid, chaseTileX, chaseTileY);
+        DbgLog("[GameMode] server-led chase move gid=%u src=%d,%d target=%d,%d dst=%d,%d range=%d\n",
+            target->m_gid,
+            sourceTileX,
+            sourceTileY,
+            targetTileX,
+            targetTileY,
+            chaseTileX,
+            chaseTileY,
+            attackRange);
     }
 }
 
@@ -3990,6 +4334,8 @@ CGameMode::CGameMode()
     m_showTimeStartTick(0), m_recordChatNum(0), m_strikeNum(0), m_isCtrlLock(0),
     m_sentLoadEndAck(0), m_isLeftButtonHeld(0), m_lastMoveRequestCellX(-1), m_lastMoveRequestCellY(-1),
         m_heldMoveTargetCellX(-1), m_heldMoveTargetCellY(-1), m_hasHeldMoveTarget(0), m_lastMoveRequestTick(0), m_lastAttackRequestTick(0),
+        m_lastAttackChaseHintTick(0), m_attackChaseTargetGid(0), m_attackChaseTargetCellX(-1), m_attackChaseTargetCellY(-1),
+        m_attackChaseSourceCellX(-1), m_attackChaseSourceCellY(-1), m_attackChaseRange(1), m_hasAttackChaseHint(0),
         m_mapLoadingStage(MapLoading_None), m_mapLoadingStartTick(0), m_mapLoadingAckTick(0), m_lastActorBootstrapPacketTick(0)
 {
     std::memset(m_rswName, 0, sizeof(m_rswName));
@@ -4062,6 +4408,7 @@ void CGameMode::OnInit(const char* worldName) {
     m_hasHeldMoveTarget = 0;
     m_lastMoveRequestTick = 0;
     m_lastAttackRequestTick = 0;
+    ClearAttackChaseHint(*this);
     m_mapLoadingStartTick = GetTickCount();
     m_mapLoadingAckTick = 0;
     m_lastActorBootstrapPacketTick = m_mapLoadingStartTick;
@@ -4120,6 +4467,7 @@ void CGameMode::OnExit() {
     m_hasHeldMoveTarget = 0;
     m_lastMoveRequestTick = 0;
     m_lastAttackRequestTick = 0;
+    ClearAttackChaseHint(*this);
     m_mapLoadingStage = MapLoading_None;
     m_mapLoadingStartTick = 0;
     m_mapLoadingAckTick = 0;
@@ -4418,6 +4766,7 @@ int CGameMode::SendMsg(int msg, int wparam, int lparam, int extra)
         m_lastMoveRequestCellY = -1;
         m_lastMoveRequestTick = 0;
         m_lastAttackRequestTick = 0;
+        ClearAttackChaseHint(*this);
         UpdateHeldMoveTargetFromScreenPoint(*this, wparam, lparam);
         PumpHeldMoveRequest(*this);
         return 1;
@@ -4431,6 +4780,7 @@ int CGameMode::SendMsg(int msg, int wparam, int lparam, int extra)
         m_hasHeldMoveTarget = 0;
         m_lastMoveRequestTick = 0;
         m_lastAttackRequestTick = 0;
+        ClearAttackChaseHint(*this);
         return 1;
 
     case GameMsg_MouseMove:

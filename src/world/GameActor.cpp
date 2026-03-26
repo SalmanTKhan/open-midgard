@@ -40,8 +40,13 @@ constexpr float kDefaultMotionSpeedFactor = 1.0f;
 constexpr float kAttackMotionFactor = 0.0023148148f;
 constexpr int kAttackStateId = kGameActorAttackStateId;
 constexpr int kDeathStateId = kGameActorDeathStateId;
+constexpr int kHitReactionStateId = 4;
 constexpr int kDeathAction = 64;
 constexpr int kDeathMotion = 4;
+constexpr int kHitReactionAction = 48;
+constexpr int kHitReactionMotion = 5;
+constexpr u32 kHitReactionDurationMs = 200;
+constexpr float kHitReactionKnockbackDist = 6.0f;
 constexpr int kMonsterJobMin = 1000;
 constexpr int kMercenaryJobMin = 6001;
 constexpr int kMercenaryJobMax = 6047;
@@ -94,6 +99,62 @@ bool IsMonsterLikeWaveActor(const CGameActor& actor)
         && (actor.m_job < kMercenaryJobMin || actor.m_job > kMercenaryJobMax);
 }
 
+bool ShouldPlayMotionWaveForActor(const CGameActor& actor)
+{
+    return actor.m_isPc != 0 || IsMonsterLikeWaveActor(actor);
+}
+
+std::string NormalizeWaveEventPath(const char* eventName);
+
+bool QueueActorHitWave(CGameActor& actor, const char* eventName)
+{
+    if (!eventName || !*eventName) {
+        return false;
+    }
+
+    const std::string normalized = NormalizeWaveEventPath(eventName);
+    if (normalized.empty()) {
+        return false;
+    }
+
+    std::snprintf(actor.m_hitWaveName, sizeof(actor.m_hitWaveName), "%s", normalized.c_str());
+    actor.m_isPlayHitWave = 1;
+    return true;
+}
+
+bool TryPlayQueuedWaveAtActor(const CGameActor& actor, const char* waveName)
+{
+    if (!waveName || !*waveName) {
+        return false;
+    }
+
+    CAudio* audio = CAudio::GetInstance();
+    CGameMode* gameMode = g_modeMgr.GetCurrentGameMode();
+    if (!audio || !gameMode || !gameMode->m_world || !gameMode->m_world->m_player) {
+        return false;
+    }
+
+    const vector3d listenerPos = gameMode->m_world->m_player->m_pos;
+    const std::string normalized = NormalizeWaveEventPath(waveName);
+    if (normalized.empty()) {
+        return false;
+    }
+
+    std::array<std::string, 3> candidates = {
+        normalized,
+        std::string("wav\\") + normalized,
+        std::string("data\\wav\\") + normalized,
+    };
+
+    for (const std::string& candidate : candidates) {
+        if (audio->PlaySound3D(candidate.c_str(), actor.m_pos, listenerPos)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
 bool ContainsAsciiCaseInsensitive(const char* text, const char* token)
 {
     if (!text || !token || !*text || !*token) {
@@ -118,10 +179,14 @@ std::string NormalizeWaveEventPath(const char* eventName)
     return normalized;
 }
 
-bool TryPlayMonsterMotionWave(const CGameActor& actor, const char* eventName)
+bool TryPlayActorMotionWave(CGameActor& actor, const char* eventName)
 {
-    if (!IsMonsterLikeWaveActor(actor) || !ContainsAsciiCaseInsensitive(eventName, ".wav")) {
+    if (!ShouldPlayMotionWaveForActor(actor) || !ContainsAsciiCaseInsensitive(eventName, ".wav")) {
         return false;
+    }
+
+    if (actor.m_isPc != 0) {
+        return QueueActorHitWave(actor, eventName);
     }
 
     CAudio* audio = CAudio::GetInstance();
@@ -179,7 +244,7 @@ void PlayMotionWaveEvents(CRenderObject* object, CActRes* actRes, int action, in
                 continue;
             }
 
-            TryPlayMonsterMotionWave(*actor, eventName);
+            TryPlayActorMotionWave(*actor, eventName);
         }
     };
 
@@ -221,6 +286,40 @@ void ProcessRenderMotionWaveEvents(CRenderObject* object, CActRes* actRes, int a
     PlayMotionWaveEvents(object, actRes, action, previousMotion, clampedMotion);
     object->m_oldBaseAction = action;
     object->m_oldMotion = clampedMotion;
+}
+
+void ProcessQueuedHitWave(CGameActor& actor)
+{
+    if (actor.m_isPlayHitWave == 0 || actor.m_hitWaveName[0] == '\0') {
+        return;
+    }
+
+    actor.m_isPlayHitWave = 0;
+    TryPlayQueuedWaveAtActor(actor, actor.m_hitWaveName);
+
+    actor.m_hitWaveName[0] = '\0';
+}
+
+void ApplyQueuedHitReaction(CGameActor& actor, const WBA& hitInfo)
+{
+    actor.m_damageDestX = hitInfo.damageDestX;
+    actor.m_damageDestZ = hitInfo.damageDestZ;
+
+    if (hitInfo.waveName[0] != '\0') {
+        TryPlayQueuedWaveAtActor(actor, hitInfo.waveName);
+    } else if (const char* genericWave = g_session.GetWeaponHitWaveName(-1)) {
+        TryPlayQueuedWaveAtActor(actor, genericWave);
+    }
+
+    if (actor.m_stateId == kDeathStateId) {
+        return;
+    }
+
+    if (hitInfo.attackedMotionTime > 0) {
+        actor.m_motionSpeed = (std::max)(kDefaultMotionSpeedFactor,
+            static_cast<float>(hitInfo.attackedMotionTime) * kAttackMotionFactor);
+    }
+    actor.SetState(kHitReactionStateId);
 }
 
 bool IsPortalFallbackJob(int job)
@@ -1775,6 +1874,8 @@ CGameActor::~CGameActor()
 }
 
 u8 CGameActor::ProcessState() {
+    ProcessWillBeAttacked();
+
     if (m_isMoving) {
         const u32 now = g_session.GetServerTime();
         const vector3d prevPos = m_pos;
@@ -1821,9 +1922,29 @@ u8 CGameActor::ProcessState() {
         ProcessMotion();
         LogDeathMotionProgress(*this);
         break;
+    case kHitReactionStateId: {
+        m_isMotionFreezed = 0;
+        ProcessMotion();
+
+        const u32 elapsedMs = timeGetTime() - m_stateStartTick;
+        const float ratio = (std::min)(1.0f, static_cast<float>(elapsedMs) / static_cast<float>(kHitReactionDurationMs));
+        m_pos.x = m_moveStartPos.x + (m_moveEndPos.x - m_moveStartPos.x) * ratio;
+        m_pos.z = m_moveStartPos.z + (m_moveEndPos.z - m_moveStartPos.z) * ratio;
+
+        if (m_isMotionFinished || elapsedMs >= kHitReactionDurationMs) {
+            m_pos.x = m_moveEndPos.x;
+            m_pos.z = m_moveEndPos.z;
+            m_stateId = 0;
+            m_targetGid = 0;
+            m_attackMotion = -1.0f;
+        }
+        break;
+    }
     default:
         break;
     }
+
+    ProcessQueuedHitWave(*this);
 
     return 1;
 }
@@ -1859,10 +1980,34 @@ void CGameActor::SendMsg(CGameObject* src, int msg, int par1, int par2, int par3
 }
 
 void CGameActor::SetState(int state) {
+    if (m_stateId == kHitReactionStateId) {
+        m_pos.x = m_damageDestX;
+        m_pos.z = m_damageDestZ;
+    }
+
     m_stateId = state;
     m_stateStartTick = timeGetTime();
 
     switch (state) {
+    case 0:
+        m_attackMotion = -1.0f;
+        m_isMotionFreezed = 0;
+        return;
+    case kHitReactionStateId:
+        if (m_isForceState || m_isForceState2 || m_isForceState3) {
+            return;
+        }
+        m_isMoving = 0;
+        m_path.Reset();
+        m_moveStartPos = m_pos;
+        m_moveEndPos = m_pos;
+        m_moveEndPos.x = m_damageDestX;
+        m_moveEndPos.z = m_damageDestZ;
+        m_targetGid = 0;
+        m_isMotionFinished = 0;
+        m_isMotionFreezed = 0;
+        SetAction(kHitReactionAction, kHitReactionMotion, 1);
+        return;
     case kDeathStateId:
         m_isMoving = 0;
         m_path.Reset();
@@ -1880,6 +2025,25 @@ void CGameActor::SetState(int state) {
     default:
         return;
     }
+}
+
+void CGameActor::ProcessWillBeAttacked()
+{
+    const u32 now = timeGetTime();
+    for (auto it = m_willBeAttackedList.begin(); it != m_willBeAttackedList.end(); ) {
+        if (now < it->time) {
+            ++it;
+            continue;
+        }
+
+        ApplyQueuedHitReaction(*this, *it);
+        it = m_willBeAttackedList.erase(it);
+    }
+}
+
+void CGameActor::QueueWillBeAttacked(const WBA& hitInfo)
+{
+    m_willBeAttackedList.push_back(hitInfo);
 }
 
 void CGameActor::SetModifyFactorOfmotionSpeed(int attackMT)
@@ -1984,6 +2148,8 @@ CPc::CPc()
     m_curMotion = 0;
     m_oldBaseAction = 0;
     m_oldMotion = 0;
+    m_isPlayHitWave = 0;
+    m_hitWaveName[0] = '\0';
 }
 
 CPc::~CPc()
@@ -2109,15 +2275,15 @@ bool CPc::EnsureBillboardTexture(float cameraLongitude)
         CActRes* actRes = nullptr;
         CSprRes* sprRes = nullptr;
         if (ResolveCachedNonPcResourcesForActor(*this, &actRes, &sprRes) && actRes) {
-            if (IsTransientActionActive(*this, actRes, m_curAction)) {
+            const bool transientActionActive = IsTransientActionActive(*this, actRes, m_curAction);
+            if (transientActionActive) {
                 bodyAction = m_curAction;
                 headMotion = m_curMotion;
                 LogDeathBillboardSelectionOnce(*this, actRes, bodyAction, headMotion);
             } else {
                 headMotion = ResolveSpriteMotionIndex(*this, actRes, bodyAction);
+                ProcessRenderMotionWaveEvents(this, actRes, bodyAction, headMotion);
             }
-
-            ProcessRenderMotionWaveEvents(this, actRes, bodyAction, headMotion);
         }
     }
 
@@ -2235,7 +2401,7 @@ bool CPc::EnsureBillboardTexture(float cameraLongitude)
         if (!m_billboardTexture) {
             return false;
         }
-        if (!m_billboardTexture->Create(kPlayerBillboardComposeWidth, kPlayerBillboardComposeHeight, PF_A8R8G8B8)) {
+        if (!m_billboardTexture->Create(kPlayerBillboardComposeWidth, kPlayerBillboardComposeHeight, PF_A8R8G8B8, false)) {
             ReleaseActorBillboardTexture(*this);
             return false;
         }
@@ -2280,8 +2446,8 @@ bool CPc::EnsureBillboardTexture(float cameraLongitude)
 }
 
 CPlayer::CPlayer()
-    : m_destCellX(0)
-    , m_destCellZ(0)
+    : m_destCellX(-1)
+    , m_destCellZ(-1)
     , m_attackReqTime(0)
     , m_preMoveStartTick(0)
     , m_preMoveOn(0)
@@ -2299,8 +2465,8 @@ CPlayer::CPlayer()
     , m_skillUseLevel(0)
     , m_gSkillDx(0)
     , m_gSkillDy(0)
-    , m_preengageXOfMove(0)
-    , m_preengageYOfMove(0)
+    , m_preengageXOfMove(-1)
+    , m_preengageYOfMove(-1)
     , m_statusEffect(nullptr)
 {
 }

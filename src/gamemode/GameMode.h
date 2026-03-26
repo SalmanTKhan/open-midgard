@@ -217,6 +217,14 @@ public:
     int m_hasHeldMoveTarget;
     u32 m_lastMoveRequestTick;
     u32 m_lastAttackRequestTick;
+    u32 m_lastAttackChaseHintTick;
+    u32 m_attackChaseTargetGid;
+    int m_attackChaseTargetCellX;
+    int m_attackChaseTargetCellY;
+    int m_attackChaseSourceCellX;
+    int m_attackChaseSourceCellY;
+    int m_attackChaseRange;
+    int m_hasAttackChaseHint;
     int m_mapLoadingStage;
     u32 m_mapLoadingStartTick;
     u32 m_mapLoadingAckTick;

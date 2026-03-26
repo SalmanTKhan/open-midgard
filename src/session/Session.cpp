@@ -3,6 +3,7 @@
 #include "../core/Xml.h"
 
 #include <algorithm>
+#include <cstdlib>
 #include <cstring>
 #include <cstdio>
 #include <mmsystem.h>
@@ -17,6 +18,101 @@ constexpr const char* kBodyPaletteRoot = "data\\palette\\\xB8\xF6\\";
 constexpr const char* kHeadPaletteRoot = "data\\palette\\\xB8\xD3\xB8\xAE\\";
 constexpr const char* kFemaleSex = "\xBF\xA9";
 constexpr const char* kMaleSex = "\xB3\xB2";
+constexpr const char* kPlayerClothesWave = "player_clothes.wav";
+constexpr const char* kPlayerWoodenMaleWave = "player_wooden_male.wav";
+constexpr const char* kPlayerMetalWave = "player_metal.wav";
+constexpr const char* kHitMaceWave = "_hit_mace.wav";
+constexpr const char* kHitSwordWave = "_hit_sword.wav";
+constexpr const char* kHitSpearWave = "_hit_spear.wav";
+constexpr const char* kHitAxeWave = "_hit_axe.wav";
+constexpr const char* kHitArrowWave = "_hit_arrow.wav";
+
+constexpr const char* kEnemyHitNormalWaves[] = {
+    "_enemy_hit_normal1.wav",
+    "_enemy_hit_normal2.wav",
+    "_enemy_hit_normal3.wav",
+    "_enemy_hit_normal4.wav",
+};
+
+constexpr const char* kEnemyHitFireWaves[] = {
+    "_enemy_hit_fire1.wav",
+    "_enemy_hit_fire2.wav",
+};
+
+constexpr const char* kEnemyHitWindWaves[] = {
+    "_enemy_hit_wind1.wav",
+    "_enemy_hit_wind2.wav",
+};
+
+struct JobWaveOverride {
+    int job;
+    const char* waveName;
+};
+
+constexpr JobWaveOverride kJobHitWaveOverrides[] = {
+    { 1, kPlayerMetalWave },
+    { 3, kPlayerWoodenMaleWave },
+    { 6, kPlayerWoodenMaleWave },
+    { 7, kPlayerMetalWave },
+    { 11, kPlayerWoodenMaleWave },
+    { 12, kPlayerWoodenMaleWave },
+    { 14, kPlayerMetalWave },
+    { 15, kPlayerMetalWave },
+    { 17, kPlayerWoodenMaleWave },
+    { 19, kPlayerWoodenMaleWave },
+    { 20, kPlayerWoodenMaleWave },
+    { 24, kPlayerWoodenMaleWave },
+    { 25, kPlayerWoodenMaleWave },
+    { 52, kPlayerMetalWave },
+    { 54, kPlayerWoodenMaleWave },
+    { 57, kPlayerWoodenMaleWave },
+    { 58, kPlayerMetalWave },
+    { 62, kPlayerWoodenMaleWave },
+    { 63, kPlayerWoodenMaleWave },
+    { 65, kPlayerMetalWave },
+    { 66, kPlayerMetalWave },
+    { 68, kPlayerWoodenMaleWave },
+    { 70, kPlayerWoodenMaleWave },
+    { 71, kPlayerWoodenMaleWave },
+    { 74, kPlayerMetalWave },
+    { 76, kPlayerWoodenMaleWave },
+    { 79, kPlayerWoodenMaleWave },
+    { 80, kPlayerMetalWave },
+    { 84, kPlayerWoodenMaleWave },
+    { 85, kPlayerWoodenMaleWave },
+    { 87, kPlayerMetalWave },
+    { 88, kPlayerMetalWave },
+    { 90, kPlayerWoodenMaleWave },
+    { 92, kPlayerWoodenMaleWave },
+    { 93, kPlayerWoodenMaleWave },
+    { 96, kPlayerWoodenMaleWave },
+    { 97, kPlayerMetalWave },
+    { 98, kPlayerMetalWave },
+    { 100, kPlayerWoodenMaleWave },
+    { 101, kPlayerMetalWave },
+};
+
+struct WeaponWaveOverride {
+    int weaponType;
+    const char* waveName;
+};
+
+constexpr WeaponWaveOverride kWeaponHitWaveOverrides[] = {
+    { 0, kHitMaceWave },
+    { 1, kHitSwordWave },
+    { 2, kHitSwordWave },
+    { 3, kHitSwordWave },
+    { 4, kHitSpearWave },
+    { 5, kHitSpearWave },
+    { 6, kHitAxeWave },
+    { 7, kHitAxeWave },
+    { 8, kHitMaceWave },
+    { 9, kHitMaceWave },
+    { 10, kHitMaceWave },
+    { 11, kHitArrowWave },
+    { 15, kHitMaceWave },
+    { 23, kHitMaceWave },
+};
 
 struct JobTokenEntry {
     int job;
@@ -115,6 +211,8 @@ CSession::CSession() : m_aid(0), m_authCode(0), m_sex(0), m_charServerPort(0), m
     std::memset(m_curMap, 0, sizeof(m_curMap));
     std::memset(m_playerName, 0, sizeof(m_playerName));
     std::memset(&m_selectedCharacterInfo, 0, sizeof(m_selectedCharacterInfo));
+    InitJobHitWaveName();
+    InitWeaponHitWaveName();
 }
 
 CSession::~CSession()
@@ -331,6 +429,65 @@ const char* CSession::GetPlayerName() const
 const char* CSession::GetJobName(int job) const
 {
     return LookupGeneratedJobName(job);
+}
+
+const char* CSession::GetAttrWaveName(int attr) const
+{
+    switch (attr) {
+    case 3:
+        return kEnemyHitFireWaves[std::rand() % (sizeof(kEnemyHitFireWaves) / sizeof(kEnemyHitFireWaves[0]))];
+    case 4:
+        return kEnemyHitWindWaves[std::rand() % (sizeof(kEnemyHitWindWaves) / sizeof(kEnemyHitWindWaves[0]))];
+    default:
+        return kEnemyHitNormalWaves[std::rand() % (sizeof(kEnemyHitNormalWaves) / sizeof(kEnemyHitNormalWaves[0]))];
+    }
+}
+
+const char* CSession::GetJobHitWaveName(int job) const
+{
+    if (job < 0 || (job >= 28 && job <= 4000)) {
+        return GetWeaponHitWaveName(-1);
+    }
+
+    const int normalizedJob = NormalizeJob(job);
+    if (normalizedJob < 0 || normalizedJob >= static_cast<int>(m_jobHitWaveNameTable.size())) {
+        return "";
+    }
+
+    return m_jobHitWaveNameTable[normalizedJob].c_str();
+}
+
+const char* CSession::GetWeaponHitWaveName(int weapon) const
+{
+    if (weapon == -1) {
+        return kEnemyHitNormalWaves[std::rand() % (sizeof(kEnemyHitNormalWaves) / sizeof(kEnemyHitNormalWaves[0]))];
+    }
+
+    if (weapon < 0 || weapon >= static_cast<int>(m_weaponHitWaveNameTable.size())) {
+        return "";
+    }
+
+    return m_weaponHitWaveNameTable[weapon].c_str();
+}
+
+void CSession::InitJobHitWaveName()
+{
+    m_jobHitWaveNameTable.assign(21068, kPlayerClothesWave);
+    for (const JobWaveOverride& entry : kJobHitWaveOverrides) {
+        if (entry.job >= 0 && entry.job < static_cast<int>(m_jobHitWaveNameTable.size())) {
+            m_jobHitWaveNameTable[entry.job] = entry.waveName;
+        }
+    }
+}
+
+void CSession::InitWeaponHitWaveName()
+{
+    m_weaponHitWaveNameTable.assign(31, kHitMaceWave);
+    for (const WeaponWaveOverride& entry : kWeaponHitWaveOverrides) {
+        if (entry.weaponType >= 0 && entry.weaponType < static_cast<int>(m_weaponHitWaveNameTable.size())) {
+            m_weaponHitWaveNameTable[entry.weaponType] = entry.waveName;
+        }
+    }
 }
 
 int CSession::NormalizeJob(int job) const

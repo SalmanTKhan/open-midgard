@@ -222,7 +222,7 @@ void CDCBitmap::UpdateSurface() {
 
     while (m_textureList.size() < required) {
         m_textureList.push_back(new CTexture());
-        m_textureList.back()->Create(256, 256, PF_DEFAULT);
+        m_textureList.back()->Create(256, 256, PF_DEFAULT, false);
     }
 
     auto it = m_textureList.begin();

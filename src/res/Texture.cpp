@@ -6,6 +6,7 @@
 #include "render3d/RenderDevice.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstring>
 #include <vector>
 #include "../DebugLog.h"
@@ -14,9 +15,13 @@ namespace {
 
 constexpr bool kLogTexture = false;
 
-int GetTextureUpscaleFactor()
+unsigned int GetTextureUpscaleFactor(bool allowUpscale)
 {
-    return (std::max)(1, GetCachedGraphicsSettings().textureUpscaleFactor);
+    if (!allowUpscale) {
+        return 1u;
+    }
+
+    return static_cast<unsigned int>((std::max)(1, GetCachedGraphicsSettings().textureUpscaleFactor));
 }
 
 unsigned int CountTrailingZeros(unsigned int mask)
@@ -84,6 +89,165 @@ unsigned int ConvertArgbToSurfacePixel(unsigned int argb, const DDPIXELFORMAT& p
 unsigned int GetSurfaceColorKey(const DDPIXELFORMAT& pf)
 {
     return pf.dwRBitMask | pf.dwBBitMask;
+}
+
+float ClampUnitFloat(float value)
+{
+    if (value < 0.0f) {
+        return 0.0f;
+    }
+    if (value > 1.0f) {
+        return 1.0f;
+    }
+    return value;
+}
+
+unsigned char FloatToByte(float value)
+{
+    const float clamped = ClampUnitFloat(value);
+    return static_cast<unsigned char>(clamped * 255.0f + 0.5f);
+}
+
+unsigned int LoadArgbPixel(const unsigned int* data, int srcWidth, int srcHeight, int srcPitch, int x, int y)
+{
+    if (!data || srcWidth <= 0 || srcHeight <= 0) {
+        return 0u;
+    }
+
+    x = (std::max)(0, (std::min)(srcWidth - 1, x));
+    y = (std::max)(0, (std::min)(srcHeight - 1, y));
+    const unsigned char* base = reinterpret_cast<const unsigned char*>(data) + static_cast<size_t>(y) * static_cast<size_t>(srcPitch);
+    const unsigned int* row = reinterpret_cast<const unsigned int*>(base);
+    return row[x];
+}
+
+void DecodeArgb(unsigned int argb, float* alpha, float* red, float* green, float* blue)
+{
+    if (alpha) {
+        *alpha = static_cast<float>((argb >> 24) & 0xFFu) / 255.0f;
+    }
+    if (red) {
+        *red = static_cast<float>((argb >> 16) & 0xFFu) / 255.0f;
+    }
+    if (green) {
+        *green = static_cast<float>((argb >> 8) & 0xFFu) / 255.0f;
+    }
+    if (blue) {
+        *blue = static_cast<float>(argb & 0xFFu) / 255.0f;
+    }
+}
+
+unsigned int EncodeArgb(float alpha, float red, float green, float blue)
+{
+    return (static_cast<unsigned int>(FloatToByte(alpha)) << 24)
+        | (static_cast<unsigned int>(FloatToByte(red)) << 16)
+        | (static_cast<unsigned int>(FloatToByte(green)) << 8)
+        | static_cast<unsigned int>(FloatToByte(blue));
+}
+
+unsigned int SampleBilinearArgb(const unsigned int* data, int srcWidth, int srcHeight, int srcPitch, float sampleX, float sampleY)
+{
+    const float clampedX = (std::max)(0.0f, (std::min)(static_cast<float>(srcWidth - 1), sampleX));
+    const float clampedY = (std::max)(0.0f, (std::min)(static_cast<float>(srcHeight - 1), sampleY));
+    const int x0 = static_cast<int>(std::floor(clampedX));
+    const int y0 = static_cast<int>(std::floor(clampedY));
+    const int x1 = (std::min)(srcWidth - 1, x0 + 1);
+    const int y1 = (std::min)(srcHeight - 1, y0 + 1);
+    const float tx = clampedX - static_cast<float>(x0);
+    const float ty = clampedY - static_cast<float>(y0);
+
+    const unsigned int p00 = LoadArgbPixel(data, srcWidth, srcHeight, srcPitch, x0, y0);
+    const unsigned int p10 = LoadArgbPixel(data, srcWidth, srcHeight, srcPitch, x1, y0);
+    const unsigned int p01 = LoadArgbPixel(data, srcWidth, srcHeight, srcPitch, x0, y1);
+    const unsigned int p11 = LoadArgbPixel(data, srcWidth, srcHeight, srcPitch, x1, y1);
+
+    float a00 = 0.0f;
+    float r00 = 0.0f;
+    float g00 = 0.0f;
+    float b00 = 0.0f;
+    float a10 = 0.0f;
+    float r10 = 0.0f;
+    float g10 = 0.0f;
+    float b10 = 0.0f;
+    float a01 = 0.0f;
+    float r01 = 0.0f;
+    float g01 = 0.0f;
+    float b01 = 0.0f;
+    float a11 = 0.0f;
+    float r11 = 0.0f;
+    float g11 = 0.0f;
+    float b11 = 0.0f;
+    DecodeArgb(p00, &a00, &r00, &g00, &b00);
+    DecodeArgb(p10, &a10, &r10, &g10, &b10);
+    DecodeArgb(p01, &a01, &r01, &g01, &b01);
+    DecodeArgb(p11, &a11, &r11, &g11, &b11);
+
+    const float w00 = (1.0f - tx) * (1.0f - ty);
+    const float w10 = tx * (1.0f - ty);
+    const float w01 = (1.0f - tx) * ty;
+    const float w11 = tx * ty;
+    const float alpha = (a00 * w00) + (a10 * w10) + (a01 * w01) + (a11 * w11);
+    const float red = (r00 * w00) + (r10 * w10) + (r01 * w01) + (r11 * w11);
+    const float green = (g00 * w00) + (g10 * w10) + (g01 * w01) + (g11 * w11);
+    const float blue = (b00 * w00) + (b10 * w10) + (b01 * w01) + (b11 * w11);
+    return EncodeArgb(alpha, red, green, blue);
+}
+
+void BuildSupersampledUpscale(const unsigned int* srcData, int srcWidth, int srcHeight, int srcPitch,
+    int scale, std::vector<unsigned int>* dstPixels)
+{
+    if (!srcData || srcWidth <= 0 || srcHeight <= 0 || scale <= 1 || !dstPixels) {
+        return;
+    }
+
+    const int dstWidth = srcWidth * scale;
+    const int dstHeight = srcHeight * scale;
+    dstPixels->resize(static_cast<size_t>(dstWidth) * static_cast<size_t>(dstHeight));
+
+    const float invScale = 1.0f / static_cast<float>(scale);
+    static constexpr float kSubsampleOffsets[4][2] = {
+        { -0.25f, -0.25f },
+        {  0.25f, -0.25f },
+        { -0.25f,  0.25f },
+        {  0.25f,  0.25f },
+    };
+
+    for (int dstY = 0; dstY < dstHeight; ++dstY) {
+        unsigned int* dstRow = dstPixels->data() + static_cast<size_t>(dstY) * static_cast<size_t>(dstWidth);
+        const float baseY = ((static_cast<float>(dstY) + 0.5f) * invScale) - 0.5f;
+        for (int dstX = 0; dstX < dstWidth; ++dstX) {
+            const float baseX = ((static_cast<float>(dstX) + 0.5f) * invScale) - 0.5f;
+
+            float accumAlpha = 0.0f;
+            float accumRed = 0.0f;
+            float accumGreen = 0.0f;
+            float accumBlue = 0.0f;
+            for (const float (&offset)[2] : kSubsampleOffsets) {
+                const unsigned int sample = SampleBilinearArgb(
+                    srcData,
+                    srcWidth,
+                    srcHeight,
+                    srcPitch,
+                    baseX + (offset[0] * invScale),
+                    baseY + (offset[1] * invScale));
+                float alpha = 0.0f;
+                float red = 0.0f;
+                float green = 0.0f;
+                float blue = 0.0f;
+                DecodeArgb(sample, &alpha, &red, &green, &blue);
+                accumAlpha += alpha;
+                accumRed += red;
+                accumGreen += green;
+                accumBlue += blue;
+            }
+
+            dstRow[dstX] = EncodeArgb(
+                accumAlpha * 0.25f,
+                accumRed * 0.25f,
+                accumGreen * 0.25f,
+                accumBlue * 0.25f);
+        }
+    }
 }
 
 void WritePackedPixel(unsigned char* dst, unsigned int bytesPerPixel, unsigned int value)
@@ -214,13 +378,13 @@ void CSurfaceWallpaper::Update(int x, int y, int w, int h, unsigned int* data, b
 
 CTexture::CTexture(unsigned int w, unsigned int h, PixelFormat format)
     : CSurface(w, h), m_pf(format), m_lockCnt(0), m_timeStamp(0), m_updateWidth(0), m_updateHeight(0), m_surfaceUpdateWidth(0), m_surfaceUpdateHeight(0),
-            m_backendTextureObject(nullptr), m_backendTextureView(nullptr), m_backendTextureUpload(nullptr) {
+            m_upscaleFactor(1), m_backendTextureObject(nullptr), m_backendTextureView(nullptr), m_backendTextureUpload(nullptr) {
     m_texName[0] = '\0';
 }
 
 CTexture::CTexture(unsigned int w, unsigned int h, PixelFormat format, IDirectDrawSurface7* pSurface)
     : CSurface(w, h, pSurface), m_pf(format), m_lockCnt(0), m_timeStamp(0), m_updateWidth(0), m_updateHeight(0), m_surfaceUpdateWidth(0), m_surfaceUpdateHeight(0),
-            m_backendTextureObject(nullptr), m_backendTextureView(nullptr), m_backendTextureUpload(nullptr) {
+            m_upscaleFactor(1), m_backendTextureObject(nullptr), m_backendTextureView(nullptr), m_backendTextureUpload(nullptr) {
     m_texName[0] = '\0';
 }
 
@@ -228,12 +392,17 @@ CTexture::~CTexture() {
     GetRenderDevice().ReleaseTextureResource(this);
 }
 
-bool CTexture::Create(unsigned int w, unsigned int h, PixelFormat format) {
+bool CTexture::Create(unsigned int w, unsigned int h, PixelFormat format, bool allowUpscale) {
     GetRenderDevice().ReleaseTextureResource(this);
+
+    m_upscaleFactor = GetTextureUpscaleFactor(allowUpscale);
+
+    const unsigned int scaledWidth = (std::max)(1u, w * m_upscaleFactor);
+    const unsigned int scaledHeight = (std::max)(1u, h * m_upscaleFactor);
 
     unsigned int textureW = 0;
     unsigned int textureH = 0;
-    if (!GetRenderDevice().CreateTextureResource(this, w, h, static_cast<int>(format), &textureW, &textureH)) {
+    if (!GetRenderDevice().CreateTextureResource(this, scaledWidth, scaledHeight, static_cast<int>(format), &textureW, &textureH)) {
         if constexpr (kLogTexture) {
             DbgLog("[Texture] CreateTextureResource failed name='%s' requested=%ux%u\n", m_texName, w, h);
         }
@@ -244,13 +413,12 @@ bool CTexture::Create(unsigned int w, unsigned int h, PixelFormat format) {
     m_h = textureH;
     m_pf = format;
     SetUVAdjust(w, h);
-    const unsigned int scale = static_cast<unsigned int>(GetTextureUpscaleFactor());
-    m_surfaceUpdateWidth = (std::min)(textureW, w * scale);
-    m_surfaceUpdateHeight = (std::min)(textureH, h * scale);
+    m_surfaceUpdateWidth = (std::min)(textureW, scaledWidth);
+    m_surfaceUpdateHeight = (std::min)(textureH, scaledHeight);
     return true;
 }
-bool CTexture::CreateBump(unsigned int w, unsigned int h) { return Create(w, h, PF_BUMP); }
-bool CTexture::CreateBump(unsigned int w, unsigned int h, IDirectDrawSurface7* pSurface) { (void)pSurface; return Create(w, h, PF_BUMP); }
+bool CTexture::CreateBump(unsigned int w, unsigned int h, bool allowUpscale) { return Create(w, h, PF_BUMP, allowUpscale); }
+bool CTexture::CreateBump(unsigned int w, unsigned int h, IDirectDrawSurface7* pSurface, bool allowUpscale) { (void)pSurface; return Create(w, h, PF_BUMP, allowUpscale); }
 void CTexture::SetUVAdjust(unsigned int width, unsigned int height)
 {
     unsigned int adjustedWidth = width;
@@ -278,7 +446,7 @@ void CTexture::ClearSurface(RECT* r, unsigned int col) { CSurface::ClearSurface(
 void CTexture::DrawSurface(int x, int y, int w, int h, unsigned int flags) { CSurface::DrawSurface(x, y, w, h, flags); }
 void CTexture::DrawSurfaceStretch(int x, int y, int w, int h) { CSurface::DrawSurfaceStretch(x, y, w, h); }
 void CTexture::Update(int x, int y, int w, int h, unsigned int* data, bool b, int p) {
-    const int scale = GetTextureUpscaleFactor();
+    const int scale = static_cast<int>((std::max)(1u, m_upscaleFactor));
     const int scaledX = x * scale;
     const int scaledY = y * scale;
     const int scaledW = w * scale;
@@ -289,15 +457,7 @@ void CTexture::Update(int x, int y, int w, int h, unsigned int* data, bool b, in
     std::vector<unsigned int> scaledPixels;
     if (scale > 1 && data && w > 0 && h > 0) {
         const int srcPitch = p > 0 ? p : w * static_cast<int>(sizeof(unsigned int));
-        scaledPixels.resize(static_cast<size_t>(scaledW) * static_cast<size_t>(scaledH));
-        for (int dstY = 0; dstY < scaledH; ++dstY) {
-            const int srcY = dstY / scale;
-            const unsigned int* srcRow = reinterpret_cast<const unsigned int*>(reinterpret_cast<const unsigned char*>(data) + static_cast<size_t>(srcY) * static_cast<size_t>(srcPitch));
-            unsigned int* dstRow = scaledPixels.data() + static_cast<size_t>(dstY) * static_cast<size_t>(scaledW);
-            for (int dstX = 0; dstX < scaledW; ++dstX) {
-                dstRow[dstX] = srcRow[dstX / scale];
-            }
-        }
+        BuildSupersampledUpscale(data, w, h, srcPitch, scale, &scaledPixels);
         uploadData = scaledPixels.data();
         uploadPitch = scaledW * static_cast<int>(sizeof(unsigned int));
     }

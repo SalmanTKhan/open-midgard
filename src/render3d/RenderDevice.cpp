@@ -1298,9 +1298,6 @@ public:
         if (!width || !height) {
             return;
         }
-        const unsigned int scale = static_cast<unsigned int>((std::max)(1, GetCachedGraphicsSettings().textureUpscaleFactor));
-        *width = (std::max)(1u, *width * scale);
-        *height = (std::max)(1u, *height * scale);
         g_3dDevice.AdjustTextureSize(width, height);
     }
 
@@ -1717,11 +1714,8 @@ public:
 
     void AdjustTextureSize(unsigned int* width, unsigned int* height) override
     {
-        if (width && height) {
-            const unsigned int scale = static_cast<unsigned int>((std::max)(1, GetCachedGraphicsSettings().textureUpscaleFactor));
-            *width = (std::max)(1u, *width * scale);
-            *height = (std::max)(1u, *height * scale);
-        }
+        (void)width;
+        (void)height;
     }
 
     void ReleaseTextureResource(CTexture* texture) override { ReleaseTextureMembers(texture); }
@@ -3301,11 +3295,8 @@ public:
     }
     void AdjustTextureSize(unsigned int* width, unsigned int* height) override
     {
-        if (width && height) {
-            const unsigned int scale = static_cast<unsigned int>((std::max)(1, GetCachedGraphicsSettings().textureUpscaleFactor));
-            *width = (std::max)(1u, *width * scale);
-            *height = (std::max)(1u, *height * scale);
-        }
+        (void)width;
+        (void)height;
     }
     void ReleaseTextureResource(CTexture* texture) override { ReleaseTextureMembers(texture); }
     bool CreateTextureResource(CTexture* texture, unsigned int requestedWidth, unsigned int requestedHeight,
@@ -5356,13 +5347,8 @@ public:
 
     void AdjustTextureSize(unsigned int* width, unsigned int* height) override
     {
-        if (!width || !height) {
-            return;
-        }
-
-        const unsigned int scale = static_cast<unsigned int>((std::max)(1, GetCachedGraphicsSettings().textureUpscaleFactor));
-        *width = (std::max)(1u, *width * scale);
-        *height = (std::max)(1u, *height * scale);
+        (void)width;
+        (void)height;
     }
 
     void ReleaseTextureResource(CTexture* texture) override
@@ -8517,7 +8503,7 @@ private:
     void BindTexture(DWORD stage, CTexture* texture) override { (void)stage; (void)texture; }
     void DrawPrimitive(D3DPRIMITIVETYPE primitiveType, DWORD vertexFormat, const void* vertices, DWORD vertexCount, DWORD flags) override { (void)primitiveType; (void)vertexFormat; (void)vertices; (void)vertexCount; (void)flags; }
     void DrawIndexedPrimitive(D3DPRIMITIVETYPE primitiveType, DWORD vertexFormat, const void* vertices, DWORD vertexCount, const unsigned short* indices, DWORD indexCount, DWORD flags) override { (void)primitiveType; (void)vertexFormat; (void)vertices; (void)vertexCount; (void)indices; (void)indexCount; (void)flags; }
-    void AdjustTextureSize(unsigned int* width, unsigned int* height) override { if (width && height) { const unsigned int scale = static_cast<unsigned int>((std::max)(1, GetCachedGraphicsSettings().textureUpscaleFactor)); *width = (std::max)(1u, *width * scale); *height = (std::max)(1u, *height * scale); } }
+    void AdjustTextureSize(unsigned int* width, unsigned int* height) override { (void)width; (void)height; }
     void ReleaseTextureResource(CTexture* texture) override { (void)texture; }
     bool CreateTextureResource(CTexture* texture, unsigned int requestedWidth, unsigned int requestedHeight, int pixelFormat, unsigned int* outSurfaceWidth, unsigned int* outSurfaceHeight) override { (void)texture; (void)requestedWidth; (void)requestedHeight; (void)pixelFormat; if (outSurfaceWidth) { *outSurfaceWidth = 0; } if (outSurfaceHeight) { *outSurfaceHeight = 0; } return false; }
     bool UpdateTextureResource(CTexture* texture, int x, int y, int w, int h, const unsigned int* data, bool skipColorKey, int pitch) override { (void)texture; (void)x; (void)y; (void)w; (void)h; (void)data; (void)skipColorKey; (void)pitch; return false; }

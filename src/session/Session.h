@@ -68,6 +68,9 @@ public:
     const std::list<ITEM_INFO>& GetInventoryItems() const;
     const char* GetPlayerName() const;
     const char* GetJobName(int job) const;
+    const char* GetAttrWaveName(int attr) const;
+    const char* GetJobHitWaveName(int job) const;
+    const char* GetWeaponHitWaveName(int weapon) const;
     int GetSex() const;
     char* GetJobActName(int job, int sex, char* buf);
     char* GetJobSprName(int job, int sex, char* buf);
@@ -78,6 +81,8 @@ public:
     char* GetHeadPaletteName(int head, int job, int sex, int palNum, char* buf);
     
 private:
+    void InitJobHitWaveName();
+    void InitWeaponHitWaveName();
     int NormalizeJob(int job) const;
     u32 m_serverTime;
     CHARACTER_INFO m_selectedCharacterInfo;
@@ -91,6 +96,8 @@ private:
     bool m_hasJobExpValue;
     bool m_hasNextJobExpValue;
     std::list<ITEM_INFO> m_inventoryItems;
+    std::vector<std::string> m_jobHitWaveNameTable;
+    std::vector<std::string> m_weaponHitWaveNameTable;
 };
 
 extern CSession g_session;

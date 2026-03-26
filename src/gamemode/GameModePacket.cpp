@@ -64,6 +64,46 @@ void HandleIgnorePacket(CGameMode&, const PacketView&)
 {
 }
 
+void HandleAttackRange(CGameMode& mode, const PacketView& packet)
+{
+    if (!packet.data || packet.packetLength < 4) {
+        return;
+    }
+
+    mode.m_attackChaseRange = (std::max)(1, static_cast<int>(ReadLE16(packet.data + 2)));
+}
+
+void HandleAttackFailureForDistance(CGameMode& mode, const PacketView& packet)
+{
+    if (!packet.data || packet.packetLength < 16) {
+        return;
+    }
+
+    const u32 targetGid = ReadLE32(packet.data + 2);
+    const int targetX = static_cast<int>(static_cast<s16>(ReadLE16(packet.data + 6)));
+    const int targetY = static_cast<int>(static_cast<s16>(ReadLE16(packet.data + 8)));
+    const int sourceX = static_cast<int>(static_cast<s16>(ReadLE16(packet.data + 10)));
+    const int sourceY = static_cast<int>(static_cast<s16>(ReadLE16(packet.data + 12)));
+    const int attackRange = (std::max)(1, static_cast<int>(ReadLE16(packet.data + 14)));
+
+    mode.m_lastAttackChaseHintTick = GetTickCount();
+    mode.m_attackChaseTargetGid = targetGid;
+    mode.m_attackChaseTargetCellX = targetX;
+    mode.m_attackChaseTargetCellY = targetY;
+    mode.m_attackChaseSourceCellX = sourceX;
+    mode.m_attackChaseSourceCellY = sourceY;
+    mode.m_attackChaseRange = attackRange;
+    mode.m_hasAttackChaseHint = 1;
+
+    DbgLog("[GameMode] attack failure for distance gid=%u target=%d,%d source=%d,%d range=%d\n",
+        targetGid,
+        targetX,
+        targetY,
+        sourceX,
+        sourceY,
+        attackRange);
+}
+
 u16 ClampToU16(u32 value)
 {
     return static_cast<u16>((std::min)(value, static_cast<u32>(0xFFFFu)));
@@ -790,6 +830,42 @@ void EmitCombatNumber(CGameActor* sourceActor, CGameActor* targetActor, int dama
         ResolveCombatNumberKind(damage, actionType));
 }
 
+void QueueCombatHitReaction(CGameActor* sourceActor, CGameActor* targetActor, int attackedMT, int damage, u8 actionType)
+{
+    if (!targetActor || damage == 0 || actionType == kNotifyActLuckyDodge) {
+        return;
+    }
+
+    WBA hitInfo{};
+    hitInfo.gid = sourceActor ? sourceActor->m_gid : 0;
+    hitInfo.time = timeGetTime();
+    hitInfo.message = 133;
+    hitInfo.attackedMotionTime = attackedMT;
+    hitInfo.damageDestX = targetActor->m_pos.x;
+    hitInfo.damageDestZ = targetActor->m_pos.z;
+
+    const char* waveName = nullptr;
+    if (targetActor->m_isPc != 0) {
+        waveName = g_session.GetJobHitWaveName(targetActor->m_job);
+    } else if (sourceActor) {
+        int weaponType = -1;
+        if (const CPc* pcActor = dynamic_cast<const CPc*>(sourceActor)) {
+            weaponType = pcActor->m_weapon;
+        } else if (const CGrannyPc* grannyPcActor = dynamic_cast<const CGrannyPc*>(sourceActor)) {
+            weaponType = grannyPcActor->m_weapon;
+        }
+        waveName = g_session.GetWeaponHitWaveName((weaponType >= 0 && weaponType < 31) ? weaponType : -1);
+    } else {
+        waveName = g_session.GetWeaponHitWaveName(-1);
+    }
+
+    if (waveName && *waveName) {
+        std::snprintf(hitInfo.waveName, sizeof(hitInfo.waveName), "%s", waveName);
+    }
+
+    targetActor->QueueWillBeAttacked(hitInfo);
+}
+
 void FaceActorTowardTarget(CGameActor* actor, CGameActor* target)
 {
     if (!actor || !target) {
@@ -930,6 +1006,7 @@ void HandleActorActionNotify(CGameMode& mode, const PacketView& packet)
         sourceActor->m_curAction,
         sourceActor->m_motionSpeed,
         sourceActor->m_attackMotion);
+    QueueCombatHitReaction(sourceActor, targetActor, attackedMT, damage, actionType);
     EmitCombatNumber(sourceActor, targetActor, damage, actionType);
     DbgLog("[GameMode] act notify stage=number src=%u dst=%u dmg=%d\n",
         srcGid,
@@ -1201,6 +1278,21 @@ float PacketDirToRotationDegrees(int dir)
     return static_cast<float>(45 * ((dir & 7) + 4));
 }
 
+void DecodePos2MoveData(const u8* src, int& srcX, int& srcY, int& dstX, int& dstY, int& cellX, int& cellY)
+{
+    if (!src) {
+        srcX = srcY = dstX = dstY = cellX = cellY = 0;
+        return;
+    }
+
+    srcX = (static_cast<int>(src[0]) << 2) | (src[1] >> 6);
+    srcY = ((src[1] & 0x3F) << 4) | (src[2] >> 4);
+    dstX = ((src[2] & 0x0F) << 6) | (src[3] >> 2);
+    dstY = ((src[3] & 0x03) << 8) | src[4];
+    cellX = (src[5] >> 4) & 0x0F;
+    cellY = src[5] & 0x0F;
+}
+
 struct RuntimeActorState {
     u16 packetId = 0;
     u32 gid = 0;
@@ -1298,6 +1390,68 @@ void UpdateRuntimeActorPosition(CGameMode& mode, u32 gid, int tileX, int tileY, 
     bool ShouldPreserveOutOfSightActor(const CGameActor& actor)
     {
         return actor.m_isMoving != 0 || actor.m_path.m_cells.size() >= 2;
+    }
+
+    bool FindActivePathSegmentForPacketView(const CPathInfo& path, u32 now, size_t* outStartIndex)
+    {
+        if (!outStartIndex || path.m_cells.size() < 2) {
+            return false;
+        }
+
+        for (size_t index = 0; index + 1 < path.m_cells.size(); ++index) {
+            if (now < path.m_cells[index + 1].arrivalTime) {
+                *outStartIndex = index;
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    bool InterpolateRuntimeActorPathPosition(const CWorld* world, const CGameActor& actor, u32 now, vector3d* outPos)
+    {
+        if (!world || !outPos || actor.m_path.m_cells.empty()) {
+            return false;
+        }
+
+        if (actor.m_path.m_cells.size() == 1) {
+            const PathCell& cell = actor.m_path.m_cells.front();
+            outPos->x = TileToWorldCoordX(world, cell.x);
+            outPos->z = TileToWorldCoordZ(world, cell.y);
+            outPos->y = ResolveActorHeight(world, outPos->x, outPos->z);
+            return true;
+        }
+
+        if (now >= actor.m_path.m_cells.back().arrivalTime) {
+            const PathCell& cell = actor.m_path.m_cells.back();
+            outPos->x = TileToWorldCoordX(world, cell.x);
+            outPos->z = TileToWorldCoordZ(world, cell.y);
+            outPos->y = ResolveActorHeight(world, outPos->x, outPos->z);
+            return true;
+        }
+
+        size_t startIndex = 0;
+        if (!FindActivePathSegmentForPacketView(actor.m_path, now, &startIndex)) {
+            return false;
+        }
+
+        const PathCell& startCell = actor.m_path.m_cells[startIndex];
+        const PathCell& endCell = actor.m_path.m_cells[startIndex + 1];
+        const u32 startTime = startCell.arrivalTime;
+        const u32 endTime = endCell.arrivalTime;
+        const float duration = static_cast<float>((std::max)(1u, endTime - startTime));
+        const float ratio = static_cast<float>(now - startTime) / duration;
+        const float clamped = (std::max)(0.0f, (std::min)(1.0f, ratio));
+
+        const float startX = startIndex == 0 ? actor.m_moveStartPos.x : TileToWorldCoordX(world, startCell.x);
+        const float startZ = startIndex == 0 ? actor.m_moveStartPos.z : TileToWorldCoordZ(world, startCell.y);
+        const float endX = TileToWorldCoordX(world, endCell.x);
+        const float endZ = TileToWorldCoordZ(world, endCell.y);
+
+        outPos->x = startX + (endX - startX) * clamped;
+        outPos->z = startZ + (endZ - startZ) * clamped;
+        outPos->y = ResolveActorHeight(world, outPos->x, outPos->z);
+        return true;
     }
 
 void InitializeRuntimeActorDefaults(CGameActor* actor, u32 gid)
@@ -2197,6 +2351,7 @@ void UpdateRuntimeActorPosition(CGameMode& mode, u32 gid, int tileX, int tileY, 
     }
 
     actor->UnRegisterPos();
+    const bool isLocalPlayer = IsLocalPlayerActor(mode, gid);
     actor->m_moveSrcX = srcX >= 0 ? srcX : actor->m_moveDestX;
     actor->m_moveSrcY = srcY >= 0 ? srcY : actor->m_moveDestY;
     actor->m_moveDestX = tileX;
@@ -2206,6 +2361,13 @@ void UpdateRuntimeActorPosition(CGameMode& mode, u32 gid, int tileX, int tileY, 
     actor->m_path.Reset();
 
     actor->m_moveStartPos = actor->m_pos;
+    if (isLocalPlayer && srcX >= 0 && srcY >= 0 && mode.m_world) {
+        const float srcWorldX = TileToWorldCoordX(mode.m_world, actor->m_moveSrcX);
+        const float srcWorldZ = TileToWorldCoordZ(mode.m_world, actor->m_moveSrcY);
+        actor->m_moveStartPos.x = srcWorldX;
+        actor->m_moveStartPos.z = srcWorldZ;
+        actor->m_moveStartPos.y = ResolveActorHeight(mode.m_world, srcWorldX, srcWorldZ);
+    }
     const float worldX = TileToWorldCoordX(mode.m_world, tileX);
     const float worldZ = TileToWorldCoordZ(mode.m_world, tileY);
     actor->m_moveEndPos.x = worldX;
@@ -2237,10 +2399,91 @@ void UpdateRuntimeActorPosition(CGameMode& mode, u32 gid, int tileX, int tileY, 
     actor->m_isMoving = actor->m_moveEndTime > actor->m_moveStartTime;
     if (!actor->m_isMoving) {
         actor->m_pos = actor->m_moveEndPos;
+    } else if (isLocalPlayer && actor->m_path.m_cells.size() >= 2) {
+        if (!InterpolateRuntimeActorPathPosition(mode.m_world, *actor, g_session.GetServerTime(), &actor->m_pos)) {
+            actor->m_pos = actor->m_moveStartPos;
+        }
     } else {
         actor->m_pos = actor->m_moveStartPos;
     }
     actor->RegisterPos();
+}
+
+void ApplyRuntimeActorFixPosition(CGameMode& mode, u32 gid, int tileX, int tileY)
+{
+    CGameActor* actor = EnsureRuntimeActor(mode, gid);
+    if (!actor) {
+        return;
+    }
+
+    ClearPreservedOutOfSightActor(mode, gid);
+    actor->m_isVisible = 1;
+
+    actor->UnRegisterPos();
+    actor->m_moveSrcX = tileX;
+    actor->m_moveSrcY = tileY;
+    actor->m_moveDestX = tileX;
+    actor->m_moveDestY = tileY;
+    actor->m_lastTlvertX = tileX;
+    actor->m_lastTlvertY = tileY;
+    actor->m_path.Reset();
+
+    const float worldX = TileToWorldCoordX(mode.m_world, tileX);
+    const float worldZ = TileToWorldCoordZ(mode.m_world, tileY);
+    actor->m_moveStartPos.x = worldX;
+    actor->m_moveStartPos.z = worldZ;
+    actor->m_moveStartPos.y = ResolveActorHeight(mode.m_world, worldX, worldZ);
+    actor->m_moveEndPos = actor->m_moveStartPos;
+    actor->m_moveStartTime = g_session.GetServerTime();
+    actor->m_moveEndTime = actor->m_moveStartTime;
+    actor->m_isMoving = 0;
+    actor->m_pos = actor->m_moveEndPos;
+    actor->RegisterPos();
+}
+
+bool FindPathCellIndex(const CPathInfo& path, int tileX, int tileY, size_t* outIndex)
+{
+    if (!outIndex) {
+        return false;
+    }
+
+    for (size_t index = 0; index < path.m_cells.size(); ++index) {
+        if (path.m_cells[index].x == tileX && path.m_cells[index].y == tileY) {
+            *outIndex = index;
+            return true;
+        }
+    }
+
+    return false;
+}
+
+bool ShouldIgnoreRedundantLocalFixPosition(const CGameActor& actor, int tileX, int tileY, size_t* outFixIndex, size_t* outActiveIndex)
+{
+    if (!actor.m_isMoving || actor.m_path.m_cells.size() < 2) {
+        return false;
+    }
+
+    size_t fixIndex = 0;
+    if (!FindPathCellIndex(actor.m_path, tileX, tileY, &fixIndex)) {
+        return false;
+    }
+
+    size_t activeIndex = 0;
+    if (!FindActivePathSegmentForPacketView(actor.m_path, g_session.GetServerTime(), &activeIndex)) {
+        return false;
+    }
+
+    if (outFixIndex) {
+        *outFixIndex = fixIndex;
+    }
+    if (outActiveIndex) {
+        *outActiveIndex = activeIndex;
+    }
+
+    // Treat fixpos as correction only when it is meaningfully ahead of the
+    // client's current path progress. If the packet lands on or behind the
+    // current segment, keep local motion to avoid visible step-back jitter.
+    return fixIndex <= activeIndex + 1;
 }
 
 void RemoveRuntimeActor(CGameMode& mode, u32 gid)
@@ -2672,6 +2915,8 @@ void HandleActorMoveSkeleton(CGameMode& mode, const PacketView& packet)
     mode.m_actorPosList[gid] = CellPos{dx, dy};
     if (IsLocalPlayerActor(mode, gid)) {
         g_session.SetPlayerPosDir(dx, dy, ddir & 7);
+        mode.m_attackChaseSourceCellX = dx;
+        mode.m_attackChaseSourceCellY = dy;
     }
     UpdateRuntimeActorPosition(mode, gid, dx, dy, sx, sy);
 }
@@ -2689,8 +2934,8 @@ void HandleActorMoveUpdate(CGameMode& mode, const PacketView& packet)
     }
 
     const u32 gid = ReadLE32(packet.data + 2);
-    int sx = 0, sy = 0, dx = 0, dy = 0, sdir = 0, ddir = 0;
-    DecodeSrcDst(packet.data + 6, sx, sy, dx, dy, sdir, ddir);
+    int sx = 0, sy = 0, dx = 0, dy = 0, cellX = 0, cellY = 0;
+    DecodePos2MoveData(packet.data + 6, sx, sy, dx, dy, cellX, cellY);
 
     const bool likelyPlayer = IsLikelyPlayerGid(gid);
 
@@ -2708,7 +2953,7 @@ void HandleActorMoveUpdate(CGameMode& mode, const PacketView& packet)
             sy,
             dx,
             dy,
-            ddir & 7,
+            -1,
             static_cast<void*>(actor),
             actor && actor->m_isPc ? 1 : 0,
             actor ? actor->m_job : -1);
@@ -2717,7 +2962,6 @@ void HandleActorMoveUpdate(CGameMode& mode, const PacketView& packet)
         SeedMoveOnlyRemotePcAppearance(actor);
     }
     if (actor) {
-        actor->m_roty = PacketDirToRotationDegrees(ddir);
         if (CPc* pcActor = dynamic_cast<CPc*>(actor)) {
             pcActor->InvalidateBillboard();
         }
@@ -2728,7 +2972,9 @@ void HandleActorMoveUpdate(CGameMode& mode, const PacketView& packet)
     mode.m_actorPosList[gid] = CellPos{dx, dy};
 
     if (IsLocalPlayerActor(mode, gid)) {
-        g_session.SetPlayerPosDir(dx, dy, ddir & 7);
+        g_session.SetPlayerPosDir(dx, dy, g_session.m_playerDir);
+        mode.m_attackChaseSourceCellX = dx;
+        mode.m_attackChaseSourceCellY = dy;
     }
     UpdateRuntimeActorPosition(mode, gid, dx, dy, sx, sy);
 }
@@ -2742,13 +2988,26 @@ void HandleSelfMoveAck(CGameMode& mode, const PacketView& packet)
 
     g_session.SetServerTime(ReadLE32(packet.data + 2));
 
-    int sx = 0, sy = 0, dx = 0, dy = 0, sdir = 0, ddir = 0;
-    DecodeSrcDst(packet.data + 6, sx, sy, dx, dy, sdir, ddir);
+    int sx = 0, sy = 0, dx = 0, dy = 0, cellX = 0, cellY = 0;
+    DecodePos2MoveData(packet.data + 6, sx, sy, dx, dy, cellX, cellY);
 
     mode.m_lastPcGid = g_session.m_gid;
     mode.m_aidList[g_session.m_gid] = GetTickCount();
     mode.m_actorPosList[g_session.m_gid] = CellPos{dx, dy};
-    g_session.SetPlayerPosDir(dx, dy, ddir & 7);
+    g_session.SetPlayerPosDir(dx, dy, g_session.m_playerDir);
+    mode.m_attackChaseSourceCellX = dx;
+    mode.m_attackChaseSourceCellY = dy;
+    if (mode.m_world && mode.m_world->m_player) {
+        mode.m_world->m_player->m_isWaitingMoveAck = 0;
+    }
+    DbgLog("[GameMode] self move ack start=%u src=%d,%d dst=%d,%d cell=%d,%d\n",
+        g_session.GetServerTime(),
+        sx,
+        sy,
+        dx,
+        dy,
+        cellX,
+        cellY);
     UpdateRuntimeActorPosition(mode, g_session.m_gid, dx, dy, sx, sy);
 }
 
@@ -2768,14 +3027,56 @@ void HandleActorSetPosition(CGameMode& mode, const PacketView& packet)
     const int x = static_cast<s16>(ReadLE16(packet.data + 6));
     const int y = static_cast<s16>(ReadLE16(packet.data + 8));
 
+    CGameActor* actor = EnsureRuntimeActor(mode, gid);
+    if (!actor) {
+        return;
+    }
+
+    if (IsLocalPlayerActor(mode, gid)) {
+        size_t fixIndex = 0;
+        size_t activeIndex = 0;
+        if (ShouldIgnoreRedundantLocalFixPosition(*actor, x, y, &fixIndex, &activeIndex)) {
+            DbgLog("[GameMode] ignored self fixpos opcode=0x%04X pos=%d,%d activePathIndex=%zu fixPathIndex=%zu\n",
+                packet.packetId,
+                x,
+                y,
+                activeIndex,
+                fixIndex);
+            return;
+        }
+    }
+
     mode.m_lastPcGid = gid;
     mode.m_aidList[gid] = GetTickCount();
     mode.m_actorPosList[gid] = CellPos{x, y};
     if (IsLocalPlayerActor(mode, gid)) {
+        const int prevX = g_session.m_playerPosX;
+        const int prevY = g_session.m_playerPosY;
+        int moveDestX = -1;
+        int moveDestY = -1;
+        int moving = 0;
+        if (mode.m_world && mode.m_world->m_player) {
+            moveDestX = mode.m_world->m_player->m_moveDestX;
+            moveDestY = mode.m_world->m_player->m_moveDestY;
+            moving = mode.m_world->m_player->m_isMoving ? 1 : 0;
+        }
         g_session.SetPlayerPosDir(x, y, g_session.m_playerDir);
-        DbgLog("[GameMode] self set position opcode=0x%04X pos=%d,%d\n", packet.packetId, x, y);
+        mode.m_attackChaseSourceCellX = x;
+        mode.m_attackChaseSourceCellY = y;
+        if (mode.m_world && mode.m_world->m_player) {
+            mode.m_world->m_player->m_isWaitingMoveAck = 0;
+        }
+        DbgLog("[GameMode] self set position opcode=0x%04X pos=%d,%d prev=%d,%d moveDest=%d,%d moving=%d\n",
+            packet.packetId,
+            x,
+            y,
+            prevX,
+            prevY,
+            moveDestX,
+            moveDestY,
+            moving);
     }
-    UpdateRuntimeActorPosition(mode, gid, x, y);
+    ApplyRuntimeActorFixPosition(mode, gid, x, y);
 }
 
 void HandleActorVanish(CGameMode& mode, const PacketView& packet)
@@ -3143,6 +3444,8 @@ void RegisterDefaultGameModePacketHandlers(CGameModePacketRouter& router)
     router.Register(0x009C, HandleActorDirection);
     router.Register(0x0119, HandleActorStateChange);
     router.Register(0x011A, HandleIgnorePacket);
+    router.Register(0x0139, HandleAttackFailureForDistance);
+    router.Register(0x013A, HandleAttackRange);
     router.Register(0x0229, HandleActorStateChange);
 
     // Chat/system text pathways.
@@ -3189,7 +3492,6 @@ void RegisterDefaultGameModePacketHandlers(CGameModePacketRouter& router)
     router.Register(0x0120, HandleIgnorePacket);
     router.Register(0x0131, HandleIgnorePacket);
     router.Register(0x0132, HandleIgnorePacket);
-    router.Register(0x013A, HandleIgnorePacket);
     router.Register(0x0141, HandleSelfStatInfo);
     router.Register(0x0148, HandleActorResurrection);
     router.Register(0x0192, HandleIgnorePacket);

@@ -37,9 +37,9 @@ public:
     CTexture(unsigned int w, unsigned int h, PixelFormat pf, IDirectDrawSurface7* pSurface);
     virtual ~CTexture();
 
-    bool Create(unsigned int w, unsigned int h, PixelFormat pf);
-    bool CreateBump(unsigned int w, unsigned int h);
-    bool CreateBump(unsigned int w, unsigned int h, IDirectDrawSurface7* pSurface);
+    bool Create(unsigned int w, unsigned int h, PixelFormat pf, bool allowUpscale = true);
+    bool CreateBump(unsigned int w, unsigned int h, bool allowUpscale = true);
+    bool CreateBump(unsigned int w, unsigned int h, IDirectDrawSurface7* pSurface, bool allowUpscale = true);
     
     void SetUVAdjust(unsigned int w, unsigned int h);
     void UpdateMipmap(RECT* rect);
@@ -61,6 +61,7 @@ public:
     char m_texName[128];
     unsigned int m_updateWidth, m_updateHeight;
     unsigned int m_surfaceUpdateWidth, m_surfaceUpdateHeight;
+    unsigned int m_upscaleFactor;
     IUnknown* m_backendTextureObject;
     IUnknown* m_backendTextureView;
     IUnknown* m_backendTextureUpload;
