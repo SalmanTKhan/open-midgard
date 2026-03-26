@@ -18,6 +18,7 @@ This client currently applies 3D anti-aliasing only on the modern renderer backe
 - Changing the AA mode is restart-required. `GraphicsSettingsRequireRestart(...)` treats AA changes the same way as other renderer reinitialization settings.
 - `SMAA` is exposed on D3D11, D3D12, and Vulkan because those backends now implement the full three-pass resolve chain.
 - `Direct3D7` continues to hide the AA row because it has no modern post-process scene resolve path.
+- User validation now confirms `Off`, `FXAA`, and `SMAA` all render correctly on D3D11, D3D12, and Vulkan, with UI/text/cursor/overlay composition left outside the AA resolve path as intended.
 
 ## SMAA Default
 

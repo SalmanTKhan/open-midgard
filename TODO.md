@@ -98,7 +98,7 @@ Goal: ship true configurable 3D anti-aliasing for modern backends without affect
 - [x] Implement SMAA edge detection pass.
 - [x] Implement SMAA blend-weight calculation pass.
 - [x] Implement SMAA neighborhood blending pass.
-- [ ] Ensure the SMAA passes operate only on the 3D scene target and never on the final UI/cursor composite.
+- [x] Ensure the SMAA passes operate only on the 3D scene target and never on the final UI/cursor composite.
 - [x] Expose SMAA in the option window only on backends where the full pass chain is implemented.
 
 #### Phase C — Port The 3D AA Pipeline To D3D12
@@ -127,9 +127,9 @@ Goal: ship true configurable 3D anti-aliasing for modern backends without affect
 - [x] Document which AA modes are supported by each backend and which render path they affect.
 
 #### Phase F — Validation Matrix
-- [ ] Validate `Off`, `FXAA`, and `SMAA` on each supported backend.
-- [ ] Validate that UI, text, mouse cursor, and software-composed overlays are unchanged by 3D AA modes.
-- [ ] Validate world geometry, models, sprites in 3D space, particles, lightmaps, and alpha-tested surfaces under each AA mode.
+- [x] Validate `Off`, `FXAA`, and `SMAA` on each supported backend.
+- [x] Validate that UI, text, mouse cursor, and software-composed overlays are unchanged by 3D AA modes.
+- [x] Validate world geometry, models, sprites in 3D space, particles, lightmaps, and alpha-tested surfaces under each AA mode.
 - [ ] Validate save/load/restart flow for AA settings from the option window.
 - [ ] Capture comparison screenshots and short implementation notes for final cleanup/documentation.
 
