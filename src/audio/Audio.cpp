@@ -235,10 +235,10 @@ void CAudio::PlayBGM(const char* fName) {
         if (g_dllExports.AIL_set_stream_volume) {
             g_dllExports.AIL_set_stream_volume(stream, m_bgmVolume);
         }
+        g_dllExports.AIL_start_stream(stream);
         if (g_dllExports.AIL_pause_stream) {
             g_dllExports.AIL_pause_stream(stream, m_bgmPaused ? 1 : 0);
         }
-        g_dllExports.AIL_start_stream(stream);
     }
 }
 
