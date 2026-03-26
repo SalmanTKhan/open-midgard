@@ -6,6 +6,8 @@ $outputHeader = Join-Path $repoRoot 'src/render3d/VulkanSmaaShaders.generated.h'
 $buildDir = Join-Path $repoRoot 'build'
 $vertexOutput = Join-Path $buildDir 'vulkan_post_smaa_dxc.vert.spv'
 $edgeOutput = Join-Path $buildDir 'vulkan_post_smaa_edge_dxc.frag.spv'
+$blendWeightOutput = Join-Path $buildDir 'vulkan_post_smaa_blend_weight_dxc.frag.spv'
+$neighborhoodOutput = Join-Path $buildDir 'vulkan_post_smaa_neighborhood_dxc.frag.spv'
 
 $dxc = (Get-Command dxc -ErrorAction Stop).Source
 
@@ -44,6 +46,8 @@ function Convert-ToByteArrayText {
 New-Item -ItemType Directory -Force -Path $buildDir | Out-Null
 Compile-Spirv -EntryPoint 'VSMainPost' -Target 'vs_6_0' -OutputPath $vertexOutput
 Compile-Spirv -EntryPoint 'PSMainSMAAEdge' -Target 'ps_6_0' -OutputPath $edgeOutput
+Compile-Spirv -EntryPoint 'PSMainSMAABlendWeight' -Target 'ps_6_0' -OutputPath $blendWeightOutput
+Compile-Spirv -EntryPoint 'PSMainSMAANeighborhood' -Target 'ps_6_0' -OutputPath $neighborhoodOutput
 
 $headerLines = New-Object System.Collections.Generic.List[string]
 $headerLines.Add('#pragma once')
@@ -58,6 +62,16 @@ foreach ($line in $vertexLines) {
 $headerLines.Add('')
 $edgeLines = Convert-ToByteArrayText -Name 'kVulkanPostSmaaEdgePsSpirv' -Bytes ([System.IO.File]::ReadAllBytes($edgeOutput))
 foreach ($line in $edgeLines) {
+    $headerLines.Add([string]$line)
+}
+$headerLines.Add('')
+$blendWeightLines = Convert-ToByteArrayText -Name 'kVulkanPostSmaaBlendWeightPsSpirv' -Bytes ([System.IO.File]::ReadAllBytes($blendWeightOutput))
+foreach ($line in $blendWeightLines) {
+    $headerLines.Add([string]$line)
+}
+$headerLines.Add('')
+$neighborhoodLines = Convert-ToByteArrayText -Name 'kVulkanPostSmaaNeighborhoodPsSpirv' -Bytes ([System.IO.File]::ReadAllBytes($neighborhoodOutput))
+foreach ($line in $neighborhoodLines) {
     $headerLines.Add([string]$line)
 }
 

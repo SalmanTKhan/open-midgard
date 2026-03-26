@@ -953,6 +953,42 @@ float4 PSMainSMAAEdge(VSOutputPost input) : SV_Target
 
     return float4(horizontalEdge, verticalEdge, 0.0f, centerSample.a);
 }
+
+float4 PSMainSMAABlendWeight(VSOutputPost input) : SV_Target
+{
+    const float2 invResolution = float2(
+        1.0f / max(g_screenWidth, 1.0f),
+        1.0f / max(g_screenHeight, 1.0f));
+
+    const float4 edgeCenter = g_texture0.Sample(g_sampler0, input.uv);
+    const float4 edgeLeft = g_texture0.Sample(g_sampler0, input.uv + float2(-1.0f, 0.0f) * invResolution);
+    const float4 edgeTop = g_texture0.Sample(g_sampler0, input.uv + float2(0.0f, -1.0f) * invResolution);
+    const float4 edgeRight = g_texture0.Sample(g_sampler0, input.uv + float2(1.0f, 0.0f) * invResolution);
+    const float4 edgeBottom = g_texture0.Sample(g_sampler0, input.uv + float2(0.0f, 1.0f) * invResolution);
+
+    const float horizontalWeight = saturate(edgeCenter.r + max(edgeTop.r, edgeBottom.r) * 0.5f + max(edgeLeft.r, edgeRight.r) * 0.25f);
+    const float verticalWeight = saturate(edgeCenter.g + max(edgeLeft.g, edgeRight.g) * 0.5f + max(edgeTop.g, edgeBottom.g) * 0.25f);
+
+    return float4(horizontalWeight, verticalWeight, 0.0f, 1.0f);
+}
+
+float4 PSMainSMAANeighborhood(VSOutputPost input) : SV_Target
+{
+    const float2 invResolution = float2(
+        1.0f / max(g_screenWidth, 1.0f),
+        1.0f / max(g_screenHeight, 1.0f));
+
+    const float4 centerSample = g_texture0.Sample(g_sampler0, input.uv);
+    const float4 weights = g_texture1.Sample(g_sampler0, input.uv);
+    const float4 leftSample = g_texture0.Sample(g_sampler0, input.uv + float2(-1.0f, 0.0f) * invResolution);
+    const float4 topSample = g_texture0.Sample(g_sampler0, input.uv + float2(0.0f, -1.0f) * invResolution);
+
+    float3 blended = centerSample.rgb;
+    blended = lerp(blended, 0.5f * (centerSample.rgb + topSample.rgb), saturate(weights.r));
+    blended = lerp(blended, 0.5f * (centerSample.rgb + leftSample.rgb), saturate(weights.g));
+
+    return float4(blended, centerSample.a);
+}
 )";
 }
 
