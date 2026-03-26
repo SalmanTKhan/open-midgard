@@ -1656,8 +1656,8 @@ vector2d ComputeGroundUvScale(const CTexture* texture)
         return vector2d{ 1.0f, 1.0f };
     }
 
-    unsigned int contentWidth = texture->m_updateWidth > 0 ? texture->m_updateWidth : texture->m_w;
-    unsigned int contentHeight = texture->m_updateHeight > 0 ? texture->m_updateHeight : texture->m_h;
+    unsigned int contentWidth = texture->m_surfaceUpdateWidth > 0 ? texture->m_surfaceUpdateWidth : texture->m_w;
+    unsigned int contentHeight = texture->m_surfaceUpdateHeight > 0 ? texture->m_surfaceUpdateHeight : texture->m_h;
     if (contentWidth == 0 || contentHeight == 0) {
         return vector2d{ 1.0f, 1.0f };
     }
@@ -2730,8 +2730,8 @@ void C3dGround::RenderAttrTile(const matrix& viewMatrix, int attrX, int attrY, u
         return;
     }
 
-    const float uAdjust = gridTexture->m_w > 0 ? static_cast<float>(gridTexture->m_updateWidth) / static_cast<float>(gridTexture->m_w) : 1.0f;
-    const float vAdjust = gridTexture->m_h > 0 ? static_cast<float>(gridTexture->m_updateHeight) / static_cast<float>(gridTexture->m_h) : 1.0f;
+    const float uAdjust = gridTexture->m_w > 0 ? static_cast<float>(gridTexture->m_surfaceUpdateWidth > 0 ? gridTexture->m_surfaceUpdateWidth : gridTexture->m_w) / static_cast<float>(gridTexture->m_w) : 1.0f;
+    const float vAdjust = gridTexture->m_h > 0 ? static_cast<float>(gridTexture->m_surfaceUpdateHeight > 0 ? gridTexture->m_surfaceUpdateHeight : gridTexture->m_h) / static_cast<float>(gridTexture->m_h) : 1.0f;
     static const vector2d kUvAll[4] = {
         { 0.0f, 0.0f },
         { 1.0f, 0.0f },

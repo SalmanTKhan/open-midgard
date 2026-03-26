@@ -213,13 +213,13 @@ void CSurfaceWallpaper::Update(int x, int y, int w, int h, unsigned int* data, b
 }
 
 CTexture::CTexture(unsigned int w, unsigned int h, PixelFormat format)
-    : CSurface(w, h), m_pf(format), m_lockCnt(0), m_timeStamp(0), m_updateWidth(0), m_updateHeight(0),
+    : CSurface(w, h), m_pf(format), m_lockCnt(0), m_timeStamp(0), m_updateWidth(0), m_updateHeight(0), m_surfaceUpdateWidth(0), m_surfaceUpdateHeight(0),
             m_backendTextureObject(nullptr), m_backendTextureView(nullptr), m_backendTextureUpload(nullptr) {
     m_texName[0] = '\0';
 }
 
 CTexture::CTexture(unsigned int w, unsigned int h, PixelFormat format, IDirectDrawSurface7* pSurface)
-    : CSurface(w, h, pSurface), m_pf(format), m_lockCnt(0), m_timeStamp(0), m_updateWidth(0), m_updateHeight(0),
+    : CSurface(w, h, pSurface), m_pf(format), m_lockCnt(0), m_timeStamp(0), m_updateWidth(0), m_updateHeight(0), m_surfaceUpdateWidth(0), m_surfaceUpdateHeight(0),
             m_backendTextureObject(nullptr), m_backendTextureView(nullptr), m_backendTextureUpload(nullptr) {
     m_texName[0] = '\0';
 }
@@ -244,6 +244,9 @@ bool CTexture::Create(unsigned int w, unsigned int h, PixelFormat format) {
     m_h = textureH;
     m_pf = format;
     SetUVAdjust(w, h);
+    const unsigned int scale = static_cast<unsigned int>(GetTextureUpscaleFactor());
+    m_surfaceUpdateWidth = (std::min)(textureW, w * scale);
+    m_surfaceUpdateHeight = (std::min)(textureH, h * scale);
     return true;
 }
 bool CTexture::CreateBump(unsigned int w, unsigned int h) { return Create(w, h, PF_BUMP); }
@@ -262,6 +265,8 @@ void CTexture::SetUVAdjust(unsigned int width, unsigned int height)
 
     m_updateWidth = adjustedWidth;
     m_updateHeight = adjustedHeight;
+    m_surfaceUpdateWidth = adjustedWidth;
+    m_surfaceUpdateHeight = adjustedHeight;
 }
 void CTexture::UpdateMipmap(RECT* r) {(void)r;}
 
@@ -302,6 +307,8 @@ void CTexture::Update(int x, int y, int w, int h, unsigned int* data, bool b, in
     }
     m_updateWidth = (std::max)(m_updateWidth, static_cast<unsigned int>(x + w));
     m_updateHeight = (std::max)(m_updateHeight, static_cast<unsigned int>(y + h));
+    m_surfaceUpdateWidth = (std::max)(m_surfaceUpdateWidth, static_cast<unsigned int>(scaledX + scaledW));
+    m_surfaceUpdateHeight = (std::max)(m_surfaceUpdateHeight, static_cast<unsigned int>(scaledY + scaledH));
 }
 
 void CTexture::UpdateSprite(int a, int b, int c, int d, SprImg& img, unsigned int* pal) { (void)a; (void)b; (void)c; (void)d; (void)img; (void)pal; }

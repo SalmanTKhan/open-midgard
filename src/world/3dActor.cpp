@@ -349,8 +349,8 @@ vector2d ComputeUvScale(const CTexture* texture)
         return vector2d{ 1.0f, 1.0f };
     }
 
-    const unsigned int contentWidth = texture->m_updateWidth > 0 ? texture->m_updateWidth : texture->m_w;
-    const unsigned int contentHeight = texture->m_updateHeight > 0 ? texture->m_updateHeight : texture->m_h;
+    const unsigned int contentWidth = texture->m_surfaceUpdateWidth > 0 ? texture->m_surfaceUpdateWidth : texture->m_w;
+    const unsigned int contentHeight = texture->m_surfaceUpdateHeight > 0 ? texture->m_surfaceUpdateHeight : texture->m_h;
     if (contentWidth == 0 || contentHeight == 0 || texture->m_w == 0 || texture->m_h == 0) {
         return vector2d{ 1.0f, 1.0f };
     }
