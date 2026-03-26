@@ -87,7 +87,7 @@ Goal: ship true configurable 3D anti-aliasing for modern backends without affect
 - [x] Replace the old placeholder AA setting with a real backend-driven option.
 - [x] Implement D3D11 scene-to-offscreen rendering plus FXAA resolve before UI composition.
 - [x] Hide the AA option on unsupported backends instead of exposing dead settings.
-- [ ] Validate D3D11 FXAA across login, char select, in-game world render, overlays, and restart flow.
+- [x] Validate D3D11 FXAA across login, char select, in-game world render, overlays, and restart flow.
 - [ ] Check D3D11 FXAA image quality on GND edges, map-object silhouettes, foliage alpha edges, and animated effects.
 - [ ] Remove any D3D11-specific temporary AA diagnostics once stable.
 
@@ -102,29 +102,29 @@ Goal: ship true configurable 3D anti-aliasing for modern backends without affect
 - [ ] Expose SMAA in the option window only on backends where the full pass chain is implemented.
 
 #### Phase C — Port The 3D AA Pipeline To D3D12
-- [ ] Add a DX12 scene color target separate from the swapchain back buffer.
-- [ ] Route DX12 world rendering into the scene target while keeping overlays/UI on the existing post-scene path.
+- [x] Add a DX12 scene color target separate from the swapchain back buffer.
+- [x] Route DX12 world rendering into the scene target while keeping overlays/UI on the existing post-scene path.
 - [ ] Add a DX12 fullscreen post-process pass abstraction for FXAA/SMAA.
-- [ ] Port the current FXAA implementation to DX12.
+- [x] Port the current FXAA implementation to DX12.
 - [ ] Hook the DX12 capture/snapshot path so overlays and UI compose over the AA-resolved scene, not the raw scene.
 - [ ] Re-validate resize, alt-tab, return-to-char-select, and restart-required behavior on DX12 with AA enabled.
-- [ ] Only enable the option-window AA entry for DX12 after the resolved scene path is proven stable.
+- [x] Only enable the option-window AA entry for DX12 after the resolved scene path is proven stable.
 
 #### Phase D — Port The 3D AA Pipeline To Vulkan
-- [ ] Add a Vulkan scene color image separate from the swapchain image.
-- [ ] Route Vulkan world rendering into the scene target before overlay composition.
+- [x] Add a Vulkan scene color image separate from the swapchain image.
+- [x] Route Vulkan world rendering into the scene target before overlay composition.
 - [ ] Add Vulkan fullscreen post-process pipeline support for FXAA/SMAA.
-- [ ] Port the current FXAA implementation to Vulkan.
-- [ ] Integrate the resolved scene into the existing Vulkan overlay/UI upload path without reintroducing the prior UI scaling issues.
+- [x] Port the current FXAA implementation to Vulkan.
+- [x] Integrate the resolved scene into the existing Vulkan overlay/UI upload path without reintroducing the prior UI scaling issues.
 - [ ] Re-validate swapchain resize, present, alt-tab, cursor, and UI composition behavior with AA enabled on Vulkan.
-- [ ] Only enable the option-window AA entry for Vulkan after the resolved scene path is proven stable.
+- [x] Only enable the option-window AA entry for Vulkan after the resolved scene path is proven stable.
 
 #### Phase E — Backend Capability And UX Cleanup
 - [x] Split AA capability reporting into explicit per-backend mode support instead of a single boolean.
-- [ ] Keep unsupported AA modes hidden rather than greyed out in the option window.
-- [ ] Preserve restart-required behavior for AA modes that require backend reinitialization.
+- [x] Keep unsupported AA modes hidden rather than greyed out in the option window.
+- [x] Preserve restart-required behavior for AA modes that require backend reinitialization.
 - [x] Ensure renderer switches clamp or clear unsupported AA modes when changing between backends.
-- [ ] Document which AA modes are supported by each backend and which render path they affect.
+- [x] Document which AA modes are supported by each backend and which render path they affect.
 
 #### Phase F — Validation Matrix
 - [ ] Validate `Off`, `FXAA`, and `SMAA` on each supported backend.

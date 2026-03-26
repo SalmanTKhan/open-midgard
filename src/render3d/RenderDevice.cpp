@@ -685,7 +685,64 @@ UINT AlignTo(UINT value, UINT alignment)
     return (value + alignment - 1u) & ~(alignment - 1u);
 }
 
-const char* GetD3D11ShaderSource()
+constexpr AntiAliasingMode kCompiledPostProcessAntiAliasingMode = AntiAliasingMode::FXAA;
+
+bool CompileShaderBlob(const char* source, const char* entryPoint, const char* target, ID3DBlob** outBlob);
+
+const char* GetPostProcessPixelShaderEntryPoint(AntiAliasingMode mode)
+{
+    switch (mode) {
+    case AntiAliasingMode::FXAA:
+        return "PSMainFXAA";
+
+    default:
+        return nullptr;
+    }
+}
+
+bool CompilePostProcessShaderBlob(const char* source, AntiAliasingMode mode, const char* target, ID3DBlob** outBlob)
+{
+    const char* entryPoint = GetPostProcessPixelShaderEntryPoint(mode);
+    return entryPoint && CompileShaderBlob(source, entryPoint, target, outBlob);
+}
+
+struct VulkanPostShaderProgram {
+    const uint8_t* vertexBytes;
+    size_t vertexByteCount;
+    const uint8_t* fragmentBytes;
+    size_t fragmentByteCount;
+    const char* vertexEntryPoint;
+    const char* fragmentEntryPoint;
+};
+
+bool GetVulkanPostShaderProgram(AntiAliasingMode mode, VulkanPostShaderProgram* outProgram)
+{
+    if (!outProgram) {
+        return false;
+    }
+
+    switch (mode) {
+    case AntiAliasingMode::FXAA:
+        outProgram->vertexBytes = kVulkanPostFxaaVsSpirv;
+        outProgram->vertexByteCount = kVulkanPostFxaaVsSpirvSize;
+        outProgram->fragmentBytes = kVulkanPostFxaaPsSpirv;
+        outProgram->fragmentByteCount = kVulkanPostFxaaPsSpirvSize;
+        outProgram->vertexEntryPoint = "VSMainPost";
+        outProgram->fragmentEntryPoint = "PSMainFXAA";
+        return true;
+
+    default:
+        outProgram->vertexBytes = nullptr;
+        outProgram->vertexByteCount = 0;
+        outProgram->fragmentBytes = nullptr;
+        outProgram->fragmentByteCount = 0;
+        outProgram->vertexEntryPoint = nullptr;
+        outProgram->fragmentEntryPoint = nullptr;
+        return false;
+    }
+}
+
+const char* GetModernRenderShaderSource()
 {
     return R"(
 cbuffer DrawConstants : register(b0)
@@ -1715,7 +1772,7 @@ private:
             return false;
         }
 
-        const char* shaderSource = GetD3D11ShaderSource();
+        const char* shaderSource = GetModernRenderShaderSource();
         ID3DBlob* vertexShaderTlBlob = nullptr;
         ID3DBlob* vertexShaderLmBlob = nullptr;
         ID3DBlob* pixelShaderBlob = nullptr;
@@ -1725,7 +1782,7 @@ private:
             && CompileShaderBlob(shaderSource, "VSMainLM", "vs_4_0", &vertexShaderLmBlob)
             && CompileShaderBlob(shaderSource, "PSMain", "ps_4_0", &pixelShaderBlob)
             && CompileShaderBlob(shaderSource, "VSMainPost", "vs_4_0", &postVertexShaderBlob)
-            && CompileShaderBlob(shaderSource, "PSMainFXAA", "ps_4_0", &fxaaPixelShaderBlob);
+            && CompilePostProcessShaderBlob(shaderSource, kCompiledPostProcessAntiAliasingMode, "ps_4_0", &fxaaPixelShaderBlob);
         if (!compiled) {
             SafeRelease(vertexShaderTlBlob);
             SafeRelease(vertexShaderLmBlob);
@@ -3250,12 +3307,12 @@ private:
             return false;
         }
 
-        const char* shaderSource = GetD3D11ShaderSource();
+        const char* shaderSource = GetModernRenderShaderSource();
         if (!CompileShaderBlob(shaderSource, "VSMainTL", "vs_5_0", &m_vertexShaderTlBlob)
             || !CompileShaderBlob(shaderSource, "VSMainLM", "vs_5_0", &m_vertexShaderLmBlob)
             || !CompileShaderBlob(shaderSource, "PSMain", "ps_5_0", &m_pixelShaderBlob)
             || !CompileShaderBlob(shaderSource, "VSMainPost", "vs_5_0", &m_postVertexShaderBlob)
-            || !CompileShaderBlob(shaderSource, "PSMainFXAA", "ps_5_0", &m_fxaaPixelShaderBlob)) {
+            || !CompilePostProcessShaderBlob(shaderSource, kCompiledPostProcessAntiAliasingMode, "ps_5_0", &m_fxaaPixelShaderBlob)) {
             return false;
         }
 
@@ -3322,19 +3379,31 @@ private:
             return false;
         }
 
-        return CreatePostPipelineResources();
+        return CreatePostPipelineResources(kCompiledPostProcessAntiAliasingMode);
     }
 
-    bool CreatePostPipelineResources()
+    ID3DBlob* GetPostPixelShaderBlob(AntiAliasingMode mode) const
     {
-        if (!m_device || !m_rootSignature || !m_postVertexShaderBlob || !m_fxaaPixelShaderBlob) {
+        switch (mode) {
+        case AntiAliasingMode::FXAA:
+            return m_fxaaPixelShaderBlob;
+
+        default:
+            return nullptr;
+        }
+    }
+
+    bool CreatePostPipelineResources(AntiAliasingMode mode)
+    {
+        ID3DBlob* postPixelShaderBlob = GetPostPixelShaderBlob(mode);
+        if (!m_device || !m_rootSignature || !m_postVertexShaderBlob || !postPixelShaderBlob) {
             return false;
         }
 
         D3D12_GRAPHICS_PIPELINE_STATE_DESC desc{};
         desc.pRootSignature = m_rootSignature;
         desc.VS = { m_postVertexShaderBlob->GetBufferPointer(), m_postVertexShaderBlob->GetBufferSize() };
-        desc.PS = { m_fxaaPixelShaderBlob->GetBufferPointer(), m_fxaaPixelShaderBlob->GetBufferSize() };
+        desc.PS = { postPixelShaderBlob->GetBufferPointer(), postPixelShaderBlob->GetBufferSize() };
         desc.BlendState.RenderTarget[0].BlendEnable = FALSE;
         desc.BlendState.RenderTarget[0].RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
         desc.SampleMask = UINT_MAX;
@@ -5236,8 +5305,10 @@ private:
             return false;
         }
 
-        if (!CreateShaderModuleFromBytes(kVulkanPostFxaaVsSpirv, kVulkanPostFxaaVsSpirvSize, &m_postVertexShaderModule)
-            || !CreateShaderModuleFromBytes(kVulkanPostFxaaPsSpirv, kVulkanPostFxaaPsSpirvSize, &m_postFxaaFragmentShaderModule)) {
+        VulkanPostShaderProgram postShaderProgram{};
+        if (!GetVulkanPostShaderProgram(kCompiledPostProcessAntiAliasingMode, &postShaderProgram)
+            || !CreateShaderModuleFromBytes(postShaderProgram.vertexBytes, postShaderProgram.vertexByteCount, &m_postVertexShaderModule)
+            || !CreateShaderModuleFromBytes(postShaderProgram.fragmentBytes, postShaderProgram.fragmentByteCount, &m_postFxaaFragmentShaderModule)) {
             DestroyPipelineResources();
             return false;
         }
@@ -5354,10 +5425,24 @@ private:
         }
     }
 
-    bool CreatePostPipeline(VkRenderPass renderPass, VkPipeline* outPipeline)
+    VkShaderModule GetPostFragmentShaderModule(AntiAliasingMode mode) const
     {
-        if (!outPipeline || renderPass == VK_NULL_HANDLE || m_device == VK_NULL_HANDLE || m_postPipelineLayout == VK_NULL_HANDLE
-            || m_postVertexShaderModule == VK_NULL_HANDLE || m_postFxaaFragmentShaderModule == VK_NULL_HANDLE) {
+        switch (mode) {
+        case AntiAliasingMode::FXAA:
+            return m_postFxaaFragmentShaderModule;
+
+        default:
+            return VK_NULL_HANDLE;
+        }
+    }
+
+    bool CreatePostPipeline(VkRenderPass renderPass, AntiAliasingMode mode, VkPipeline* outPipeline)
+    {
+        VulkanPostShaderProgram postShaderProgram{};
+        const VkShaderModule postFragmentShaderModule = GetPostFragmentShaderModule(mode);
+        if (!GetVulkanPostShaderProgram(mode, &postShaderProgram)
+            || !outPipeline || renderPass == VK_NULL_HANDLE || m_device == VK_NULL_HANDLE || m_postPipelineLayout == VK_NULL_HANDLE
+            || m_postVertexShaderModule == VK_NULL_HANDLE || postFragmentShaderModule == VK_NULL_HANDLE) {
             return false;
         }
 
@@ -5430,11 +5515,11 @@ private:
         shaderStages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
         shaderStages[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
         shaderStages[0].module = m_postVertexShaderModule;
-        shaderStages[0].pName = "VSMainPost";
+        shaderStages[0].pName = postShaderProgram.vertexEntryPoint;
         shaderStages[1].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
         shaderStages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
-        shaderStages[1].module = m_postFxaaFragmentShaderModule;
-        shaderStages[1].pName = "PSMainFXAA";
+        shaderStages[1].module = postFragmentShaderModule;
+        shaderStages[1].pName = postShaderProgram.fragmentEntryPoint;
 
         VkGraphicsPipelineCreateInfo pipelineInfo{};
         pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
@@ -6966,7 +7051,8 @@ private:
                 vkDestroySwapchainKHR(m_device, newSwapChain, nullptr);
                 return false;
             }
-            if (ShouldUseVulkanFxaaPostProcess() && !CreatePostPipeline(newOverlayRenderPass, &newPostPipeline)) {
+            if (ShouldUseVulkanFxaaPostProcess()
+                && !CreatePostPipeline(newOverlayRenderPass, kCompiledPostProcessAntiAliasingMode, &newPostPipeline)) {
                 vkDestroyRenderPass(m_device, newOverlayRenderPass, nullptr);
                 vkDestroyRenderPass(m_device, newRenderPass, nullptr);
                 vkDestroyImageView(m_device, newDepthImageView, nullptr);
