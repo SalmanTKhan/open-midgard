@@ -1412,9 +1412,9 @@ public:
     D3D11RenderDevice()
         : m_hwnd(nullptr), m_renderWidth(0), m_renderHeight(0),
           m_swapChain(nullptr), m_device(nullptr), m_context(nullptr),
-                                        m_renderTargetView(nullptr), m_swapChainRenderTargetView(nullptr), m_sceneTexture(nullptr), m_sceneRenderTargetView(nullptr), m_sceneShaderResourceView(nullptr), m_smaaEdgeTexture(nullptr), m_smaaEdgeRenderTargetView(nullptr), m_smaaEdgeShaderResourceView(nullptr), m_depthStencilTexture(nullptr), m_depthStencilView(nullptr),
+                                                                                m_renderTargetView(nullptr), m_swapChainRenderTargetView(nullptr), m_sceneTexture(nullptr), m_sceneRenderTargetView(nullptr), m_sceneShaderResourceView(nullptr), m_smaaEdgeTexture(nullptr), m_smaaEdgeRenderTargetView(nullptr), m_smaaEdgeShaderResourceView(nullptr), m_smaaBlendWeightTexture(nullptr), m_smaaBlendWeightRenderTargetView(nullptr), m_smaaBlendWeightShaderResourceView(nullptr), m_depthStencilTexture(nullptr), m_depthStencilView(nullptr),
           m_captureTexture(nullptr),
-                                        m_vertexShaderTl(nullptr), m_vertexShaderLm(nullptr), m_pixelShader(nullptr), m_postVertexShader(nullptr), m_fxaaPixelShader(nullptr), m_smaaEdgePixelShader(nullptr),
+                                                                                m_vertexShaderTl(nullptr), m_vertexShaderLm(nullptr), m_pixelShader(nullptr), m_postVertexShader(nullptr), m_fxaaPixelShader(nullptr), m_smaaEdgePixelShader(nullptr), m_smaaBlendWeightPixelShader(nullptr), m_smaaNeighborhoodPixelShader(nullptr),
           m_inputLayoutTl(nullptr), m_inputLayoutLm(nullptr), m_constantBuffer(nullptr),
           m_vertexBuffer(nullptr), m_vertexBufferSize(0), m_indexBuffer(nullptr), m_indexBufferSize(0),
                                         m_samplerState(nullptr), m_postSamplerState(nullptr), m_postBlendState(nullptr), m_postDepthStencilState(nullptr), m_postRasterizerState(nullptr),
@@ -1529,6 +1529,8 @@ public:
         SafeRelease(m_constantBuffer);
         SafeRelease(m_inputLayoutLm);
         SafeRelease(m_inputLayoutTl);
+        SafeRelease(m_smaaNeighborhoodPixelShader);
+        SafeRelease(m_smaaBlendWeightPixelShader);
         SafeRelease(m_smaaEdgePixelShader);
         SafeRelease(m_fxaaPixelShader);
         SafeRelease(m_postVertexShader);
@@ -1863,12 +1865,16 @@ private:
         ID3DBlob* postVertexShaderBlob = nullptr;
         ID3DBlob* fxaaPixelShaderBlob = nullptr;
         ID3DBlob* smaaEdgePixelShaderBlob = nullptr;
+        ID3DBlob* smaaBlendWeightPixelShaderBlob = nullptr;
+        ID3DBlob* smaaNeighborhoodPixelShaderBlob = nullptr;
         const bool compiled = CompileShaderBlob(shaderSource, "VSMainTL", "vs_4_0", &vertexShaderTlBlob)
             && CompileShaderBlob(shaderSource, "VSMainLM", "vs_4_0", &vertexShaderLmBlob)
             && CompileShaderBlob(shaderSource, "PSMain", "ps_4_0", &pixelShaderBlob)
             && CompileShaderBlob(shaderSource, "VSMainPost", "vs_4_0", &postVertexShaderBlob)
             && CompilePostProcessShaderBlob(shaderSource, kCompiledPostProcessAntiAliasingMode, "ps_4_0", &fxaaPixelShaderBlob)
-            && CompilePostProcessShaderBlob(shaderSource, AntiAliasingMode::SMAA, "ps_4_0", &smaaEdgePixelShaderBlob);
+            && CompilePostProcessShaderBlob(shaderSource, AntiAliasingMode::SMAA, "ps_4_0", &smaaEdgePixelShaderBlob)
+            && CompileShaderBlob(shaderSource, "PSMainSMAABlendWeight", "ps_4_0", &smaaBlendWeightPixelShaderBlob)
+            && CompileShaderBlob(shaderSource, "PSMainSMAANeighborhood", "ps_4_0", &smaaNeighborhoodPixelShaderBlob);
         if (!compiled) {
             SafeRelease(vertexShaderTlBlob);
             SafeRelease(vertexShaderLmBlob);
@@ -1876,6 +1882,8 @@ private:
             SafeRelease(postVertexShaderBlob);
             SafeRelease(fxaaPixelShaderBlob);
             SafeRelease(smaaEdgePixelShaderBlob);
+            SafeRelease(smaaBlendWeightPixelShaderBlob);
+            SafeRelease(smaaNeighborhoodPixelShaderBlob);
             return false;
         }
 
@@ -1887,6 +1895,8 @@ private:
             SafeRelease(postVertexShaderBlob);
             SafeRelease(fxaaPixelShaderBlob);
             SafeRelease(smaaEdgePixelShaderBlob);
+            SafeRelease(smaaBlendWeightPixelShaderBlob);
+            SafeRelease(smaaNeighborhoodPixelShaderBlob);
             return false;
         }
 
@@ -1898,6 +1908,8 @@ private:
             SafeRelease(postVertexShaderBlob);
             SafeRelease(fxaaPixelShaderBlob);
             SafeRelease(smaaEdgePixelShaderBlob);
+            SafeRelease(smaaBlendWeightPixelShaderBlob);
+            SafeRelease(smaaNeighborhoodPixelShaderBlob);
             return false;
         }
 
@@ -1909,6 +1921,8 @@ private:
             SafeRelease(postVertexShaderBlob);
             SafeRelease(fxaaPixelShaderBlob);
             SafeRelease(smaaEdgePixelShaderBlob);
+            SafeRelease(smaaBlendWeightPixelShaderBlob);
+            SafeRelease(smaaNeighborhoodPixelShaderBlob);
             return false;
         }
 
@@ -1920,6 +1934,8 @@ private:
             SafeRelease(postVertexShaderBlob);
             SafeRelease(fxaaPixelShaderBlob);
             SafeRelease(smaaEdgePixelShaderBlob);
+            SafeRelease(smaaBlendWeightPixelShaderBlob);
+            SafeRelease(smaaNeighborhoodPixelShaderBlob);
             return false;
         }
 
@@ -1931,6 +1947,8 @@ private:
             SafeRelease(postVertexShaderBlob);
             SafeRelease(fxaaPixelShaderBlob);
             SafeRelease(smaaEdgePixelShaderBlob);
+            SafeRelease(smaaBlendWeightPixelShaderBlob);
+            SafeRelease(smaaNeighborhoodPixelShaderBlob);
             return false;
         }
 
@@ -1942,6 +1960,34 @@ private:
             SafeRelease(postVertexShaderBlob);
             SafeRelease(fxaaPixelShaderBlob);
             SafeRelease(smaaEdgePixelShaderBlob);
+            SafeRelease(smaaBlendWeightPixelShaderBlob);
+            SafeRelease(smaaNeighborhoodPixelShaderBlob);
+            return false;
+        }
+
+        hr = m_device->CreatePixelShader(smaaBlendWeightPixelShaderBlob->GetBufferPointer(), smaaBlendWeightPixelShaderBlob->GetBufferSize(), nullptr, &m_smaaBlendWeightPixelShader);
+        if (FAILED(hr) || !m_smaaBlendWeightPixelShader) {
+            SafeRelease(vertexShaderTlBlob);
+            SafeRelease(vertexShaderLmBlob);
+            SafeRelease(pixelShaderBlob);
+            SafeRelease(postVertexShaderBlob);
+            SafeRelease(fxaaPixelShaderBlob);
+            SafeRelease(smaaEdgePixelShaderBlob);
+            SafeRelease(smaaBlendWeightPixelShaderBlob);
+            SafeRelease(smaaNeighborhoodPixelShaderBlob);
+            return false;
+        }
+
+        hr = m_device->CreatePixelShader(smaaNeighborhoodPixelShaderBlob->GetBufferPointer(), smaaNeighborhoodPixelShaderBlob->GetBufferSize(), nullptr, &m_smaaNeighborhoodPixelShader);
+        if (FAILED(hr) || !m_smaaNeighborhoodPixelShader) {
+            SafeRelease(vertexShaderTlBlob);
+            SafeRelease(vertexShaderLmBlob);
+            SafeRelease(pixelShaderBlob);
+            SafeRelease(postVertexShaderBlob);
+            SafeRelease(fxaaPixelShaderBlob);
+            SafeRelease(smaaEdgePixelShaderBlob);
+            SafeRelease(smaaBlendWeightPixelShaderBlob);
+            SafeRelease(smaaNeighborhoodPixelShaderBlob);
             return false;
         }
 
@@ -1962,6 +2008,8 @@ private:
             SafeRelease(postVertexShaderBlob);
             SafeRelease(fxaaPixelShaderBlob);
             SafeRelease(smaaEdgePixelShaderBlob);
+            SafeRelease(smaaBlendWeightPixelShaderBlob);
+            SafeRelease(smaaNeighborhoodPixelShaderBlob);
             return false;
         }
 
@@ -1982,6 +2030,8 @@ private:
         SafeRelease(postVertexShaderBlob);
         SafeRelease(fxaaPixelShaderBlob);
         SafeRelease(smaaEdgePixelShaderBlob);
+        SafeRelease(smaaBlendWeightPixelShaderBlob);
+        SafeRelease(smaaNeighborhoodPixelShaderBlob);
         if (FAILED(hr) || !m_inputLayoutLm) {
             return false;
         }
@@ -2483,24 +2533,6 @@ private:
         return mode == AntiAliasingMode::FXAA || mode == AntiAliasingMode::SMAA;
     }
 
-    bool CopySceneToBackBuffer()
-    {
-        if (!m_swapChain || !m_context || !m_sceneTexture) {
-            return false;
-        }
-
-        ID3D11Texture2D* backBuffer = nullptr;
-        const HRESULT hr = m_swapChain->GetBuffer(0, __uuidof(ID3D11Texture2D), reinterpret_cast<void**>(&backBuffer));
-        if (FAILED(hr) || !backBuffer) {
-            SafeRelease(backBuffer);
-            return false;
-        }
-
-        m_context->CopyResource(backBuffer, m_sceneTexture);
-        SafeRelease(backBuffer);
-        return true;
-    }
-
     bool DrawPostProcessPass(ID3D11RenderTargetView* targetView, ID3D11ShaderResourceView* sourceView0,
         ID3D11ShaderResourceView* sourceView1, ID3D11PixelShader* pixelShader)
     {
@@ -2538,6 +2570,9 @@ private:
 
     void ReleaseSceneRenderTargetResources()
     {
+        SafeRelease(m_smaaBlendWeightShaderResourceView);
+        SafeRelease(m_smaaBlendWeightRenderTargetView);
+        SafeRelease(m_smaaBlendWeightTexture);
         SafeRelease(m_smaaEdgeShaderResourceView);
         SafeRelease(m_smaaEdgeRenderTargetView);
         SafeRelease(m_smaaEdgeTexture);
@@ -2610,6 +2645,24 @@ private:
                 ReleaseSceneRenderTargetResources();
                 return false;
             }
+
+            hr = m_device->CreateTexture2D(&sceneDesc, nullptr, &m_smaaBlendWeightTexture);
+            if (FAILED(hr) || !m_smaaBlendWeightTexture) {
+                ReleaseSceneRenderTargetResources();
+                return false;
+            }
+
+            hr = m_device->CreateRenderTargetView(m_smaaBlendWeightTexture, nullptr, &m_smaaBlendWeightRenderTargetView);
+            if (FAILED(hr) || !m_smaaBlendWeightRenderTargetView) {
+                ReleaseSceneRenderTargetResources();
+                return false;
+            }
+
+            hr = m_device->CreateShaderResourceView(m_smaaBlendWeightTexture, nullptr, &m_smaaBlendWeightShaderResourceView);
+            if (FAILED(hr) || !m_smaaBlendWeightShaderResourceView) {
+                ReleaseSceneRenderTargetResources();
+                return false;
+            }
         }
 
         return true;
@@ -2632,13 +2685,18 @@ private:
         }
 
         if (IsSmaaEnabled()) {
-            if (!m_smaaEdgeRenderTargetView || !m_smaaEdgeShaderResourceView || !m_smaaEdgePixelShader) {
+            if (!m_swapChainRenderTargetView || !m_smaaEdgeRenderTargetView || !m_smaaEdgeShaderResourceView
+                || !m_smaaBlendWeightRenderTargetView || !m_smaaBlendWeightShaderResourceView
+                || !m_smaaEdgePixelShader || !m_smaaBlendWeightPixelShader || !m_smaaNeighborhoodPixelShader) {
                 return false;
             }
             if (!DrawPostProcessPass(m_smaaEdgeRenderTargetView, m_sceneShaderResourceView, nullptr, m_smaaEdgePixelShader)) {
                 return false;
             }
-            if (!CopySceneToBackBuffer()) {
+            if (!DrawPostProcessPass(m_smaaBlendWeightRenderTargetView, m_smaaEdgeShaderResourceView, nullptr, m_smaaBlendWeightPixelShader)) {
+                return false;
+            }
+            if (!DrawPostProcessPass(m_swapChainRenderTargetView, m_sceneShaderResourceView, m_smaaBlendWeightShaderResourceView, m_smaaNeighborhoodPixelShader)) {
                 return false;
             }
         } else {
@@ -2670,6 +2728,9 @@ private:
     ID3D11Texture2D* m_smaaEdgeTexture;
     ID3D11RenderTargetView* m_smaaEdgeRenderTargetView;
     ID3D11ShaderResourceView* m_smaaEdgeShaderResourceView;
+    ID3D11Texture2D* m_smaaBlendWeightTexture;
+    ID3D11RenderTargetView* m_smaaBlendWeightRenderTargetView;
+    ID3D11ShaderResourceView* m_smaaBlendWeightShaderResourceView;
     ID3D11Texture2D* m_depthStencilTexture;
     ID3D11DepthStencilView* m_depthStencilView;
     ID3D11Texture2D* m_captureTexture;
@@ -2679,6 +2740,8 @@ private:
     ID3D11VertexShader* m_postVertexShader;
     ID3D11PixelShader* m_fxaaPixelShader;
     ID3D11PixelShader* m_smaaEdgePixelShader;
+    ID3D11PixelShader* m_smaaBlendWeightPixelShader;
+    ID3D11PixelShader* m_smaaNeighborhoodPixelShader;
     ID3D11InputLayout* m_inputLayoutTl;
     ID3D11InputLayout* m_inputLayoutLm;
     ID3D11Buffer* m_constantBuffer;

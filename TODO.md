@@ -96,8 +96,8 @@ Goal: ship true configurable 3D anti-aliasing for modern backends without affect
 - [x] Add SMAA presets or a single production default and document the choice.
 - [x] Add SMAA shader resources and generation flow for D3D11/D3D12/Vulkan.
 - [x] Implement SMAA edge detection pass.
-- [ ] Implement SMAA blend-weight calculation pass.
-- [ ] Implement SMAA neighborhood blending pass.
+- [x] Implement SMAA blend-weight calculation pass.
+- [x] Implement SMAA neighborhood blending pass.
 - [ ] Ensure the SMAA passes operate only on the 3D scene target and never on the final UI/cursor composite.
 - [ ] Expose SMAA in the option window only on backends where the full pass chain is implemented.
 
