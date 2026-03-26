@@ -386,17 +386,6 @@ bool QueueModernOverlayQuad(CGameMode& mode, int cursorActNum, u32 mouseAnimStar
         return false;
     }
 
-    ClearOverlayComposeBits(s_overlayComposeBits, clientWidth, clientHeight);
-    DrawGameplayOverlayToHdc(mode, s_overlayComposeDc);
-
-    HDC previousSharedDc = UIWindow::GetSharedDrawDC();
-    UIWindow::SetSharedDrawDC(s_overlayComposeDc);
-    g_windowMgr.OnDraw();
-    UIWindow::SetSharedDrawDC(previousSharedDc);
-    DrawModeCursorToHdc(s_overlayComposeDc, cursorActNum, mouseAnimStartTick);
-
-    ConvertOverlayComposeBitsToAlpha(s_overlayComposeBits, clientWidth, clientHeight);
-
     static CTexture* s_overlayTexture = nullptr;
     static int s_overlayTextureWidth = 0;
     static int s_overlayTextureHeight = 0;
