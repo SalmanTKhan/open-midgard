@@ -109,7 +109,7 @@ PFN_vkCmdBindIndexBuffer vkCmdBindIndexBuffer = nullptr;
 PFN_vkCmdDraw vkCmdDraw = nullptr;
 PFN_vkCmdDrawIndexed vkCmdDrawIndexed = nullptr;
 PFN_vkCmdPipelineBarrier vkCmdPipelineBarrier = nullptr;
-    PFN_vkCmdCopyImage vkCmdCopyImage = nullptr;
+PFN_vkCmdCopyImage vkCmdCopyImage = nullptr;
 PFN_vkCmdCopyBufferToImage vkCmdCopyBufferToImage = nullptr;
 PFN_vkCreateWin32SurfaceKHR vkCreateWin32SurfaceKHR = nullptr;
 PFN_vkDestroySurfaceKHR vkDestroySurfaceKHR = nullptr;
@@ -4544,6 +4544,11 @@ public:
         return GetCachedGraphicsSettings().antiAliasing == AntiAliasingMode::FXAA;
     }
 
+    bool ShouldUseVulkanFxaaPostProcess() const
+    {
+        return false;
+    }
+
     int Present(bool vertSync) override
     {
         if (!m_device || !m_swapChain || !m_frameBegun) {
@@ -4748,6 +4753,78 @@ public:
 
         vkCmdEndRenderPass(commandBuffer);
         m_renderPassActive = false;
+
+        if (!ShouldUseVulkanFxaaPostProcess()) {
+            VkImageMemoryBarrier sceneToCopy{};
+            sceneToCopy.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+            sceneToCopy.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+            sceneToCopy.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+            sceneToCopy.oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+            sceneToCopy.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+            sceneToCopy.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+            sceneToCopy.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+            sceneToCopy.image = m_sceneImage;
+            sceneToCopy.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+            sceneToCopy.subresourceRange.baseMipLevel = 0;
+            sceneToCopy.subresourceRange.levelCount = 1;
+            sceneToCopy.subresourceRange.baseArrayLayer = 0;
+            sceneToCopy.subresourceRange.layerCount = 1;
+            vkCmdPipelineBarrier(
+                commandBuffer,
+                VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+                VK_PIPELINE_STAGE_TRANSFER_BIT,
+                0,
+                0, nullptr,
+                0, nullptr,
+                1, &sceneToCopy);
+
+            if (!TransitionCurrentSwapChainImage(
+                    VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                    VK_ACCESS_TRANSFER_WRITE_BIT,
+                    VK_PIPELINE_STAGE_TRANSFER_BIT)) {
+                return false;
+            }
+
+            VkImageCopy copyRegion{};
+            copyRegion.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+            copyRegion.srcSubresource.mipLevel = 0;
+            copyRegion.srcSubresource.baseArrayLayer = 0;
+            copyRegion.srcSubresource.layerCount = 1;
+            copyRegion.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+            copyRegion.dstSubresource.mipLevel = 0;
+            copyRegion.dstSubresource.baseArrayLayer = 0;
+            copyRegion.dstSubresource.layerCount = 1;
+            copyRegion.extent.width = m_swapChainExtent.width;
+            copyRegion.extent.height = m_swapChainExtent.height;
+            copyRegion.extent.depth = 1;
+            vkCmdCopyImage(
+                commandBuffer,
+                m_sceneImage,
+                VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                m_swapChainImages[m_currentImageIndex],
+                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                1,
+                &copyRegion);
+
+            if (!TransitionCurrentSwapChainImage(
+                    VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                    VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+                    VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT)) {
+                return false;
+            }
+
+            VkRenderPassBeginInfo renderPassInfo{};
+            renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+            renderPassInfo.renderPass = m_overlayRenderPass;
+            renderPassInfo.framebuffer = m_framebuffers[m_currentImageIndex];
+            renderPassInfo.renderArea.offset = { 0, 0 };
+            renderPassInfo.renderArea.extent = m_swapChainExtent;
+            vkCmdBeginRenderPass(commandBuffer, &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
+
+            m_renderPassActive = true;
+            m_overlayPassPrepared = true;
+            return true;
+        }
 
         VkImageMemoryBarrier sceneToSample{};
         sceneToSample.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
@@ -5072,27 +5149,6 @@ private:
             return false;
         }
 
-        VkDescriptorSetLayoutBinding postLayoutBindings[2]{};
-        postLayoutBindings[0].binding = 0;
-        postLayoutBindings[0].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
-        postLayoutBindings[0].descriptorCount = 1;
-        postLayoutBindings[0].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
-        postLayoutBindings[1].binding = 1;
-        postLayoutBindings[1].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER;
-        postLayoutBindings[1].descriptorCount = 1;
-        postLayoutBindings[1].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
-
-        VkDescriptorSetLayoutCreateInfo postDescriptorLayoutInfo{};
-        postDescriptorLayoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-        postDescriptorLayoutInfo.bindingCount = static_cast<uint32_t>(std::size(postLayoutBindings));
-        postDescriptorLayoutInfo.pBindings = postLayoutBindings;
-        result = vkCreateDescriptorSetLayout(m_device, &postDescriptorLayoutInfo, nullptr, &m_postDescriptorSetLayout);
-        if (result != VK_SUCCESS) {
-            m_bootstrap.initHr = static_cast<int>(result);
-            DestroyPipelineResources();
-            return false;
-        }
-
         VkDescriptorPoolSize poolSizes[2]{};
         poolSizes[0].type = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
         poolSizes[0].descriptorCount = 16384;
@@ -5134,28 +5190,9 @@ private:
             return false;
         }
 
-        VkSamplerCreateInfo postSamplerInfo{};
-        postSamplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
-        postSamplerInfo.magFilter = VK_FILTER_LINEAR;
-        postSamplerInfo.minFilter = VK_FILTER_LINEAR;
-        postSamplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
-        postSamplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-        postSamplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-        postSamplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-        postSamplerInfo.minLod = 0.0f;
-        postSamplerInfo.maxLod = 0.0f;
-        result = vkCreateSampler(m_device, &postSamplerInfo, nullptr, &m_postSampler);
-        if (result != VK_SUCCESS) {
-            m_bootstrap.initHr = static_cast<int>(result);
-            DestroyPipelineResources();
-            return false;
-        }
-
         if (!CreateShaderModuleFromBytes(kVulkanVsTlSpirv, kVulkanVsTlSpirvSize, &m_vertexShaderTlModule)
             || !CreateShaderModuleFromBytes(kVulkanVsLmSpirv, kVulkanVsLmSpirvSize, &m_vertexShaderLmModule)
-            || !CreateShaderModuleFromBytes(kVulkanPsSpirv, kVulkanPsSpirvSize, &m_fragmentShaderModule)
-            || !CreateShaderModuleFromBytes(kVulkanPostFxaaVsSpirv, kVulkanPostFxaaVsSpirvSize, &m_postVertexShaderModule)
-            || !CreateShaderModuleFromBytes(kVulkanPostFxaaPsSpirv, kVulkanPostFxaaPsSpirvSize, &m_postFxaaFragmentShaderModule)) {
+            || !CreateShaderModuleFromBytes(kVulkanPsSpirv, kVulkanPsSpirvSize, &m_fragmentShaderModule)) {
             DestroyPipelineResources();
             return false;
         }
@@ -5173,25 +5210,6 @@ private:
         layoutInfo.pPushConstantRanges = &pushConstantRange;
 
         result = vkCreatePipelineLayout(m_device, &layoutInfo, nullptr, &m_pipelineLayout);
-        if (result != VK_SUCCESS) {
-            m_bootstrap.initHr = static_cast<int>(result);
-            DestroyPipelineResources();
-            return false;
-        }
-
-        VkPushConstantRange postPushConstantRange{};
-        postPushConstantRange.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
-        postPushConstantRange.offset = 0;
-        postPushConstantRange.size = static_cast<uint32_t>(sizeof(ModernDrawConstants));
-
-        VkPipelineLayoutCreateInfo postLayoutInfo{};
-        postLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-        postLayoutInfo.setLayoutCount = 1;
-        postLayoutInfo.pSetLayouts = &m_postDescriptorSetLayout;
-        postLayoutInfo.pushConstantRangeCount = 1;
-        postLayoutInfo.pPushConstantRanges = &postPushConstantRange;
-
-        result = vkCreatePipelineLayout(m_device, &postLayoutInfo, nullptr, &m_postPipelineLayout);
         if (result != VK_SUCCESS) {
             m_bootstrap.initHr = static_cast<int>(result);
             DestroyPipelineResources();
@@ -6884,7 +6902,7 @@ private:
                 vkDestroySwapchainKHR(m_device, newSwapChain, nullptr);
                 return false;
             }
-            if (!CreatePostPipeline(newOverlayRenderPass, &newPostPipeline)) {
+            if (ShouldUseVulkanFxaaPostProcess() && !CreatePostPipeline(newOverlayRenderPass, &newPostPipeline)) {
                 vkDestroyRenderPass(m_device, newOverlayRenderPass, nullptr);
                 vkDestroyRenderPass(m_device, newRenderPass, nullptr);
                 vkDestroyImageView(m_device, newDepthImageView, nullptr);
