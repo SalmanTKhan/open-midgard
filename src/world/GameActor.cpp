@@ -194,6 +194,35 @@ void PlayMotionWaveEvents(CRenderObject* object, CActRes* actRes, int action, in
     playRange(0, newMotion);
 }
 
+void ProcessRenderMotionWaveEvents(CRenderObject* object, CActRes* actRes, int action, int motion)
+{
+    if (!object || !actRes) {
+        return;
+    }
+
+    const int motionCount = actRes->GetMotionCount(action);
+    if (motionCount <= 0) {
+        object->m_oldBaseAction = action;
+        object->m_oldMotion = 0;
+        return;
+    }
+
+    const int clampedMotion = (std::max)(0, (std::min)(motion, motionCount - 1));
+    if (object->m_oldBaseAction == action && object->m_oldMotion == clampedMotion) {
+        return;
+    }
+
+    int previousMotion = object->m_oldMotion;
+    if (object->m_oldBaseAction != action) {
+        previousMotion = 0;
+    }
+    previousMotion = (std::max)(0, (std::min)(previousMotion, motionCount - 1));
+
+    PlayMotionWaveEvents(object, actRes, action, previousMotion, clampedMotion);
+    object->m_oldBaseAction = action;
+    object->m_oldMotion = clampedMotion;
+}
+
 bool IsPortalFallbackJob(int job)
 {
     return job == kJobWarpNpc
@@ -2087,6 +2116,8 @@ bool CPc::EnsureBillboardTexture(float cameraLongitude)
             } else {
                 headMotion = ResolveSpriteMotionIndex(*this, actRes, bodyAction);
             }
+
+            ProcessRenderMotionWaveEvents(this, actRes, bodyAction, headMotion);
         }
     }
 
