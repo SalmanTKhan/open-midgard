@@ -164,11 +164,8 @@ void DrawBitmapTransparent(HDC target, HBITMAP bmp, const RECT& dst)
     DeleteDC(srcDC);
 }
 
-RECT MakeCenteredBitmapRect(HBITMAP bmp, const RECT& outerRect)
+RECT MakeBitmapRectAtSlotOrigin(HBITMAP bmp, const RECT& outerRect)
 {
-    constexpr int kSlotOverlayOffsetX = -4;
-    constexpr int kSlotOverlayOffsetY = -2;
-
     RECT result = outerRect;
     if (!bmp) {
         return result;
@@ -179,12 +176,8 @@ RECT MakeCenteredBitmapRect(HBITMAP bmp, const RECT& outerRect)
         return result;
     }
 
-    const int outerWidth = outerRect.right - outerRect.left;
-    const int outerHeight = outerRect.bottom - outerRect.top;
-    const int insetX = (outerWidth - bm.bmWidth) / 2;
-    const int insetY = (outerHeight - bm.bmHeight) / 2;
-    result.left = outerRect.left + (std::max)(insetX + kSlotOverlayOffsetX, 0);
-    result.top = outerRect.top + (std::max)(insetY + kSlotOverlayOffsetY, 0);
+    result.left = outerRect.left;
+    result.top = outerRect.top;
     result.right = result.left + bm.bmWidth;
     result.bottom = result.top + bm.bmHeight;
     return result;
@@ -575,18 +568,8 @@ void UISelectCharWnd::EnsureResourceCache()
         m_backgroundBmp = LoadFirstBitmapFromCandidates(BuildUiAssetCandidates(panelNames[i]), &m_backgroundPath);
     }
 
-    const char* slotBmpNames[] = {
-        "client_select_cs1.bmp",
-        "selectslot_img.bmp",
-        "selslot.bmp",
-        "slot_bg.bmp",
-        nullptr
-    };
-    for (int i = 0; slotBmpNames[i] && !m_slotBmp; ++i) {
-        m_slotBmp = LoadFirstBitmapFromCandidates(BuildUiAssetCandidates(slotBmpNames[i]), nullptr);
-    }
-
     const char* selSlotBmpNames[] = {
+        "box_select.bmp",
         "client_select_cs.bmp",
         "selectslot_select.bmp",
         "selslot_on.bmp",
@@ -1095,9 +1078,8 @@ void UISelectCharWnd::OnDraw()
             m_y + kSlotTop,
             kSlotWidth,
             kSlotHeight);
-        HBITMAP slotBmp = (slotNumber == m_selectedSlot && m_slotSelectedBmp) ? m_slotSelectedBmp : m_slotBmp;
-        if (slotBmp) {
-            DrawBitmapTransparent(hdc, slotBmp, MakeCenteredBitmapRect(slotBmp, slotRect));
+        if (slotNumber == m_selectedSlot && m_slotSelectedBmp) {
+            DrawBitmapTransparent(hdc, m_slotSelectedBmp, MakeBitmapRectAtSlotOrigin(m_slotSelectedBmp, slotRect));
         }
     }
 
