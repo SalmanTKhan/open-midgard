@@ -2745,55 +2745,6 @@ bool WorldToAttrCell(const CWorld* world, float worldX, float worldZ, int* outTi
     return true;
 }
 
-void RestorePreservedOutOfSightActors(CGameMode& mode)
-{
-    if (!mode.m_world || g_session.m_playerPosX < 0 || g_session.m_playerPosY < 0) {
-        return;
-    }
-
-    constexpr int kOutOfSightRestoreRadius = 16;
-
-    for (auto it = mode.m_preservedOutOfSightActors.begin(); it != mode.m_preservedOutOfSightActors.end();) {
-        const u32 gid = it->first;
-        const auto actorIt = mode.m_runtimeActors.find(gid);
-        if (actorIt == mode.m_runtimeActors.end() || !actorIt->second) {
-            it = mode.m_preservedOutOfSightActors.erase(it);
-            continue;
-        }
-
-        CGameActor* actor = actorIt->second;
-        int actorTileX = 0;
-        int actorTileY = 0;
-        if (!WorldToAttrCell(mode.m_world, actor->m_pos.x, actor->m_pos.z, &actorTileX, &actorTileY)) {
-            ++it;
-            continue;
-        }
-
-        const int dx = std::abs(actorTileX - g_session.m_playerPosX);
-        const int dy = std::abs(actorTileY - g_session.m_playerPosY);
-        if (dx > kOutOfSightRestoreRadius || dy > kOutOfSightRestoreRadius) {
-            ++it;
-            continue;
-        }
-
-        actor->m_isVisible = 1;
-        mode.m_actorPosList[gid] = CellPos{ actorTileX, actorTileY };
-        mode.m_aidList[gid] = GetTickCount();
-        if (CPc* pcActor = dynamic_cast<CPc*>(actor)) {
-            pcActor->InvalidateBillboard();
-        }
-
-        DbgLog("[GameMode] restore actor gid=%u from preserved outsight pos=%d,%d player=%d,%d\n",
-            gid,
-            actorTileX,
-            actorTileY,
-            g_session.m_playerPosX,
-            g_session.m_playerPosY);
-
-        it = mode.m_preservedOutOfSightActors.erase(it);
-    }
-}
-
 void SyncBootstrapSelfActorWorldPos(CGameMode& mode)
 {
     if (!mode.m_world || !mode.m_world->m_player) {
@@ -4695,7 +4646,6 @@ void CGameMode::OnUpdate() {
             SetRuntimeActorCameraLongitude(m_view ? m_view->GetCameraLongitude() : 0.0f);
             m_world->UpdateActors();
             CleanupPendingActorDespawns(*this);
-            RestorePreservedOutOfSightActors(*this);
             const matrix* viewMatrix = m_view ? &m_view->GetViewMatrix() : nullptr;
             m_world->UpdateBackgroundObjects(viewMatrix);
         }
@@ -4715,7 +4665,6 @@ void CGameMode::OnUpdate() {
         SetRuntimeActorCameraLongitude(m_view ? m_view->GetCameraLongitude() : 0.0f);
         m_world->UpdateActors();
         CleanupPendingActorDespawns(*this);
-        RestorePreservedOutOfSightActors(*this);
         actorUpdateEnd = GetTickCount();
 
         const matrix* viewMatrix = m_view ? &m_view->GetViewMatrix() : nullptr;

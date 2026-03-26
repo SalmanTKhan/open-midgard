@@ -1374,16 +1374,6 @@ int ScoreLegacyActorState(const RuntimeActorState& state, bool hasObjectType)
 
 void UpdateRuntimeActorPosition(CGameMode& mode, u32 gid, int tileX, int tileY, int srcX = -1, int srcY = -1);
 
-    void ClearPreservedOutOfSightActor(CGameMode& mode, u32 gid)
-    {
-        mode.m_preservedOutOfSightActors.erase(gid);
-    }
-
-    bool ShouldPreserveOutOfSightActor(const CGameActor& actor)
-    {
-        return actor.m_isMoving != 0 || actor.m_path.m_cells.size() >= 2;
-    }
-
     bool FindActivePathSegmentForPacketView(const CPathInfo& path, u32 now, size_t* outStartIndex)
     {
         if (!outStartIndex || path.m_cells.size() < 2) {
@@ -2335,7 +2325,6 @@ void UpdateRuntimeActorPosition(CGameMode& mode, u32 gid, int tileX, int tileY, 
         return;
     }
 
-    ClearPreservedOutOfSightActor(mode, gid);
     actor->m_isVisible = 1;
 
     if (actor->m_isMoving) {
@@ -2408,7 +2397,6 @@ void ApplyRuntimeActorFixPosition(CGameMode& mode, u32 gid, int tileX, int tileY
         return;
     }
 
-    ClearPreservedOutOfSightActor(mode, gid);
     actor->m_isVisible = 1;
 
     actor->UnRegisterPos();
@@ -2480,8 +2468,6 @@ bool ShouldIgnoreRedundantLocalFixPosition(const CGameActor& actor, int tileX, i
 
 void RemoveRuntimeActor(CGameMode& mode, u32 gid)
 {
-    ClearPreservedOutOfSightActor(mode, gid);
-
     mode.m_actorPosList.erase(gid);
     mode.m_aidList.erase(gid);
     mode.m_actorNameList.erase(gid);
@@ -2497,6 +2483,12 @@ void RemoveRuntimeActor(CGameMode& mode, u32 gid)
     }
     if (mode.m_lastLockOnMonGid == gid) {
         mode.m_lastLockOnMonGid = 0;
+    }
+    if (mode.m_attackChaseTargetGid == gid) {
+        mode.m_attackChaseTargetGid = 0;
+    }
+    if (mode.m_world && mode.m_world->m_player && mode.m_world->m_player->m_proceedTargetGid == gid) {
+        mode.m_world->m_player->m_proceedTargetGid = 0;
     }
 
     const auto it = mode.m_runtimeActors.find(gid);
@@ -3057,16 +3049,8 @@ void HandleActorVanish(CGameMode& mode, const PacketView& packet)
     mode.m_aidList.erase(gid);
 
     if (reason == 0) {
-        if (CGameActor* actor = FindRuntimeActorForVanish(mode, gid)) {
-            if (ShouldPreserveOutOfSightActor(*actor)) {
-                mode.m_preservedOutOfSightActors[gid] = GetTickCount();
-                actor->m_isVisible = 0;
-                DbgLog("[GameMode] hide actor gid=%u for out-of-sight preserve\n", gid);
-            } else {
-                DbgLog("[GameMode] remove stationary vanish gid=%u reason=0\n", gid);
-                RemoveRuntimeActor(mode, gid);
-            }
-        }
+        DbgLog("[GameMode] remove vanish gid=%u reason=0\n", gid);
+        RemoveRuntimeActor(mode, gid);
     } else if (reason == 1) {
         if (CGameActor* actor = FindRuntimeActorForVanish(mode, gid)) {
             BeginActorDeath(mode, *actor, gid);

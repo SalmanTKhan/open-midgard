@@ -128,7 +128,6 @@ public:
     std::map<u32, int> m_guildMemberStatusCache;
     std::map<u32, CellPos> m_actorPosList;
     std::map<u32, CGameActor*> m_runtimeActors;
-        std::map<u32, u32> m_preservedOutOfSightActors;
     std::map<u32, GroundItemState> m_groundItemList;
     std::list<u32> m_pickupReqItemNaidList;
     std::map<u32, u32> m_aidList;
