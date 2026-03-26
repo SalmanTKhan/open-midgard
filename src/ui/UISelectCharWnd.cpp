@@ -132,6 +132,39 @@ void DrawBitmapStretched(HDC target, HBITMAP bmp, const RECT& dst)
     DeleteDC(srcDC);
 }
 
+void DrawBitmapTransparent(HDC target, HBITMAP bmp, const RECT& dst)
+{
+    if (!target || !bmp) {
+        return;
+    }
+
+    BITMAP bm{};
+    if (!GetObjectA(bmp, sizeof(bm), &bm) || bm.bmWidth <= 0 || bm.bmHeight <= 0) {
+        return;
+    }
+
+    HDC srcDC = CreateCompatibleDC(target);
+    if (!srcDC) {
+        return;
+    }
+
+    HGDIOBJ old = SelectObject(srcDC, bmp);
+    const COLORREF colorKey = GetPixel(srcDC, 0, 0);
+    TransparentBlt(target,
+        dst.left,
+        dst.top,
+        dst.right - dst.left,
+        dst.bottom - dst.top,
+        srcDC,
+        0,
+        0,
+        bm.bmWidth,
+        bm.bmHeight,
+        colorKey);
+    SelectObject(srcDC, old);
+    DeleteDC(srcDC);
+}
+
 std::string ToLowerAscii(std::string value)
 {
     std::transform(value.begin(), value.end(), value.begin(), [](unsigned char ch) {
@@ -518,6 +551,7 @@ void UISelectCharWnd::EnsureResourceCache()
     }
 
     const char* slotBmpNames[] = {
+        "client_select_cs1.bmp",
         "selectslot_img.bmp",
         "selslot.bmp",
         "slot_bg.bmp",
@@ -528,6 +562,7 @@ void UISelectCharWnd::EnsureResourceCache()
     }
 
     const char* selSlotBmpNames[] = {
+        "client_select_cs.bmp",
         "selectslot_select.bmp",
         "selslot_on.bmp",
         nullptr
@@ -1027,6 +1062,19 @@ void UISelectCharWnd::OnDraw()
 
     CHARACTER_INFO* chars = GetCharacters();
     const int baseSlot = GetVisibleSlotStart();
+
+    for (int offset = 0; offset < kVisibleSlotsPerPage; ++offset) {
+        const int slotNumber = baseSlot + offset;
+        const RECT slotRect = MakeRect(
+            m_x + kSlotLeft + offset * (kSlotWidth + kSlotGap),
+            m_y + kSlotTop,
+            kSlotWidth,
+            kSlotHeight);
+        HBITMAP slotBmp = (slotNumber == m_selectedSlot && m_slotSelectedBmp) ? m_slotSelectedBmp : m_slotBmp;
+        if (slotBmp) {
+            DrawBitmapTransparent(hdc, slotBmp, slotRect);
+        }
+    }
 
     for (int offset = 0; offset < kVisibleSlotsPerPage; ++offset) {
         DrawPreview(hdc, m_visiblePreviews[offset]);
