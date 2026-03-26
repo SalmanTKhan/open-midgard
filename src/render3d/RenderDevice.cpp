@@ -1412,9 +1412,9 @@ public:
     D3D11RenderDevice()
         : m_hwnd(nullptr), m_renderWidth(0), m_renderHeight(0),
           m_swapChain(nullptr), m_device(nullptr), m_context(nullptr),
-                    m_renderTargetView(nullptr), m_swapChainRenderTargetView(nullptr), m_sceneTexture(nullptr), m_sceneRenderTargetView(nullptr), m_sceneShaderResourceView(nullptr), m_depthStencilTexture(nullptr), m_depthStencilView(nullptr),
+                                        m_renderTargetView(nullptr), m_swapChainRenderTargetView(nullptr), m_sceneTexture(nullptr), m_sceneRenderTargetView(nullptr), m_sceneShaderResourceView(nullptr), m_smaaEdgeTexture(nullptr), m_smaaEdgeRenderTargetView(nullptr), m_smaaEdgeShaderResourceView(nullptr), m_depthStencilTexture(nullptr), m_depthStencilView(nullptr),
           m_captureTexture(nullptr),
-                    m_vertexShaderTl(nullptr), m_vertexShaderLm(nullptr), m_pixelShader(nullptr), m_postVertexShader(nullptr), m_fxaaPixelShader(nullptr),
+                                        m_vertexShaderTl(nullptr), m_vertexShaderLm(nullptr), m_pixelShader(nullptr), m_postVertexShader(nullptr), m_fxaaPixelShader(nullptr), m_smaaEdgePixelShader(nullptr),
           m_inputLayoutTl(nullptr), m_inputLayoutLm(nullptr), m_constantBuffer(nullptr),
           m_vertexBuffer(nullptr), m_vertexBufferSize(0), m_indexBuffer(nullptr), m_indexBufferSize(0),
                                         m_samplerState(nullptr), m_postSamplerState(nullptr), m_postBlendState(nullptr), m_postDepthStencilState(nullptr), m_postRasterizerState(nullptr),
@@ -1529,6 +1529,7 @@ public:
         SafeRelease(m_constantBuffer);
         SafeRelease(m_inputLayoutLm);
         SafeRelease(m_inputLayoutTl);
+        SafeRelease(m_smaaEdgePixelShader);
         SafeRelease(m_fxaaPixelShader);
         SafeRelease(m_postVertexShader);
         SafeRelease(m_pixelShader);
@@ -1588,7 +1589,7 @@ public:
         };
         m_context->OMSetRenderTargets(1, &m_renderTargetView, m_depthStencilView);
         m_context->ClearRenderTargetView(m_renderTargetView, clearColor);
-        m_scenePresentDirty = IsFxaaEnabled();
+        m_scenePresentDirty = IsScenePostProcessEnabled();
         return 0;
     }
 
@@ -1596,7 +1597,7 @@ public:
     {
         if (m_context && m_depthStencilView) {
             m_context->ClearDepthStencilView(m_depthStencilView, D3D11_CLEAR_DEPTH, 1.0f, 0);
-            if (IsFxaaEnabled()) {
+            if (IsScenePostProcessEnabled()) {
                 m_scenePresentDirty = true;
             }
         }
@@ -1861,17 +1862,20 @@ private:
         ID3DBlob* pixelShaderBlob = nullptr;
         ID3DBlob* postVertexShaderBlob = nullptr;
         ID3DBlob* fxaaPixelShaderBlob = nullptr;
+        ID3DBlob* smaaEdgePixelShaderBlob = nullptr;
         const bool compiled = CompileShaderBlob(shaderSource, "VSMainTL", "vs_4_0", &vertexShaderTlBlob)
             && CompileShaderBlob(shaderSource, "VSMainLM", "vs_4_0", &vertexShaderLmBlob)
             && CompileShaderBlob(shaderSource, "PSMain", "ps_4_0", &pixelShaderBlob)
             && CompileShaderBlob(shaderSource, "VSMainPost", "vs_4_0", &postVertexShaderBlob)
-            && CompilePostProcessShaderBlob(shaderSource, kCompiledPostProcessAntiAliasingMode, "ps_4_0", &fxaaPixelShaderBlob);
+            && CompilePostProcessShaderBlob(shaderSource, kCompiledPostProcessAntiAliasingMode, "ps_4_0", &fxaaPixelShaderBlob)
+            && CompilePostProcessShaderBlob(shaderSource, AntiAliasingMode::SMAA, "ps_4_0", &smaaEdgePixelShaderBlob);
         if (!compiled) {
             SafeRelease(vertexShaderTlBlob);
             SafeRelease(vertexShaderLmBlob);
             SafeRelease(pixelShaderBlob);
             SafeRelease(postVertexShaderBlob);
             SafeRelease(fxaaPixelShaderBlob);
+            SafeRelease(smaaEdgePixelShaderBlob);
             return false;
         }
 
@@ -1882,6 +1886,7 @@ private:
             SafeRelease(pixelShaderBlob);
             SafeRelease(postVertexShaderBlob);
             SafeRelease(fxaaPixelShaderBlob);
+            SafeRelease(smaaEdgePixelShaderBlob);
             return false;
         }
 
@@ -1892,6 +1897,7 @@ private:
             SafeRelease(pixelShaderBlob);
             SafeRelease(postVertexShaderBlob);
             SafeRelease(fxaaPixelShaderBlob);
+            SafeRelease(smaaEdgePixelShaderBlob);
             return false;
         }
 
@@ -1902,6 +1908,7 @@ private:
             SafeRelease(pixelShaderBlob);
             SafeRelease(postVertexShaderBlob);
             SafeRelease(fxaaPixelShaderBlob);
+            SafeRelease(smaaEdgePixelShaderBlob);
             return false;
         }
 
@@ -1912,6 +1919,7 @@ private:
             SafeRelease(pixelShaderBlob);
             SafeRelease(postVertexShaderBlob);
             SafeRelease(fxaaPixelShaderBlob);
+            SafeRelease(smaaEdgePixelShaderBlob);
             return false;
         }
 
@@ -1922,6 +1930,18 @@ private:
             SafeRelease(pixelShaderBlob);
             SafeRelease(postVertexShaderBlob);
             SafeRelease(fxaaPixelShaderBlob);
+            SafeRelease(smaaEdgePixelShaderBlob);
+            return false;
+        }
+
+        hr = m_device->CreatePixelShader(smaaEdgePixelShaderBlob->GetBufferPointer(), smaaEdgePixelShaderBlob->GetBufferSize(), nullptr, &m_smaaEdgePixelShader);
+        if (FAILED(hr) || !m_smaaEdgePixelShader) {
+            SafeRelease(vertexShaderTlBlob);
+            SafeRelease(vertexShaderLmBlob);
+            SafeRelease(pixelShaderBlob);
+            SafeRelease(postVertexShaderBlob);
+            SafeRelease(fxaaPixelShaderBlob);
+            SafeRelease(smaaEdgePixelShaderBlob);
             return false;
         }
 
@@ -1939,6 +1959,9 @@ private:
             SafeRelease(vertexShaderTlBlob);
             SafeRelease(vertexShaderLmBlob);
             SafeRelease(pixelShaderBlob);
+            SafeRelease(postVertexShaderBlob);
+            SafeRelease(fxaaPixelShaderBlob);
+            SafeRelease(smaaEdgePixelShaderBlob);
             return false;
         }
 
@@ -1958,6 +1981,7 @@ private:
         SafeRelease(pixelShaderBlob);
         SafeRelease(postVertexShaderBlob);
         SafeRelease(fxaaPixelShaderBlob);
+        SafeRelease(smaaEdgePixelShaderBlob);
         if (FAILED(hr) || !m_inputLayoutLm) {
             return false;
         }
@@ -2258,7 +2282,7 @@ private:
             m_context->Draw(vertexCount, 0);
         }
 
-        if (IsFxaaEnabled()) {
+        if (IsScenePostProcessEnabled()) {
             m_scenePresentDirty = true;
         }
     }
@@ -2288,7 +2312,7 @@ private:
         if (FAILED(hr) || !m_swapChainRenderTargetView) {
             return false;
         }
-        if (IsFxaaEnabled()) {
+        if (IsScenePostProcessEnabled()) {
             if (!CreateSceneRenderTargetResources()) {
                 return false;
             }
@@ -2448,8 +2472,75 @@ private:
         return GetCachedGraphicsSettings().antiAliasing == AntiAliasingMode::FXAA;
     }
 
+    bool IsSmaaEnabled() const
+    {
+        return GetCachedGraphicsSettings().antiAliasing == AntiAliasingMode::SMAA;
+    }
+
+    bool IsScenePostProcessEnabled() const
+    {
+        const AntiAliasingMode mode = GetCachedGraphicsSettings().antiAliasing;
+        return mode == AntiAliasingMode::FXAA || mode == AntiAliasingMode::SMAA;
+    }
+
+    bool CopySceneToBackBuffer()
+    {
+        if (!m_swapChain || !m_context || !m_sceneTexture) {
+            return false;
+        }
+
+        ID3D11Texture2D* backBuffer = nullptr;
+        const HRESULT hr = m_swapChain->GetBuffer(0, __uuidof(ID3D11Texture2D), reinterpret_cast<void**>(&backBuffer));
+        if (FAILED(hr) || !backBuffer) {
+            SafeRelease(backBuffer);
+            return false;
+        }
+
+        m_context->CopyResource(backBuffer, m_sceneTexture);
+        SafeRelease(backBuffer);
+        return true;
+    }
+
+    bool DrawPostProcessPass(ID3D11RenderTargetView* targetView, ID3D11ShaderResourceView* sourceView0,
+        ID3D11ShaderResourceView* sourceView1, ID3D11PixelShader* pixelShader)
+    {
+        if (!m_context || !targetView || !sourceView0 || !m_postVertexShader || !pixelShader
+            || !m_constantBuffer || !m_postSamplerState || !m_postBlendState
+            || !m_postDepthStencilState || !m_postRasterizerState) {
+            return false;
+        }
+
+        ID3D11ShaderResourceView* postViews[2] = { sourceView0, sourceView1 };
+        const float blendFactor[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+
+        m_context->OMSetRenderTargets(1, &targetView, nullptr);
+        m_context->OMSetBlendState(m_postBlendState, blendFactor, 0xFFFFFFFFu);
+        m_context->OMSetDepthStencilState(m_postDepthStencilState, 0);
+        m_context->RSSetState(m_postRasterizerState);
+        ApplyViewport();
+
+        m_context->IASetInputLayout(nullptr);
+        m_context->IASetVertexBuffers(0, 0, nullptr, nullptr, nullptr);
+        m_context->IASetIndexBuffer(nullptr, DXGI_FORMAT_R16_UINT, 0);
+        m_context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+        m_context->VSSetShader(m_postVertexShader, nullptr, 0);
+        m_context->PSSetShader(pixelShader, nullptr, 0);
+        m_context->VSSetConstantBuffers(0, 1, &m_constantBuffer);
+        m_context->PSSetConstantBuffers(0, 1, &m_constantBuffer);
+        m_context->PSSetSamplers(0, 1, &m_postSamplerState);
+        m_context->PSSetShaderResources(0, 2, postViews);
+        m_context->Draw(3, 0);
+
+        ID3D11ShaderResourceView* clearViews[2] = { nullptr, nullptr };
+        m_context->PSSetShaderResources(0, 2, clearViews);
+        return true;
+    }
+
     void ReleaseSceneRenderTargetResources()
     {
+        SafeRelease(m_smaaEdgeShaderResourceView);
+        SafeRelease(m_smaaEdgeRenderTargetView);
+        SafeRelease(m_smaaEdgeTexture);
         SafeRelease(m_sceneShaderResourceView);
         SafeRelease(m_sceneRenderTargetView);
         SafeRelease(m_sceneTexture);
@@ -2501,17 +2592,35 @@ private:
             return false;
         }
 
+        if (IsSmaaEnabled()) {
+            hr = m_device->CreateTexture2D(&sceneDesc, nullptr, &m_smaaEdgeTexture);
+            if (FAILED(hr) || !m_smaaEdgeTexture) {
+                ReleaseSceneRenderTargetResources();
+                return false;
+            }
+
+            hr = m_device->CreateRenderTargetView(m_smaaEdgeTexture, nullptr, &m_smaaEdgeRenderTargetView);
+            if (FAILED(hr) || !m_smaaEdgeRenderTargetView) {
+                ReleaseSceneRenderTargetResources();
+                return false;
+            }
+
+            hr = m_device->CreateShaderResourceView(m_smaaEdgeTexture, nullptr, &m_smaaEdgeShaderResourceView);
+            if (FAILED(hr) || !m_smaaEdgeShaderResourceView) {
+                ReleaseSceneRenderTargetResources();
+                return false;
+            }
+        }
+
         return true;
     }
 
     bool EnsureScenePresentedToBackBuffer()
     {
-        if (!IsFxaaEnabled() || !m_scenePresentDirty) {
+        if (!IsScenePostProcessEnabled() || !m_scenePresentDirty) {
             return true;
         }
-        if (!m_context || !m_swapChainRenderTargetView || !m_sceneShaderResourceView
-            || !m_postVertexShader || !m_fxaaPixelShader || !m_constantBuffer
-            || !m_postSamplerState || !m_postBlendState || !m_postDepthStencilState || !m_postRasterizerState) {
+        if (!m_context || !m_sceneShaderResourceView || !m_constantBuffer) {
             return false;
         }
 
@@ -2522,29 +2631,25 @@ private:
             return false;
         }
 
-        ID3D11ShaderResourceView* postViews[2] = { m_sceneShaderResourceView, nullptr };
-        const float blendFactor[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+        if (IsSmaaEnabled()) {
+            if (!m_smaaEdgeRenderTargetView || !m_smaaEdgeShaderResourceView || !m_smaaEdgePixelShader) {
+                return false;
+            }
+            if (!DrawPostProcessPass(m_smaaEdgeRenderTargetView, m_sceneShaderResourceView, nullptr, m_smaaEdgePixelShader)) {
+                return false;
+            }
+            if (!CopySceneToBackBuffer()) {
+                return false;
+            }
+        } else {
+            if (!m_swapChainRenderTargetView || !m_fxaaPixelShader) {
+                return false;
+            }
+            if (!DrawPostProcessPass(m_swapChainRenderTargetView, m_sceneShaderResourceView, nullptr, m_fxaaPixelShader)) {
+                return false;
+            }
+        }
 
-        m_context->OMSetRenderTargets(1, &m_swapChainRenderTargetView, nullptr);
-        m_context->OMSetBlendState(m_postBlendState, blendFactor, 0xFFFFFFFFu);
-        m_context->OMSetDepthStencilState(m_postDepthStencilState, 0);
-        m_context->RSSetState(m_postRasterizerState);
-        ApplyViewport();
-
-        m_context->IASetInputLayout(nullptr);
-        m_context->IASetVertexBuffers(0, 0, nullptr, nullptr, nullptr);
-        m_context->IASetIndexBuffer(nullptr, DXGI_FORMAT_R16_UINT, 0);
-        m_context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-        m_context->VSSetShader(m_postVertexShader, nullptr, 0);
-        m_context->PSSetShader(m_fxaaPixelShader, nullptr, 0);
-        m_context->VSSetConstantBuffers(0, 1, &m_constantBuffer);
-        m_context->PSSetConstantBuffers(0, 1, &m_constantBuffer);
-        m_context->PSSetSamplers(0, 1, &m_postSamplerState);
-        m_context->PSSetShaderResources(0, 2, postViews);
-        m_context->Draw(3, 0);
-
-        ID3D11ShaderResourceView* clearViews[2] = { nullptr, nullptr };
-        m_context->PSSetShaderResources(0, 2, clearViews);
         m_context->OMSetRenderTargets(1, &m_renderTargetView, m_depthStencilView);
         ApplyViewport();
         m_scenePresentDirty = false;
@@ -2562,6 +2667,9 @@ private:
     ID3D11Texture2D* m_sceneTexture;
     ID3D11RenderTargetView* m_sceneRenderTargetView;
     ID3D11ShaderResourceView* m_sceneShaderResourceView;
+    ID3D11Texture2D* m_smaaEdgeTexture;
+    ID3D11RenderTargetView* m_smaaEdgeRenderTargetView;
+    ID3D11ShaderResourceView* m_smaaEdgeShaderResourceView;
     ID3D11Texture2D* m_depthStencilTexture;
     ID3D11DepthStencilView* m_depthStencilView;
     ID3D11Texture2D* m_captureTexture;
@@ -2570,6 +2678,7 @@ private:
     ID3D11PixelShader* m_pixelShader;
     ID3D11VertexShader* m_postVertexShader;
     ID3D11PixelShader* m_fxaaPixelShader;
+    ID3D11PixelShader* m_smaaEdgePixelShader;
     ID3D11InputLayout* m_inputLayoutTl;
     ID3D11InputLayout* m_inputLayoutLm;
     ID3D11Buffer* m_constantBuffer;

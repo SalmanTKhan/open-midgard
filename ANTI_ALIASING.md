@@ -33,7 +33,8 @@ When SMAA ships, it will use a single production preset: `SMAA 1x High`.
 - D3D11 and D3D12 source for those passes lives in the shared post-process HLSL embedded in [src/render3d/RenderDevice.cpp](d:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render3d/RenderDevice.cpp).
 - Vulkan source for those passes lives in [src/render3d/shaders/vulkan_post_smaa.hlsl](d:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render3d/shaders/vulkan_post_smaa.hlsl).
 - The Vulkan generated header for those shaders is emitted by [tools/update_vulkan_smaa_shaders.ps1](d:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/tools/update_vulkan_smaa_shaders.ps1).
-- Those assets are checked in ahead of runtime wiring so the remaining SMAA work can focus on render-target allocation, pass sequencing, and composition correctness.
+- D3D11 now allocates and runs the SMAA edge-detection pass against the offscreen 3D scene target when `SMAA` is selected internally; the later blend-weight and neighborhood passes are still pending before the mode is exposed.
+- The remaining SMAA work is focused on the later pass sequencing and final composition correctness.
 
 ## Render Path Scope
 
