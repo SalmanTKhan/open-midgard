@@ -4546,7 +4546,7 @@ public:
 
     bool ShouldUseVulkanFxaaPostProcess() const
     {
-        return false;
+        return true;
     }
 
     int Present(bool vertSync) override
@@ -5197,6 +5197,51 @@ private:
             return false;
         }
 
+        VkDescriptorSetLayoutBinding postLayoutBindings[2]{};
+        postLayoutBindings[0].binding = 0;
+        postLayoutBindings[0].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+        postLayoutBindings[0].descriptorCount = 1;
+        postLayoutBindings[0].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+        postLayoutBindings[1].binding = 1;
+        postLayoutBindings[1].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER;
+        postLayoutBindings[1].descriptorCount = 1;
+        postLayoutBindings[1].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+
+        VkDescriptorSetLayoutCreateInfo postDescriptorLayoutInfo{};
+        postDescriptorLayoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+        postDescriptorLayoutInfo.bindingCount = static_cast<uint32_t>(std::size(postLayoutBindings));
+        postDescriptorLayoutInfo.pBindings = postLayoutBindings;
+        result = vkCreateDescriptorSetLayout(m_device, &postDescriptorLayoutInfo, nullptr, &m_postDescriptorSetLayout);
+        if (result != VK_SUCCESS) {
+            m_bootstrap.initHr = static_cast<int>(result);
+            DestroyPipelineResources();
+            return false;
+        }
+
+        VkSamplerCreateInfo postSamplerInfo{};
+        postSamplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+        postSamplerInfo.magFilter = VK_FILTER_LINEAR;
+        postSamplerInfo.minFilter = VK_FILTER_LINEAR;
+        postSamplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+        postSamplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+        postSamplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+        postSamplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+        postSamplerInfo.minLod = 0.0f;
+        postSamplerInfo.maxLod = 0.0f;
+        postSamplerInfo.anisotropyEnable = VK_FALSE;
+        result = vkCreateSampler(m_device, &postSamplerInfo, nullptr, &m_postSampler);
+        if (result != VK_SUCCESS) {
+            m_bootstrap.initHr = static_cast<int>(result);
+            DestroyPipelineResources();
+            return false;
+        }
+
+        if (!CreateShaderModuleFromBytes(kVulkanPostFxaaVsSpirv, kVulkanPostFxaaVsSpirvSize, &m_postVertexShaderModule)
+            || !CreateShaderModuleFromBytes(kVulkanPostFxaaPsSpirv, kVulkanPostFxaaPsSpirvSize, &m_postFxaaFragmentShaderModule)) {
+            DestroyPipelineResources();
+            return false;
+        }
+
         VkPushConstantRange pushConstantRange{};
         pushConstantRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
         pushConstantRange.offset = 0;
@@ -5210,6 +5255,25 @@ private:
         layoutInfo.pPushConstantRanges = &pushConstantRange;
 
         result = vkCreatePipelineLayout(m_device, &layoutInfo, nullptr, &m_pipelineLayout);
+        if (result != VK_SUCCESS) {
+            m_bootstrap.initHr = static_cast<int>(result);
+            DestroyPipelineResources();
+            return false;
+        }
+
+        VkPushConstantRange postPushConstantRange{};
+        postPushConstantRange.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+        postPushConstantRange.offset = 0;
+        postPushConstantRange.size = static_cast<uint32_t>(sizeof(ModernDrawConstants));
+
+        VkPipelineLayoutCreateInfo postLayoutInfo{};
+        postLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+        postLayoutInfo.setLayoutCount = 1;
+        postLayoutInfo.pSetLayouts = &m_postDescriptorSetLayout;
+        postLayoutInfo.pushConstantRangeCount = 1;
+        postLayoutInfo.pPushConstantRanges = &postPushConstantRange;
+
+        result = vkCreatePipelineLayout(m_device, &postLayoutInfo, nullptr, &m_postPipelineLayout);
         if (result != VK_SUCCESS) {
             m_bootstrap.initHr = static_cast<int>(result);
             DestroyPipelineResources();
@@ -5366,11 +5430,11 @@ private:
         shaderStages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
         shaderStages[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
         shaderStages[0].module = m_postVertexShaderModule;
-        shaderStages[0].pName = "main";
+        shaderStages[0].pName = "VSMainPost";
         shaderStages[1].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
         shaderStages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
         shaderStages[1].module = m_postFxaaFragmentShaderModule;
-        shaderStages[1].pName = "main";
+        shaderStages[1].pName = "PSMainFXAA";
 
         VkGraphicsPipelineCreateInfo pipelineInfo{};
         pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
