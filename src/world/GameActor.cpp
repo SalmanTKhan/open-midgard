@@ -1,6 +1,9 @@
 #include "GameActor.h"
 #include "MsgEffect.h"
 #include "World.h"
+#include "audio/Audio.h"
+#include "gamemode/GameMode.h"
+#include "gamemode/Mode.h"
 #include "main/WinMain.h"
 #include "DebugLog.h"
 #include "render/DC.h"
@@ -39,6 +42,9 @@ constexpr int kAttackStateId = kGameActorAttackStateId;
 constexpr int kDeathStateId = kGameActorDeathStateId;
 constexpr int kDeathAction = 64;
 constexpr int kDeathMotion = 4;
+constexpr int kMonsterJobMin = 1000;
+constexpr int kMercenaryJobMin = 6001;
+constexpr int kMercenaryJobMax = 6047;
 
 #define LOG_ACT_LOAD(...) do { if constexpr (kLogActLoad) { DbgLog(__VA_ARGS__); } } while (0)
 
@@ -80,6 +86,112 @@ bool TryResolveNonPcSpritePaths(const char* spriteRoot, const char* jobName, cha
 float ActorRotationDegreesFromDir(int dir)
 {
     return NormalizeAngle360(45.0f * static_cast<float>(dir & 7));
+}
+
+bool IsMonsterLikeWaveActor(const CGameActor& actor)
+{
+    return actor.m_job >= kMonsterJobMin
+        && (actor.m_job < kMercenaryJobMin || actor.m_job > kMercenaryJobMax);
+}
+
+bool ContainsAsciiCaseInsensitive(const char* text, const char* token)
+{
+    if (!text || !token || !*text || !*token) {
+        return false;
+    }
+
+    std::string loweredText(text);
+    std::string loweredToken(token);
+    std::transform(loweredText.begin(), loweredText.end(), loweredText.begin(), [](unsigned char ch) {
+        return static_cast<char>(std::tolower(ch));
+    });
+    std::transform(loweredToken.begin(), loweredToken.end(), loweredToken.begin(), [](unsigned char ch) {
+        return static_cast<char>(std::tolower(ch));
+    });
+    return loweredText.find(loweredToken) != std::string::npos;
+}
+
+std::string NormalizeWaveEventPath(const char* eventName)
+{
+    std::string normalized = eventName ? eventName : "";
+    std::replace(normalized.begin(), normalized.end(), '/', '\\');
+    return normalized;
+}
+
+bool TryPlayMonsterMotionWave(const CGameActor& actor, const char* eventName)
+{
+    if (!IsMonsterLikeWaveActor(actor) || !ContainsAsciiCaseInsensitive(eventName, ".wav")) {
+        return false;
+    }
+
+    CAudio* audio = CAudio::GetInstance();
+    CGameMode* gameMode = g_modeMgr.GetCurrentGameMode();
+    if (!audio || !gameMode || !gameMode->m_world || !gameMode->m_world->m_player) {
+        return false;
+    }
+
+    const vector3d listenerPos = gameMode->m_world->m_player->m_pos;
+    const std::string normalized = NormalizeWaveEventPath(eventName);
+    if (normalized.empty()) {
+        return false;
+    }
+
+    std::array<std::string, 3> candidates = {
+        normalized,
+        std::string("wav\\") + normalized,
+        std::string("data\\wav\\") + normalized,
+    };
+
+    for (const std::string& candidate : candidates) {
+        if (audio->PlaySound3D(candidate.c_str(), actor.m_pos, listenerPos)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+void PlayMotionWaveEvents(CRenderObject* object, CActRes* actRes, int action, int oldMotion, int newMotion)
+{
+    if (!object || !actRes || newMotion == oldMotion) {
+        return;
+    }
+
+    CGameActor* actor = dynamic_cast<CGameActor*>(object);
+    if (!actor) {
+        return;
+    }
+
+    const int motionCount = actRes->GetMotionCount(action);
+    if (motionCount <= 0) {
+        return;
+    }
+
+    auto playRange = [&](int first, int last) {
+        for (int motionIndex = first; motionIndex <= last; ++motionIndex) {
+            const CMotion* motion = actRes->GetMotion(action, motionIndex);
+            if (!motion || motion->eventId < 0) {
+                continue;
+            }
+
+            const char* eventName = actRes->GetEventName(motion->eventId);
+            if (!eventName || !*eventName) {
+                continue;
+            }
+
+            TryPlayMonsterMotionWave(*actor, eventName);
+        }
+    };
+
+    if (newMotion > oldMotion) {
+        playRange(oldMotion + 1, newMotion);
+        return;
+    }
+
+    if (oldMotion + 1 < motionCount) {
+        playRange(oldMotion + 1, motionCount - 1);
+    }
+    playRange(0, newMotion);
 }
 
 bool IsPortalFallbackJob(int job)
@@ -1542,6 +1654,8 @@ void CRenderObject::SetAction(int act, int mot, int type) {
     m_baseAction = act;
     m_curAction = act;
     m_curMotion = 0;
+    m_oldBaseAction = act;
+    m_oldMotion = 0;
     m_motionType = type;
     m_motionSpeed = clampedDelay * (m_modifyFactorOfmotionSpeed > 0.0f
         ? m_modifyFactorOfmotionSpeed
@@ -1560,6 +1674,10 @@ void CRenderObject::ProcessMotion() {
         return;
     }
 
+    if (m_oldBaseAction != m_baseAction) {
+        m_oldMotion = 0;
+    }
+
     const int resolvedAction = m_baseAction + Get8Dir(m_roty);
 
     const int availableAction = ResolveAvailableActionIndex(actRes, resolvedAction);
@@ -1568,13 +1686,19 @@ void CRenderObject::ProcessMotion() {
     const int motionCount = actRes->GetMotionCount(m_curAction);
     if (motionCount <= 0) {
         m_curMotion = 0;
+        m_oldBaseAction = m_baseAction;
+        m_oldMotion = 0;
         return;
     }
 
     if (m_isMotionFinished || m_isMotionFreezed) {
         m_curMotion = (std::min)(m_curMotion, motionCount - 1);
+        m_oldBaseAction = m_baseAction;
+        m_oldMotion = m_curMotion;
         return;
     }
+
+    const int previousMotion = (std::max)(0, (std::min)(m_oldMotion, motionCount - 1));
 
     const float stateTicks = static_cast<float>(timeGetTime() - m_stateStartTick) * 0.041666668f;
     const float motionSpeed = (std::max)(kDefaultMotionSpeedFactor, m_motionSpeed);
@@ -1590,10 +1714,16 @@ void CRenderObject::ProcessMotion() {
                 m_isMotionFinished = 1;
             }
         }
+        PlayMotionWaveEvents(this, actRes, m_curAction, previousMotion, m_curMotion);
+        m_oldBaseAction = m_baseAction;
+        m_oldMotion = m_curMotion;
         return;
     }
 
     m_curMotion = static_cast<int>(stateTicks / motionSpeed) % motionCount;
+    PlayMotionWaveEvents(this, actRes, m_curAction, previousMotion, m_curMotion);
+    m_oldBaseAction = m_baseAction;
+    m_oldMotion = m_curMotion;
 }
 
 void CRenderObject::SetRenderInfo(RENDER_INFO_RECT* rect, float f1, float f2) {
@@ -1823,6 +1953,8 @@ CPc::CPc()
     m_curAction = 0;
     m_baseAction = 0;
     m_curMotion = 0;
+    m_oldBaseAction = 0;
+    m_oldMotion = 0;
 }
 
 CPc::~CPc()

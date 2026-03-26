@@ -12,6 +12,7 @@ class UIPlayerGage;
 class CWorld;
 class CView;
 class CMousePointer;
+class CGameMode;
 
 enum class CursorAction : int {
     Arrow = 0,
@@ -79,6 +80,7 @@ public:
     void Switch(int newMode, const char* worldName);
     void PresentLoadingScreen(const char* message, float progress);
     int SendMsg(int msg, int wparam, int lparam, int extra = 0);
+    CGameMode* GetCurrentGameMode() const;
     void Quit();
 
 private:

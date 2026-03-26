@@ -115,6 +115,11 @@ int CModeMgr::SendMsg(int msg, int wparam, int lparam, int extra)
     return m_curMode->SendMsg(msg, wparam, lparam, extra);
 }
 
+CGameMode* CModeMgr::GetCurrentGameMode() const
+{
+    return m_curModeType == 1 ? dynamic_cast<CGameMode*>(m_curMode) : nullptr;
+}
+
 void CModeMgr::Run(int startMode, const char* worldName)
 {
     m_loopCond = 1;
