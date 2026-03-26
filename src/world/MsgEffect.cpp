@@ -230,9 +230,11 @@ unsigned int ModulateDigitColor(unsigned int srcRgb, unsigned int alpha, unsigne
         return PremultiplyArgb(alpha << 24);
     }
 
-    const unsigned int modulatedRed = srcRed * tintRed / 255u;
-    const unsigned int modulatedGreen = srcGreen * tintGreen / 255u;
-    const unsigned int modulatedBlue = srcBlue * tintBlue / 255u;
+    // Treat the digit sprite as a brightness mask so the requested damage tint
+    // stays stable through the fade instead of inheriting the source art hue.
+    const unsigned int modulatedRed = maxChannel * tintRed / 255u;
+    const unsigned int modulatedGreen = maxChannel * tintGreen / 255u;
+    const unsigned int modulatedBlue = maxChannel * tintBlue / 255u;
     return PremultiplyArgb((alpha << 24) | (modulatedRed << 16) | (modulatedGreen << 8) | modulatedBlue);
 }
 
