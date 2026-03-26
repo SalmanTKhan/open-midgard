@@ -3,6 +3,7 @@
 #include <windows.h>
 
 #include <algorithm>
+#include <vector>
 
 namespace {
 
@@ -187,11 +188,52 @@ bool DoesBackendSupportAnisotropicFiltering(RenderBackendType backend)
         || backend == RenderBackendType::Vulkan;
 }
 
+std::vector<AntiAliasingMode> GetSupportedAntiAliasingModesForBackend(RenderBackendType backend)
+{
+    switch (backend) {
+    case RenderBackendType::Direct3D11:
+    case RenderBackendType::Direct3D12:
+    case RenderBackendType::Vulkan:
+        return { AntiAliasingMode::None, AntiAliasingMode::FXAA };
+
+    default:
+        return {};
+    }
+}
+
 bool DoesBackendSupportAntiAliasing(RenderBackendType backend)
 {
-    return backend == RenderBackendType::Direct3D11
-    || backend == RenderBackendType::Direct3D12
-    || backend == RenderBackendType::Vulkan;
+    return !GetSupportedAntiAliasingModesForBackend(backend).empty();
+}
+
+bool DoesBackendSupportAntiAliasingMode(RenderBackendType backend, AntiAliasingMode mode)
+{
+    if (mode == AntiAliasingMode::None) {
+        return true;
+    }
+
+    const std::vector<AntiAliasingMode> supportedModes = GetSupportedAntiAliasingModesForBackend(backend);
+    return std::find(supportedModes.begin(), supportedModes.end(), mode) != supportedModes.end();
+}
+
+AntiAliasingMode GetEffectiveAntiAliasingModeForBackend(RenderBackendType backend, AntiAliasingMode requestedMode)
+{
+    return DoesBackendSupportAntiAliasingMode(backend, requestedMode)
+        ? requestedMode
+        : AntiAliasingMode::None;
+}
+
+void ClampGraphicsSettingsToBackend(RenderBackendType backend, GraphicsSettings* settings)
+{
+    if (!settings) {
+        return;
+    }
+
+    settings->windowMode = GetEffectiveWindowModeForBackend(backend, settings->windowMode);
+    if (!DoesBackendSupportAnisotropicFiltering(backend)) {
+        settings->anisotropicLevel = 1;
+    }
+    settings->antiAliasing = GetEffectiveAntiAliasingModeForBackend(backend, settings->antiAliasing);
 }
 
 WindowMode GetEffectiveWindowModeForBackend(RenderBackendType backend, WindowMode requestedMode)

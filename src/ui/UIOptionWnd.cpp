@@ -588,10 +588,7 @@ std::vector<int> UIOptionWnd::GetSupportedAnisotropicLevels() const
 
 std::vector<AntiAliasingMode> UIOptionWnd::GetSupportedAntiAliasingModes() const
 {
-    if (!DoesBackendSupportAntiAliasing(m_selectedRenderBackend)) {
-        return {};
-    }
-    return { AntiAliasingMode::None, AntiAliasingMode::FXAA };
+    return GetSupportedAntiAliasingModesForBackend(m_selectedRenderBackend);
 }
 
 RenderBackendType UIOptionWnd::NormalizeSelectedBackend(RenderBackendType backend) const
@@ -665,7 +662,9 @@ void UIOptionWnd::LoadSettings()
 
 void UIOptionWnd::SaveGraphicsPreferences() const
 {
-    SaveGraphicsSettings(m_graphicsSettings);
+    GraphicsSettings settings = m_graphicsSettings;
+    ClampGraphicsSettingsToBackend(m_selectedRenderBackend, &settings);
+    SaveGraphicsSettings(settings);
     SetConfiguredRenderBackend(m_selectedRenderBackend);
 }
 
@@ -1016,13 +1015,7 @@ void UIOptionWnd::CycleGraphicsSetting(GraphicsRowId rowId, int direction)
                     nextIndex = 0;
                 }
                 m_selectedRenderBackend = backends[static_cast<size_t>(nextIndex)];
-                m_graphicsSettings.windowMode = GetEffectiveWindowModeForBackend(m_selectedRenderBackend, m_graphicsSettings.windowMode);
-                if (!DoesBackendSupportAnisotropicFiltering(m_selectedRenderBackend)) {
-                    m_graphicsSettings.anisotropicLevel = 1;
-                }
-                if (!DoesBackendSupportAntiAliasing(m_selectedRenderBackend)) {
-                    m_graphicsSettings.antiAliasing = AntiAliasingMode::None;
-                }
+                ClampGraphicsSettingsToBackend(m_selectedRenderBackend, &m_graphicsSettings);
                 break;
             }
         }

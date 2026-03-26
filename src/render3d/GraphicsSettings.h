@@ -2,6 +2,8 @@
 
 #include "RenderBackend.h"
 
+#include <vector>
+
 enum class WindowMode {
     Windowed = 0,
     Fullscreen,
@@ -34,5 +36,9 @@ bool DoesBackendSupportResolutionSelection(RenderBackendType backend);
 bool DoesBackendSupportTextureUpscaling(RenderBackendType backend);
 bool DoesBackendSupportAnisotropicFiltering(RenderBackendType backend);
 bool DoesBackendSupportAntiAliasing(RenderBackendType backend);
+std::vector<AntiAliasingMode> GetSupportedAntiAliasingModesForBackend(RenderBackendType backend);
+bool DoesBackendSupportAntiAliasingMode(RenderBackendType backend, AntiAliasingMode mode);
+AntiAliasingMode GetEffectiveAntiAliasingModeForBackend(RenderBackendType backend, AntiAliasingMode requestedMode);
+void ClampGraphicsSettingsToBackend(RenderBackendType backend, GraphicsSettings* settings);
 WindowMode GetEffectiveWindowModeForBackend(RenderBackendType backend, WindowMode requestedMode);
 bool GraphicsSettingsRequireRestart(const GraphicsSettings& current, const GraphicsSettings& pending);

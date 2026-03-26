@@ -120,10 +120,10 @@ Goal: ship true configurable 3D anti-aliasing for modern backends without affect
 - [ ] Only enable the option-window AA entry for Vulkan after the resolved scene path is proven stable.
 
 #### Phase E — Backend Capability And UX Cleanup
-- [ ] Split AA capability reporting into explicit per-backend mode support instead of a single boolean.
+- [x] Split AA capability reporting into explicit per-backend mode support instead of a single boolean.
 - [ ] Keep unsupported AA modes hidden rather than greyed out in the option window.
 - [ ] Preserve restart-required behavior for AA modes that require backend reinitialization.
-- [ ] Ensure renderer switches clamp or clear unsupported AA modes when changing between backends.
+- [x] Ensure renderer switches clamp or clear unsupported AA modes when changing between backends.
 - [ ] Document which AA modes are supported by each backend and which render path they affect.
 
 #### Phase F — Validation Matrix
