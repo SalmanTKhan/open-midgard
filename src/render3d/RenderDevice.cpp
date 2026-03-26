@@ -1085,6 +1085,8 @@ public:
         return device && SUCCEEDED(device->BeginScene());
     }
 
+    bool PrepareOverlayPass() override { return true; }
+
     void EndScene() override
     {
         IDirect3DDevice7* device = g_3dDevice.m_pd3dDevice;
@@ -1529,6 +1531,8 @@ public:
         }
         return m_context != nullptr;
     }
+
+    bool PrepareOverlayPass() override { return true; }
 
     void EndScene() override {}
     void SetTransform(D3DTRANSFORMSTATETYPE state, const D3DMATRIX* matrix) override { (void)state; (void)matrix; }
@@ -2457,20 +2461,21 @@ public:
     D3D12RenderDevice()
         : m_hwnd(nullptr), m_renderWidth(0), m_renderHeight(0),
           m_factory(nullptr), m_device(nullptr), m_commandQueue(nullptr), m_swapChain(nullptr),
-          m_rtvHeap(nullptr), m_dsvHeap(nullptr), m_srvHeap(nullptr), m_depthStencil(nullptr),
+          m_rtvHeap(nullptr), m_dsvHeap(nullptr), m_srvHeap(nullptr), m_depthStencil(nullptr), m_postPipelineState(nullptr),
           m_commandAllocator(nullptr), m_commandList(nullptr), m_fence(nullptr),
           m_fenceEvent(nullptr), m_fenceValue(0), m_frameIndex(0), m_rtvDescriptorSize(0), m_srvDescriptorSize(0), m_srvHeapCursor(0),
           m_rootSignature(nullptr),
-          m_vertexShaderTlBlob(nullptr), m_vertexShaderLmBlob(nullptr), m_pixelShaderBlob(nullptr),
+          m_vertexShaderTlBlob(nullptr), m_vertexShaderLmBlob(nullptr), m_pixelShaderBlob(nullptr), m_postVertexShaderBlob(nullptr), m_fxaaPixelShaderBlob(nullptr),
                         m_captureReadbackBuffer(nullptr), m_captureDc(nullptr), m_captureBitmap(nullptr), m_captureBits(nullptr),
             m_captureWidth(0), m_captureHeight(0), m_captureRowPitch(0),
-                    m_frameCommandsOpen(false), m_loggedSrvHeapExhausted(false)
+                    m_frameCommandsOpen(false), m_loggedSrvHeapExhausted(false), m_scenePresentDirty(false)
     {
         ResetModernFixedFunctionState(&m_pipelineState);
         m_boundTextures[0] = nullptr;
         m_boundTextures[1] = nullptr;
         for (UINT index = 0; index < kFrameCount; ++index) {
             m_renderTargets[index] = nullptr;
+            m_sceneRenderTargets[index] = nullptr;
         }
     }
 
@@ -2584,7 +2589,7 @@ public:
         m_frameIndex = m_swapChain->GetCurrentBackBufferIndex();
 
         D3D12_DESCRIPTOR_HEAP_DESC rtvHeapDesc{};
-        rtvHeapDesc.NumDescriptors = kFrameCount;
+        rtvHeapDesc.NumDescriptors = kFrameCount * 2;
         rtvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
         hr = m_device->CreateDescriptorHeap(&rtvHeapDesc, IID_PPV_ARGS(&m_rtvHeap));
         if (FAILED(hr) || !m_rtvHeap) {
@@ -2715,6 +2720,9 @@ public:
         ReleaseUploadPages(m_indexUploadPages);
         ReleaseUploadPages(m_vertexUploadPages);
         ReleaseUploadPages(m_constantUploadPages);
+        SafeRelease(m_postPipelineState);
+        SafeRelease(m_fxaaPixelShaderBlob);
+        SafeRelease(m_postVertexShaderBlob);
         SafeRelease(m_pixelShaderBlob);
         SafeRelease(m_vertexShaderLmBlob);
         SafeRelease(m_vertexShaderTlBlob);
@@ -2744,6 +2752,7 @@ public:
         ResetModernFixedFunctionState(&m_pipelineState);
         m_boundTextures[0] = nullptr;
         m_boundTextures[1] = nullptr;
+        m_scenePresentDirty = false;
     }
 
     void RefreshRenderSize() override
@@ -2781,8 +2790,9 @@ public:
             static_cast<float>(color & 0xFFu) / 255.0f,
             static_cast<float>((color >> 24) & 0xFFu) / 255.0f,
         };
-        const D3D12_CPU_DESCRIPTOR_HANDLE rtvHandle = GetCurrentRtvHandle();
+        const D3D12_CPU_DESCRIPTOR_HANDLE rtvHandle = IsFxaaEnabled() ? GetCurrentSceneRtvHandle() : GetCurrentRtvHandle();
         m_commandList->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
+        m_scenePresentDirty = IsFxaaEnabled();
         return 0;
     }
     int ClearDepth() override
@@ -2792,11 +2802,18 @@ public:
         }
 
         m_commandList->ClearDepthStencilView(GetDsvHandle(), D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
+        if (IsFxaaEnabled()) {
+            m_scenePresentDirty = true;
+        }
         return 0;
     }
     int Present(bool vertSync) override
     {
         if (!m_swapChain || !m_commandQueue) {
+            return -1;
+        }
+
+        if (!EnsureScenePresentedToBackBuffer()) {
             return -1;
         }
 
@@ -2926,9 +2943,11 @@ public:
         ApplyViewportAndScissor();
 
         m_pendingUploadBuffers.push_back(uploadBuffer);
+        m_scenePresentDirty = false;
         return true;
     }
     bool BeginScene() override { return EnsureFrameCommandsStarted(); }
+    bool PrepareOverlayPass() override { return true; }
     void EndScene() override {}
     void SetTransform(D3DTRANSFORMSTATETYPE state, const D3DMATRIX* matrix) override { (void)state; (void)matrix; }
     void SetRenderState(D3DRENDERSTATETYPE state, DWORD value) override
@@ -3198,6 +3217,7 @@ private:
 
         for (UINT index = 0; index < kFrameCount; ++index) {
             SafeRelease(m_renderTargets[index]);
+            SafeRelease(m_sceneRenderTargets[index]);
         }
 
         D3D12_CPU_DESCRIPTOR_HANDLE handle = m_rtvHeap->GetCPUDescriptorHandleForHeapStart();
@@ -3210,7 +3230,14 @@ private:
             handle.ptr += static_cast<SIZE_T>(m_rtvDescriptorSize);
         }
 
+        if (IsFxaaEnabled()) {
+            if (!CreateSceneRenderTargets()) {
+                return false;
+            }
+        }
+
         m_frameIndex = m_swapChain->GetCurrentBackBufferIndex();
+        m_scenePresentDirty = false;
         return true;
     }
 
@@ -3223,7 +3250,9 @@ private:
         const char* shaderSource = GetD3D11ShaderSource();
         if (!CompileShaderBlob(shaderSource, "VSMainTL", "vs_5_0", &m_vertexShaderTlBlob)
             || !CompileShaderBlob(shaderSource, "VSMainLM", "vs_5_0", &m_vertexShaderLmBlob)
-            || !CompileShaderBlob(shaderSource, "PSMain", "ps_5_0", &m_pixelShaderBlob)) {
+            || !CompileShaderBlob(shaderSource, "PSMain", "ps_5_0", &m_pixelShaderBlob)
+            || !CompileShaderBlob(shaderSource, "VSMainPost", "vs_5_0", &m_postVertexShaderBlob)
+            || !CompileShaderBlob(shaderSource, "PSMainFXAA", "ps_5_0", &m_fxaaPixelShaderBlob)) {
             return false;
         }
 
@@ -3290,6 +3319,168 @@ private:
             return false;
         }
 
+        return CreatePostPipelineResources();
+    }
+
+    bool CreatePostPipelineResources()
+    {
+        if (!m_device || !m_rootSignature || !m_postVertexShaderBlob || !m_fxaaPixelShaderBlob) {
+            return false;
+        }
+
+        D3D12_GRAPHICS_PIPELINE_STATE_DESC desc{};
+        desc.pRootSignature = m_rootSignature;
+        desc.VS = { m_postVertexShaderBlob->GetBufferPointer(), m_postVertexShaderBlob->GetBufferSize() };
+        desc.PS = { m_fxaaPixelShaderBlob->GetBufferPointer(), m_fxaaPixelShaderBlob->GetBufferSize() };
+        desc.BlendState.RenderTarget[0].BlendEnable = FALSE;
+        desc.BlendState.RenderTarget[0].RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
+        desc.SampleMask = UINT_MAX;
+        desc.RasterizerState.FillMode = D3D12_FILL_MODE_SOLID;
+        desc.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;
+        desc.RasterizerState.FrontCounterClockwise = FALSE;
+        desc.RasterizerState.DepthClipEnable = TRUE;
+        desc.DepthStencilState.DepthEnable = FALSE;
+        desc.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO;
+        desc.DepthStencilState.DepthFunc = D3D12_COMPARISON_FUNC_ALWAYS;
+        desc.DepthStencilState.StencilEnable = FALSE;
+        desc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+        desc.NumRenderTargets = 1;
+        desc.RTVFormats[0] = DXGI_FORMAT_B8G8R8A8_UNORM;
+        desc.SampleDesc.Count = 1;
+
+        HRESULT hr = m_device->CreateGraphicsPipelineState(&desc, IID_PPV_ARGS(&m_postPipelineState));
+        return SUCCEEDED(hr) && m_postPipelineState != nullptr;
+    }
+
+    bool IsFxaaEnabled() const
+    {
+        return GetCachedGraphicsSettings().antiAliasing == AntiAliasingMode::FXAA;
+    }
+
+    D3D12_CPU_DESCRIPTOR_HANDLE GetCurrentSceneRtvHandle() const
+    {
+        D3D12_CPU_DESCRIPTOR_HANDLE handle = m_rtvHeap->GetCPUDescriptorHandleForHeapStart();
+        handle.ptr += static_cast<SIZE_T>(kFrameCount + m_frameIndex) * static_cast<SIZE_T>(m_rtvDescriptorSize);
+        return handle;
+    }
+
+    bool CreateSceneRenderTargets()
+    {
+        if (!m_device || m_renderWidth <= 0 || m_renderHeight <= 0) {
+            return false;
+        }
+
+        D3D12_HEAP_PROPERTIES heapProps{};
+        heapProps.Type = D3D12_HEAP_TYPE_DEFAULT;
+
+        D3D12_RESOURCE_DESC sceneDesc{};
+        sceneDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+        sceneDesc.Width = static_cast<UINT64>(m_renderWidth);
+        sceneDesc.Height = static_cast<UINT>(m_renderHeight);
+        sceneDesc.DepthOrArraySize = 1;
+        sceneDesc.MipLevels = 1;
+        sceneDesc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+        sceneDesc.SampleDesc.Count = 1;
+        sceneDesc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
+        sceneDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
+
+        D3D12_CLEAR_VALUE clearValue{};
+        clearValue.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+
+        for (UINT index = 0; index < kFrameCount; ++index) {
+            HRESULT hr = m_device->CreateCommittedResource(
+                &heapProps,
+                D3D12_HEAP_FLAG_NONE,
+                &sceneDesc,
+                D3D12_RESOURCE_STATE_RENDER_TARGET,
+                &clearValue,
+                IID_PPV_ARGS(&m_sceneRenderTargets[index]));
+            if (FAILED(hr) || !m_sceneRenderTargets[index]) {
+                return false;
+            }
+
+            D3D12_CPU_DESCRIPTOR_HANDLE handle = m_rtvHeap->GetCPUDescriptorHandleForHeapStart();
+            handle.ptr += static_cast<SIZE_T>(kFrameCount + index) * static_cast<SIZE_T>(m_rtvDescriptorSize);
+            m_device->CreateRenderTargetView(m_sceneRenderTargets[index], nullptr, handle);
+        }
+
+        return true;
+    }
+
+    bool WriteSceneSrvDescriptors(UINT baseIndex)
+    {
+        if (baseIndex + 1 >= kSrvHeapCapacity || !m_device || !m_sceneRenderTargets[m_frameIndex]) {
+            return false;
+        }
+
+        D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc{};
+        srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+        srvDesc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+        srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+        srvDesc.Texture2D.MostDetailedMip = 0;
+        srvDesc.Texture2D.MipLevels = 1;
+        srvDesc.Texture2D.ResourceMinLODClamp = 0.0f;
+        m_device->CreateShaderResourceView(m_sceneRenderTargets[m_frameIndex], &srvDesc, GetSrvCpuHandle(baseIndex));
+        WriteNullSrvDescriptor(baseIndex + 1);
+        return true;
+    }
+
+    bool EnsureScenePresentedToBackBuffer()
+    {
+        if (!IsFxaaEnabled() || !m_scenePresentDirty) {
+            return true;
+        }
+        if (!EnsureFrameCommandsStarted() || !m_postPipelineState || !m_sceneRenderTargets[m_frameIndex]) {
+            return false;
+        }
+
+        UINT srvBaseIndex = 0;
+        if (!ReserveSrvTable(kSrvSlotCount, &srvBaseIndex) || !WriteSceneSrvDescriptors(srvBaseIndex)) {
+            return false;
+        }
+
+        ModernDrawConstants constants{};
+        constants.screenWidth = static_cast<float>((std::max)(1, m_renderWidth));
+        constants.screenHeight = static_cast<float>((std::max)(1, m_renderHeight));
+        void* constantUpload = nullptr;
+        UINT64 constantGpuAddress = 0;
+        const size_t constantBytes = AlignTo(static_cast<UINT>(sizeof(ModernDrawConstants)), D3D12_CONSTANT_BUFFER_DATA_PLACEMENT_ALIGNMENT);
+        if (!AllocateConstantBufferSlice(constantBytes, &constantUpload, &constantGpuAddress)) {
+            return false;
+        }
+        std::memset(constantUpload, 0, constantBytes);
+        std::memcpy(constantUpload, &constants, sizeof(constants));
+
+        const D3D12_RESOURCE_BARRIER sceneToShader = TransitionBarrier(
+            m_sceneRenderTargets[m_frameIndex],
+            D3D12_RESOURCE_STATE_RENDER_TARGET,
+            D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+        m_commandList->ResourceBarrier(1, &sceneToShader);
+
+        ID3D12DescriptorHeap* descriptorHeaps[] = { m_srvHeap };
+        m_commandList->SetDescriptorHeaps(1, descriptorHeaps);
+        m_commandList->SetGraphicsRootSignature(m_rootSignature);
+        m_commandList->SetPipelineState(m_postPipelineState);
+        m_commandList->SetGraphicsRootConstantBufferView(0, constantGpuAddress);
+        m_commandList->SetGraphicsRootDescriptorTable(1, GetSrvGpuHandle(srvBaseIndex));
+        m_commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+        m_commandList->IASetVertexBuffers(0, 0, nullptr);
+        m_commandList->IASetIndexBuffer(nullptr);
+        const D3D12_CPU_DESCRIPTOR_HANDLE rtvHandle = GetCurrentRtvHandle();
+        m_commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, nullptr);
+        ApplyViewportAndScissor();
+        m_commandList->DrawInstanced(3, 1, 0, 0);
+
+        const D3D12_RESOURCE_BARRIER sceneToRender = TransitionBarrier(
+            m_sceneRenderTargets[m_frameIndex],
+            D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
+            D3D12_RESOURCE_STATE_RENDER_TARGET);
+        m_commandList->ResourceBarrier(1, &sceneToRender);
+
+        const D3D12_CPU_DESCRIPTOR_HANDLE dsvHandle = GetDsvHandle();
+        m_commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, m_depthStencil ? &dsvHandle : nullptr);
+        ApplyViewportAndScissor();
+        m_scenePresentDirty = false;
         return true;
     }
 
@@ -3623,7 +3814,11 @@ private:
 
     bool CaptureRenderTargetSnapshot()
     {
-        if (!EnsureCaptureResources() || !GetCurrentBackBuffer() || !EnsureFrameCommandsStarted()) {
+        if (!EnsureCaptureResources() || !GetCurrentBackBuffer()) {
+            return false;
+        }
+
+        if (!EnsureScenePresentedToBackBuffer() || !EnsureFrameCommandsStarted()) {
             return false;
         }
 
@@ -3897,6 +4092,10 @@ private:
             m_commandList->IASetIndexBuffer(nullptr);
             m_commandList->DrawInstanced(vertexCount, 1, 0, 0);
         }
+
+        if (IsFxaaEnabled()) {
+            m_scenePresentDirty = true;
+        }
     }
 
     bool CreateDepthStencilResources()
@@ -3945,6 +4144,7 @@ private:
         SafeRelease(m_depthStencil);
         for (UINT index = 0; index < kFrameCount; ++index) {
             SafeRelease(m_renderTargets[index]);
+            SafeRelease(m_sceneRenderTargets[index]);
         }
     }
 
@@ -4004,7 +4204,7 @@ private:
             D3D12_RESOURCE_STATE_PRESENT,
             D3D12_RESOURCE_STATE_RENDER_TARGET);
         m_commandList->ResourceBarrier(1, &barrier);
-        const D3D12_CPU_DESCRIPTOR_HANDLE rtvHandle = GetCurrentRtvHandle();
+        const D3D12_CPU_DESCRIPTOR_HANDLE rtvHandle = IsFxaaEnabled() ? GetCurrentSceneRtvHandle() : GetCurrentRtvHandle();
         const D3D12_CPU_DESCRIPTOR_HANDLE dsvHandle = GetDsvHandle();
         m_commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, m_depthStencil ? &dsvHandle : nullptr);
         ApplyViewportAndScissor();
@@ -4053,7 +4253,9 @@ private:
     ID3D12DescriptorHeap* m_dsvHeap;
     ID3D12DescriptorHeap* m_srvHeap;
     ID3D12Resource* m_renderTargets[kFrameCount];
+    ID3D12Resource* m_sceneRenderTargets[kFrameCount];
     ID3D12Resource* m_depthStencil;
+    ID3D12PipelineState* m_postPipelineState;
     ID3D12CommandAllocator* m_commandAllocator;
     ID3D12GraphicsCommandList* m_commandList;
     ID3D12Fence* m_fence;
@@ -4067,6 +4269,8 @@ private:
     ID3DBlob* m_vertexShaderTlBlob;
     ID3DBlob* m_vertexShaderLmBlob;
     ID3DBlob* m_pixelShaderBlob;
+    ID3DBlob* m_postVertexShaderBlob;
+    ID3DBlob* m_fxaaPixelShaderBlob;
     std::vector<UploadPage> m_constantUploadPages;
     std::vector<UploadPage> m_vertexUploadPages;
     std::vector<UploadPage> m_indexUploadPages;
@@ -4083,6 +4287,7 @@ private:
     std::vector<ID3D12Resource*> m_pendingUploadBuffers;
     bool m_frameCommandsOpen;
     bool m_loggedSrvHeapExhausted;
+    bool m_scenePresentDirty;
 };
 
 class VulkanRenderDevice final : public IRenderDevice {
@@ -4505,6 +4710,7 @@ public:
     }
 
     bool BeginScene() override { return EnsureFrameStarted(); }
+    bool PrepareOverlayPass() override { return true; }
     void EndScene() override {}
 
     void SetTransform(D3DTRANSFORMSTATETYPE state, const D3DMATRIX* matrix) override
@@ -6892,6 +7098,7 @@ private:
     void ReleaseBackBufferDC(HDC dc) override { (void)dc; }
     bool UpdateBackBufferFromMemory(const void* bgraPixels, int width, int height, int pitch) override { (void)bgraPixels; (void)width; (void)height; (void)pitch; return false; }
     bool BeginScene() override { return false; }
+    bool PrepareOverlayPass() override { return false; }
     void EndScene() override {}
     void SetTransform(D3DTRANSFORMSTATETYPE state, const D3DMATRIX* matrix) override { (void)state; (void)matrix; }
     void SetRenderState(D3DRENDERSTATETYPE state, DWORD value) override { (void)state; (void)value; }
@@ -7036,6 +7243,7 @@ public:
     void ReleaseBackBufferDC(HDC dc) override { m_active->ReleaseBackBufferDC(dc); }
     bool UpdateBackBufferFromMemory(const void* bgraPixels, int width, int height, int pitch) override { return m_active->UpdateBackBufferFromMemory(bgraPixels, width, height, pitch); }
     bool BeginScene() override { return m_active->BeginScene(); }
+    bool PrepareOverlayPass() override { return m_active->PrepareOverlayPass(); }
     void EndScene() override { m_active->EndScene(); }
     void SetTransform(D3DTRANSFORMSTATETYPE state, const D3DMATRIX* matrix) override { m_active->SetTransform(state, matrix); }
     void SetRenderState(D3DRENDERSTATETYPE state, DWORD value) override { m_active->SetRenderState(state, value); }

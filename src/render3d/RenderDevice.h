@@ -30,6 +30,7 @@ public:
     virtual bool UpdateBackBufferFromMemory(const void* bgraPixels, int width, int height, int pitch) = 0;
 
     virtual bool BeginScene() = 0;
+    virtual bool PrepareOverlayPass() = 0;
     virtual void EndScene() = 0;
     virtual void SetTransform(D3DTRANSFORMSTATETYPE state, const D3DMATRIX* matrix) = 0;
     virtual void SetRenderState(D3DRENDERSTATETYPE state, DWORD value) = 0;

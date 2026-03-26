@@ -689,6 +689,24 @@ void CRenderer::FlushRenderList() {
         return a.first < b.first;
     });
 
+    if (!m_rpAlphaNoDepthList.empty() && !m_renderDevice->PrepareOverlayPass()) {
+        m_rpFaceList.clear();
+        m_rpLMGroundList.clear();
+        m_rpLMLightList.clear();
+        m_rpRawList.clear();
+        m_rpAlphaList.clear();
+        m_rpAlphaNoDepthList.clear();
+        m_rpEmissiveList.clear();
+        m_rpRawAlphaList.clear();
+        m_rpLmList.clear();
+        m_rpAlphaOPList.clear();
+        m_vertBuffer.clear();
+        m_rpNullFaceListIter = m_rpNullFaceList.begin();
+        m_rpQuadFaceListIter = m_rpQuadFaceList.begin();
+        m_rpLmQuadFaceListIter = m_rpLmQuadFaceList.begin();
+        return;
+    }
+
     m_renderDevice->SetRenderState(D3DRENDERSTATE_ZENABLE, D3DZB_FALSE);
     for (auto& pair : m_rpAlphaNoDepthList) {
         SetTexture(pair.second->tex);
