@@ -166,6 +166,9 @@ void DrawBitmapTransparent(HDC target, HBITMAP bmp, const RECT& dst)
 
 RECT MakeCenteredBitmapRect(HBITMAP bmp, const RECT& outerRect)
 {
+    constexpr int kSlotOverlayOffsetX = -4;
+    constexpr int kSlotOverlayOffsetY = -2;
+
     RECT result = outerRect;
     if (!bmp) {
         return result;
@@ -180,8 +183,8 @@ RECT MakeCenteredBitmapRect(HBITMAP bmp, const RECT& outerRect)
     const int outerHeight = outerRect.bottom - outerRect.top;
     const int insetX = (outerWidth - bm.bmWidth) / 2;
     const int insetY = (outerHeight - bm.bmHeight) / 2;
-    result.left = outerRect.left + (std::max)(insetX, 0);
-    result.top = outerRect.top + (std::max)(insetY, 0);
+    result.left = outerRect.left + (std::max)(insetX + kSlotOverlayOffsetX, 0);
+    result.top = outerRect.top + (std::max)(insetY + kSlotOverlayOffsetY, 0);
     result.right = result.left + bm.bmWidth;
     result.bottom = result.top + bm.bmHeight;
     return result;
