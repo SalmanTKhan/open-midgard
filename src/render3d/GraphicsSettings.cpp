@@ -190,7 +190,8 @@ bool DoesBackendSupportAnisotropicFiltering(RenderBackendType backend)
 bool DoesBackendSupportAntiAliasing(RenderBackendType backend)
 {
     return backend == RenderBackendType::Direct3D11
-        || backend == RenderBackendType::Direct3D12;
+    || backend == RenderBackendType::Direct3D12
+    || backend == RenderBackendType::Vulkan;
 }
 
 WindowMode GetEffectiveWindowModeForBackend(RenderBackendType backend, WindowMode requestedMode)
