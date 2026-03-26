@@ -79,6 +79,60 @@ Goal: ship Direct3D12 and Vulkan as real renderer options, selectable from the i
 - [ ] Document backend selection precedence: env var override, persisted setting, default backend.
 - [ ] Document backend fallback order and restart-required behavior.
 
+### Milestone 11 — Modern Anti-Aliasing Roadmap
+
+Goal: ship true configurable 3D anti-aliasing for modern backends without affecting the composed UI or software cursor paths.
+
+#### Phase A — Finish The Current D3D11 FXAA Path
+- [x] Replace the old placeholder AA setting with a real backend-driven option.
+- [x] Implement D3D11 scene-to-offscreen rendering plus FXAA resolve before UI composition.
+- [x] Hide the AA option on unsupported backends instead of exposing dead settings.
+- [ ] Validate D3D11 FXAA across login, char select, in-game world render, overlays, and restart flow.
+- [ ] Check D3D11 FXAA image quality on GND edges, map-object silhouettes, foliage alpha edges, and animated effects.
+- [ ] Remove any D3D11-specific temporary AA diagnostics once stable.
+
+#### Phase B — Add True SMAA Option
+- [ ] Extend `AntiAliasingMode` to support both `FXAA` and `SMAA` as real selectable modes.
+- [ ] Add SMAA presets or a single production default and document the choice.
+- [ ] Add SMAA shader resources and generation flow for D3D11/D3D12/Vulkan.
+- [ ] Implement SMAA edge detection pass.
+- [ ] Implement SMAA blend-weight calculation pass.
+- [ ] Implement SMAA neighborhood blending pass.
+- [ ] Ensure the SMAA passes operate only on the 3D scene target and never on the final UI/cursor composite.
+- [ ] Expose SMAA in the option window only on backends where the full pass chain is implemented.
+
+#### Phase C — Port The 3D AA Pipeline To D3D12
+- [ ] Add a DX12 scene color target separate from the swapchain back buffer.
+- [ ] Route DX12 world rendering into the scene target while keeping overlays/UI on the existing post-scene path.
+- [ ] Add a DX12 fullscreen post-process pass abstraction for FXAA/SMAA.
+- [ ] Port the current FXAA implementation to DX12.
+- [ ] Hook the DX12 capture/snapshot path so overlays and UI compose over the AA-resolved scene, not the raw scene.
+- [ ] Re-validate resize, alt-tab, return-to-char-select, and restart-required behavior on DX12 with AA enabled.
+- [ ] Only enable the option-window AA entry for DX12 after the resolved scene path is proven stable.
+
+#### Phase D — Port The 3D AA Pipeline To Vulkan
+- [ ] Add a Vulkan scene color image separate from the swapchain image.
+- [ ] Route Vulkan world rendering into the scene target before overlay composition.
+- [ ] Add Vulkan fullscreen post-process pipeline support for FXAA/SMAA.
+- [ ] Port the current FXAA implementation to Vulkan.
+- [ ] Integrate the resolved scene into the existing Vulkan overlay/UI upload path without reintroducing the prior UI scaling issues.
+- [ ] Re-validate swapchain resize, present, alt-tab, cursor, and UI composition behavior with AA enabled on Vulkan.
+- [ ] Only enable the option-window AA entry for Vulkan after the resolved scene path is proven stable.
+
+#### Phase E — Backend Capability And UX Cleanup
+- [ ] Split AA capability reporting into explicit per-backend mode support instead of a single boolean.
+- [ ] Keep unsupported AA modes hidden rather than greyed out in the option window.
+- [ ] Preserve restart-required behavior for AA modes that require backend reinitialization.
+- [ ] Ensure renderer switches clamp or clear unsupported AA modes when changing between backends.
+- [ ] Document which AA modes are supported by each backend and which render path they affect.
+
+#### Phase F — Validation Matrix
+- [ ] Validate `Off`, `FXAA`, and `SMAA` on each supported backend.
+- [ ] Validate that UI, text, mouse cursor, and software-composed overlays are unchanged by 3D AA modes.
+- [ ] Validate world geometry, models, sprites in 3D space, particles, lightmaps, and alpha-tested surfaces under each AA mode.
+- [ ] Validate save/load/restart flow for AA settings from the option window.
+- [ ] Capture comparison screenshots and short implementation notes for final cleanup/documentation.
+
 ---
 
 ## Packet Version Alignment Plan
