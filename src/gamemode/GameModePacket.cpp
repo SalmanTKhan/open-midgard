@@ -64,6 +64,11 @@ constexpr u32 kNotifyEffectJobLevelUp = 1;
 constexpr u32 kNotifyEffectBaseLevelUpSuperNovice = 7;
 constexpr u32 kNotifyEffectJobLevelUpSuperNovice = 8;
 constexpr u32 kNotifyEffectBaseLevelUpTaekwon = 9;
+constexpr u32 kEffectIdBaseLevelUp = 371;
+constexpr u32 kEffectIdJobLevelUp = 158;
+constexpr u32 kEffectIdBaseLevelUpSuperNovice = 338;
+constexpr u32 kEffectIdJobLevelUpSuperNovice = 337;
+constexpr u32 kEffectIdBaseLevelUpTaekwon = 582;
 constexpr u32 kDeathFadeDurationMs = 510;
 constexpr u32 kDeathCorpseHoldMs = 1290;
 
@@ -161,13 +166,19 @@ void HandleNotifyEffect(CGameMode& mode, const PacketView& packet)
 
     switch (effectType) {
     case kNotifyEffectBaseLevelUp:
+        LaunchLevelUpEffect(actor, kEffectIdBaseLevelUp);
+        break;
     case kNotifyEffectBaseLevelUpSuperNovice:
+        LaunchLevelUpEffect(actor, kEffectIdBaseLevelUpSuperNovice);
+        break;
     case kNotifyEffectBaseLevelUpTaekwon:
-        LaunchLevelUpEffect(actor, false);
+        LaunchLevelUpEffect(actor, kEffectIdBaseLevelUpTaekwon);
         break;
     case kNotifyEffectJobLevelUp:
+        LaunchLevelUpEffect(actor, kEffectIdJobLevelUp);
+        break;
     case kNotifyEffectJobLevelUpSuperNovice:
-        LaunchLevelUpEffect(actor, true);
+        LaunchLevelUpEffect(actor, kEffectIdJobLevelUpSuperNovice);
         break;
     default:
         DbgLog("[GameMode] unhandled notify effect type=%u actor=%u\n",

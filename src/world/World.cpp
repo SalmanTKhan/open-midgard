@@ -8,6 +8,8 @@
 #include "core/File.h"
 #include "res/GndRes.h"
 #include "res/ModelRes.h"
+#include "res/Res.h"
+#include "res/Texture.h"
 #include "res/WorldRes.h"
 #include "session/Session.h"
 
@@ -292,6 +294,34 @@ CTexture* GetPortalRingTexture()
 
     ringTexture = g_texMgr.CreateTexture(kTextureSize, kTextureSize, pixels.data(), PF_A8R8G8B8, false);
     return ringTexture;
+}
+
+CTexture* GetEffectTexture(const char* path)
+{
+    if (!path || !*path) {
+        return nullptr;
+    }
+
+    static std::map<std::string, CTexture*> cache;
+    const std::string key(path);
+    const auto it = cache.find(key);
+    if (it != cache.end()) {
+        return it->second;
+    }
+
+    CTexture* texture = g_texMgr.GetTexture(path, false);
+    cache.emplace(key, texture);
+    return texture;
+}
+
+CTexture* GetAngelWingTexture()
+{
+    return GetEffectTexture("data\\texture\\effect\\wing003.bmp");
+}
+
+CTexture* GetJobLevelTexture()
+{
+    return GetEffectTexture("data\\texture\\effect\\explosive_1_128.bmp");
 }
 
 void SubmitTexturedBillboard(const vector3d& center,
@@ -928,17 +958,17 @@ private:
 
 class CLevelUpEffect : public CGameObject {
 public:
-    CLevelUpEffect(CGameActor* actor, bool jobLevel)
+    CLevelUpEffect(CGameActor* actor, u32 effectId)
         : m_actor(actor)
         , m_origin(actor ? actor->m_pos : vector3d{})
         , m_spawnTick(timeGetTime())
-        , m_jobLevel(jobLevel)
+        , m_effectId(effectId)
     {
     }
 
     u8 OnProcess() override
     {
-        return (timeGetTime() - m_spawnTick) < 2200u ? 1 : 0;
+        return (timeGetTime() - m_spawnTick) < ResolveLifeMs() ? 1 : 0;
     }
 
     void Render(matrix* viewMatrix) override
@@ -949,11 +979,11 @@ public:
 
         const DWORD elapsed = timeGetTime() - m_spawnTick;
         const float timeSeconds = static_cast<float>(elapsed) * 0.001f;
-        if (timeSeconds <= 0.0f || timeSeconds > 2.4f) {
+        if (timeSeconds <= 0.0f) {
             return;
         }
 
-        const float totalLife = m_jobLevel ? 1.6f : 1.9f;
+        const float totalLife = static_cast<float>(ResolveLifeMs()) * 0.001f;
         const float normalized = (std::min)(1.0f, timeSeconds / totalLife);
         const float fadeOut = normalized < 0.72f ? 1.0f : (1.0f - (normalized - 0.72f) / 0.28f);
         if (fadeOut <= 0.0f) {
@@ -963,86 +993,148 @@ public:
         vector3d center = m_actor ? m_actor->m_pos : m_origin;
         center.y += 0.15f;
 
-        const COLORREF burstColor = m_jobLevel ? RGB(120, 220, 255) : RGB(255, 238, 150);
-        const COLORREF coreColor = m_jobLevel ? RGB(220, 245, 255) : RGB(255, 255, 230);
-        const float ringRadius = m_jobLevel ? 1.7f : 2.2f;
-        const float flashWidth = m_jobLevel ? 2.0f : 2.8f;
-        const float flashHeight = m_jobLevel ? 3.4f : 4.8f;
-        const unsigned int baseAlpha = static_cast<unsigned int>((m_jobLevel ? 150.0f : 210.0f) * fadeOut);
-        const int renderFlags = 1 | 2;
+        switch (m_effectId) {
+        case 158:
+            RenderEntry(viewMatrix, center, normalized, fadeOut);
+            break;
+        case 337:
+            RenderJobLevel(viewMatrix, center, normalized, fadeOut, true);
+            break;
+        case 338:
+            RenderSuperAngel(viewMatrix, center, normalized, fadeOut, false);
+            break;
+        case 582:
+            RenderSuperAngel(viewMatrix, center, normalized, fadeOut, true);
+            break;
+        case 371:
+        default:
+            RenderAngel(viewMatrix, center, normalized, fadeOut);
+            break;
+        }
+    }
 
+private:
+    DWORD ResolveLifeMs() const
+    {
+        switch (m_effectId) {
+        case 158:
+            return 1500u;
+        case 337:
+            return 1650u;
+        case 338:
+        case 582:
+            return 1800u;
+        case 371:
+        default:
+            return 1700u;
+        }
+    }
+
+    vector3d ResolveGroundCenter(const vector3d& center) const
+    {
         vector3d groundCenter = center;
         if (g_world.m_attr) {
             groundCenter.y = g_world.m_attr->GetHeight(groundCenter.x, groundCenter.z) - 0.03f;
         }
+        return groundCenter;
+    }
 
-        const float pulseA = normalized;
-        const float pulseB = (std::max)(0.0f, normalized - 0.18f) / 0.82f;
+    void RenderAngel(matrix* viewMatrix, const vector3d& center, float normalized, float fadeOut) const
+    {
+        const COLORREF glowColor = RGB(255, 236, 168);
+        const COLORREF wingColor = RGB(255, 250, 236);
+        const unsigned int alpha = static_cast<unsigned int>(210.0f * fadeOut);
+        const int renderFlags = 1 | 2;
+        const vector3d groundCenter = ResolveGroundCenter(center);
+
         RenderPortalGroundDisc(groundCenter,
             *viewMatrix,
             GetPortalRingTexture(),
-            burstColor,
-            ringRadius + pulseA * (m_jobLevel ? 2.2f : 3.0f),
-            static_cast<unsigned int>(baseAlpha * 0.65f),
+            glowColor,
+            2.1f + normalized * 2.7f,
+            static_cast<unsigned int>(alpha * 0.45f),
             0.0f,
             kPortalGroundDepthBias,
             renderFlags);
-        if (pulseB > 0.0f) {
-            RenderPortalGroundDisc(groundCenter,
-                *viewMatrix,
-                GetPortalRingTexture(),
-                burstColor,
-                ringRadius * 0.7f + pulseB * (m_jobLevel ? 2.6f : 3.4f),
-                static_cast<unsigned int>(baseAlpha * (1.0f - pulseB) * 0.4f),
-                0.0f,
-                kPortalGroundDepthBias,
-                renderFlags);
+
+        if (CTexture* wingTexture = GetAngelWingTexture()) {
+            for (int side = -1; side <= 1; side += 2) {
+                vector3d wingCenter = center;
+                wingCenter.x += static_cast<float>(side) * (0.75f + normalized * 0.22f);
+                wingCenter.y += 1.9f + normalized * 0.55f;
+                wingCenter.z -= 0.18f;
+                SubmitTexturedBillboard(wingCenter,
+                    *viewMatrix,
+                    wingTexture,
+                    2.6f,
+                    3.6f,
+                    PackPortalColor(static_cast<unsigned int>(alpha * 0.95f), wingColor),
+                    D3DBLEND_ONE,
+                    0.0f,
+                    0.0f,
+                    renderFlags);
+            }
         }
 
         vector3d flashCenter = center;
-        flashCenter.y += 1.7f + normalized * 0.7f;
+        flashCenter.y += 2.25f + normalized * 0.4f;
         SubmitTexturedBillboard(flashCenter,
             *viewMatrix,
             GetPortalParticleTexture(false),
-            flashWidth * (1.0f + normalized * 0.55f),
-            flashHeight * (1.0f + normalized * 0.35f),
-            PackPortalColor(static_cast<unsigned int>(baseAlpha * 0.85f), coreColor),
+            2.3f + normalized * 1.1f,
+            4.0f + normalized * 0.8f,
+            PackPortalColor(static_cast<unsigned int>(alpha * 0.8f), wingColor),
             D3DBLEND_ONE,
             0.0f,
             0.0f,
             renderFlags);
+    }
 
-        vector3d crossCenter = flashCenter;
-        crossCenter.y += 0.35f;
-        SubmitTexturedBillboard(crossCenter,
+    void RenderEntry(matrix* viewMatrix, const vector3d& center, float normalized, float fadeOut) const
+    {
+        const COLORREF glowColor = RGB(255, 214, 144);
+        const unsigned int alpha = static_cast<unsigned int>(185.0f * fadeOut);
+        const int renderFlags = 1 | 2;
+        const vector3d groundCenter = ResolveGroundCenter(center);
+
+        RenderPortalGroundDisc(groundCenter,
             *viewMatrix,
             GetPortalRingTexture(),
-            flashWidth * 2.1f * (1.0f + normalized * 0.3f),
-            flashWidth * 1.0f,
-            PackPortalColor(static_cast<unsigned int>(baseAlpha * 0.55f), burstColor),
-            D3DBLEND_ONE,
+            glowColor,
+            1.6f + normalized * 2.1f,
+            static_cast<unsigned int>(alpha * 0.38f),
             0.0f,
-            0.0f,
+            kPortalGroundDepthBias,
             renderFlags);
 
-        const int particleCount = m_jobLevel ? 10 : 16;
-        for (int particleIndex = 0; particleIndex < particleCount; ++particleIndex) {
-            const float seed = (static_cast<float>(particleIndex) + 0.5f) / static_cast<float>(particleCount);
-            const float angle = seed * 6.2831853f + timeSeconds * (m_jobLevel ? 2.2f : 3.0f);
-            const float radial = (0.35f + seed * (m_jobLevel ? 1.0f : 1.45f)) * (0.3f + normalized * 0.9f);
-            vector3d particlePos = center;
-            particlePos.x += std::cos(angle) * radial;
-            particlePos.z += std::sin(angle) * radial;
-            particlePos.y += 0.6f + normalized * (m_jobLevel ? 2.2f : 3.1f) + std::sin(angle * 2.0f + timeSeconds * 5.0f) * 0.12f;
+        if (CTexture* burstTexture = GetJobLevelTexture()) {
+            vector3d burstCenter = center;
+            burstCenter.y += 1.75f + normalized * 0.45f;
+            SubmitTexturedBillboard(burstCenter,
+                *viewMatrix,
+                burstTexture,
+                2.0f + normalized * 1.4f,
+                2.0f + normalized * 1.4f,
+                PackPortalColor(static_cast<unsigned int>(alpha * 0.95f), RGB(255, 248, 220)),
+                D3DBLEND_ONE,
+                0.0f,
+                0.0f,
+                renderFlags);
+        }
 
-            const float size = (m_jobLevel ? 0.55f : 0.72f) * (1.0f - normalized * 0.45f);
-            const unsigned int particleAlpha = static_cast<unsigned int>(baseAlpha * (0.45f + 0.45f * (1.0f - seed)));
+        for (int index = 0; index < 10; ++index) {
+            const float seed = (static_cast<float>(index) + 0.5f) / 10.0f;
+            const float angle = seed * 6.2831853f + normalized * 5.0f;
+            vector3d particlePos = center;
+            particlePos.x += std::cos(angle) * (0.35f + normalized * 1.1f);
+            particlePos.z += std::sin(angle) * (0.35f + normalized * 1.1f);
+            particlePos.y += 0.7f + normalized * 1.8f;
             SubmitTexturedBillboard(particlePos,
                 *viewMatrix,
-                (particleIndex & 1) == 0 ? GetPortalParticleTexture(false) : GetPortalParticleTexture(true),
-                size,
-                size * 1.35f,
-                PackPortalColor(particleAlpha, (particleIndex % 3) == 0 ? coreColor : burstColor),
+                GetPortalParticleTexture((index & 1) != 0),
+                0.48f,
+                0.7f,
+                PackPortalColor(static_cast<unsigned int>(alpha * (0.4f + 0.5f * (1.0f - seed))), glowColor),
                 D3DBLEND_ONE,
                 0.0f,
                 0.0f,
@@ -1050,11 +1142,103 @@ public:
         }
     }
 
-private:
+    void RenderJobLevel(matrix* viewMatrix, const vector3d& center, float normalized, float fadeOut, bool advanced) const
+    {
+        const COLORREF glowColor = advanced ? RGB(255, 188, 112) : RGB(255, 214, 144);
+        const COLORREF coreColor = advanced ? RGB(255, 242, 220) : RGB(255, 248, 232);
+        const unsigned int alpha = static_cast<unsigned int>((advanced ? 210.0f : 190.0f) * fadeOut);
+        const int renderFlags = 1 | 2;
+        const vector3d groundCenter = ResolveGroundCenter(center);
+
+        RenderPortalGroundDisc(groundCenter,
+            *viewMatrix,
+            GetPortalRingTexture(),
+            glowColor,
+            1.8f + normalized * (advanced ? 2.5f : 2.0f),
+            static_cast<unsigned int>(alpha * 0.42f),
+            0.0f,
+            kPortalGroundDepthBias,
+            renderFlags);
+
+        if (CTexture* burstTexture = GetJobLevelTexture()) {
+            vector3d burstCenter = center;
+            burstCenter.y += 1.65f + normalized * 0.35f;
+            const float size = advanced ? 2.6f : 2.2f;
+            SubmitTexturedBillboard(burstCenter,
+                *viewMatrix,
+                burstTexture,
+                size + normalized * 1.8f,
+                size + normalized * 1.8f,
+                PackPortalColor(static_cast<unsigned int>(alpha * 0.98f), coreColor),
+                D3DBLEND_ONE,
+                0.0f,
+                0.0f,
+                renderFlags);
+        }
+    }
+
+    void RenderSuperAngel(matrix* viewMatrix, const vector3d& center, float normalized, float fadeOut, bool taekwonVariant) const
+    {
+        const COLORREF glowColor = taekwonVariant ? RGB(255, 206, 116) : RGB(255, 236, 180);
+        const COLORREF accentColor = taekwonVariant ? RGB(255, 164, 92) : RGB(196, 236, 255);
+        const unsigned int alpha = static_cast<unsigned int>((taekwonVariant ? 220.0f : 210.0f) * fadeOut);
+        const int renderFlags = 1 | 2;
+        const vector3d groundCenter = ResolveGroundCenter(center);
+
+        RenderPortalGroundDisc(groundCenter,
+            *viewMatrix,
+            GetPortalRingTexture(),
+            glowColor,
+            2.0f + normalized * 2.9f,
+            static_cast<unsigned int>(alpha * 0.5f),
+            0.0f,
+            kPortalGroundDepthBias,
+            renderFlags);
+
+        if (CTexture* wingTexture = GetAngelWingTexture()) {
+            for (int wingIndex = 0; wingIndex < 4; ++wingIndex) {
+                const float angle = normalized * 2.6f + wingIndex * (6.2831853f / 4.0f);
+                vector3d wingCenter = center;
+                wingCenter.x += std::cos(angle) * 0.8f;
+                wingCenter.z += std::sin(angle) * 0.8f;
+                wingCenter.y += 2.0f + std::sin(angle * 1.7f) * 0.12f;
+                SubmitTexturedBillboard(wingCenter,
+                    *viewMatrix,
+                    wingTexture,
+                    2.2f,
+                    3.1f,
+                    PackPortalColor(static_cast<unsigned int>(alpha * 0.85f), taekwonVariant ? accentColor : glowColor),
+                    D3DBLEND_ONE,
+                    0.0f,
+                    0.0f,
+                    renderFlags);
+            }
+        }
+
+        for (int orbIndex = 0; orbIndex < 12; ++orbIndex) {
+            const float seed = (static_cast<float>(orbIndex) + 0.5f) / 12.0f;
+            const float angle = seed * 6.2831853f + normalized * (taekwonVariant ? 3.8f : 3.0f);
+            vector3d orbPos = center;
+            orbPos.x += std::cos(angle) * (0.45f + normalized * 1.25f);
+            orbPos.z += std::sin(angle) * (0.45f + normalized * 1.25f);
+            orbPos.y += 0.9f + normalized * 2.4f;
+            SubmitTexturedBillboard(orbPos,
+                *viewMatrix,
+                GetPortalParticleTexture((orbIndex & 1) != 0),
+                0.46f,
+                0.62f,
+                PackPortalColor(static_cast<unsigned int>(alpha * (0.4f + 0.45f * (1.0f - seed))), (orbIndex % 2) == 0 ? glowColor : accentColor),
+                D3DBLEND_ONE,
+                0.0f,
+                0.0f,
+                renderFlags);
+        }
+    }
+
     CGameActor* m_actor;
     vector3d m_origin;
     DWORD m_spawnTick;
-    bool m_jobLevel;
+    u32 m_effectId;
 };
 
 vector3d NormalizeVec3(const vector3d& value);
@@ -4022,11 +4206,11 @@ void CWorld::RenderBackgroundObjects(const matrix& viewMatrix) const
     }
 }
 
-void LaunchLevelUpEffect(CGameActor* actor, bool jobLevel)
+void LaunchLevelUpEffect(CGameActor* actor, u32 effectId)
 {
     if (!actor) {
         return;
     }
 
-    g_world.m_gameObjectList.push_back(new CLevelUpEffect(actor, jobLevel));
+    g_world.m_gameObjectList.push_back(new CLevelUpEffect(actor, effectId));
 }

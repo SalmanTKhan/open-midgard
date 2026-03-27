@@ -282,4 +282,4 @@ public:
 
 extern CWorld g_world;
 
-void LaunchLevelUpEffect(CGameActor* actor, bool jobLevel);
+void LaunchLevelUpEffect(CGameActor* actor, u32 effectId);
