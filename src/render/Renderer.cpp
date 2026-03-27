@@ -418,7 +418,9 @@ void CRenderer::AddRP(RPFace* face, int renderFlag) {
             }
         }
 
-        if (renderFlag & 4) {
+        if ((renderFlag & 8) && (renderFlag & 4)) {
+            m_rpAlphaOPNoDepthList.push_back({sortKey, face});
+        } else if (renderFlag & 4) {
             m_rpAlphaOPList.push_back({sortKey, face});
         } else if (renderFlag & 2) { // Emissive
             m_rpEmissiveList.push_back({sortKey, face});
@@ -697,9 +699,11 @@ void CRenderer::FlushRenderList() {
         m_rpAlphaList.clear();
         m_rpAlphaNoDepthList.clear();
         m_rpEmissiveList.clear();
+        m_rpEmissiveNoDepthList.clear();
         m_rpRawAlphaList.clear();
         m_rpLmList.clear();
         m_rpAlphaOPList.clear();
+        m_rpAlphaOPNoDepthList.clear();
         m_vertBuffer.clear();
         m_rpNullFaceListIter = m_rpNullFaceList.begin();
         m_rpQuadFaceListIter = m_rpQuadFaceList.begin();
@@ -708,6 +712,39 @@ void CRenderer::FlushRenderList() {
     }
 
     m_renderDevice->SetRenderState(D3DRENDERSTATE_ZENABLE, D3DZB_FALSE);
+    if (!m_rpAlphaOPNoDepthList.empty()) {
+        std::stable_sort(m_rpAlphaOPNoDepthList.begin(), m_rpAlphaOPNoDepthList.end(), [](const std::pair<float, RPFace*>& a, const std::pair<float, RPFace*>& b) {
+            return a.first < b.first;
+        });
+
+        D3DBLEND activeSrcBlend = D3DBLEND_SRCALPHA;
+        D3DBLEND activeDestBlend = D3DBLEND_INVSRCALPHA;
+        for (auto& pair : m_rpAlphaOPNoDepthList) {
+            RPFace* face = pair.second;
+            if (!face) {
+                continue;
+            }
+
+            if (face->srcAlphaMode != activeSrcBlend) {
+                m_renderDevice->SetRenderState(D3DRENDERSTATE_SRCBLEND, face->srcAlphaMode);
+                activeSrcBlend = face->srcAlphaMode;
+            }
+            if (face->destAlphaMode != activeDestBlend) {
+                m_renderDevice->SetRenderState(D3DRENDERSTATE_DESTBLEND, face->destAlphaMode);
+                activeDestBlend = face->destAlphaMode;
+            }
+            SetTexture(face->tex);
+            RPFace::DrawPri(face, *m_renderDevice);
+        }
+
+        if (activeSrcBlend != D3DBLEND_SRCALPHA) {
+            m_renderDevice->SetRenderState(D3DRENDERSTATE_SRCBLEND, D3DBLEND_SRCALPHA);
+        }
+        if (activeDestBlend != D3DBLEND_INVSRCALPHA) {
+            m_renderDevice->SetRenderState(D3DRENDERSTATE_DESTBLEND, D3DBLEND_INVSRCALPHA);
+        }
+    }
+
     for (auto& pair : m_rpAlphaNoDepthList) {
         SetTexture(pair.second->tex);
         RPFace::DrawPri(pair.second, *m_renderDevice);
@@ -746,6 +783,7 @@ void CRenderer::FlushRenderList() {
     m_rpRawAlphaList.clear();
     m_rpLmList.clear();
     m_rpAlphaOPList.clear();
+    m_rpAlphaOPNoDepthList.clear();
     m_vertBuffer.clear();
     
     m_rpNullFaceListIter = m_rpNullFaceList.begin();
