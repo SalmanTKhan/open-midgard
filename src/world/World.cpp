@@ -953,42 +953,101 @@ public:
             return;
         }
 
-        vector3d center = m_actor ? m_actor->m_pos : m_origin;
-        center.y += 0.8f;
-
-        const COLORREF ringColor = m_jobLevel ? RGB(112, 214, 255) : RGB(255, 230, 120);
-        const float radius = m_jobLevel ? 2.5f : 3.2f;
-        const float height = m_jobLevel ? 3.2f : 4.2f;
-
-        RenderPortalEffectAtPosition(center,
-            *viewMatrix,
-            ringColor,
-            radius,
-            height,
-            timeSeconds,
-            m_jobLevel ? 0.2f : 0.0f,
-            false,
-            m_jobLevel ? PortalVisualStyle::Ready : PortalVisualStyle::Portal);
-
-        const float life = (std::min)(1.0f, timeSeconds / 2.2f);
-        const float fade = life < 0.75f ? 1.0f : (1.0f - (life - 0.75f) / 0.25f);
-        const unsigned int alpha = static_cast<unsigned int>((std::max)(0.0f, fade) * (m_jobLevel ? 148.0f : 208.0f));
-        if (alpha == 0u) {
+        const float totalLife = m_jobLevel ? 1.6f : 1.9f;
+        const float normalized = (std::min)(1.0f, timeSeconds / totalLife);
+        const float fadeOut = normalized < 0.72f ? 1.0f : (1.0f - (normalized - 0.72f) / 0.28f);
+        if (fadeOut <= 0.0f) {
             return;
         }
 
-        vector3d upperCenter = center;
-        upperCenter.y += 1.9f + std::sin(timeSeconds * 5.4f) * 0.12f;
-        SubmitTexturedBillboard(upperCenter,
+        vector3d center = m_actor ? m_actor->m_pos : m_origin;
+        center.y += 0.15f;
+
+        const COLORREF burstColor = m_jobLevel ? RGB(120, 220, 255) : RGB(255, 238, 150);
+        const COLORREF coreColor = m_jobLevel ? RGB(220, 245, 255) : RGB(255, 255, 230);
+        const float ringRadius = m_jobLevel ? 1.7f : 2.2f;
+        const float flashWidth = m_jobLevel ? 2.0f : 2.8f;
+        const float flashHeight = m_jobLevel ? 3.4f : 4.8f;
+        const unsigned int baseAlpha = static_cast<unsigned int>((m_jobLevel ? 150.0f : 210.0f) * fadeOut);
+        const int renderFlags = 1 | 2;
+
+        vector3d groundCenter = center;
+        if (g_world.m_attr) {
+            groundCenter.y = g_world.m_attr->GetHeight(groundCenter.x, groundCenter.z) - 0.03f;
+        }
+
+        const float pulseA = normalized;
+        const float pulseB = (std::max)(0.0f, normalized - 0.18f) / 0.82f;
+        RenderPortalGroundDisc(groundCenter,
             *viewMatrix,
             GetPortalRingTexture(),
-            radius * 3.5f,
-            radius * 2.2f,
-            PackPortalColor(alpha, ringColor),
+            burstColor,
+            ringRadius + pulseA * (m_jobLevel ? 2.2f : 3.0f),
+            static_cast<unsigned int>(baseAlpha * 0.65f),
+            0.0f,
+            kPortalGroundDepthBias,
+            renderFlags);
+        if (pulseB > 0.0f) {
+            RenderPortalGroundDisc(groundCenter,
+                *viewMatrix,
+                GetPortalRingTexture(),
+                burstColor,
+                ringRadius * 0.7f + pulseB * (m_jobLevel ? 2.6f : 3.4f),
+                static_cast<unsigned int>(baseAlpha * (1.0f - pulseB) * 0.4f),
+                0.0f,
+                kPortalGroundDepthBias,
+                renderFlags);
+        }
+
+        vector3d flashCenter = center;
+        flashCenter.y += 1.7f + normalized * 0.7f;
+        SubmitTexturedBillboard(flashCenter,
+            *viewMatrix,
+            GetPortalParticleTexture(false),
+            flashWidth * (1.0f + normalized * 0.55f),
+            flashHeight * (1.0f + normalized * 0.35f),
+            PackPortalColor(static_cast<unsigned int>(baseAlpha * 0.85f), coreColor),
             D3DBLEND_ONE,
             0.0f,
             0.0f,
-            1 | 2);
+            renderFlags);
+
+        vector3d crossCenter = flashCenter;
+        crossCenter.y += 0.35f;
+        SubmitTexturedBillboard(crossCenter,
+            *viewMatrix,
+            GetPortalRingTexture(),
+            flashWidth * 2.1f * (1.0f + normalized * 0.3f),
+            flashWidth * 1.0f,
+            PackPortalColor(static_cast<unsigned int>(baseAlpha * 0.55f), burstColor),
+            D3DBLEND_ONE,
+            0.0f,
+            0.0f,
+            renderFlags);
+
+        const int particleCount = m_jobLevel ? 10 : 16;
+        for (int particleIndex = 0; particleIndex < particleCount; ++particleIndex) {
+            const float seed = (static_cast<float>(particleIndex) + 0.5f) / static_cast<float>(particleCount);
+            const float angle = seed * 6.2831853f + timeSeconds * (m_jobLevel ? 2.2f : 3.0f);
+            const float radial = (0.35f + seed * (m_jobLevel ? 1.0f : 1.45f)) * (0.3f + normalized * 0.9f);
+            vector3d particlePos = center;
+            particlePos.x += std::cos(angle) * radial;
+            particlePos.z += std::sin(angle) * radial;
+            particlePos.y += 0.6f + normalized * (m_jobLevel ? 2.2f : 3.1f) + std::sin(angle * 2.0f + timeSeconds * 5.0f) * 0.12f;
+
+            const float size = (m_jobLevel ? 0.55f : 0.72f) * (1.0f - normalized * 0.45f);
+            const unsigned int particleAlpha = static_cast<unsigned int>(baseAlpha * (0.45f + 0.45f * (1.0f - seed)));
+            SubmitTexturedBillboard(particlePos,
+                *viewMatrix,
+                (particleIndex & 1) == 0 ? GetPortalParticleTexture(false) : GetPortalParticleTexture(true),
+                size,
+                size * 1.35f,
+                PackPortalColor(particleAlpha, (particleIndex % 3) == 0 ? coreColor : burstColor),
+                D3DBLEND_ONE,
+                0.0f,
+                0.0f,
+                renderFlags);
+        }
     }
 
 private:

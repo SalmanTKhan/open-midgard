@@ -122,6 +122,11 @@ void UINotifyLevelUpWnd::SetShow(int show)
     }
 }
 
+bool UINotifyLevelUpWnd::IsUpdateNeed()
+{
+    return m_show != 0 && (m_isDirty != 0 || !m_children.empty());
+}
+
 void UINotifyLevelUpWnd::OnCreate(int x, int y)
 {
     (void)x;
@@ -155,6 +160,15 @@ void UINotifyLevelUpWnd::OnProcess()
 
     EnsureCreated();
     UpdateAnchor();
+}
+
+void UINotifyLevelUpWnd::OnDraw()
+{
+    if (m_show == 0) {
+        return;
+    }
+
+    DrawChildren();
 }
 
 int UINotifyLevelUpWnd::SendMsg(UIWindow* sender, int msg, int wparam, int lparam, int extra)

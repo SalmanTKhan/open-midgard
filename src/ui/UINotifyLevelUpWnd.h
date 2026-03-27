@@ -10,7 +10,9 @@ public:
     ~UINotifyLevelUpWnd() override;
 
     void SetShow(int show) override;
+    bool IsUpdateNeed() override;
     void OnCreate(int x, int y) override;
+    void OnDraw() override;
     void OnProcess() override;
     int SendMsg(UIWindow* sender, int msg, int wparam, int lparam, int extra) override;
 
