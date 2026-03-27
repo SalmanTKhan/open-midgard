@@ -1045,29 +1045,18 @@ private:
         const COLORREF wingColor = RGB(255, 250, 236);
         const unsigned int alpha = static_cast<unsigned int>(210.0f * fadeOut);
         const int renderFlags = 1 | 2;
-        const vector3d groundCenter = ResolveGroundCenter(center);
-
-        RenderPortalGroundDisc(groundCenter,
-            *viewMatrix,
-            GetPortalRingTexture(),
-            glowColor,
-            2.1f + normalized * 2.7f,
-            static_cast<unsigned int>(alpha * 0.45f),
-            0.0f,
-            kPortalGroundDepthBias,
-            renderFlags);
 
         if (CTexture* wingTexture = GetAngelWingTexture()) {
             for (int side = -1; side <= 1; side += 2) {
                 vector3d wingCenter = center;
-                wingCenter.x += static_cast<float>(side) * (0.75f + normalized * 0.22f);
-                wingCenter.y += 1.9f + normalized * 0.55f;
+                wingCenter.x += static_cast<float>(side) * (0.82f + normalized * 0.32f);
+                wingCenter.y += 1.85f + normalized * 0.75f;
                 wingCenter.z -= 0.18f;
                 SubmitTexturedBillboard(wingCenter,
                     *viewMatrix,
                     wingTexture,
-                    2.6f,
-                    3.6f,
+                    2.8f,
+                    3.9f,
                     PackPortalColor(static_cast<unsigned int>(alpha * 0.95f), wingColor),
                     D3DBLEND_ONE,
                     0.0f,
@@ -1077,17 +1066,36 @@ private:
         }
 
         vector3d flashCenter = center;
-        flashCenter.y += 2.25f + normalized * 0.4f;
+        flashCenter.y += 2.1f + normalized * 0.55f;
         SubmitTexturedBillboard(flashCenter,
             *viewMatrix,
             GetPortalParticleTexture(false),
-            2.3f + normalized * 1.1f,
-            4.0f + normalized * 0.8f,
+            1.8f + normalized * 0.8f,
+            4.8f + normalized * 1.1f,
             PackPortalColor(static_cast<unsigned int>(alpha * 0.8f), wingColor),
             D3DBLEND_ONE,
             0.0f,
             0.0f,
             renderFlags);
+
+        for (int sparkIndex = 0; sparkIndex < 8; ++sparkIndex) {
+            const float seed = (static_cast<float>(sparkIndex) + 0.5f) / 8.0f;
+            const float angle = seed * 6.2831853f;
+            vector3d sparkPos = center;
+            sparkPos.x += std::cos(angle) * (0.2f + normalized * 0.7f);
+            sparkPos.z += std::sin(angle) * (0.2f + normalized * 0.7f);
+            sparkPos.y += 0.7f + normalized * 2.5f + seed * 0.35f;
+            SubmitTexturedBillboard(sparkPos,
+                *viewMatrix,
+                GetPortalParticleTexture((sparkIndex & 1) != 0),
+                0.34f,
+                0.7f,
+                PackPortalColor(static_cast<unsigned int>(alpha * (0.3f + 0.5f * (1.0f - seed))), glowColor),
+                D3DBLEND_ONE,
+                0.0f,
+                0.0f,
+                renderFlags);
+        }
     }
 
     void RenderEntry(matrix* viewMatrix, const vector3d& center, float normalized, float fadeOut) const
@@ -1183,30 +1191,20 @@ private:
         const COLORREF accentColor = taekwonVariant ? RGB(255, 164, 92) : RGB(196, 236, 255);
         const unsigned int alpha = static_cast<unsigned int>((taekwonVariant ? 220.0f : 210.0f) * fadeOut);
         const int renderFlags = 1 | 2;
-        const vector3d groundCenter = ResolveGroundCenter(center);
-
-        RenderPortalGroundDisc(groundCenter,
-            *viewMatrix,
-            GetPortalRingTexture(),
-            glowColor,
-            2.0f + normalized * 2.9f,
-            static_cast<unsigned int>(alpha * 0.5f),
-            0.0f,
-            kPortalGroundDepthBias,
-            renderFlags);
 
         if (CTexture* wingTexture = GetAngelWingTexture()) {
             for (int wingIndex = 0; wingIndex < 4; ++wingIndex) {
-                const float angle = normalized * 2.6f + wingIndex * (6.2831853f / 4.0f);
+                const float side = (wingIndex < 2) ? -1.0f : 1.0f;
+                const float row = (wingIndex % 2 == 0) ? 0.0f : 1.0f;
                 vector3d wingCenter = center;
-                wingCenter.x += std::cos(angle) * 0.8f;
-                wingCenter.z += std::sin(angle) * 0.8f;
-                wingCenter.y += 2.0f + std::sin(angle * 1.7f) * 0.12f;
+                wingCenter.x += side * (0.7f + row * 0.45f + normalized * 0.18f);
+                wingCenter.z -= row * 0.15f;
+                wingCenter.y += 1.85f + row * 0.7f + normalized * 0.55f;
                 SubmitTexturedBillboard(wingCenter,
                     *viewMatrix,
                     wingTexture,
-                    2.2f,
-                    3.1f,
+                    2.3f + row * 0.25f,
+                    3.0f + row * 0.45f,
                     PackPortalColor(static_cast<unsigned int>(alpha * 0.85f), taekwonVariant ? accentColor : glowColor),
                     D3DBLEND_ONE,
                     0.0f,
@@ -1215,13 +1213,26 @@ private:
             }
         }
 
+        vector3d flashCenter = center;
+        flashCenter.y += 2.2f + normalized * 0.7f;
+        SubmitTexturedBillboard(flashCenter,
+            *viewMatrix,
+            GetPortalParticleTexture(false),
+            2.2f + normalized * 1.1f,
+            5.0f + normalized * 1.1f,
+            PackPortalColor(static_cast<unsigned int>(alpha * 0.78f), glowColor),
+            D3DBLEND_ONE,
+            0.0f,
+            0.0f,
+            renderFlags);
+
         for (int orbIndex = 0; orbIndex < 12; ++orbIndex) {
             const float seed = (static_cast<float>(orbIndex) + 0.5f) / 12.0f;
-            const float angle = seed * 6.2831853f + normalized * (taekwonVariant ? 3.8f : 3.0f);
+            const float angle = seed * 6.2831853f;
             vector3d orbPos = center;
-            orbPos.x += std::cos(angle) * (0.45f + normalized * 1.25f);
-            orbPos.z += std::sin(angle) * (0.45f + normalized * 1.25f);
-            orbPos.y += 0.9f + normalized * 2.4f;
+            orbPos.x += std::cos(angle) * (0.18f + seed * 0.35f + normalized * 0.55f);
+            orbPos.z += std::sin(angle) * (0.18f + seed * 0.35f + normalized * 0.55f);
+            orbPos.y += 0.8f + normalized * 2.8f + seed * 0.45f;
             SubmitTexturedBillboard(orbPos,
                 *viewMatrix,
                 GetPortalParticleTexture((orbIndex & 1) != 0),

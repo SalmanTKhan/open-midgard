@@ -113,6 +113,16 @@ UINotifyLevelUpWnd::UINotifyLevelUpWnd()
 
 UINotifyLevelUpWnd::~UINotifyLevelUpWnd() = default;
 
+namespace {
+void LayoutNotifyButton(UIBitmapButton* button, int x, int y)
+{
+    if (!button) {
+        return;
+    }
+    button->Move(x, y);
+}
+}
+
 void UINotifyLevelUpWnd::SetShow(int show)
 {
     UIWindow::SetShow(show);
@@ -148,7 +158,6 @@ void UINotifyLevelUpWnd::OnCreate(int x, int y)
     AddChild(m_button);
 
     Resize((std::max)(1, m_button->m_w), (std::max)(1, m_button->m_h));
-    m_button->Move(0, 0);
     UpdateAnchor();
 }
 
@@ -225,6 +234,7 @@ void UINotifyLevelUpWnd::UpdateAnchor()
     if (m_x != x || m_y != y) {
         UIWindow::Move(x, y);
     }
+    LayoutNotifyButton(m_button, m_x, m_y);
 }
 
 UINotifyJobLevelUpWnd::UINotifyJobLevelUpWnd() = default;
