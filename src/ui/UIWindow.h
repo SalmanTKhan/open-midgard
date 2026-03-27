@@ -7,6 +7,8 @@
 class CDC;
 
 void PlayUiButtonSound();
+bool LoadUiWindowPlacement(const char* windowName, int* x, int* y);
+void SaveUiWindowPlacement(const char* windowName, int x, int y);
 
 struct BOXINFO {
     int x;

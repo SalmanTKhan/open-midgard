@@ -1,0 +1,956 @@
+#include "UISkillListWnd.h"
+
+#include "gamemode/GameMode.h"
+#include "gamemode/Mode.h"
+#include "UIWindowMgr.h"
+#include "core/File.h"
+#include "main/WinMain.h"
+#include "session/Session.h"
+#include "skill/Skill.h"
+
+#include <gdiplus.h>
+#include <windows.h>
+
+#include <algorithm>
+#include <array>
+#include <cstring>
+#include <string>
+
+#pragma comment(lib, "gdiplus.lib")
+#pragma comment(lib, "msimg32.lib")
+
+namespace {
+
+constexpr int kWindowWidth = 317;
+constexpr int kWindowHeight = 291;
+constexpr int kTitleBarHeight = 17;
+constexpr int kBottomBarHeight = 50;
+constexpr int kLeftGutterWidth = 41;
+constexpr int kListTop = 20;
+constexpr int kListRightMargin = 18;
+constexpr int kListBottomMargin = 10;
+constexpr int kRowHeight = 37;
+constexpr int kIconSize = 24;
+constexpr int kIconCellSize = 32;
+constexpr int kScrollBarWidth = 10;
+constexpr int kButtonIdBase = 148;
+constexpr int kButtonIdMini = 149;
+constexpr int kButtonIdClose = 150;
+constexpr int kBottomButtonUse = 0;
+constexpr int kBottomButtonClose = 1;
+
+ULONG_PTR EnsureGdiplusStarted()
+{
+    static ULONG_PTR s_token = 0;
+    static bool s_started = false;
+    if (!s_started) {
+        Gdiplus::GdiplusStartupInput startupInput;
+        if (Gdiplus::GdiplusStartup(&s_token, &startupInput, nullptr) == Gdiplus::Ok) {
+            s_started = true;
+        }
+    }
+    return s_token;
+}
+
+std::string NormalizeSlash(std::string value)
+{
+    std::replace(value.begin(), value.end(), '/', '\\');
+    return value;
+}
+
+std::string ToLowerAscii(std::string value)
+{
+    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char ch) {
+        if (ch >= 'A' && ch <= 'Z') {
+            return static_cast<char>(ch - 'A' + 'a');
+        }
+        return static_cast<char>(ch);
+    });
+    return value;
+}
+
+void AddUniqueCandidate(std::vector<std::string>& out, const std::string& raw)
+{
+    if (raw.empty()) {
+        return;
+    }
+
+    const std::string normalized = NormalizeSlash(raw);
+    const std::string lowered = ToLowerAscii(normalized);
+    for (const std::string& existing : out) {
+        if (ToLowerAscii(existing) == lowered) {
+            return;
+        }
+    }
+    out.push_back(normalized);
+}
+
+std::vector<std::string> BuildUiAssetCandidates(const char* fileName)
+{
+    std::vector<std::string> out;
+    if (!fileName || !*fileName) {
+        return out;
+    }
+
+    const char* prefixes[] = {
+        "",
+        "skin\\default\\",
+        "skin\\default\\basic_interface\\",
+        "texture\\",
+        "texture\\interface\\",
+        "texture\\interface\\basic_interface\\",
+        "data\\",
+        "data\\texture\\",
+        "data\\texture\\interface\\",
+        "data\\texture\\interface\\basic_interface\\",
+        nullptr
+    };
+
+    std::string base = NormalizeSlash(fileName);
+    AddUniqueCandidate(out, base);
+
+    std::string filenameOnly = base;
+    const size_t slashPos = filenameOnly.find_last_of('\\');
+    if (slashPos != std::string::npos && slashPos + 1 < filenameOnly.size()) {
+        filenameOnly = filenameOnly.substr(slashPos + 1);
+    }
+
+    for (int index = 0; prefixes[index]; ++index) {
+        AddUniqueCandidate(out, std::string(prefixes[index]) + filenameOnly);
+    }
+
+    return out;
+}
+
+std::string ResolveUiAssetPath(const char* fileName)
+{
+    for (const std::string& candidate : BuildUiAssetCandidates(fileName)) {
+        if (g_fileMgr.IsDataExist(candidate.c_str())) {
+            return candidate;
+        }
+    }
+    return NormalizeSlash(fileName ? fileName : "");
+}
+
+HBITMAP LoadBitmapFromGameData(const std::string& path)
+{
+    if (path.empty() || !EnsureGdiplusStarted()) {
+        return nullptr;
+    }
+
+    int size = 0;
+    unsigned char* bytes = g_fileMgr.GetData(path.c_str(), &size);
+    if (!bytes || size <= 0) {
+        delete[] bytes;
+        return nullptr;
+    }
+
+    HBITMAP outBitmap = nullptr;
+    HGLOBAL mem = GlobalAlloc(GMEM_MOVEABLE, static_cast<SIZE_T>(size));
+    if (mem) {
+        void* dst = GlobalLock(mem);
+        if (dst) {
+            std::memcpy(dst, bytes, static_cast<size_t>(size));
+            GlobalUnlock(mem);
+
+            IStream* stream = nullptr;
+            if (CreateStreamOnHGlobal(mem, TRUE, &stream) == S_OK) {
+                auto* bitmap = Gdiplus::Bitmap::FromStream(stream, FALSE);
+                if (bitmap && bitmap->GetLastStatus() == Gdiplus::Ok) {
+                    bitmap->GetHBITMAP(RGB(0, 0, 0), &outBitmap);
+                }
+                delete bitmap;
+                stream->Release();
+            } else {
+                GlobalFree(mem);
+            }
+        } else {
+            GlobalFree(mem);
+        }
+    }
+
+    delete[] bytes;
+    return outBitmap;
+}
+
+void DrawBitmapTransparent(HDC target, HBITMAP bitmap, const RECT& dst)
+{
+    if (!target || !bitmap) {
+        return;
+    }
+
+    BITMAP bm{};
+    if (!GetObjectA(bitmap, sizeof(bm), &bm) || bm.bmWidth <= 0 || bm.bmHeight <= 0) {
+        return;
+    }
+
+    HDC srcDC = CreateCompatibleDC(target);
+    if (!srcDC) {
+        return;
+    }
+
+    HGDIOBJ oldBitmap = SelectObject(srcDC, bitmap);
+    TransparentBlt(target,
+        dst.left,
+        dst.top,
+        dst.right - dst.left,
+        dst.bottom - dst.top,
+        srcDC,
+        0,
+        0,
+        bm.bmWidth,
+        bm.bmHeight,
+        RGB(255, 0, 255));
+    SelectObject(srcDC, oldBitmap);
+    DeleteDC(srcDC);
+}
+
+void TileBitmap(HDC target, HBITMAP bitmap, const RECT& rect)
+{
+    if (!target || !bitmap || rect.right <= rect.left || rect.bottom <= rect.top) {
+        return;
+    }
+
+    BITMAP bm{};
+    if (!GetObjectA(bitmap, sizeof(bm), &bm) || bm.bmWidth <= 0 || bm.bmHeight <= 0) {
+        return;
+    }
+
+    for (int y = rect.top; y < rect.bottom; y += bm.bmHeight) {
+        for (int x = rect.left; x < rect.right; x += bm.bmWidth) {
+            RECT dst{ x, y, std::min(x + bm.bmWidth, rect.right), std::min(y + bm.bmHeight, rect.bottom) };
+            DrawBitmapTransparent(target, bitmap, dst);
+        }
+    }
+}
+
+void DrawThreePieceBar(HDC hdc, const RECT& rect, HBITMAP left, HBITMAP mid, HBITMAP right)
+{
+    if (rect.right <= rect.left || rect.bottom <= rect.top) {
+        return;
+    }
+
+    BITMAP leftBm{};
+    BITMAP rightBm{};
+    int leftWidth = 0;
+    int rightWidth = 0;
+    if (left && GetObjectA(left, sizeof(leftBm), &leftBm)) {
+        leftWidth = leftBm.bmWidth;
+    }
+    if (right && GetObjectA(right, sizeof(rightBm), &rightBm)) {
+        rightWidth = rightBm.bmWidth;
+    }
+
+    if (left) {
+        RECT dst{ rect.left, rect.top, rect.left + leftWidth, rect.bottom };
+        DrawBitmapTransparent(hdc, left, dst);
+    }
+    if (right) {
+        RECT dst{ rect.right - rightWidth, rect.top, rect.right, rect.bottom };
+        DrawBitmapTransparent(hdc, right, dst);
+    }
+
+    RECT midRect{ rect.left + leftWidth, rect.top, rect.right - rightWidth, rect.bottom };
+    TileBitmap(hdc, mid, midRect);
+}
+
+void DrawTextLine(HDC hdc, int x, int y, COLORREF color, const std::string& text)
+{
+    if (!hdc || text.empty()) {
+        return;
+    }
+    SetBkMode(hdc, TRANSPARENT);
+    SetTextColor(hdc, color);
+    TextOutA(hdc, x, y, text.c_str(), static_cast<int>(text.size()));
+}
+
+void FillRectColor(HDC hdc, const RECT& rect, COLORREF color)
+{
+    HBRUSH brush = CreateSolidBrush(color);
+    FillRect(hdc, &rect, brush);
+    DeleteObject(brush);
+}
+
+void FrameRectColor(HDC hdc, const RECT& rect, COLORREF color)
+{
+    HBRUSH brush = CreateSolidBrush(color);
+    FrameRect(hdc, &rect, brush);
+    DeleteObject(brush);
+}
+
+bool IsInsideRect(const RECT& rect, int x, int y)
+{
+    return x >= rect.left && x < rect.right && y >= rect.top && y < rect.bottom;
+}
+
+std::string ResolveSkillIconPath(const SkillMetadata& metadata)
+{
+    const std::string lowered = ToLowerAscii(metadata.skillIdName);
+    const std::string direct = "texture\\\xC0\xAF\xC0\xFA\xC0\xCE\xC5\xCD\xC6\xE4\xC0\xCC\xBD\xBA\\item\\" + lowered + ".bmp";
+    const std::string dataPath = "data\\" + direct;
+    if (g_fileMgr.IsDataExist(direct.c_str())) {
+        return direct;
+    }
+    if (g_fileMgr.IsDataExist(dataPath.c_str())) {
+        return dataPath;
+    }
+    return direct;
+}
+
+std::string BuildSkillRightText(const PLAYER_SKILL_INFO& skill)
+{
+    if (skill.spcost > 0) {
+        return "Sp : " + std::to_string(skill.spcost);
+    }
+    return "Passive";
+}
+
+HFONT GetUiFont()
+{
+    static HFONT s_font = CreateFontA(
+        -11, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+        DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+        CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, "Tahoma");
+    return s_font;
+}
+
+HFONT GetUiBoldFont()
+{
+    static HFONT s_font = CreateFontA(
+        -11, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
+        DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+        CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, "Tahoma");
+    return s_font;
+}
+
+} // namespace
+
+UISkillListWnd::UISkillListWnd()
+    : m_controlsCreated(false),
+      m_hoveredRow(-1),
+      m_viewOffset(0),
+      m_selectedSkillId(0),
+      m_pressedUpgradeSkillId(0),
+      m_isDraggingScrollThumb(0),
+      m_scrollDragOffsetY(0),
+      m_systemButtons{},
+      m_bottomButtons{},
+      m_titleBarBitmap(nullptr),
+      m_titleBarLeftBitmap(nullptr),
+      m_titleBarMidBitmap(nullptr),
+      m_titleBarRightBitmap(nullptr),
+      m_btnBarLeftBitmap(nullptr),
+      m_btnBarMidBitmap(nullptr),
+      m_btnBarRightBitmap(nullptr),
+      m_btnBarLeft2Bitmap(nullptr),
+      m_btnBarMid2Bitmap(nullptr),
+      m_btnBarRight2Bitmap(nullptr),
+      m_itemRowBitmap(nullptr),
+      m_itemInvertBitmap(nullptr),
+      m_upgradeNormalBitmap(nullptr),
+      m_upgradeHoverBitmap(nullptr),
+      m_upgradePressedBitmap(nullptr),
+      m_mesBtnLeftBitmap(nullptr),
+      m_mesBtnMidBitmap(nullptr),
+      m_mesBtnRightBitmap(nullptr)
+{
+    m_show = 0;
+    m_w = kWindowWidth;
+    m_h = kWindowHeight;
+    m_bottomButtons[kBottomButtonUse].label = "use";
+    m_bottomButtons[kBottomButtonClose].label = "close";
+    Move(281, 121);
+    int savedX = m_x;
+    int savedY = m_y;
+    if (LoadUiWindowPlacement("SkillListWnd", &savedX, &savedY)) {
+        g_windowMgr.ClampWindowToClient(&savedX, &savedY, m_w, m_h);
+        Move(savedX, savedY);
+    }
+}
+
+UISkillListWnd::~UISkillListWnd()
+{
+    ReleaseAssets();
+}
+
+void UISkillListWnd::SetShow(int show)
+{
+    m_show = show;
+    if (show != 0) {
+        EnsureCreated();
+    }
+}
+
+void UISkillListWnd::Move(int x, int y)
+{
+    UIWindow::Move(x, y);
+    LayoutChildren();
+}
+
+bool UISkillListWnd::IsUpdateNeed()
+{
+    return true;
+}
+
+int UISkillListWnd::SendMsg(UIWindow* sender, int msg, int wparam, int lparam, int extra)
+{
+    (void)sender;
+    (void)lparam;
+    (void)extra;
+    if (msg != 6) {
+        return 0;
+    }
+
+    switch (wparam) {
+    case kButtonIdClose:
+        SetShow(0);
+        return 1;
+    case kButtonIdMini:
+    case kButtonIdBase:
+        return 1;
+    default:
+        return 0;
+    }
+}
+
+void UISkillListWnd::OnCreate(int x, int y)
+{
+    (void)x;
+    (void)y;
+    if (m_controlsCreated) {
+        return;
+    }
+
+    m_controlsCreated = true;
+    LoadAssets();
+
+    struct ButtonSpec {
+        const char* offName;
+        const char* onName;
+        int id;
+        const char* tooltip;
+    };
+
+    const std::array<ButtonSpec, 3> specs = {{
+        { "sys_base_off.bmp", "sys_base_on.bmp", kButtonIdBase, "Base" },
+        { "sys_mini_off.bmp", "sys_mini_on.bmp", kButtonIdMini, "Mini" },
+        { "sys_close_off.bmp", "sys_close_on.bmp", kButtonIdClose, "Close" },
+    }};
+
+    for (size_t index = 0; index < specs.size(); ++index) {
+        auto* button = new UIBitmapButton();
+        button->SetBitmapName(ResolveUiAssetPath(specs[index].offName).c_str(), 0);
+        button->SetBitmapName(ResolveUiAssetPath(specs[index].onName).c_str(), 1);
+        button->SetBitmapName(ResolveUiAssetPath(specs[index].onName).c_str(), 2);
+        button->Create(button->m_bitmapWidth, button->m_bitmapHeight);
+        button->m_id = specs[index].id;
+        button->SetToolTip(specs[index].tooltip);
+        AddChild(button);
+        m_systemButtons[index] = button;
+    }
+
+    LayoutChildren();
+}
+
+void UISkillListWnd::OnDestroy()
+{
+}
+
+void UISkillListWnd::OnDraw()
+{
+    if (m_show == 0) {
+        return;
+    }
+
+    EnsureCreated();
+    const std::vector<const PLAYER_SKILL_INFO*> skills = GetSortedSkills();
+    if (m_selectedSkillId == 0 && !skills.empty()) {
+        m_selectedSkillId = skills.front()->SKID;
+    }
+
+    const int visibleRows = std::max(1, (m_h - kTitleBarHeight - kBottomBarHeight - kListTop - kListBottomMargin) / kRowHeight);
+    m_viewOffset = std::max(0, std::min(m_viewOffset, GetMaxViewOffset(static_cast<int>(skills.size()))));
+    m_visibleSkills.clear();
+
+    HDC hdc = UIWindow::GetSharedDrawDC();
+    if (!hdc) {
+        hdc = GetDC(g_hMainWnd);
+    }
+    if (!hdc) {
+        return;
+    }
+
+    HGDIOBJ oldFont = SelectObject(hdc, GetUiFont());
+
+    DrawWindowChrome(hdc);
+    SelectObject(hdc, GetUiBoldFont());
+    DrawTextLine(hdc, m_x + 10, m_y + 3, RGB(0, 0, 0), "Skill Tree");
+    SelectObject(hdc, GetUiBoldFont());
+    DrawTextLine(hdc, m_x + 13, m_y + m_h - 18, RGB(176, 145, 48),
+        "Skill Point : " + std::to_string(g_session.GetPlayerSkillPointCount()));
+    SelectObject(hdc, GetUiFont());
+
+    const int rowLeft = m_x + kLeftGutterWidth + 4;
+    const int rowRight = m_x + m_w - kListRightMargin - 4;
+    const int firstIndex = m_viewOffset;
+    const int lastIndex = std::min(static_cast<int>(skills.size()), firstIndex + visibleRows);
+    for (int drawIndex = firstIndex; drawIndex < lastIndex; ++drawIndex) {
+        const int rowIndex = drawIndex - firstIndex;
+        const int rowTop = m_y + kListTop + rowIndex * kRowHeight;
+        RECT rowRect{ rowLeft, rowTop, rowRight, rowTop + kRowHeight };
+        RECT upgradeRect{ rowRect.right - 28, rowRect.top + 4, rowRect.right - 4, rowRect.top + 28 };
+        const PLAYER_SKILL_INFO* skill = skills[drawIndex];
+        m_visibleSkills.push_back({ skill, rowRect, upgradeRect });
+
+        const bool isSelected = skill && skill->SKID == m_selectedSkillId;
+        RECT iconCellRect{ rowRect.left + 4, rowRect.top + 1, rowRect.left + 4 + kIconCellSize, rowRect.top + 1 + kIconCellSize };
+        RECT iconInvertRect{ iconCellRect.left + 2, iconCellRect.top + 8, iconCellRect.left + 2 + 28, iconCellRect.top + 8 + 15 };
+        RECT iconRect{
+            iconCellRect.left + ((kIconCellSize - kIconSize) / 2),
+            iconCellRect.top + ((kIconCellSize - kIconSize) / 2),
+            iconCellRect.left + ((kIconCellSize - kIconSize) / 2) + kIconSize,
+            iconCellRect.top + ((kIconCellSize - kIconSize) / 2) + kIconSize
+        };
+        if (m_itemRowBitmap) {
+            DrawBitmapTransparent(hdc, m_itemRowBitmap, iconCellRect);
+        }
+        if (isSelected && m_itemInvertBitmap) {
+            DrawBitmapTransparent(hdc, m_itemInvertBitmap, iconInvertRect);
+        }
+
+        if (skill) {
+            if (HBITMAP icon = GetSkillIcon(skill->SKID)) {
+                DrawBitmapTransparent(hdc, icon, iconRect);
+            }
+
+            const std::string skillName = skill->skillName.empty() ? skill->skillIdName : skill->skillName;
+            const int textLeft = iconCellRect.right + 12;
+            DrawTextLine(hdc, textLeft, rowRect.top + 3, RGB(0, 0, 0), skillName);
+            DrawTextLine(hdc, textLeft, rowRect.top + 18, RGB(0, 0, 0),
+                "Lv : " + std::to_string(skill->level));
+            DrawTextLine(hdc, rowRect.left + 165, rowRect.top + 18, RGB(0, 0, 0), BuildSkillRightText(*skill));
+
+            const bool canUpgrade = skill->upgradable != 0 && g_session.GetPlayerSkillPointCount() > 0;
+            if (canUpgrade) {
+                HBITMAP upgradeBitmap = m_upgradeNormalBitmap;
+                if (upgradeBitmap) {
+                    DrawBitmapTransparent(hdc, upgradeBitmap, upgradeRect);
+                }
+            }
+        }
+    }
+
+    if (IsScrollBarVisible(static_cast<int>(skills.size()))) {
+        const RECT scrollTrackRect = GetScrollTrackRect();
+        const RECT scrollThumbRect = GetScrollThumbRect(static_cast<int>(skills.size()));
+        FillRectColor(hdc, scrollTrackRect, RGB(227, 231, 238));
+        FrameRectColor(hdc, scrollTrackRect, RGB(164, 173, 189));
+        FillRectColor(hdc, scrollThumbRect, RGB(180, 188, 205));
+        FrameRectColor(hdc, scrollThumbRect, RGB(120, 130, 150));
+    }
+
+    for (const TextButton& button : m_bottomButtons) {
+        DrawBottomButton(hdc, button);
+    }
+
+    DrawChildren();
+
+    SelectObject(hdc, oldFont);
+
+    if (UIWindow::GetSharedDrawDC() == nullptr) {
+        ReleaseDC(g_hMainWnd, hdc);
+    }
+}
+
+void UISkillListWnd::OnLBtnDown(int x, int y)
+{
+    if (y >= m_y && y < m_y + kTitleBarHeight) {
+        UIFrameWnd::OnLBtnDown(x, y);
+        return;
+    }
+
+    UpdateHover(x, y);
+    m_pressedUpgradeSkillId = 0;
+
+    const int skillCount = static_cast<int>(GetSortedSkills().size());
+    if (IsScrollBarVisible(skillCount)) {
+        const RECT scrollThumbRect = GetScrollThumbRect(skillCount);
+        const RECT scrollTrackRect = GetScrollTrackRect();
+        if (IsInsideRect(scrollThumbRect, x, y)) {
+            m_isDraggingScrollThumb = 1;
+            m_scrollDragOffsetY = y - scrollThumbRect.top;
+            return;
+        }
+        if (IsInsideRect(scrollTrackRect, x, y)) {
+            UpdateScrollFromThumbPosition(y - ((scrollThumbRect.bottom - scrollThumbRect.top) / 2), skillCount);
+            return;
+        }
+    }
+
+    const int bottomButtonIndex = HitTestBottomButton(x, y);
+    if (bottomButtonIndex >= 0) {
+        m_bottomButtons[bottomButtonIndex].pressed = true;
+        return;
+    }
+
+    for (const VisibleSkill& visible : m_visibleSkills) {
+        if (!visible.skill) {
+            continue;
+        }
+        if (!IsInsideRect(visible.upgradeRect, x, y)) {
+            continue;
+        }
+        if (visible.skill->upgradable == 0 || g_session.GetPlayerSkillPointCount() <= 0) {
+            return;
+        }
+        m_selectedSkillId = visible.skill->SKID;
+        m_pressedUpgradeSkillId = visible.skill->SKID;
+        return;
+    }
+
+    if (m_hoveredRow >= 0 && m_hoveredRow < static_cast<int>(m_visibleSkills.size())) {
+        const VisibleSkill& visible = m_visibleSkills[m_hoveredRow];
+        if (visible.skill) {
+            m_selectedSkillId = visible.skill->SKID;
+        }
+    }
+}
+
+void UISkillListWnd::OnLBtnUp(int x, int y)
+{
+    UIFrameWnd::OnLBtnUp(x, y);
+    m_isDraggingScrollThumb = 0;
+    const int bottomButtonIndex = HitTestBottomButton(x, y);
+    for (size_t index = 0; index < m_bottomButtons.size(); ++index) {
+        const bool activate = m_bottomButtons[index].pressed && static_cast<int>(index) == bottomButtonIndex;
+        m_bottomButtons[index].pressed = false;
+        if (!activate) {
+            continue;
+        }
+        if (index == kBottomButtonClose) {
+            SetShow(0);
+        }
+    }
+
+    if (m_pressedUpgradeSkillId != 0) {
+        for (const VisibleSkill& visible : m_visibleSkills) {
+            if (!visible.skill || visible.skill->SKID != m_pressedUpgradeSkillId) {
+                continue;
+            }
+            if (IsInsideRect(visible.upgradeRect, x, y) &&
+                visible.skill->upgradable != 0 &&
+                g_session.GetPlayerSkillPointCount() > 0) {
+                g_modeMgr.SendMsg(CGameMode::GameMsg_RequestUpgradeSkillLevel, m_pressedUpgradeSkillId, 0, 0);
+            }
+            break;
+        }
+    }
+    m_pressedUpgradeSkillId = 0;
+}
+
+void UISkillListWnd::OnMouseMove(int x, int y)
+{
+    UIFrameWnd::OnMouseMove(x, y);
+    UpdateHover(x, y);
+    if (m_isDraggingScrollThumb) {
+        UpdateScrollFromThumbPosition(y - m_scrollDragOffsetY, static_cast<int>(GetSortedSkills().size()));
+    }
+    for (size_t index = 0; index < m_bottomButtons.size(); ++index) {
+        m_bottomButtons[index].hovered = (static_cast<int>(index) == HitTestBottomButton(x, y));
+    }
+}
+
+void UISkillListWnd::OnWheel(int delta)
+{
+    const int skillCount = static_cast<int>(GetSortedSkills().size());
+    const int maxOffset = GetMaxViewOffset(skillCount);
+    if (delta > 0) {
+        m_viewOffset = std::max(0, m_viewOffset - 1);
+    } else if (delta < 0) {
+        m_viewOffset = std::min(maxOffset, m_viewOffset + 1);
+    }
+}
+
+void UISkillListWnd::StoreInfo()
+{
+    SaveUiWindowPlacement("SkillListWnd", m_x, m_y);
+}
+
+void UISkillListWnd::EnsureCreated()
+{
+    if (m_controlsCreated) {
+        return;
+    }
+
+    Create(m_w, m_h);
+    OnCreate(m_x, m_y);
+}
+
+void UISkillListWnd::LayoutChildren()
+{
+    int buttonX = m_x + m_w - 49;
+    for (UIBitmapButton* button : m_systemButtons) {
+        if (!button) {
+            continue;
+        }
+        button->Move(buttonX, m_y + 2);
+        buttonX += 16;
+    }
+
+    const int bottomY = m_y + m_h - 28;
+    m_bottomButtons[kBottomButtonClose].rect = RECT{ m_x + m_w - 56, bottomY, m_x + m_w - 12, bottomY + 20 };
+    m_bottomButtons[kBottomButtonUse].rect = RECT{ m_bottomButtons[kBottomButtonClose].rect.left - 44, bottomY, m_bottomButtons[kBottomButtonClose].rect.left, bottomY + 20 };
+}
+
+void UISkillListWnd::LoadAssets()
+{
+    ReleaseAssets();
+    m_titleBarBitmap = LoadBitmapFromGameData(ResolveUiAssetPath("titlebar_fix.bmp"));
+    m_titleBarLeftBitmap = LoadBitmapFromGameData(ResolveUiAssetPath("titlebar_left.bmp"));
+    m_titleBarMidBitmap = LoadBitmapFromGameData(ResolveUiAssetPath("titlebar_mid.bmp"));
+    m_titleBarRightBitmap = LoadBitmapFromGameData(ResolveUiAssetPath("titlebar_right.bmp"));
+    m_btnBarLeftBitmap = LoadBitmapFromGameData(ResolveUiAssetPath("btnbar_left.bmp"));
+    m_btnBarMidBitmap = LoadBitmapFromGameData(ResolveUiAssetPath("btnbar_mid.bmp"));
+    m_btnBarRightBitmap = LoadBitmapFromGameData(ResolveUiAssetPath("btnbar_right.bmp"));
+    m_btnBarLeft2Bitmap = LoadBitmapFromGameData(ResolveUiAssetPath("btnbar_left2.bmp"));
+    m_btnBarMid2Bitmap = LoadBitmapFromGameData(ResolveUiAssetPath("btnbar_mid2.bmp"));
+    m_btnBarRight2Bitmap = LoadBitmapFromGameData(ResolveUiAssetPath("btnbar_right2.bmp"));
+    m_itemRowBitmap = LoadBitmapFromGameData(ResolveUiAssetPath("itemwin_mid.bmp"));
+    m_itemInvertBitmap = LoadBitmapFromGameData(ResolveUiAssetPath("item_invert.bmp"));
+    m_upgradeNormalBitmap = LoadBitmapFromGameData(ResolveUiAssetPath("skill_up_a.bmp"));
+    m_upgradeHoverBitmap = LoadBitmapFromGameData(ResolveUiAssetPath("skill_up_b.bmp"));
+    m_upgradePressedBitmap = LoadBitmapFromGameData(ResolveUiAssetPath("skill_up_c.bmp"));
+    m_mesBtnLeftBitmap = LoadBitmapFromGameData(ResolveUiAssetPath("mesbtn_left.bmp"));
+    m_mesBtnMidBitmap = LoadBitmapFromGameData(ResolveUiAssetPath("mesbtn_mid.bmp"));
+    m_mesBtnRightBitmap = LoadBitmapFromGameData(ResolveUiAssetPath("mesbtn_right.bmp"));
+}
+
+void UISkillListWnd::ReleaseAssets()
+{
+    auto releaseBitmap = [](HBITMAP& bitmap) {
+        if (bitmap) {
+            DeleteObject(bitmap);
+            bitmap = nullptr;
+        }
+    };
+
+    releaseBitmap(m_titleBarBitmap);
+    releaseBitmap(m_titleBarLeftBitmap);
+    releaseBitmap(m_titleBarMidBitmap);
+    releaseBitmap(m_titleBarRightBitmap);
+    releaseBitmap(m_btnBarLeftBitmap);
+    releaseBitmap(m_btnBarMidBitmap);
+    releaseBitmap(m_btnBarRightBitmap);
+    releaseBitmap(m_btnBarLeft2Bitmap);
+    releaseBitmap(m_btnBarMid2Bitmap);
+    releaseBitmap(m_btnBarRight2Bitmap);
+    releaseBitmap(m_itemRowBitmap);
+    releaseBitmap(m_itemInvertBitmap);
+    releaseBitmap(m_upgradeNormalBitmap);
+    releaseBitmap(m_upgradeHoverBitmap);
+    releaseBitmap(m_upgradePressedBitmap);
+    releaseBitmap(m_mesBtnLeftBitmap);
+    releaseBitmap(m_mesBtnMidBitmap);
+    releaseBitmap(m_mesBtnRightBitmap);
+
+    for (auto& entry : m_iconCache) {
+        if (entry.second) {
+            DeleteObject(entry.second);
+        }
+    }
+    m_iconCache.clear();
+}
+
+void UISkillListWnd::UpdateHover(int globalX, int globalY)
+{
+    m_hoveredRow = -1;
+    for (size_t index = 0; index < m_visibleSkills.size(); ++index) {
+        const RECT& rowRect = m_visibleSkills[index].rowRect;
+        if (IsInsideRect(rowRect, globalX, globalY)) {
+            m_hoveredRow = static_cast<int>(index);
+            break;
+        }
+    }
+}
+
+void UISkillListWnd::DrawWindowChrome(HDC hdc) const
+{
+    RECT outer{ m_x, m_y, m_x + m_w, m_y + m_h };
+    HBRUSH whiteBrush = CreateSolidBrush(RGB(255, 255, 255));
+    FillRect(hdc, &outer, whiteBrush);
+    DeleteObject(whiteBrush);
+
+    if (m_titleBarBitmap && m_w == 280) {
+        RECT titleRect{ m_x, m_y, m_x + m_w, m_y + kTitleBarHeight };
+        DrawBitmapTransparent(hdc, m_titleBarBitmap, titleRect);
+    } else {
+        RECT titleRect{ m_x, m_y, m_x + m_w, m_y + kTitleBarHeight };
+        DrawThreePieceBar(hdc, titleRect, m_titleBarLeftBitmap, m_titleBarMidBitmap, m_titleBarRightBitmap);
+    }
+
+    RECT bottomTopRect{ m_x, m_y + m_h - kBottomBarHeight, m_x + m_w, m_y + m_h - 29 };
+    RECT bottomBottomRect{ m_x, m_y + m_h - 29, m_x + m_w, m_y + m_h };
+    DrawThreePieceBar(hdc, bottomTopRect, m_btnBarLeftBitmap, m_btnBarMidBitmap, m_btnBarRightBitmap);
+    DrawThreePieceBar(hdc, bottomBottomRect, m_btnBarLeft2Bitmap, m_btnBarMid2Bitmap, m_btnBarRight2Bitmap);
+
+    RECT leftBarRect{ m_x, m_y + kTitleBarHeight, m_x + kLeftGutterWidth, m_y + m_h - kBottomBarHeight };
+    if (leftBarRect.bottom > leftBarRect.top) {
+        BITMAP topBm{};
+        BITMAP bottomBm{};
+        int y = leftBarRect.top;
+        const int limit = leftBarRect.bottom;
+        if (m_btnBarMidBitmap && GetObjectA(m_btnBarMidBitmap, sizeof(topBm), &topBm)) {
+            while (y + topBm.bmHeight <= limit) {
+                RECT dst{ leftBarRect.left, y, leftBarRect.right, y + topBm.bmHeight };
+                DrawBitmapTransparent(hdc, m_btnBarMidBitmap, dst);
+                y += topBm.bmHeight;
+                if (m_btnBarMid2Bitmap && GetObjectA(m_btnBarMid2Bitmap, sizeof(bottomBm), &bottomBm)) {
+                    if (y + bottomBm.bmHeight <= limit) {
+                        RECT dst2{ leftBarRect.left, y, leftBarRect.right, y + bottomBm.bmHeight };
+                        DrawBitmapTransparent(hdc, m_btnBarMid2Bitmap, dst2);
+                        y += bottomBm.bmHeight;
+                    }
+                }
+            }
+        }
+    }
+
+    RECT contentRect{ m_x + kLeftGutterWidth, m_y + kTitleBarHeight, m_x + m_w, m_y + m_h - kBottomBarHeight };
+    HBRUSH contentBrush = CreateSolidBrush(RGB(255, 255, 255));
+    FillRect(hdc, &contentRect, contentBrush);
+    DeleteObject(contentBrush);
+
+    HPEN lightPen = CreatePen(PS_SOLID, 1, RGB(214, 214, 214));
+    HPEN darkPen = CreatePen(PS_SOLID, 1, RGB(151, 151, 151));
+    HGDIOBJ oldPen = SelectObject(hdc, lightPen);
+    MoveToEx(hdc, m_x + 1, m_y + m_h - kBottomBarHeight, nullptr);
+    LineTo(hdc, m_x + m_w - 2, m_y + m_h - kBottomBarHeight);
+    SelectObject(hdc, darkPen);
+    MoveToEx(hdc, m_x + 1, m_y + m_h - kBottomBarHeight + 1, nullptr);
+    LineTo(hdc, m_x + m_w - 2, m_y + m_h - kBottomBarHeight + 1);
+
+    MoveToEx(hdc, m_x + m_w - 10, m_y + m_h - 4, nullptr);
+    LineTo(hdc, m_x + m_w - 4, m_y + m_h - 10);
+    MoveToEx(hdc, m_x + m_w - 14, m_y + m_h - 4, nullptr);
+    LineTo(hdc, m_x + m_w - 4, m_y + m_h - 14);
+    MoveToEx(hdc, m_x + m_w - 18, m_y + m_h - 4, nullptr);
+    LineTo(hdc, m_x + m_w - 4, m_y + m_h - 18);
+    SelectObject(hdc, oldPen);
+    DeleteObject(lightPen);
+    DeleteObject(darkPen);
+}
+
+void UISkillListWnd::DrawBottomButton(HDC hdc, const TextButton& button) const
+{
+    DrawThreePieceBar(hdc, button.rect, m_mesBtnLeftBitmap, m_mesBtnMidBitmap, m_mesBtnRightBitmap);
+    RECT textRect{ button.rect.left, button.rect.top + 3, button.rect.right, button.rect.bottom };
+    SetBkMode(hdc, TRANSPARENT);
+    SetTextColor(hdc, RGB(0, 0, 0));
+    DrawTextA(hdc, button.label.c_str(), static_cast<int>(button.label.size()), &textRect, DT_CENTER | DT_SINGLELINE | DT_VCENTER);
+}
+
+int UISkillListWnd::HitTestBottomButton(int globalX, int globalY) const
+{
+    for (size_t index = 0; index < m_bottomButtons.size(); ++index) {
+        if (IsInsideRect(m_bottomButtons[index].rect, globalX, globalY)) {
+            return static_cast<int>(index);
+        }
+    }
+    return -1;
+}
+
+RECT UISkillListWnd::GetScrollTrackRect() const
+{
+    return RECT{
+        m_x + m_w - kListRightMargin + 1,
+        m_y + kListTop,
+        m_x + m_w - 5,
+        m_y + m_h - kBottomBarHeight - kListBottomMargin
+    };
+}
+
+RECT UISkillListWnd::GetScrollThumbRect(int skillCount) const
+{
+    RECT trackRect = GetScrollTrackRect();
+    const int maxOffset = GetMaxViewOffset(skillCount);
+    const int trackHeight = trackRect.bottom - trackRect.top - 8;
+    int thumbHeight = std::max(18, trackHeight / 4);
+    if (maxOffset <= 0) {
+        return RECT{ trackRect.left + 2, trackRect.top + 4, trackRect.right - 2, trackRect.top + 4 + thumbHeight };
+    }
+
+    const int thumbTop = trackRect.top + 4 + ((trackHeight - thumbHeight) * m_viewOffset) / maxOffset;
+    return RECT{ trackRect.left + 2, thumbTop, trackRect.right - 2, thumbTop + thumbHeight };
+}
+
+bool UISkillListWnd::IsScrollBarVisible(int skillCount) const
+{
+    return GetMaxViewOffset(skillCount) > 0;
+}
+
+void UISkillListWnd::UpdateScrollFromThumbPosition(int globalY, int skillCount)
+{
+    const RECT trackRect = GetScrollTrackRect();
+    const int maxOffset = GetMaxViewOffset(skillCount);
+    if (maxOffset <= 0) {
+        m_viewOffset = 0;
+        return;
+    }
+
+    const RECT thumbRect = GetScrollThumbRect(skillCount);
+    const int thumbHeight = thumbRect.bottom - thumbRect.top;
+    const int minTop = trackRect.top + 4;
+    const int maxTop = trackRect.bottom - 4 - thumbHeight;
+    const int clampedTop = std::max(minTop, std::min(globalY, maxTop));
+    const int denominator = std::max(1, maxTop - minTop);
+    m_viewOffset = ((clampedTop - minTop) * maxOffset) / denominator;
+}
+
+std::vector<const PLAYER_SKILL_INFO*> UISkillListWnd::GetSortedSkills() const
+{
+    std::vector<const PLAYER_SKILL_INFO*> out;
+    for (const PLAYER_SKILL_INFO& skill : g_session.GetSkillItems()) {
+        out.push_back(&skill);
+    }
+
+    std::sort(out.begin(), out.end(), [](const PLAYER_SKILL_INFO* lhs, const PLAYER_SKILL_INFO* rhs) {
+        if (!lhs || !rhs) {
+            return lhs != nullptr;
+        }
+        if (lhs->skillPos != rhs->skillPos) {
+            return lhs->skillPos < rhs->skillPos;
+        }
+        return lhs->SKID < rhs->SKID;
+    });
+    return out;
+}
+
+int UISkillListWnd::GetMaxViewOffset(int skillCount) const
+{
+    const int visibleRows = std::max(1, (m_h - kTitleBarHeight - kBottomBarHeight - kListTop - kListBottomMargin) / kRowHeight);
+    return std::max(0, skillCount - visibleRows);
+}
+
+HBITMAP UISkillListWnd::GetSkillIcon(int skillId)
+{
+    const auto existing = m_iconCache.find(skillId);
+    if (existing != m_iconCache.end()) {
+        return existing->second;
+    }
+
+    const SkillMetadata* metadata = g_skillMgr.GetSkillMetadata(skillId);
+    std::string path = metadata ? ResolveSkillIconPath(*metadata) : g_skillMgr.GetSkillIconPath(skillId);
+    HBITMAP bitmap = path.empty() ? nullptr : LoadBitmapFromGameData(path);
+    m_iconCache[skillId] = bitmap;
+    return bitmap;
+}
+
+const PLAYER_SKILL_INFO* UISkillListWnd::GetSelectedSkill() const
+{
+    for (const PLAYER_SKILL_INFO& skill : g_session.GetSkillItems()) {
+        if (skill.SKID == m_selectedSkillId) {
+            return &skill;
+        }
+    }
+    return nullptr;
+}

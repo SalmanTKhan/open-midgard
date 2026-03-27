@@ -295,6 +295,12 @@ UIBasicInfoWnd::UIBasicInfoWnd()
 {
     Create(kFullWidth, kFullHeight);
     Move(0, 0);
+    int savedX = m_x;
+    int savedY = m_y;
+    if (LoadUiWindowPlacement("BasicInfoWnd", &savedX, &savedY)) {
+        g_windowMgr.ClampWindowToClient(&savedX, &savedY, m_w, m_h);
+        Move(savedX, savedY);
+    }
 }
 
 UIBasicInfoWnd::~UIBasicInfoWnd()
@@ -348,13 +354,16 @@ int UIBasicInfoWnd::SendMsg(UIWindow* sender, int msg, int wparam, int lparam, i
         SetMiniMode(true);
         return 1;
     case kButtonIdItems:
-        g_windowMgr.MakeWindow(UIWindowMgr::WID_ITEMWND);
+        g_windowMgr.ToggleWindow(UIWindowMgr::WID_ITEMWND);
         return 1;
     case kButtonIdEquip:
-        g_windowMgr.MakeWindow(UIWindowMgr::WID_EQUIPWND);
+        g_windowMgr.ToggleWindow(UIWindowMgr::WID_EQUIPWND);
+        return 1;
+    case kButtonIdSkill:
+        g_windowMgr.ToggleWindow(UIWindowMgr::WID_SKILLLISTWND);
         return 1;
     case kButtonIdOption:
-        g_windowMgr.MakeWindow(UIWindowMgr::WID_OPTIONWND);
+        g_windowMgr.ToggleWindow(UIWindowMgr::WID_OPTIONWND);
         return 1;
     default:
         return 1;
@@ -505,6 +514,7 @@ void UIBasicInfoWnd::OnMouseHover(int x, int y)
 
 void UIBasicInfoWnd::StoreInfo()
 {
+    SaveUiWindowPlacement("BasicInfoWnd", m_x, m_y);
 }
 
 void UIBasicInfoWnd::NewHeight(int height)

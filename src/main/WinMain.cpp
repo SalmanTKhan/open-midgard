@@ -337,14 +337,22 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
     }
 
     case WM_MOUSEWHEEL:
-        g_modeMgr.SendMsg(CGameMode::GameMsg_MouseWheel, GET_WHEEL_DELTA_WPARAM(wParam), 0);
+    {
+        POINT screenPoint{ GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
+        POINT clientPoint = screenPoint;
+        ScreenToClient(hwnd, &clientPoint);
+        if (!g_windowMgr.OnWheel(clientPoint.x, clientPoint.y, GET_WHEEL_DELTA_WPARAM(wParam))) {
+            g_modeMgr.SendMsg(CGameMode::GameMsg_MouseWheel, GET_WHEEL_DELTA_WPARAM(wParam), 0);
+        }
         return 0;
+    }
 
     case WM_CHAR:
         g_windowMgr.OnChar(static_cast<char>(wParam));
         return 0;
 
     case WM_KEYDOWN:
+    case WM_SYSKEYDOWN:
         g_windowMgr.OnKeyDown(static_cast<int>(wParam));
         return 0;
     }

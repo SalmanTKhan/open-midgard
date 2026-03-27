@@ -2695,6 +2695,31 @@ bool RequestUnequipInventoryItem(u16 itemIndex)
     return sent;
 }
 
+bool RequestUpgradeSkillLevel(u16 skillId)
+{
+    if (skillId == 0) {
+        return false;
+    }
+
+    PACKET_CZ_SKILLUP packet{};
+    packet.PacketType = PacketProfile::ActiveMapServerSend::kSkillUp;
+    packet.SkillId = skillId;
+
+    const bool sent = CRagConnection::instance()->SendPacket(
+        reinterpret_cast<const char*>(&packet),
+        static_cast<int>(sizeof(packet)));
+    if (sent) {
+        if (CGameMode* gameMode = g_modeMgr.GetCurrentGameMode()) {
+            gameMode->m_isReqUpgradeSkillLevel = 1;
+        }
+    }
+
+    DbgLog("[GameMode] skill upgrade request skid=%u sent=%d\n",
+        static_cast<unsigned int>(skillId),
+        sent ? 1 : 0);
+    return sent;
+}
+
 bool TryRequestAttackFromScreenPoint(CGameMode& mode, int screenX, int screenY)
 {
     if (!mode.m_world || !mode.m_view || mode.m_canRotateView) {
@@ -5383,6 +5408,9 @@ int CGameMode::SendMsg(int msg, int wparam, int lparam, int extra)
 
     case GameMsg_RequestUnequipInventoryItem:
         return RequestUnequipInventoryItem(static_cast<u16>(wparam)) ? 1 : 0;
+
+    case GameMsg_RequestUpgradeSkillLevel:
+        return RequestUpgradeSkillLevel(static_cast<u16>(wparam)) ? 1 : 0;
 
     case GameMsg_RButtonUp:
         m_canRotateView = 0;

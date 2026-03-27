@@ -1,4 +1,301 @@
-﻿// Skill.cpp - Skill data and usage logic stub
+// Skill.cpp - Skill data and usage logic
 #include "Skill.h"
-CSkillMgr::CSkillMgr()  {}
-CSkillMgr::~CSkillMgr() {}
+
+#include <algorithm>
+#include <cctype>
+#include <cstdlib>
+#include <filesystem>
+#include <fstream>
+#include <vector>
+
+namespace {
+
+constexpr const char* kUiKorPrefix =
+    "texture\\"
+    "\xC0\xAF\xC0\xFA\xC0\xCE\xC5\xCD\xC6\xE4\xC0\xCC\xBD\xBA"
+    "\\";
+
+std::string TrimAscii(const std::string& value)
+{
+    const auto isSpace = [](unsigned char ch) {
+        return std::isspace(ch) != 0;
+    };
+
+    size_t begin = 0;
+    while (begin < value.size() && isSpace(static_cast<unsigned char>(value[begin]))) {
+        ++begin;
+    }
+
+    size_t end = value.size();
+    while (end > begin && isSpace(static_cast<unsigned char>(value[end - 1]))) {
+        --end;
+    }
+
+    return value.substr(begin, end - begin);
+}
+
+std::string ToLowerAscii(std::string value)
+{
+    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char ch) {
+        if (ch >= 'A' && ch <= 'Z') {
+            return static_cast<char>(ch - 'A' + 'a');
+        }
+        return static_cast<char>(ch);
+    });
+    return value;
+}
+
+bool ReadLines(const std::filesystem::path& path, std::vector<std::string>& outLines)
+{
+    outLines.clear();
+    std::ifstream stream(path, std::ios::binary);
+    if (!stream) {
+        return false;
+    }
+
+    std::string line;
+    while (std::getline(stream, line)) {
+        if (!line.empty() && line.back() == '\r') {
+            line.pop_back();
+        }
+        outLines.push_back(line);
+    }
+
+    return true;
+}
+
+std::filesystem::path GetSkillDataRoot()
+{
+#ifdef RO_SOURCE_ROOT
+    return std::filesystem::path(RO_SOURCE_ROOT) / "Ref" / "GRF-Content" / "data";
+#else
+    return std::filesystem::current_path() / "Ref" / "GRF-Content" / "data";
+#endif
+}
+
+std::vector<std::string> SplitHashTokens(const std::string& line)
+{
+    std::vector<std::string> out;
+    std::string current;
+    for (char ch : line) {
+        if (ch == '#') {
+            out.push_back(current);
+            current.clear();
+            continue;
+        }
+        current.push_back(ch);
+    }
+    if (!current.empty()) {
+        out.push_back(current);
+    }
+    return out;
+}
+
+} // namespace
+
+CSkillMgr::CSkillMgr()
+    : m_loaded(false)
+{
+}
+
+CSkillMgr::~CSkillMgr() = default;
+
+bool CSkillMgr::EnsureLoaded()
+{
+    if (m_loaded) {
+        return !m_byId.empty();
+    }
+    m_loaded = true;
+    return LoadSkillMetadata();
+}
+
+const SkillMetadata* CSkillMgr::GetSkillMetadata(int skillId) const
+{
+    const auto it = m_byId.find(skillId);
+    if (it == m_byId.end()) {
+        return nullptr;
+    }
+    return &it->second;
+}
+
+const SkillMetadata* CSkillMgr::GetSkillMetadataByName(const std::string& skillIdName) const
+{
+    const auto it = m_idBySkillName.find(ToLowerAscii(skillIdName));
+    if (it == m_idBySkillName.end()) {
+        return nullptr;
+    }
+    return GetSkillMetadata(it->second);
+}
+
+std::string CSkillMgr::GetSkillIconPath(int skillId) const
+{
+    const SkillMetadata* metadata = GetSkillMetadata(skillId);
+    if (!metadata || metadata->skillIdName.empty()) {
+        return std::string();
+    }
+
+    return std::string(kUiKorPrefix) + "item\\" + ToLowerAscii(metadata->skillIdName) + ".bmp";
+}
+
+bool CSkillMgr::LoadSkillMetadata()
+{
+    m_byId.clear();
+    m_idBySkillName.clear();
+
+    if (!BuildSkillIdMapFromNameTable()) {
+        return false;
+    }
+
+    LoadSkillDisplayNames();
+    LoadSkillDescriptions();
+    LoadSkillLevelSpCosts();
+    return !m_byId.empty();
+}
+
+bool CSkillMgr::BuildSkillIdMapFromNameTable()
+{
+    std::vector<std::string> lines;
+    if (!ReadLines(GetSkillDataRoot() / "skillnametable.txt", lines)) {
+        return false;
+    }
+
+    int nextSkillId = 1;
+    for (const std::string& rawLine : lines) {
+        const std::string line = TrimAscii(rawLine);
+        if (line.empty()) {
+            continue;
+        }
+
+        const std::vector<std::string> tokens = SplitHashTokens(line);
+        if (tokens.empty()) {
+            continue;
+        }
+
+        const std::string skillIdName = TrimAscii(tokens[0]);
+        if (skillIdName.empty()) {
+            continue;
+        }
+
+        SkillMetadata& metadata = m_byId[nextSkillId];
+        metadata.skillId = nextSkillId;
+        metadata.skillIdName = skillIdName;
+        if (tokens.size() >= 2) {
+            metadata.displayName = tokens[1];
+            std::replace(metadata.displayName.begin(), metadata.displayName.end(), '_', ' ');
+        }
+        m_idBySkillName[ToLowerAscii(skillIdName)] = nextSkillId;
+        ++nextSkillId;
+    }
+
+    return !m_byId.empty();
+}
+
+void CSkillMgr::LoadSkillDisplayNames()
+{
+    std::vector<std::string> lines;
+    if (!ReadLines(GetSkillDataRoot() / "skillnametable.txt", lines)) {
+        return;
+    }
+
+    for (const std::string& rawLine : lines) {
+        const std::string line = TrimAscii(rawLine);
+        if (line.empty()) {
+            continue;
+        }
+
+        const std::vector<std::string> tokens = SplitHashTokens(line);
+        if (tokens.size() < 2) {
+            continue;
+        }
+
+        const auto it = m_idBySkillName.find(ToLowerAscii(TrimAscii(tokens[0])));
+        if (it == m_idBySkillName.end()) {
+            continue;
+        }
+
+        SkillMetadata& metadata = m_byId[it->second];
+        metadata.displayName = tokens[1];
+        std::replace(metadata.displayName.begin(), metadata.displayName.end(), '_', ' ');
+    }
+}
+
+void CSkillMgr::LoadSkillDescriptions()
+{
+    std::vector<std::string> lines;
+    if (!ReadLines(GetSkillDataRoot() / "skilldesctable.txt", lines)) {
+        return;
+    }
+
+    SkillMetadata* currentMetadata = nullptr;
+    bool expectTitle = false;
+    for (const std::string& rawLine : lines) {
+        const std::string trimmed = TrimAscii(rawLine);
+        if (trimmed.empty()) {
+            continue;
+        }
+
+        if (trimmed == "#") {
+            currentMetadata = nullptr;
+            expectTitle = false;
+            continue;
+        }
+
+        if (trimmed.size() > 1 && trimmed.back() == '#') {
+            const std::string skillIdName = trimmed.substr(0, trimmed.size() - 1);
+            const auto it = m_idBySkillName.find(ToLowerAscii(skillIdName));
+            currentMetadata = (it == m_idBySkillName.end()) ? nullptr : &m_byId[it->second];
+            expectTitle = true;
+            continue;
+        }
+
+        if (!currentMetadata) {
+            continue;
+        }
+
+        if (expectTitle) {
+            if (currentMetadata->displayName.empty()) {
+                currentMetadata->displayName = trimmed;
+            }
+            expectTitle = false;
+            continue;
+        }
+
+        currentMetadata->descriptionLines.push_back(rawLine);
+    }
+}
+
+void CSkillMgr::LoadSkillLevelSpCosts()
+{
+    std::vector<std::string> lines;
+    if (!ReadLines(GetSkillDataRoot() / "leveluseskillspamount.txt", lines)) {
+        return;
+    }
+
+    SkillMetadata* currentMetadata = nullptr;
+    for (const std::string& rawLine : lines) {
+        const std::string trimmed = TrimAscii(rawLine);
+        if (trimmed.empty()) {
+            continue;
+        }
+
+        if (trimmed == "@") {
+            currentMetadata = nullptr;
+            continue;
+        }
+
+        if (trimmed.size() > 1 && trimmed.back() == '#') {
+            const std::string skillIdName = trimmed.substr(0, trimmed.size() - 1);
+            const auto it = m_idBySkillName.find(ToLowerAscii(skillIdName));
+            currentMetadata = (it == m_idBySkillName.end()) ? nullptr : &m_byId[it->second];
+            continue;
+        }
+
+        if (!currentMetadata) {
+            continue;
+        }
+
+        currentMetadata->levelSpCosts.push_back(std::atoi(trimmed.c_str()));
+    }
+}
+
+CSkillMgr g_skillMgr;

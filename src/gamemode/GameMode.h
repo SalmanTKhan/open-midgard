@@ -86,6 +86,7 @@ public:
         GameMsg_RequestEquipInventoryItem = 20010,
         GameMsg_RequestUnequipInventoryItem = 20011,
         GameMsg_ToggleSitStand = 20012,
+        GameMsg_RequestUpgradeSkillLevel = 20013,
     };
 
     CGameMode();

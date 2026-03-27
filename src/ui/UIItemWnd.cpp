@@ -520,6 +520,12 @@ UIItemWnd::UIItemWnd()
 {
     Create(kWindowWidth, kWindowHeight);
     Move(0, 121);
+    int savedX = m_x;
+    int savedY = m_y;
+    if (LoadUiWindowPlacement("ItemWnd", &savedX, &savedY)) {
+        g_windowMgr.ClampWindowToClient(&savedX, &savedY, m_w, m_h);
+        Move(savedX, savedY);
+    }
 }
 
 UIItemWnd::~UIItemWnd()
@@ -790,6 +796,11 @@ void UIItemWnd::OnLBtnDblClk(int x, int y)
 
 void UIItemWnd::OnLBtnDown(int x, int y)
 {
+    if (y >= m_y && y < m_y + kTitleBarHeight) {
+        UIFrameWnd::OnLBtnDown(x, y);
+        return;
+    }
+
     if (x >= m_x && x < m_x + kTabWidth && y >= m_y + kGridTop && y < m_y + kGridTop + kTabHeight) {
         SetCurrentTab(GetTabAtPoint(x, y));
         return;
@@ -815,6 +826,7 @@ void UIItemWnd::OnLBtnDown(int x, int y)
 
 void UIItemWnd::OnMouseMove(int x, int y)
 {
+    UIFrameWnd::OnMouseMove(x, y);
     UpdateHoveredItem(x, y);
 }
 
@@ -825,6 +837,7 @@ void UIItemWnd::OnMouseHover(int x, int y)
 
 void UIItemWnd::StoreInfo()
 {
+    SaveUiWindowPlacement("ItemWnd", m_x, m_y);
 }
 
 void UIItemWnd::EnsureCreated()

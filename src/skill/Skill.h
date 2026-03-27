@@ -1,10 +1,37 @@
-﻿#pragma once
-// Skill.h - Skill data and usage logic
-// Clean C++17 stub (implement from Ref/Skill.cpp)
-class CSkillMgr
-{
+#pragma once
+
+#include <string>
+#include <unordered_map>
+#include <vector>
+
+struct SkillMetadata {
+    int skillId = 0;
+    std::string skillIdName;
+    std::string displayName;
+    std::vector<std::string> descriptionLines;
+    std::vector<int> levelSpCosts;
+};
+
+class CSkillMgr {
 public:
     CSkillMgr();
     ~CSkillMgr();
+
+    bool EnsureLoaded();
+    const SkillMetadata* GetSkillMetadata(int skillId) const;
+    const SkillMetadata* GetSkillMetadataByName(const std::string& skillIdName) const;
+    std::string GetSkillIconPath(int skillId) const;
+
+private:
+    bool LoadSkillMetadata();
+    bool BuildSkillIdMapFromNameTable();
+    void LoadSkillDisplayNames();
+    void LoadSkillDescriptions();
+    void LoadSkillLevelSpCosts();
+
+    std::unordered_map<int, SkillMetadata> m_byId;
+    std::unordered_map<std::string, int> m_idBySkillName;
+    bool m_loaded;
 };
-extern CSkillMgr g_kkillmgr;
+
+extern CSkillMgr g_skillMgr;

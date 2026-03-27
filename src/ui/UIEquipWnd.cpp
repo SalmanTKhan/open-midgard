@@ -792,6 +792,12 @@ UIEquipWnd::UIEquipWnd()
 {
     Create(kWindowWidth, kWindowHeight);
     Move(281, 121);
+    int savedX = m_x;
+    int savedY = m_y;
+    if (LoadUiWindowPlacement("EquipWnd", &savedX, &savedY)) {
+        g_windowMgr.ClampWindowToClient(&savedX, &savedY, m_w, m_h);
+        Move(savedX, savedY);
+    }
 }
 
 UIEquipWnd::~UIEquipWnd()
@@ -1066,6 +1072,7 @@ void UIEquipWnd::OnLBtnDblClk(int x, int y)
 
 void UIEquipWnd::StoreInfo()
 {
+    SaveUiWindowPlacement("EquipWnd", m_x, m_y);
 }
 
 void UIEquipWnd::EnsureCreated()

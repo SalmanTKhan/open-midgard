@@ -10,4 +10,5 @@ target_compile_definitions(ro_session PRIVATE RO_SOURCE_ROOT="${CMAKE_SOURCE_DIR
 target_link_libraries(ro_session PUBLIC
     ro_core
     ro_network
+    ro_skill
 )

@@ -17,6 +17,7 @@ class UIBasicInfoWnd;
 class UINotifyLevelUpWnd;
 class UINotifyJobLevelUpWnd;
 class UIEquipWnd;
+class UISkillListWnd;
 class UIOptionWnd;
 class UIShortCutWnd;
 class UIItemDropCntWnd;
@@ -55,6 +56,7 @@ public:
         WID_LOADINGWND        = 10,
         WID_OPTIONWND         = 13,
         WID_EQUIPWND          = 14,
+        WID_SKILLLISTWND      = 15,
         WID_NOTIFYLEVELUPWND  = 21,
         WID_CHOOSEWND         = 17,
         WID_NOTIFYJOBLEVELUPWND = 49,
@@ -84,6 +86,7 @@ public:
     std::vector<UIChatEvent> GetChatPreviewEvents(size_t maxCount) const;
     void ClearChatEvents();
     UIWindow* MakeWindow(int windowId);
+    bool ToggleWindow(int windowId);
     void RemoveAllWindows();
     void DeleteWindow(UIWindow* window);
 
@@ -92,9 +95,12 @@ public:
     void OnLBtnDblClk(int x, int y);
     void OnLBtnUp(int x, int y);
     void OnMouseMove(int x, int y);
+    bool OnWheel(int x, int y, int delta);
     void OnChar(char c);
     void OnKeyDown(int virtualKey);
     bool HasWindowAtPoint(int x, int y) const;
+    void ClampWindowToClient(int* x, int* y, int w, int h) const;
+    void SnapWindowToNearby(UIWindow* window, int* x, int* y) const;
 
     // Memory layout from HighPriest.exe.h:10334
     int m_chatWndX, m_chatWndY;
@@ -136,6 +142,7 @@ public:
     UINotifyLevelUpWnd* m_notifyLevelUpWnd;
     UINotifyJobLevelUpWnd* m_notifyJobLevelUpWnd;
     UIEquipWnd* m_equipWnd;
+    UISkillListWnd* m_skillListWnd;
     std::string m_loginStatus;
     std::string m_loginWallpaper;
     std::string m_loadedWallpaperPath;

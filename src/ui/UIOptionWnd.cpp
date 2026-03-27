@@ -1332,9 +1332,14 @@ void UIOptionWnd::OnMouseMove(int x, int y)
 {
     switch (m_dragMode) {
     case DragMode_Window:
-        Move(m_dragWindowStartX + (x - m_dragAnchorX), m_dragWindowStartY + (y - m_dragAnchorY));
+    {
+        int snappedX = m_dragWindowStartX + (x - m_dragAnchorX);
+        int snappedY = m_dragWindowStartY + (y - m_dragAnchorY);
+        g_windowMgr.SnapWindowToNearby(this, &snappedX, &snappedY);
+        Move(snappedX, snappedY);
         LayoutControls();
         break;
+    }
 
     case DragMode_BgmSlider:
         m_bgmVolume = SliderValueFromMouseX(x);

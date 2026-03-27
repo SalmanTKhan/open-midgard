@@ -5,6 +5,7 @@
 #include "UIChooseWnd.h"
 #include "UIEquipWnd.h"
 #include "UIItemWnd.h"
+#include "UISkillListWnd.h"
 #include "UILoginWnd.h"
 #include "UISelectServerWnd.h"
 #include "UIMakeCharWnd.h"
@@ -36,6 +37,7 @@ namespace {
 constexpr int kUiChatEventMsg = 101;
 constexpr size_t kMaxChatEvents = 256;
 constexpr bool kLogWallpaperLoad = false;
+constexpr int kWindowSnapDistance = 14;
 
 #define LOG_WALLPAPER_LOAD(...) do { if constexpr (kLogWallpaperLoad) { DbgLog(__VA_ARGS__); } } while (0)
 
@@ -177,6 +179,11 @@ void ClearDirtyWindowRecursive(UIWindow* window)
         ClearDirtyWindowRecursive(child);
     }
 }
+
+bool RangesOverlapWithMargin(int a0, int a1, int b0, int b1, int margin)
+{
+    return std::max(a0, b0) <= std::min(a1, b1) + margin;
+}
 }
 
 UIWindowMgr g_windowMgr;
@@ -188,7 +195,7 @@ UIWindowMgr::UIWindowMgr()
       m_isDragAll(0), m_conversionMode(0),
       m_captureWindow(nullptr), m_editWindow(nullptr), m_modalWindow(nullptr), m_lastHitWindow(nullptr),
       m_loadingWnd(nullptr), m_minimapZoomWnd(nullptr), m_statusWnd(nullptr), m_chatWnd(nullptr),
-    m_loginWnd(nullptr), m_selectServerWnd(nullptr), m_selectCharWnd(nullptr), m_makeCharWnd(nullptr), m_chooseWnd(nullptr), m_optionWnd(nullptr), m_itemWnd(nullptr), m_questWnd(nullptr), m_basicInfoWnd(nullptr), m_notifyLevelUpWnd(nullptr), m_notifyJobLevelUpWnd(nullptr), m_equipWnd(nullptr),
+    m_loginWnd(nullptr), m_selectServerWnd(nullptr), m_selectCharWnd(nullptr), m_makeCharWnd(nullptr), m_chooseWnd(nullptr), m_optionWnd(nullptr), m_itemWnd(nullptr), m_questWnd(nullptr), m_basicInfoWnd(nullptr), m_notifyLevelUpWnd(nullptr), m_notifyJobLevelUpWnd(nullptr), m_equipWnd(nullptr), m_skillListWnd(nullptr),
       m_wallpaperSurface(nullptr), m_uiComposeDC(nullptr), m_uiComposeBitmap(nullptr), m_uiComposeBits(nullptr), m_uiComposeWidth(0), m_uiComposeHeight(0),
       m_composeCursorActNum(0), m_composeCursorStartTick(0), m_composeCursorEnabled(false)
 {
@@ -197,6 +204,98 @@ UIWindowMgr::UIWindowMgr()
 
 UIWindowMgr::~UIWindowMgr() {
     Reset();
+}
+
+void UIWindowMgr::ClampWindowToClient(int* x, int* y, int w, int h) const
+{
+    if (!x || !y) {
+        return;
+    }
+
+    RECT clientRect{ 0, 0, 640, 480 };
+    if (g_hMainWnd) {
+        GetClientRect(g_hMainWnd, &clientRect);
+    }
+
+    const int minX = static_cast<int>(clientRect.left);
+    const int minY = static_cast<int>(clientRect.top);
+    const int clientRight = static_cast<int>(clientRect.right);
+    const int clientBottom = static_cast<int>(clientRect.bottom);
+    const int maxX = std::max(minX, clientRight - std::max(1, w));
+    const int maxY = std::max(minY, clientBottom - std::max(17, std::min(h, 64)));
+    *x = std::clamp(*x, minX, maxX);
+    *y = std::clamp(*y, minY, maxY);
+}
+
+void UIWindowMgr::SnapWindowToNearby(UIWindow* window, int* x, int* y) const
+{
+    if (!window || !x || !y) {
+        return;
+    }
+
+    int snappedX = *x;
+    int snappedY = *y;
+    int bestXDistance = kWindowSnapDistance + 1;
+    int bestYDistance = kWindowSnapDistance + 1;
+
+    RECT clientRect{ 0, 0, 640, 480 };
+    if (g_hMainWnd) {
+        GetClientRect(g_hMainWnd, &clientRect);
+    }
+
+    const auto considerX = [&](int candidateX) {
+        const int distance = std::abs(*x - candidateX);
+        if (distance < bestXDistance && distance <= kWindowSnapDistance) {
+            bestXDistance = distance;
+            snappedX = candidateX;
+        }
+    };
+    const auto considerY = [&](int candidateY) {
+        const int distance = std::abs(*y - candidateY);
+        if (distance < bestYDistance && distance <= kWindowSnapDistance) {
+            bestYDistance = distance;
+            snappedY = candidateY;
+        }
+    };
+
+    considerX(clientRect.left);
+    considerX(clientRect.right - window->m_w);
+    considerY(clientRect.top);
+    considerY(clientRect.bottom - window->m_h);
+
+    const int proposedLeft = *x;
+    const int proposedRight = *x + window->m_w;
+    const int proposedTop = *y;
+    const int proposedBottom = *y + window->m_h;
+
+    for (UIWindow* other : m_children) {
+        if (!other || other == window || other->m_show == 0 || other->m_parent != nullptr || !other->IsFrameWnd()) {
+            continue;
+        }
+
+        const int otherLeft = other->m_x;
+        const int otherRight = other->m_x + other->m_w;
+        const int otherTop = other->m_y;
+        const int otherBottom = other->m_y + other->m_h;
+
+        if (RangesOverlapWithMargin(proposedTop, proposedBottom, otherTop, otherBottom, kWindowSnapDistance)) {
+            considerX(otherLeft - window->m_w);
+            considerX(otherRight);
+            considerX(otherLeft);
+            considerX(otherRight - window->m_w);
+        }
+
+        if (RangesOverlapWithMargin(proposedLeft, proposedRight, otherLeft, otherRight, kWindowSnapDistance)) {
+            considerY(otherTop - window->m_h);
+            considerY(otherBottom);
+            considerY(otherTop);
+            considerY(otherBottom - window->m_h);
+        }
+    }
+
+    *x = snappedX;
+    *y = snappedY;
+    ClampWindowToClient(x, y, window->m_w, window->m_h);
 }
 
 void UIWindowMgr::ReleaseComposeSurface()
@@ -319,6 +418,16 @@ UIWindow* UIWindowMgr::MakeWindow(int windowId)
         m_equipWnd->SetShow(1);
         return m_equipWnd;
 
+    case WID_SKILLLISTWND:
+        if (!m_skillListWnd) {
+            m_skillListWnd = new UISkillListWnd();
+            m_children.push_back(m_skillListWnd);
+        }
+        m_children.remove(m_skillListWnd);
+        m_children.push_back(m_skillListWnd);
+        m_skillListWnd->SetShow(1);
+        return m_skillListWnd;
+
     case WID_LOGINWND:
         if (!m_loginWnd) {
             m_loginWnd = new UILoginWnd();
@@ -404,6 +513,36 @@ UIWindow* UIWindowMgr::MakeWindow(int windowId)
     }
 }
 
+bool UIWindowMgr::ToggleWindow(int windowId)
+{
+    UIWindow* window = nullptr;
+    switch (windowId) {
+    case WID_ITEMWND:
+        window = m_itemWnd;
+        break;
+    case WID_EQUIPWND:
+        window = m_equipWnd;
+        break;
+    case WID_SKILLLISTWND:
+        window = m_skillListWnd;
+        break;
+    case WID_OPTIONWND:
+        window = m_optionWnd;
+        break;
+    default:
+        window = nullptr;
+        break;
+    }
+
+    if (window && window->m_show != 0) {
+        window->SetShow(0);
+        window->StoreInfo();
+        return false;
+    }
+
+    return MakeWindow(windowId) != nullptr;
+}
+
 void UIWindowMgr::DeleteWindow(UIWindow* window)
 {
     if (!window) {
@@ -464,6 +603,9 @@ void UIWindowMgr::DeleteWindow(UIWindow* window)
     if (window == m_equipWnd) {
         m_equipWnd = nullptr;
     }
+    if (window == m_skillListWnd) {
+        m_skillListWnd = nullptr;
+    }
 
     delete window;
 }
@@ -496,6 +638,7 @@ void UIWindowMgr::RemoveAllWindows()
     m_questWnd = nullptr;
     m_basicInfoWnd = nullptr;
     m_equipWnd = nullptr;
+    m_skillListWnd = nullptr;
 }
 
 void UIWindowMgr::Reset() {
@@ -507,6 +650,7 @@ void UIWindowMgr::Reset() {
     m_optionWnd = nullptr;
     m_chatWnd = nullptr;
     m_chatEvents.clear();
+    m_skillListWnd = nullptr;
 
     if (m_wallpaperSurface) {
         delete m_wallpaperSurface;
@@ -912,6 +1056,22 @@ void UIWindowMgr::OnMouseMove(int x, int y)
     }
 }
 
+bool UIWindowMgr::OnWheel(int x, int y, int delta)
+{
+    if (m_captureWindow) {
+        m_captureWindow->OnWheel(delta);
+        return true;
+    }
+
+    UIWindow* hit = HitTestWindow(x, y);
+    if (!hit) {
+        return false;
+    }
+
+    hit->OnWheel(delta);
+    return true;
+}
+
 UIWindow* UIWindowMgr::HitTestWindow(int x, int y) const
 {
     for (auto it = m_children.rbegin(); it != m_children.rend(); ++it) {
@@ -950,6 +1110,28 @@ void UIWindowMgr::OnChar(char c)
 
 void UIWindowMgr::OnKeyDown(int virtualKey)
 {
+    const bool hasFrontMenuUi =
+        (m_loginWnd && m_loginWnd->m_show != 0) ||
+        (m_selectCharWnd && m_selectCharWnd->m_show != 0) ||
+        (m_makeCharWnd && m_makeCharWnd->m_show != 0);
+    const bool isAltDown = (GetKeyState(VK_MENU) & 0x8000) != 0;
+
+    if (isAltDown && !hasFrontMenuUi) {
+        switch (virtualKey) {
+        case 'E':
+            ToggleWindow(WID_ITEMWND);
+            return;
+        case 'Q':
+            ToggleWindow(WID_EQUIPWND);
+            return;
+        case 'S':
+            ToggleWindow(WID_SKILLLISTWND);
+            return;
+        default:
+            break;
+        }
+    }
+
     if (virtualKey == VK_RETURN || virtualKey == VK_ESCAPE) {
         DbgLog("[UI] keydown vk=%d chat=%p show=%d login=%p select=%p make=%p edit=%p\n",
             virtualKey,
@@ -983,11 +1165,6 @@ void UIWindowMgr::OnKeyDown(int virtualKey)
         m_optionWnd->OnKeyDown(virtualKey);
         return;
     }
-
-    const bool hasFrontMenuUi =
-        (m_loginWnd && m_loginWnd->m_show != 0) ||
-        (m_selectCharWnd && m_selectCharWnd->m_show != 0) ||
-        (m_makeCharWnd && m_makeCharWnd->m_show != 0);
 
     if (virtualKey == VK_ESCAPE && !hasFrontMenuUi) {
         UIWindow* chooseWnd = MakeWindow(WID_CHOOSEWND);

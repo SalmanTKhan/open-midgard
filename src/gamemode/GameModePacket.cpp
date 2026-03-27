@@ -512,6 +512,141 @@ bool BuildEquipInventoryItem(const PacketView& packet, const u8* entry, ITEM_INF
     return outItem.m_itemIndex != 0;
 }
 
+void ApplySkillMetadata(PLAYER_SKILL_INFO& skillInfo)
+{
+    g_skillMgr.EnsureLoaded();
+    const SkillMetadata* metadata = g_skillMgr.GetSkillMetadata(skillInfo.SKID);
+    if (!metadata) {
+        if (skillInfo.skillName.empty()) {
+            skillInfo.skillName = "Unknown Skill";
+        }
+        return;
+    }
+
+    skillInfo.skillIdName = metadata->skillIdName;
+    if (skillInfo.skillName.empty()) {
+        skillInfo.skillName = metadata->displayName.empty() ? metadata->skillIdName : metadata->displayName;
+    }
+    if (skillInfo.descriptionLines.empty()) {
+        skillInfo.descriptionLines = metadata->descriptionLines;
+    }
+    if (skillInfo.skillMaxLv <= 0) {
+        skillInfo.skillMaxLv = static_cast<int>(metadata->levelSpCosts.size());
+    }
+    if (skillInfo.spcost <= 0 &&
+        skillInfo.level > 0 &&
+        skillInfo.level <= static_cast<int>(metadata->levelSpCosts.size())) {
+        skillInfo.spcost = metadata->levelSpCosts[skillInfo.level - 1];
+    }
+}
+
+bool BuildPlayerSkillListEntry(const u8* entry, PLAYER_SKILL_INFO& outSkill)
+{
+    if (!entry) {
+        return false;
+    }
+
+    outSkill = {};
+    outSkill.m_isValid = 1;
+    outSkill.SKID = ReadLE16(entry + 0);
+    outSkill.type = static_cast<int>(ReadLE32(entry + 2));
+    outSkill.level = static_cast<int>(ReadLE16(entry + 6));
+    outSkill.spcost = static_cast<int>(ReadLE16(entry + 8));
+    outSkill.attackRange = static_cast<int>(ReadLE16(entry + 10));
+    outSkill.upgradable = static_cast<int>(entry[36]);
+    ApplySkillMetadata(outSkill);
+    return outSkill.SKID != 0;
+}
+
+bool TryGetExistingPlayerSkillInfo(int skillId, PLAYER_SKILL_INFO& outSkill)
+{
+    for (const PLAYER_SKILL_INFO& skillInfo : g_session.GetSkillItems()) {
+        if (skillInfo.SKID == skillId) {
+            outSkill = skillInfo;
+            return true;
+        }
+    }
+    return false;
+}
+
+void HandlePlayerSkillList(CGameMode&, const PacketView& packet)
+{
+    if (!packet.data || packet.packetLength < 4) {
+        return;
+    }
+
+    DbgLog("[GameMode] skill list pkt=0x%04X len=%u\n",
+        static_cast<unsigned int>(packet.packetId),
+        static_cast<unsigned int>(packet.packetLength));
+    g_session.ClearSkillItems();
+    for (size_t offset = 4; offset + 37 <= static_cast<size_t>(packet.packetLength); offset += 37) {
+        PLAYER_SKILL_INFO skillInfo;
+        if (!BuildPlayerSkillListEntry(packet.data + offset, skillInfo)) {
+            continue;
+        }
+        g_session.SetSkillItem(skillInfo);
+        DbgLog("[GameMode] skill list entry skid=%d level=%d sp=%d upgradable=%d\n",
+            skillInfo.SKID,
+            skillInfo.level,
+            skillInfo.spcost,
+            skillInfo.upgradable);
+    }
+}
+
+void HandlePlayerSkillUpdate(CGameMode&, const PacketView& packet)
+{
+    if (!packet.data || packet.packetLength < 11) {
+        return;
+    }
+
+    if (CGameMode* gameMode = g_modeMgr.GetCurrentGameMode()) {
+        gameMode->m_isReqUpgradeSkillLevel = 0;
+    }
+
+    DbgLog("[GameMode] skill update pkt=0x%04X len=%u skid=%u level=%u sp=%u range=%u upgradable=%u\n",
+        static_cast<unsigned int>(packet.packetId),
+        static_cast<unsigned int>(packet.packetLength),
+        static_cast<unsigned int>(ReadLE16(packet.data + 2)),
+        static_cast<unsigned int>(ReadLE16(packet.data + 4)),
+        static_cast<unsigned int>(ReadLE16(packet.data + 6)),
+        static_cast<unsigned int>(ReadLE16(packet.data + 8)),
+        static_cast<unsigned int>(packet.data[10]));
+    PLAYER_SKILL_INFO skillInfo;
+    skillInfo.SKID = static_cast<int>(ReadLE16(packet.data + 2));
+    if (!TryGetExistingPlayerSkillInfo(skillInfo.SKID, skillInfo)) {
+        skillInfo = {};
+        skillInfo.SKID = static_cast<int>(ReadLE16(packet.data + 2));
+        skillInfo.m_isValid = 1;
+    }
+
+    skillInfo.level = static_cast<int>(ReadLE16(packet.data + 4));
+    skillInfo.spcost = static_cast<int>(ReadLE16(packet.data + 6));
+    skillInfo.attackRange = static_cast<int>(ReadLE16(packet.data + 8));
+    skillInfo.upgradable = static_cast<int>(packet.data[10]);
+    ApplySkillMetadata(skillInfo);
+    g_session.SetSkillItem(skillInfo);
+}
+
+void HandlePlayerSkillAdd(CGameMode&, const PacketView& packet)
+{
+    if (!packet.data || packet.packetLength < 39) {
+        return;
+    }
+
+    if (CGameMode* gameMode = g_modeMgr.GetCurrentGameMode()) {
+        gameMode->m_isReqUpgradeSkillLevel = 0;
+    }
+
+    DbgLog("[GameMode] add skill pkt=0x%04X len=%u\n",
+        static_cast<unsigned int>(packet.packetId),
+        static_cast<unsigned int>(packet.packetLength));
+    PLAYER_SKILL_INFO skillInfo;
+    if (!BuildPlayerSkillListEntry(packet.data + 2, skillInfo)) {
+        return;
+    }
+    g_session.SetSkillItem(skillInfo);
+}
+
 void HandleNormalInventoryList(CGameMode&, const PacketView& packet)
 {
     if (!packet.data || packet.packetLength < 4) {
@@ -4040,7 +4175,14 @@ void RegisterDefaultGameModePacketHandlers(CGameModePacketRouter& router)
     router.Register(0x008A, HandleActorActionNotify);
     router.Register(0x0088, HandleActorSetPosition);
     router.Register(0x009C, HandleActorDirection);
+    router.Register(0x010E, HandlePlayerSkillUpdate);
+    router.Register(0x010F, HandlePlayerSkillList);
     router.Register(0x0110, HandleSkillFailAck);
+    router.Register(0x0111, HandlePlayerSkillAdd);
+    router.Register(0x0235, HandlePlayerSkillList);
+    router.Register(0x0239, HandlePlayerSkillUpdate);
+    router.Register(0x029D, HandlePlayerSkillList);
+    router.Register(0x029E, HandlePlayerSkillUpdate);
     router.Register(0x0119, HandleActorStateChange);
     router.Register(0x011A, HandleIgnorePacket);
     router.Register(0x0139, HandleAttackFailureForDistance);
@@ -4089,7 +4231,6 @@ void RegisterDefaultGameModePacketHandlers(CGameModePacketRouter& router)
     router.Register(0x01B0, HandleIgnorePacket);
     router.Register(0x0106, HandleIgnorePacket);
     router.Register(0x0104, HandleIgnorePacket);
-    router.Register(0x010F, HandleIgnorePacket);
     router.Register(0x011F, HandleIgnorePacket);
     router.Register(0x0120, HandleIgnorePacket);
     router.Register(0x0131, HandleIgnorePacket);

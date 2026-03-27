@@ -141,8 +141,10 @@ void FillPacketSizeTable()
     SetPacketSize(0x0105, 31);
     SetPacketSize(0x0106, 10);
     SetPacketSize(0x0109, kVariablePacketSize);
+    SetPacketSize(0x010E, 11);
     SetPacketSize(0x010F, kVariablePacketSize);
     SetPacketSize(0x0110, 10);
+    SetPacketSize(0x0111, 39);
     SetPacketSize(0x0119, 13);
     SetPacketSize(0x011A, 15);
     SetPacketSize(0x011F, 16);
@@ -220,6 +222,8 @@ void FillPacketSizeTable()
     SetPacketSize(0x022A, 58);
     SetPacketSize(0x022B, 57);
     SetPacketSize(0x022C, 65);
+    SetPacketSize(0x0235, kVariablePacketSize);
+    SetPacketSize(0x0239, 11);
     SetPacketSize(0x0283, 6);
     SetPacketSize(0x02EB, 13);
     SetPacketSize(0x02EC, 67);
@@ -235,6 +239,8 @@ void FillPacketSizeTable()
     SetPacketSize(0x02D3, 4);
     SetPacketSize(0x02D4, 29);
     SetPacketSize(0x02D5, 2);
+    SetPacketSize(0x029D, kVariablePacketSize);
+    SetPacketSize(0x029E, 11);
     SetPacketSize(0x07F7, kVariablePacketSize);
     SetPacketSize(0x07F8, kVariablePacketSize);
     SetPacketSize(0x07F9, kVariablePacketSize);

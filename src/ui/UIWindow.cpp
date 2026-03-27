@@ -18,6 +18,7 @@
 namespace {
 
 HDC g_sharedUiDrawDC = nullptr;
+constexpr char kUiWindowRegPath[] = "Software\\Gravity Soft\\Ragnarok Online";
 
 std::string ToLowerAsciiUi(std::string value)
 {
@@ -31,6 +32,27 @@ std::string NormalizeSlashUi(std::string value)
 {
     std::replace(value.begin(), value.end(), '/', '\\');
     return value;
+}
+
+void ClampWindowPositionToClient(int* x, int* y, int w, int h)
+{
+    if (!x || !y) {
+        return;
+    }
+
+    RECT clientRect{ 0, 0, 640, 480 };
+    if (g_hMainWnd) {
+        GetClientRect(g_hMainWnd, &clientRect);
+    }
+
+    const int minX = static_cast<int>(clientRect.left);
+    const int minY = static_cast<int>(clientRect.top);
+    const int clientRight = static_cast<int>(clientRect.right);
+    const int clientBottom = static_cast<int>(clientRect.bottom);
+    const int maxX = std::max(minX, clientRight - std::max(1, w));
+    const int maxY = std::max(minY, clientBottom - std::max(17, std::min(h, 64)));
+    *x = std::clamp(*x, minX, maxX);
+    *y = std::clamp(*y, minY, maxY);
 }
 
 bool ContainsUiToken(const std::string& lowered, const char* token)
@@ -348,6 +370,66 @@ void UIWindow::SetSharedDrawDC(HDC dc)
 HDC UIWindow::GetSharedDrawDC()
 {
     return g_sharedUiDrawDC;
+}
+
+bool LoadUiWindowPlacement(const char* windowName, int* x, int* y)
+{
+    if (!windowName || !*windowName || !x || !y) {
+        return false;
+    }
+
+    char valueNameX[64] = {};
+    char valueNameY[64] = {};
+    std::snprintf(valueNameX, sizeof(valueNameX), "%sX", windowName);
+    std::snprintf(valueNameY, sizeof(valueNameY), "%sY", windowName);
+
+    HKEY key = nullptr;
+    if (RegOpenKeyExA(HKEY_CURRENT_USER, kUiWindowRegPath, 0, KEY_READ, &key) != ERROR_SUCCESS) {
+        return false;
+    }
+
+    bool loadedX = false;
+    bool loadedY = false;
+
+    DWORD rawValue = 0;
+    DWORD size = sizeof(rawValue);
+    if (RegQueryValueExA(key, valueNameX, nullptr, nullptr, reinterpret_cast<BYTE*>(&rawValue), &size) == ERROR_SUCCESS) {
+        *x = static_cast<int>(rawValue);
+        loadedX = true;
+    }
+
+    rawValue = 0;
+    size = sizeof(rawValue);
+    if (RegQueryValueExA(key, valueNameY, nullptr, nullptr, reinterpret_cast<BYTE*>(&rawValue), &size) == ERROR_SUCCESS) {
+        *y = static_cast<int>(rawValue);
+        loadedY = true;
+    }
+
+    RegCloseKey(key);
+    return loadedX && loadedY;
+}
+
+void SaveUiWindowPlacement(const char* windowName, int x, int y)
+{
+    if (!windowName || !*windowName) {
+        return;
+    }
+
+    char valueNameX[64] = {};
+    char valueNameY[64] = {};
+    std::snprintf(valueNameX, sizeof(valueNameX), "%sX", windowName);
+    std::snprintf(valueNameY, sizeof(valueNameY), "%sY", windowName);
+
+    HKEY key = nullptr;
+    if (RegCreateKeyExA(HKEY_CURRENT_USER, kUiWindowRegPath, 0, nullptr, 0, KEY_SET_VALUE, nullptr, &key, nullptr) != ERROR_SUCCESS) {
+        return;
+    }
+
+    const DWORD rawX = static_cast<DWORD>(x);
+    const DWORD rawY = static_cast<DWORD>(y);
+    RegSetValueExA(key, valueNameX, 0, REG_DWORD, reinterpret_cast<const BYTE*>(&rawX), sizeof(rawX));
+    RegSetValueExA(key, valueNameY, 0, REG_DWORD, reinterpret_cast<const BYTE*>(&rawY), sizeof(rawY));
+    RegCloseKey(key);
 }
 
 UIWindow::~UIWindow() {

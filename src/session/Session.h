@@ -4,6 +4,7 @@
 #include <vector>
 #include "Types.h"
 #include "item/Item.h"
+#include "skill/Skill.h"
 
 struct accountInfo {
     std::string display;
@@ -14,6 +15,22 @@ struct accountInfo {
 };
 
 constexpr int JT_G_MASTER = 20002;
+
+struct PLAYER_SKILL_INFO {
+    int m_isValid = 0;
+    int SKID = 0;
+    int type = 0;
+    int level = 0;
+    int spcost = 0;
+    int upgradable = 0;
+    int attackRange = 0;
+    int skillPos = 0;
+    int skillMaxLv = 0;
+    std::string skillIdName;
+    std::string skillName;
+    std::vector<std::string> descriptionLines;
+    std::vector<int> needSkillList;
+};
 
 class CSession
 {
@@ -64,13 +81,17 @@ public:
     bool TryGetJobExpPercent(int* outPercent) const;
     void ClearInventoryItems();
     void ClearEquipmentInventoryItems();
+    void ClearSkillItems();
     void SetInventoryItem(const ITEM_INFO& itemInfo);
     void AddInventoryItem(const ITEM_INFO& itemInfo);
+    void SetSkillItem(const PLAYER_SKILL_INFO& skillInfo);
     void RemoveInventoryItem(unsigned int itemIndex, int amount);
     bool SetInventoryItemWearLocation(unsigned int itemIndex, int wearLocation);
     void ClearInventoryWearLocationMask(int wearMask, unsigned int exceptItemIndex = 0);
     void RebuildPlayerEquipmentAppearanceFromInventory();
     const std::list<ITEM_INFO>& GetInventoryItems() const;
+    const std::list<PLAYER_SKILL_INFO>& GetSkillItems() const;
+    int GetPlayerSkillPointCount() const;
     const char* GetPlayerName() const;
     const char* GetJobName(int job) const;
     const char* GetAttrWaveName(int attr) const;
@@ -104,6 +125,7 @@ private:
     bool m_hasJobExpValue;
     bool m_hasNextJobExpValue;
     std::list<ITEM_INFO> m_inventoryItems;
+    std::list<PLAYER_SKILL_INFO> m_skillItems;
     bool m_accessoryNameTableLoaded;
     std::vector<std::string> m_accessoryNameTable;
     std::vector<std::string> m_jobHitWaveNameTable;

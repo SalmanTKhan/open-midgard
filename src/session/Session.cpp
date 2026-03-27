@@ -314,6 +314,7 @@ void CSession::SetSelectedCharacterAppearance(const CHARACTER_INFO& info)
 {
     m_selectedCharacterInfo = info;
     m_hasSelectedCharacterInfo = true;
+    m_skillItems.clear();
     m_hasBaseExpValue = false;
     m_hasNextBaseExpValue = false;
     m_hasJobExpValue = false;
@@ -419,6 +420,11 @@ void CSession::ClearEquipmentInventoryItems()
     }
 }
 
+void CSession::ClearSkillItems()
+{
+    m_skillItems.clear();
+}
+
 void CSession::SetInventoryItem(const ITEM_INFO& itemInfo)
 {
     auto it = std::find_if(m_inventoryItems.begin(), m_inventoryItems.end(), [&](const ITEM_INFO& existing) {
@@ -451,6 +457,20 @@ void CSession::AddInventoryItem(const ITEM_INFO& itemInfo)
     }
 
     m_inventoryItems.push_back(itemInfo);
+}
+
+void CSession::SetSkillItem(const PLAYER_SKILL_INFO& skillInfo)
+{
+    auto it = std::find_if(m_skillItems.begin(), m_skillItems.end(), [&](const PLAYER_SKILL_INFO& existing) {
+        return existing.SKID == skillInfo.SKID;
+    });
+
+    if (it != m_skillItems.end()) {
+        *it = skillInfo;
+        return;
+    }
+
+    m_skillItems.push_back(skillInfo);
 }
 
 void CSession::RemoveInventoryItem(unsigned int itemIndex, int amount)
@@ -560,6 +580,16 @@ void CSession::RebuildPlayerEquipmentAppearanceFromInventory()
 const std::list<ITEM_INFO>& CSession::GetInventoryItems() const
 {
     return m_inventoryItems;
+}
+
+const std::list<PLAYER_SKILL_INFO>& CSession::GetSkillItems() const
+{
+    return m_skillItems;
+}
+
+int CSession::GetPlayerSkillPointCount() const
+{
+    return m_hasSelectedCharacterInfo ? static_cast<int>(m_selectedCharacterInfo.jobpoint) : 0;
 }
 
 const char* CSession::GetPlayerName() const

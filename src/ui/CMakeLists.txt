@@ -19,6 +19,8 @@ add_library(ro_ui STATIC
     UIItemWnd.cpp
     UIEquipWnd.h
     UIEquipWnd.cpp
+    UISkillListWnd.h
+    UISkillListWnd.cpp
     UIChooseWnd.h
     UIChooseWnd.cpp
     UIOptionWnd.h
@@ -41,4 +43,6 @@ target_include_directories(ro_ui PUBLIC
 target_link_libraries(ro_ui PUBLIC
     ro_core
     ro_item
+    ro_session
+    ro_skill
 )
