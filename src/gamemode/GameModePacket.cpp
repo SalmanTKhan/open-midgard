@@ -84,6 +84,9 @@ constexpr u32 kDeathCorpseHoldMs = 1290;
 
 u16 ReadLE16(const u8* data);
 u32 ReadLE32(const u8* data);
+float TileToWorldCoordX(const CWorld* world, int tileX);
+float TileToWorldCoordZ(const CWorld* world, int tileY);
+float PacketDirToRotationDegrees(int dir);
 
 std::string ToLowerAsciiStatus(std::string value)
 {
@@ -1300,6 +1303,126 @@ bool ParseMapChangePacket(const PacketView& packet, MapChangeInfo& outInfo)
     }
 
     return !outInfo.mapName.empty();
+}
+
+bool SendLoadEndAckPacket()
+{
+    const u16 opcode = PacketProfile::ActiveMapServerSend::kNotifyActorInit;
+    u8 packet[2] = {
+        static_cast<u8>(opcode & 0xFFu),
+        static_cast<u8>((opcode >> 8) & 0xFFu)
+    };
+
+    const bool sent = CRagConnection::instance()->SendPacket(
+        reinterpret_cast<const char*>(packet),
+        static_cast<int>(sizeof(packet)));
+    DbgLog("[GameMode] load end ack opcode=0x%04X sent=%d\n",
+        opcode,
+        sent ? 1 : 0);
+    return sent;
+}
+
+bool IsSameMapAlreadyLoaded(const CGameMode& mode, const MapChangeInfo& info)
+{
+    if (info.mapName.empty() || !mode.m_world || !mode.m_world->m_player || mode.m_rswName[0] == '\0') {
+        return false;
+    }
+
+    const std::string currentMap = ToLowerAsciiStatus(NormalizeMapName(std::string(mode.m_rswName)));
+    const std::string targetMap = ToLowerAsciiStatus(info.mapName);
+    return !currentMap.empty() && currentMap == targetMap;
+}
+
+void PrepareSameMapWarpReuse(CGameMode& mode)
+{
+    CPlayer* const player = mode.m_world ? mode.m_world->m_player : nullptr;
+    if (!player) {
+        return;
+    }
+
+    for (auto it = mode.m_runtimeActors.begin(); it != mode.m_runtimeActors.end(); ) {
+        CGameActor* actor = it->second;
+        if (!actor || actor == player || it->first == g_session.m_gid || it->first == g_session.m_aid) {
+            ++it;
+            continue;
+        }
+
+        actor->UnRegisterPos();
+        delete actor;
+        it = mode.m_runtimeActors.erase(it);
+    }
+
+    mode.m_actorPosList.clear();
+    mode.m_aidList.clear();
+    mode.m_actorNameList.clear();
+    mode.m_actorNameReqTimer.clear();
+    mode.m_actorNameListByGID.clear();
+    mode.m_actorNameByGIDReqTimer.clear();
+    mode.m_partyPosList.clear();
+    mode.m_guildPosList.clear();
+    mode.m_compassPosList.clear();
+    mode.m_pickupReqItemNaidList.clear();
+    mode.m_groundItemList.clear();
+
+    if (mode.m_world) {
+        for (CItem* item : mode.m_world->m_itemList) {
+            delete item;
+        }
+        mode.m_world->m_itemList.clear();
+    }
+
+    player->m_targetGid = 0;
+    player->m_proceedTargetGid = 0;
+    player->m_isMoving = 0;
+    player->m_isWaitingMoveAck = 0;
+    player->m_path.Reset();
+    player->m_moveStartTime = 0;
+    player->m_moveEndTime = 0;
+    player->m_moveSrcX = g_session.m_playerPosX;
+    player->m_moveSrcY = g_session.m_playerPosY;
+    player->m_moveDestX = g_session.m_playerPosX;
+    player->m_moveDestY = g_session.m_playerPosY;
+    player->m_lastTlvertX = g_session.m_playerPosX;
+    player->m_lastTlvertY = g_session.m_playerPosY;
+    player->m_pos.x = TileToWorldCoordX(mode.m_world, g_session.m_playerPosX);
+    player->m_pos.z = TileToWorldCoordZ(mode.m_world, g_session.m_playerPosY);
+    player->m_pos.y = mode.m_world && mode.m_world->m_attr
+        ? mode.m_world->m_attr->GetHeight(player->m_pos.x, player->m_pos.z)
+        : 0.0f;
+    player->m_moveStartPos = player->m_pos;
+    player->m_moveEndPos = player->m_pos;
+    player->m_roty = PacketDirToRotationDegrees(g_session.m_playerDir);
+    if (CPc* pc = dynamic_cast<CPc*>(player)) {
+        pc->InvalidateBillboard();
+    }
+
+    mode.m_runtimeActors[g_session.m_gid] = player;
+    mode.m_actorPosList[g_session.m_gid] = CellPos{ g_session.m_playerPosX, g_session.m_playerPosY };
+    mode.m_aidList[g_session.m_gid] = GetTickCount();
+    mode.m_lastPcGid = g_session.m_gid;
+    mode.m_lastMonGid = 0;
+    mode.m_lastLockOnMonGid = 0;
+    mode.m_lastMoveRequestCellX = -1;
+    mode.m_lastMoveRequestCellY = -1;
+    mode.m_heldMoveTargetCellX = -1;
+    mode.m_heldMoveTargetCellY = -1;
+    mode.m_hasHeldMoveTarget = 0;
+    mode.m_lastMoveRequestTick = 0;
+    mode.m_lastAttackRequestTick = 0;
+    mode.m_lastPickupRequestTick = 0;
+    mode.m_attackChaseTargetGid = 0;
+    mode.m_attackChaseTargetCellX = 0;
+    mode.m_attackChaseTargetCellY = 0;
+    mode.m_attackChaseSourceCellX = 0;
+    mode.m_attackChaseSourceCellY = 0;
+    mode.m_attackChaseRange = 0;
+    mode.m_hasAttackChaseHint = 0;
+    mode.m_isLeftButtonHeld = 0;
+    mode.m_sentLoadEndAck = 0;
+    mode.m_mapLoadingStage = CGameMode::MapLoading_None;
+    mode.m_mapLoadingStartTick = 0;
+    mode.m_mapLoadingAckTick = 0;
+    mode.m_lastActorBootstrapPacketTick = GetTickCount();
 }
 
 constexpr u8 kNotifyActDamage = 0;
@@ -3537,15 +3660,15 @@ void HandleLoginRefuse(CGameMode&, const PacketView&)
     g_session.m_aid = 0;
 }
 
-void HandleMapChange(CGameMode&, const PacketView& packet)
+void HandleMapChange(CGameMode& mode, const PacketView& packet)
 {
     MapChangeInfo info;
     if (!ParseMapChangePacket(packet, info)) {
         return;
     }
 
+    const bool sameMapAlreadyLoaded = !info.hasServerMove && IsSameMapAlreadyLoaded(mode, info);
     ApplyMapChangeSessionState(info);
-    g_modeMgr.PresentLoadingScreen("Loading new map...", 0.01f);
 
     DbgLog("[GameMode] map change packet=0x%04X map='%s' pos=%d,%d serverMove=%d\n",
         packet.packetId,
@@ -3553,6 +3676,22 @@ void HandleMapChange(CGameMode&, const PacketView& packet)
         info.x,
         info.y,
         info.hasServerMove ? 1 : 0);
+
+    if (sameMapAlreadyLoaded) {
+        PrepareSameMapWarpReuse(mode);
+        const bool sentLoadAck = SendLoadEndAckPacket();
+        mode.m_sentLoadEndAck = sentLoadAck ? 1 : 0;
+        mode.m_mapLoadingAckTick = GetTickCount();
+        mode.m_lastActorBootstrapPacketTick = mode.m_mapLoadingAckTick;
+        DbgLog("[GameMode] reused loaded map='%s' pos=%d,%d sentLoadAck=%d\n",
+            g_session.m_curMap,
+            info.x,
+            info.y,
+            sentLoadAck ? 1 : 0);
+        return;
+    }
+
+    g_modeMgr.PresentLoadingScreen("Loading new map...", 0.01f);
 
     if (!ReconnectForServerMove(info)) {
         ReturnToLoginMode();
