@@ -1000,7 +1000,7 @@ public:
 
         switch (m_effectId) {
         case 158:
-            RenderEntry(viewMatrix, center, normalized, fadeOut);
+            RenderJobLevel(viewMatrix, center, normalized, fadeOut, false);
             break;
         case 337:
             RenderJobLevel(viewMatrix, center, normalized, fadeOut, true);
@@ -1044,12 +1044,26 @@ private:
         return groundCenter;
     }
 
+    float ResolveVisualScale() const
+    {
+        float zoom = 5.0f;
+        if (g_world.m_attr) {
+            zoom = static_cast<float>(g_world.m_attr->m_zoom);
+        } else if (g_world.m_ground) {
+            zoom = g_world.m_ground->m_zoom;
+        }
+
+        const float actorBillboardHeight = zoom * kPlayerBillboardWorldHeightScale;
+        return (std::max)(1.0f, actorBillboardHeight / 6.0f);
+    }
+
     void RenderAngel(matrix* viewMatrix, const vector3d& center, float normalized, float fadeOut) const
     {
+        const float scale = ResolveVisualScale();
         const COLORREF glowColor = RGB(255, 236, 168);
         const COLORREF wingColor = RGB(255, 250, 236);
         const unsigned int alpha = static_cast<unsigned int>(210.0f * fadeOut);
-        const int renderFlags = 1 | 2;
+        const int renderFlags = 1 | 4;
 
         CTexture* wingTexture = GetAngelWingTexture();
         if (!wingTexture) {
@@ -1059,14 +1073,14 @@ private:
         if (wingTexture) {
             for (int side = -1; side <= 1; side += 2) {
                 vector3d wingCenter = center;
-                wingCenter.x += static_cast<float>(side) * (0.82f + normalized * 0.32f);
-                wingCenter.y += 1.85f + normalized * 0.75f;
-                wingCenter.z -= 0.18f;
+                wingCenter.x += static_cast<float>(side) * (0.82f + normalized * 0.32f) * scale;
+                wingCenter.y += (1.85f + normalized * 0.75f) * scale;
+                wingCenter.z -= 0.18f * scale;
                 SubmitTexturedBillboard(wingCenter,
                     *viewMatrix,
                     wingTexture,
-                    2.8f + (wingTexture == GetPortalAuraTexture() ? 0.9f : 0.0f),
-                    3.9f + (wingTexture == GetPortalAuraTexture() ? 1.5f : 0.0f),
+                    (2.8f + (wingTexture == GetPortalAuraTexture() ? 0.9f : 0.0f)) * scale,
+                    (3.9f + (wingTexture == GetPortalAuraTexture() ? 1.5f : 0.0f)) * scale,
                     PackPortalColor(static_cast<unsigned int>(alpha * 0.95f), wingColor),
                     D3DBLEND_ONE,
                     0.0f,
@@ -1076,12 +1090,12 @@ private:
         }
 
         vector3d flashCenter = center;
-        flashCenter.y += 2.1f + normalized * 0.55f;
+        flashCenter.y += (2.1f + normalized * 0.55f) * scale;
         SubmitTexturedBillboard(flashCenter,
             *viewMatrix,
             GetPortalParticleTexture(false),
-            2.8f + normalized * 1.0f,
-            6.2f + normalized * 1.5f,
+            (2.8f + normalized * 1.0f) * scale,
+            (6.2f + normalized * 1.5f) * scale,
             PackPortalColor(static_cast<unsigned int>(alpha * 0.8f), wingColor),
             D3DBLEND_ONE,
             0.0f,
@@ -1089,12 +1103,12 @@ private:
             renderFlags);
 
         vector3d haloCenter = center;
-        haloCenter.y += 2.7f + normalized * 0.35f;
+        haloCenter.y += (2.7f + normalized * 0.35f) * scale;
         SubmitTexturedBillboard(haloCenter,
             *viewMatrix,
             GetPortalRingTexture(),
-            2.6f + normalized * 0.6f,
-            0.75f + normalized * 0.1f,
+            (2.6f + normalized * 0.6f) * scale,
+            (0.75f + normalized * 0.1f) * scale,
             PackPortalColor(static_cast<unsigned int>(alpha * 0.7f), glowColor),
             D3DBLEND_ONE,
             0.0f,
@@ -1105,14 +1119,14 @@ private:
             const float seed = (static_cast<float>(sparkIndex) + 0.5f) / 8.0f;
             const float angle = seed * 6.2831853f;
             vector3d sparkPos = center;
-            sparkPos.x += std::cos(angle) * (0.2f + normalized * 0.7f);
-            sparkPos.z += std::sin(angle) * (0.2f + normalized * 0.7f);
-            sparkPos.y += 0.7f + normalized * 2.5f + seed * 0.35f;
+            sparkPos.x += std::cos(angle) * (0.2f + normalized * 0.7f) * scale;
+            sparkPos.z += std::sin(angle) * (0.2f + normalized * 0.7f) * scale;
+            sparkPos.y += (0.7f + normalized * 2.5f + seed * 0.35f) * scale;
             SubmitTexturedBillboard(sparkPos,
                 *viewMatrix,
                 GetPortalParticleTexture((sparkIndex & 1) != 0),
-                0.34f,
-                0.7f,
+                0.34f * scale,
+                0.7f * scale,
                 PackPortalColor(static_cast<unsigned int>(alpha * (0.3f + 0.5f * (1.0f - seed))), glowColor),
                 D3DBLEND_ONE,
                 0.0f,
@@ -1123,16 +1137,17 @@ private:
 
     void RenderEntry(matrix* viewMatrix, const vector3d& center, float normalized, float fadeOut) const
     {
+        const float scale = ResolveVisualScale();
         const COLORREF glowColor = RGB(255, 214, 144);
         const unsigned int alpha = static_cast<unsigned int>(185.0f * fadeOut);
-        const int renderFlags = 1 | 2;
+        const int renderFlags = 1 | 4;
         const vector3d groundCenter = ResolveGroundCenter(center);
 
         RenderPortalGroundDisc(groundCenter,
             *viewMatrix,
             GetPortalRingTexture(),
             glowColor,
-            1.6f + normalized * 2.1f,
+            (1.6f + normalized * 2.1f) * scale,
             static_cast<unsigned int>(alpha * 0.38f),
             0.0f,
             kPortalGroundDepthBias,
@@ -1140,12 +1155,12 @@ private:
 
         if (CTexture* burstTexture = GetJobLevelTexture()) {
             vector3d burstCenter = center;
-            burstCenter.y += 1.75f + normalized * 0.45f;
+            burstCenter.y += (1.75f + normalized * 0.45f) * scale;
             SubmitTexturedBillboard(burstCenter,
                 *viewMatrix,
                 burstTexture,
-                2.0f + normalized * 1.4f,
-                2.0f + normalized * 1.4f,
+                (2.0f + normalized * 1.4f) * scale,
+                (2.0f + normalized * 1.4f) * scale,
                 PackPortalColor(static_cast<unsigned int>(alpha * 0.95f), RGB(255, 248, 220)),
                 D3DBLEND_ONE,
                 0.0f,
@@ -1157,14 +1172,14 @@ private:
             const float seed = (static_cast<float>(index) + 0.5f) / 10.0f;
             const float angle = seed * 6.2831853f + normalized * 5.0f;
             vector3d particlePos = center;
-            particlePos.x += std::cos(angle) * (0.35f + normalized * 1.1f);
-            particlePos.z += std::sin(angle) * (0.35f + normalized * 1.1f);
-            particlePos.y += 0.7f + normalized * 1.8f;
+            particlePos.x += std::cos(angle) * (0.35f + normalized * 1.1f) * scale;
+            particlePos.z += std::sin(angle) * (0.35f + normalized * 1.1f) * scale;
+            particlePos.y += (0.7f + normalized * 1.8f) * scale;
             SubmitTexturedBillboard(particlePos,
                 *viewMatrix,
                 GetPortalParticleTexture((index & 1) != 0),
-                0.48f,
-                0.7f,
+                0.48f * scale,
+                0.7f * scale,
                 PackPortalColor(static_cast<unsigned int>(alpha * (0.4f + 0.5f * (1.0f - seed))), glowColor),
                 D3DBLEND_ONE,
                 0.0f,
@@ -1175,17 +1190,18 @@ private:
 
     void RenderJobLevel(matrix* viewMatrix, const vector3d& center, float normalized, float fadeOut, bool advanced) const
     {
+        const float scale = ResolveVisualScale();
         const COLORREF glowColor = advanced ? RGB(255, 188, 112) : RGB(255, 214, 144);
         const COLORREF coreColor = advanced ? RGB(255, 242, 220) : RGB(255, 248, 232);
         const unsigned int alpha = static_cast<unsigned int>((advanced ? 210.0f : 190.0f) * fadeOut);
-        const int renderFlags = 1 | 2;
+        const int renderFlags = 1 | 4;
         const vector3d groundCenter = ResolveGroundCenter(center);
 
         RenderPortalGroundDisc(groundCenter,
             *viewMatrix,
             GetPortalRingTexture(),
             glowColor,
-            1.8f + normalized * (advanced ? 2.5f : 2.0f),
+            (1.8f + normalized * (advanced ? 2.5f : 2.0f)) * scale,
             static_cast<unsigned int>(alpha * 0.42f),
             0.0f,
             kPortalGroundDepthBias,
@@ -1193,13 +1209,13 @@ private:
 
         if (CTexture* burstTexture = GetJobLevelTexture()) {
             vector3d burstCenter = center;
-            burstCenter.y += 1.65f + normalized * 0.35f;
-            const float size = advanced ? 2.6f : 2.2f;
+            burstCenter.y += (1.65f + normalized * 0.35f) * scale;
+            const float size = (advanced ? 2.6f : 2.2f) * scale;
             SubmitTexturedBillboard(burstCenter,
                 *viewMatrix,
                 burstTexture,
-                size + normalized * 1.8f,
-                size + normalized * 1.8f,
+                size + normalized * 1.8f * scale,
+                size + normalized * 1.8f * scale,
                 PackPortalColor(static_cast<unsigned int>(alpha * 0.98f), coreColor),
                 D3DBLEND_ONE,
                 0.0f,
@@ -1210,10 +1226,11 @@ private:
 
     void RenderSuperAngel(matrix* viewMatrix, const vector3d& center, float normalized, float fadeOut, bool taekwonVariant) const
     {
+        const float scale = ResolveVisualScale();
         const COLORREF glowColor = taekwonVariant ? RGB(255, 206, 116) : RGB(255, 236, 180);
         const COLORREF accentColor = taekwonVariant ? RGB(255, 164, 92) : RGB(196, 236, 255);
         const unsigned int alpha = static_cast<unsigned int>((taekwonVariant ? 220.0f : 210.0f) * fadeOut);
-        const int renderFlags = 1 | 2;
+        const int renderFlags = 1 | 4;
 
         CTexture* wingTexture = GetAngelWingTexture();
         if (!wingTexture) {
@@ -1225,14 +1242,14 @@ private:
                 const float side = (wingIndex < 2) ? -1.0f : 1.0f;
                 const float row = (wingIndex % 2 == 0) ? 0.0f : 1.0f;
                 vector3d wingCenter = center;
-                wingCenter.x += side * (0.7f + row * 0.45f + normalized * 0.18f);
-                wingCenter.z -= row * 0.15f;
-                wingCenter.y += 1.85f + row * 0.7f + normalized * 0.55f;
+                wingCenter.x += side * (0.7f + row * 0.45f + normalized * 0.18f) * scale;
+                wingCenter.z -= row * 0.15f * scale;
+                wingCenter.y += (1.85f + row * 0.7f + normalized * 0.55f) * scale;
                 SubmitTexturedBillboard(wingCenter,
                     *viewMatrix,
                     wingTexture,
-                    2.3f + row * 0.25f + (wingTexture == GetPortalAuraTexture() ? 0.8f : 0.0f),
-                    3.0f + row * 0.45f + (wingTexture == GetPortalAuraTexture() ? 1.2f : 0.0f),
+                    (2.3f + row * 0.25f + (wingTexture == GetPortalAuraTexture() ? 0.8f : 0.0f)) * scale,
+                    (3.0f + row * 0.45f + (wingTexture == GetPortalAuraTexture() ? 1.2f : 0.0f)) * scale,
                     PackPortalColor(static_cast<unsigned int>(alpha * 0.85f), taekwonVariant ? accentColor : glowColor),
                     D3DBLEND_ONE,
                     0.0f,
@@ -1242,12 +1259,12 @@ private:
         }
 
         vector3d flashCenter = center;
-        flashCenter.y += 2.2f + normalized * 0.7f;
+        flashCenter.y += (2.2f + normalized * 0.7f) * scale;
         SubmitTexturedBillboard(flashCenter,
             *viewMatrix,
             GetPortalParticleTexture(false),
-            2.2f + normalized * 1.1f,
-            5.0f + normalized * 1.1f,
+            (2.2f + normalized * 1.1f) * scale,
+            (5.0f + normalized * 1.1f) * scale,
             PackPortalColor(static_cast<unsigned int>(alpha * 0.78f), glowColor),
             D3DBLEND_ONE,
             0.0f,
@@ -1255,12 +1272,12 @@ private:
             renderFlags);
 
         vector3d haloCenter = center;
-        haloCenter.y += 2.85f + normalized * 0.25f;
+        haloCenter.y += (2.85f + normalized * 0.25f) * scale;
         SubmitTexturedBillboard(haloCenter,
             *viewMatrix,
             GetPortalRingTexture(),
-            2.8f + normalized * 0.8f,
-            0.85f,
+            (2.8f + normalized * 0.8f) * scale,
+            0.85f * scale,
             PackPortalColor(static_cast<unsigned int>(alpha * 0.72f), taekwonVariant ? accentColor : glowColor),
             D3DBLEND_ONE,
             0.0f,
@@ -1271,14 +1288,14 @@ private:
             const float seed = (static_cast<float>(orbIndex) + 0.5f) / 12.0f;
             const float angle = seed * 6.2831853f;
             vector3d orbPos = center;
-            orbPos.x += std::cos(angle) * (0.18f + seed * 0.35f + normalized * 0.55f);
-            orbPos.z += std::sin(angle) * (0.18f + seed * 0.35f + normalized * 0.55f);
-            orbPos.y += 0.8f + normalized * 2.8f + seed * 0.45f;
+            orbPos.x += std::cos(angle) * (0.18f + seed * 0.35f + normalized * 0.55f) * scale;
+            orbPos.z += std::sin(angle) * (0.18f + seed * 0.35f + normalized * 0.55f) * scale;
+            orbPos.y += (0.8f + normalized * 2.8f + seed * 0.45f) * scale;
             SubmitTexturedBillboard(orbPos,
                 *viewMatrix,
                 GetPortalParticleTexture((orbIndex & 1) != 0),
-                0.46f,
-                0.62f,
+                0.46f * scale,
+                0.62f * scale,
                 PackPortalColor(static_cast<unsigned int>(alpha * (0.4f + 0.45f * (1.0f - seed))), (orbIndex % 2) == 0 ? glowColor : accentColor),
                 D3DBLEND_ONE,
                 0.0f,
