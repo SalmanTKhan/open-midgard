@@ -38,6 +38,8 @@ public:
 namespace {
 
 PendingDisconnectAction g_pendingDisconnectAction = PendingDisconnectAction::None;
+u32 g_lastLocalLevelUpEffectId = 0;
+u32 g_lastLocalLevelUpEffectTick = 0;
 
 constexpr u32 kStatusSpeed = 0;
 constexpr u32 kStatusBaseExp = 1;
@@ -69,6 +71,7 @@ constexpr u32 kEffectIdJobLevelUp = 158;
 constexpr u32 kEffectIdBaseLevelUpSuperNovice = 338;
 constexpr u32 kEffectIdJobLevelUpSuperNovice = 337;
 constexpr u32 kEffectIdBaseLevelUpTaekwon = 582;
+constexpr u32 kLocalLevelUpNotifySuppressMs = 1200;
 constexpr u32 kDeathFadeDurationMs = 510;
 constexpr u32 kDeathCorpseHoldMs = 1290;
 
@@ -134,6 +137,45 @@ void PlayJobLevelUpPresentation(CGameMode& mode)
     g_windowMgr.MakeWindow(UIWindowMgr::WID_NOTIFYJOBLEVELUPWND);
 }
 
+void RecordLocalLevelUpEffect(u32 effectId)
+{
+    g_lastLocalLevelUpEffectId = effectId;
+    g_lastLocalLevelUpEffectTick = GetTickCount();
+}
+
+bool ShouldSuppressSelfNotifyEffect(u32 actorId, u32 effectId)
+{
+    if (actorId != g_session.m_aid && actorId != g_session.m_gid) {
+        return false;
+    }
+
+    const u32 elapsed = GetTickCount() - g_lastLocalLevelUpEffectTick;
+    return g_lastLocalLevelUpEffectId == effectId && elapsed <= kLocalLevelUpNotifySuppressMs;
+}
+
+u32 ResolveLocalBaseLevelUpEffectId(const CGameMode& mode)
+{
+    const CPlayer* player = mode.m_world ? mode.m_world->m_player : nullptr;
+    const int job = player ? player->m_job : g_session.m_playerJob;
+    if (job == 23 || job == 4046) {
+        return kEffectIdBaseLevelUpSuperNovice;
+    }
+    if (job == 4047 || job == 4048 || job == 4049 || job == 4050 || job == 4051) {
+        return kEffectIdBaseLevelUpTaekwon;
+    }
+    return kEffectIdBaseLevelUp;
+}
+
+u32 ResolveLocalJobLevelUpEffectId(const CGameMode& mode)
+{
+    const CPlayer* player = mode.m_world ? mode.m_world->m_player : nullptr;
+    const int job = player ? player->m_job : g_session.m_playerJob;
+    if (job == 23 || job == 4046) {
+        return kEffectIdJobLevelUpSuperNovice;
+    }
+    return kEffectIdJobLevelUp;
+}
+
 CGameActor* ResolveNotifyEffectActor(CGameMode& mode, u32 actorId)
 {
     if (mode.m_world && mode.m_world->m_player) {
@@ -164,28 +206,35 @@ void HandleNotifyEffect(CGameMode& mode, const PacketView& packet)
         return;
     }
 
+    u32 effectId = 0;
     switch (effectType) {
     case kNotifyEffectBaseLevelUp:
-        LaunchLevelUpEffect(actor, kEffectIdBaseLevelUp);
+        effectId = kEffectIdBaseLevelUp;
         break;
     case kNotifyEffectBaseLevelUpSuperNovice:
-        LaunchLevelUpEffect(actor, kEffectIdBaseLevelUpSuperNovice);
+        effectId = kEffectIdBaseLevelUpSuperNovice;
         break;
     case kNotifyEffectBaseLevelUpTaekwon:
-        LaunchLevelUpEffect(actor, kEffectIdBaseLevelUpTaekwon);
+        effectId = kEffectIdBaseLevelUpTaekwon;
         break;
     case kNotifyEffectJobLevelUp:
-        LaunchLevelUpEffect(actor, kEffectIdJobLevelUp);
+        effectId = kEffectIdJobLevelUp;
         break;
     case kNotifyEffectJobLevelUpSuperNovice:
-        LaunchLevelUpEffect(actor, kEffectIdJobLevelUpSuperNovice);
+        effectId = kEffectIdJobLevelUpSuperNovice;
         break;
     default:
         DbgLog("[GameMode] unhandled notify effect type=%u actor=%u\n",
             static_cast<unsigned int>(effectType),
             static_cast<unsigned int>(actorId));
-        break;
+        return;
     }
+
+    if (ShouldSuppressSelfNotifyEffect(actorId, effectId)) {
+        return;
+    }
+
+    LaunchLevelUpEffect(actor, effectId);
 }
 
 void HandleIgnorePacket(CGameMode&, const PacketView&)
@@ -708,8 +757,18 @@ void HandleSelfStatusParam(CGameMode& mode, const PacketView& packet)
         if (hadPreviousValue && value > previousValue) {
             if (statusType == kStatusBaseLevel) {
                 PlayBaseLevelUpPresentation(mode);
+                if (mode.m_world && mode.m_world->m_player) {
+                    const u32 effectId = ResolveLocalBaseLevelUpEffectId(mode);
+                    LaunchLevelUpEffect(mode.m_world->m_player, effectId);
+                    RecordLocalLevelUpEffect(effectId);
+                }
             } else if (statusType == kStatusJobLevel) {
                 PlayJobLevelUpPresentation(mode);
+                if (mode.m_world && mode.m_world->m_player) {
+                    const u32 effectId = ResolveLocalJobLevelUpEffectId(mode);
+                    LaunchLevelUpEffect(mode.m_world->m_player, effectId);
+                    RecordLocalLevelUpEffect(effectId);
+                }
             }
         }
     }
