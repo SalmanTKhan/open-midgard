@@ -75,7 +75,7 @@ public:
     CGameObject() {}
     virtual ~CGameObject() {}
     virtual u8   OnProcess() { return 1; }
-    virtual void SendMsg(CGameObject* src, int msg, int par1, int par2, int par3) {}
+    virtual void SendMsg(CGameObject* src, int msg, msgparam_t par1, msgparam_t par2, msgparam_t par3) {}
     virtual void Render(matrix* m) {}
     virtual int  Get8Dir(float rot);
 };
@@ -225,7 +225,7 @@ public:
     int m_isMoving;
 
     virtual u8   ProcessState();
-    virtual void SendMsg(CGameObject* src, int msg, int par1, int par2, int par3) override;
+    virtual void SendMsg(CGameObject* src, int msg, msgparam_t par1, msgparam_t par2, msgparam_t par3) override;
     virtual int  Get8Dir(float rot) override;
     virtual void SetState(int state);
     virtual void ProcessWillBeAttacked();
@@ -244,7 +244,7 @@ public:
     ~CMsgEffect() override;
 
     u8 OnProcess() override;
-    void SendMsg(CGameObject* sender, int msg, int par1, int par2, int par3) override;
+    void SendMsg(CGameObject* sender, int msg, msgparam_t par1, msgparam_t par2, msgparam_t par3) override;
     void Render(matrix* viewMatrix) override;
 
     int m_msgEffectType;

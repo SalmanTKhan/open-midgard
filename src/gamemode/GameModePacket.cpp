@@ -1770,7 +1770,7 @@ void HandleSkillFailAck(CGameMode& mode, const PacketView& packet)
         message);
 
     g_windowMgr.SendMsg(kUiChatEventMsg,
-        reinterpret_cast<int>(message),
+        reinterpret_cast<msgparam_t>(message),
         static_cast<int>(kSystemNoticeColor));
 }
 
@@ -3425,7 +3425,7 @@ void PropagateChatToUi(const ChatEntry& entry)
     }
 
     const int meta = static_cast<int>((entry.color & 0x00FFFFFFu) | (static_cast<u32>(entry.channel) << 24));
-    g_windowMgr.SendMsg(kUiChatEventMsg, reinterpret_cast<int>(entry.text.c_str()), meta);
+    g_windowMgr.SendMsg(kUiChatEventMsg, reinterpret_cast<msgparam_t>(entry.text.c_str()), meta);
 }
 
 void RecordChat(CGameMode& mode, const std::string& text, u32 color, u8 channel)

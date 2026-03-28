@@ -598,7 +598,7 @@ void SpawnDamageNumberEffect(CGameActor& actor, CGameActor* sourceActor, int val
     effect->SendMsg(nullptr, 22, static_cast<int>(actor.m_gid), kind, 0);
     effect->SendMsg(nullptr,
         64,
-        static_cast<int>(reinterpret_cast<intptr_t>(&actor.m_pos)),
+        reinterpret_cast<msgparam_t>(&actor.m_pos),
         value,
         0);
     effect->SendMsg(&actor, 50, 0, 0, 0);
@@ -2170,7 +2170,7 @@ u8 CGameActor::ProcessState() {
     return 1;
 }
 
-void CGameActor::SendMsg(CGameObject* src, int msg, int par1, int par2, int par3)
+void CGameActor::SendMsg(CGameObject* src, int msg, msgparam_t par1, msgparam_t par2, msgparam_t par3)
 {
     switch (msg) {
     case 28:
@@ -2192,7 +2192,7 @@ void CGameActor::SendMsg(CGameObject* src, int msg, int par1, int par2, int par3
         return;
     case 88: {
         CGameActor* sourceActor = dynamic_cast<CGameActor*>(src);
-        MakeDamageNumber(*this, sourceActor, par1, static_cast<u32>(par2), par3);
+        MakeDamageNumber(*this, sourceActor, static_cast<int>(par1), static_cast<u32>(par2), static_cast<int>(par3));
         return;
     }
     default:

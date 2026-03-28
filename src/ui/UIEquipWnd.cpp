@@ -855,7 +855,7 @@ bool UIEquipWnd::IsUpdateNeed()
     return BuildVisualStateToken() != m_lastVisualStateToken;
 }
 
-int UIEquipWnd::SendMsg(UIWindow* sender, int msg, int wparam, int lparam, int extra)
+msgresult_t UIEquipWnd::SendMsg(UIWindow* sender, int msg, msgparam_t wparam, msgparam_t lparam, msgparam_t extra)
 {
     (void)sender;
     (void)lparam;

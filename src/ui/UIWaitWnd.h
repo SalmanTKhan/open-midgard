@@ -9,7 +9,7 @@ public:
     UIWaitWnd();
     virtual ~UIWaitWnd();
 
-    virtual int  SendMsg(UIWindow* sender, int msg, int wparam, int lparam, int extra) override;
+    virtual msgresult_t SendMsg(UIWindow* sender, int msg, msgparam_t wparam, msgparam_t lparam, msgparam_t extra) override;
     virtual void OnCreate(int x, int y) override;
     virtual void OnDraw() override;
 

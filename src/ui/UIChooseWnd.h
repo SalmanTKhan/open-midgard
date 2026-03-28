@@ -15,7 +15,7 @@ public:
     void OnLBtnDown(int x, int y) override;
     void OnLBtnDblClk(int x, int y) override;
     void OnMouseMove(int x, int y) override;
-    int SendMsg(UIWindow* sender, int msg, int wparam, int lparam, int extra) override;
+    msgresult_t SendMsg(UIWindow* sender, int msg, msgparam_t wparam, msgparam_t lparam, msgparam_t extra) override;
     void OnKeyDown(int virtualKey);
 
 private:
@@ -32,7 +32,7 @@ private:
     void SyncSelectionVisuals();
     void UpdateSelectedIndexFromHover() const;
     void CloseMenu();
-    int ActivateSelection();
+    msgresult_t ActivateSelection();
 
     bool m_controlsCreated;
     UIBitmapButton* m_entryButtons[MenuEntry_Count];

@@ -88,7 +88,7 @@ int C3dDevice::Init(HWND hwnd, GUID* pDriverGUID, GUID* pDeviceGUID, IDirectDraw
 
     m_bIsFullscreen = dwFlags & 1;
     if (m_bIsFullscreen) {
-        SetWindowLongA(g_hMainWnd, GWL_STYLE, WS_POPUP);
+        SetWindowLongPtrA(g_hMainWnd, GWL_STYLE, static_cast<LONG_PTR>(WS_POPUP));
         ShowWindow(g_hMainWnd, SW_SHOWMAXIMIZED);
     }
 

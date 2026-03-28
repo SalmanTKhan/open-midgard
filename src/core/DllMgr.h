@@ -12,6 +12,7 @@ class CDllMgr {
 public:
     // Phase 3: Load all RO supporting DLLs and resolve their exports
     static bool LoadAll();
+    static const std::string& GetLastLoadReport();
 
     // Low-level DLL management
     static bool Load(const std::string& dllName);

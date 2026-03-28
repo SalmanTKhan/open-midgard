@@ -85,7 +85,7 @@ public:
     void UpdateLoadingScreen(const std::string& message, float progress);
     void HideLoadingScreen();
     void SetComposeCursorState(int cursorActNum, u32 mouseAnimStartTick, bool enabled);
-    void SendMsg(int msg, int wparam, int lparam);
+    void SendMsg(int msg, msgparam_t wparam, msgparam_t lparam);
     void SetLoginStatus(const std::string& status);
     void SetLoginWallpaper(const std::string& wallpaperName);
     const std::string& GetLoginStatus() const;

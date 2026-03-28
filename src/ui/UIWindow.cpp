@@ -514,7 +514,7 @@ void UIWindow::OnRBtnUp(int x, int y) {}
 void UIWindow::OnRBtnDblClk(int x, int y) {}
 void UIWindow::OnWheel(int delta) {}
 void UIWindow::RefreshSnap() {}
-int  UIWindow::SendMsg(UIWindow* sender, int msg, int wparam, int lparam, int extra) { return 0; }
+msgresult_t UIWindow::SendMsg(UIWindow* sender, int msg, msgparam_t wparam, msgparam_t lparam, msgparam_t extra) { return 0; }
 void UIWindow::OnChar(char c) { (void)c; }
 bool UIWindow::CanReceiveKeyInput() const { return false; }
 

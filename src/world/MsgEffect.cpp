@@ -568,12 +568,12 @@ u8 CMsgEffect::OnProcess()
     return m_isDisappear ? 0 : 1;
 }
 
-void CMsgEffect::SendMsg(CGameObject* sender, int msg, int par1, int par2, int par3)
+void CMsgEffect::SendMsg(CGameObject* sender, int msg, msgparam_t par1, msgparam_t par2, msgparam_t par3)
 {
     switch (msg) {
     case 22:
         m_masterGid = static_cast<u32>(par1);
-        m_msgEffectType = par2;
+        m_msgEffectType = static_cast<int>(par2);
         return;
     case 49:
         m_masterActor = nullptr;
@@ -589,7 +589,7 @@ void CMsgEffect::SendMsg(CGameObject* sender, int msg, int par1, int par2, int p
         m_isDisappear = 1;
         return;
     case 64: {
-        const vector3d* pos = reinterpret_cast<const vector3d*>(static_cast<intptr_t>(par1));
+        const vector3d* pos = reinterpret_cast<const vector3d*>(par1);
         if (!pos) {
             m_isDisappear = 1;
             return;
@@ -597,9 +597,9 @@ void CMsgEffect::SendMsg(CGameObject* sender, int msg, int par1, int par2, int p
 
         m_isVisible = 1;
         m_stateStartTick = timeGetTime();
-        m_numberValue = (std::max)(0, par2);
+        m_numberValue = (std::max)(0, static_cast<int>(par2));
         m_digit = (std::max)(0, (std::min)(9, m_numberValue % 10));
-        m_sprShift = par3;
+        m_sprShift = static_cast<int>(par3);
         m_pos = *pos;
         m_orgPos = *pos;
 

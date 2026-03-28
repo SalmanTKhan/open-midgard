@@ -562,15 +562,18 @@ int __stdcall WinMain(HINSTANCE hInstance, HINSTANCE /*hPrevInstance*/,
     }
 
     // Phase 3: Dynamic DLL Loading
-    // Must happen before AddPak: GRF v0x200 index decompression requires
-    // zlib's uncompress(), which is resolved from a DLL by CDllMgr::LoadAll().
+    // Legacy middleware is now optional in x64 milestone builds; GRF zlib
+    // decompression is linked in-process and no longer depends on cps.dll.
     if (!CDllMgr::LoadAll())
     {
-        ErrorMsg("Failed to load one or more supporting DLLs (Granny, Miles, Bink, IJL, etc.).\nPlease ensure the 'dlls' folder exists and contains the required binaries.");
-        // We could return 1 here to enforce DLL presence
+        ErrorMsg(CDllMgr::GetLastLoadReport().c_str());
+    }
+    else if (!CDllMgr::GetLastLoadReport().empty())
+    {
+        DbgLog("%s", CDllMgr::GetLastLoadReport().c_str());
     }
 
-    // Register PAK archives (must come after DLL loading for zlib decompression)
+    // Register PAK archives.
     if (lpCmdLine && strstr(lpCmdLine, "/pc"))
     {
         // Offline / test mode: skip data.grf

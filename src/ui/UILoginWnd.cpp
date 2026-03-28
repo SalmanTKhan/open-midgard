@@ -756,7 +756,7 @@ void UILoginWnd::OnDraw()
     }
 }
 
-int UILoginWnd::SendMsg(UIWindow* sender, int msg, int wparam, int lparam, int extra)
+msgresult_t UILoginWnd::SendMsg(UIWindow* sender, int msg, msgparam_t wparam, msgparam_t lparam, msgparam_t extra)
 {
     (void)lparam;
 
@@ -769,9 +769,9 @@ int UILoginWnd::SendMsg(UIWindow* sender, int msg, int wparam, int lparam, int e
                 m_login ? m_login->GetText() : "",
                 m_saveAccountCheck && m_saveAccountCheck->m_isChecked != 0);
             g_modeMgr.SendMsg(CLoginMode::LoginMsg_SetPassword,
-                reinterpret_cast<int>(m_password ? m_password->GetText() : ""), 0, 0);
+                reinterpret_cast<msgparam_t>(m_password ? m_password->GetText() : ""), 0, 0);
             g_modeMgr.SendMsg(CLoginMode::LoginMsg_SetUserId,
-                reinterpret_cast<int>(m_login ? m_login->GetText() : ""), 0, 0);
+                reinterpret_cast<msgparam_t>(m_login ? m_login->GetText() : ""), 0, 0);
             return g_modeMgr.SendMsg(CLoginMode::LoginMsg_RequestConnect, 0, 0, 0);
 
         case 119: // cancel
@@ -813,9 +813,9 @@ int UILoginWnd::SendMsg(UIWindow* sender, int msg, int wparam, int lparam, int e
                 m_login ? m_login->GetText() : "",
                 m_saveAccountCheck && m_saveAccountCheck->m_isChecked != 0);
             g_modeMgr.SendMsg(CLoginMode::LoginMsg_SetPassword,
-                reinterpret_cast<int>(m_password ? m_password->GetText() : ""), 0, 0);
+                reinterpret_cast<msgparam_t>(m_password ? m_password->GetText() : ""), 0, 0);
             g_modeMgr.SendMsg(CLoginMode::LoginMsg_SetUserId,
-                reinterpret_cast<int>(m_login ? m_login->GetText() : ""), 0, 0);
+                reinterpret_cast<msgparam_t>(m_login ? m_login->GetText() : ""), 0, 0);
             return g_modeMgr.SendMsg(CLoginMode::LoginMsg_RequestConnect, 0, 0, 0);
         case 119:
             return g_modeMgr.SendMsg(CLoginMode::LoginMsg_ReturnToLogin, 0, 0, 0);

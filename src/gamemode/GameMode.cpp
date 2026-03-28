@@ -5712,13 +5712,15 @@ void CGameMode::OnUpdate() {
         g_updatePerfStats.packetsProcessed = 0;
     }
 }
-int CGameMode::SendMsg(int msg, int wparam, int lparam, int extra)
+msgresult_t CGameMode::SendMsg(int msg, msgparam_t wparam, msgparam_t lparam, msgparam_t extra)
 {
     (void)extra;
     (void)lparam;
 
     switch (msg) {
-    case GameMsg_LButtonDown:
+    case GameMsg_LButtonDown: {
+        const int mouseX = static_cast<int>(wparam);
+        const int mouseY = static_cast<int>(lparam);
         if (m_world && m_world->m_player) {
             if (ShouldUseTurnOnlyGroundClick(*this)) {
                 ClearPickupIntent(*this);
@@ -5731,17 +5733,17 @@ int CGameMode::SendMsg(int msg, int wparam, int lparam, int extra)
                 m_lastMoveRequestTick = 0;
                 m_lastAttackRequestTick = 0;
                 ClearAttackChaseHint(*this);
-                TryRequestChangeDirFromScreenPoint(*this, wparam, lparam);
+                TryRequestChangeDirFromScreenPoint(*this, mouseX, mouseY);
                 return 1;
             }
         }
 
-        if (TryRequestGroundItemFromScreenPoint(*this, wparam, lparam)) {
+        if (TryRequestGroundItemFromScreenPoint(*this, mouseX, mouseY)) {
             m_isLeftButtonHeld = 0;
             m_hasHeldMoveTarget = 0;
             return 1;
         }
-        if (TryRequestAttackFromScreenPoint(*this, wparam, lparam)) {
+        if (TryRequestAttackFromScreenPoint(*this, mouseX, mouseY)) {
             m_isLeftButtonHeld = 0;
             return 1;
         }
@@ -5756,9 +5758,10 @@ int CGameMode::SendMsg(int msg, int wparam, int lparam, int extra)
         m_lastMoveRequestTick = 0;
         m_lastAttackRequestTick = 0;
         ClearAttackChaseHint(*this);
-        UpdateHeldMoveTargetFromScreenPoint(*this, wparam, lparam);
+        UpdateHeldMoveTargetFromScreenPoint(*this, mouseX, mouseY);
         PumpHeldMoveRequest(*this);
         return 1;
+    }
 
     case GameMsg_LButtonUp:
         m_isLeftButtonHeld = 0;
@@ -5772,33 +5775,38 @@ int CGameMode::SendMsg(int msg, int wparam, int lparam, int extra)
         ClearAttackChaseHint(*this);
         return 1;
 
-    case GameMsg_MouseMove:
+    case GameMsg_MouseMove: {
+        const int mouseX = static_cast<int>(wparam);
+        const int mouseY = static_cast<int>(lparam);
         if (m_view && !m_canRotateView) {
-            m_view->UpdateHoverCellFromScreen(wparam, lparam);
+            m_view->UpdateHoverCellFromScreen(mouseX, mouseY);
             if (m_isLeftButtonHeld) {
-                UpdateHeldMoveTargetFromScreenPoint(*this, wparam, lparam);
+                UpdateHeldMoveTargetFromScreenPoint(*this, mouseX, mouseY);
             }
         }
         if (m_canRotateView && m_view) {
-            if (wparam != m_oldMouseX || lparam != m_oldMouseY) {
+            if (mouseX != m_oldMouseX || mouseY != m_oldMouseY) {
                 m_rButtonDragged = 1;
             }
-            m_view->RotateByDrag(wparam - m_oldMouseX, lparam - m_oldMouseY);
+            m_view->RotateByDrag(mouseX - m_oldMouseX, mouseY - m_oldMouseY);
             m_view->ClearHoverCell();
         }
-        m_oldMouseX = wparam;
-        m_oldMouseY = lparam;
+        m_oldMouseX = mouseX;
+        m_oldMouseY = mouseY;
         return 1;
+    }
 
     case GameMsg_RButtonDown:
     {
+        const int mouseX = static_cast<int>(wparam);
+        const int mouseY = static_cast<int>(lparam);
         const u32 now = GetTickCount();
         const int doubleClickWidth = (std::max)(4, GetSystemMetrics(SM_CXDOUBLECLK));
         const int doubleClickHeight = (std::max)(4, GetSystemMetrics(SM_CYDOUBLECLK));
         const bool withinDoubleClickTime = m_lastRButtonClickTick != 0
             && now - m_lastRButtonClickTick <= GetDoubleClickTime();
-        const bool withinDoubleClickRect = (std::abs)(wparam - m_lastRButtonClickX) <= doubleClickWidth
-            && (std::abs)(lparam - m_lastRButtonClickY) <= doubleClickHeight;
+        const bool withinDoubleClickRect = (std::abs)(mouseX - m_lastRButtonClickX) <= doubleClickWidth
+            && (std::abs)(mouseY - m_lastRButtonClickY) <= doubleClickHeight;
         if (withinDoubleClickTime && withinDoubleClickRect) {
             m_lastRButtonClickTick = 0;
             m_rButtonDragged = 0;
@@ -5810,16 +5818,16 @@ int CGameMode::SendMsg(int msg, int wparam, int lparam, int extra)
             if (GetCapture() == g_hMainWnd) {
                 ReleaseCapture();
             }
-            m_oldMouseX = wparam;
-            m_oldMouseY = lparam;
+            m_oldMouseX = mouseX;
+            m_oldMouseY = mouseY;
             return 1;
         }
 
         m_canRotateView = 1;
-        m_rBtnClickX = wparam;
-        m_rBtnClickY = lparam;
-        m_oldMouseX = wparam;
-        m_oldMouseY = lparam;
+        m_rBtnClickX = mouseX;
+        m_rBtnClickY = mouseY;
+        m_oldMouseX = mouseX;
+        m_oldMouseY = mouseY;
         m_rButtonDragged = 0;
         if (m_view) {
             m_view->ClearHoverCell();
@@ -5896,8 +5904,8 @@ int CGameMode::SendMsg(int msg, int wparam, int lparam, int extra)
         }
         if (!m_rButtonDragged) {
             m_lastRButtonClickTick = GetTickCount();
-            m_lastRButtonClickX = wparam;
-            m_lastRButtonClickY = lparam;
+            m_lastRButtonClickX = static_cast<int>(wparam);
+            m_lastRButtonClickY = static_cast<int>(lparam);
         } else {
             m_lastRButtonClickTick = 0;
         }
@@ -5905,7 +5913,7 @@ int CGameMode::SendMsg(int msg, int wparam, int lparam, int extra)
 
     case GameMsg_MouseWheel:
         if (m_view) {
-            m_view->ZoomByWheel(wparam);
+            m_view->ZoomByWheel(static_cast<int>(wparam));
         }
         return 1;
 

@@ -3,7 +3,7 @@
 UIWaitWnd::UIWaitWnd() : m_fontHeight(0), m_fontType(0) {}
 UIWaitWnd::~UIWaitWnd() {}
 
-int UIWaitWnd::SendMsg(UIWindow* sender, int msg, int wparam, int lparam, int extra) {
+msgresult_t UIWaitWnd::SendMsg(UIWindow* sender, int msg, msgparam_t wparam, msgparam_t lparam, msgparam_t extra) {
     return 0; // Stub
 }
 

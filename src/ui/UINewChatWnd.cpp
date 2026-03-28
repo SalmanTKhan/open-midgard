@@ -425,7 +425,7 @@ bool UINewChatWnd::SubmitInput()
     const size_t lastNonSpace = text.find_last_not_of(" \t\r\n");
     text = text.substr(firstNonSpace, lastNonSpace - firstNonSpace + 1);
 
-    const int sent = g_modeMgr.SendMsg(CGameMode::GameMsg_SubmitChat, reinterpret_cast<int>(text.c_str()), 0, 0);
+    const msgresult_t sent = g_modeMgr.SendMsg(CGameMode::GameMsg_SubmitChat, reinterpret_cast<msgparam_t>(text.c_str()), 0, 0);
     if (sent != 0) {
         AddInputHistory(text);
         m_inputText.clear();

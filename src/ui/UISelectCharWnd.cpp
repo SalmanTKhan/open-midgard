@@ -736,12 +736,14 @@ void UISelectCharWnd::OnProcess()
 
 int UISelectCharWnd::GetCharacterCount() const
 {
-    return g_modeMgr.SendMsg(CLoginMode::LoginMsg_GetCharCount, 0, 0, 0);
+    const CLoginMode* loginMode = g_modeMgr.GetCurrentLoginMode();
+    return loginMode ? loginMode->GetCharCount() : 0;
 }
 
 CHARACTER_INFO* UISelectCharWnd::GetCharacters() const
 {
-    return reinterpret_cast<CHARACTER_INFO*>(g_modeMgr.SendMsg(CLoginMode::LoginMsg_GetCharInfo, 0, 0, 0));
+    CLoginMode* loginMode = g_modeMgr.GetCurrentLoginMode();
+    return loginMode ? loginMode->GetCharInfo() : nullptr;
 }
 
 int UISelectCharWnd::GetPageCount() const
@@ -1024,7 +1026,7 @@ void UISelectCharWnd::OnLBtnUp(int x, int y)
     }
 }
 
-int UISelectCharWnd::SendMsg(UIWindow* sender, int msg, int wparam, int lparam, int extra)
+msgresult_t UISelectCharWnd::SendMsg(UIWindow* sender, int msg, msgparam_t wparam, msgparam_t lparam, msgparam_t extra)
 {
     (void)sender;
     (void)lparam;

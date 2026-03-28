@@ -581,7 +581,8 @@ void UIMakeCharWnd::OnCreate(int cx, int cy)
     m_nameEditCtrl->m_hasFocus = true;
     AddChild(m_nameEditCtrl);
 
-    const char* savedName = reinterpret_cast<const char*>(g_modeMgr.SendMsg(CLoginMode::LoginMsg_GetMakingCharName, 0, 0, 0));
+    const CLoginMode* loginMode = g_modeMgr.GetCurrentLoginMode();
+    const char* savedName = loginMode ? loginMode->GetMakingCharName() : nullptr;
     if (savedName) {
         m_nameEditCtrl->SetText(savedName);
     }
@@ -753,7 +754,7 @@ void UIMakeCharWnd::OnDraw()
     }
 }
 
-int UIMakeCharWnd::SendMsg(UIWindow* sender, int msg, int wparam, int lparam, int extra)
+msgresult_t UIMakeCharWnd::SendMsg(UIWindow* sender, int msg, msgparam_t wparam, msgparam_t lparam, msgparam_t extra)
 {
     (void)sender;
     (void)lparam;
@@ -781,9 +782,9 @@ int UIMakeCharWnd::SendMsg(UIWindow* sender, int msg, int wparam, int lparam, in
     case 118: {
         PlayUiButtonSound();
         int param[8] = { m_stats[0], m_stats[1], m_stats[2], m_stats[3], m_stats[4], m_stats[5], m_hairColor, m_hairIdx };
-        g_modeMgr.SendMsg(CLoginMode::LoginMsg_SetCharParam, reinterpret_cast<int>(param), 0, 0);
+        g_modeMgr.SendMsg(CLoginMode::LoginMsg_SetCharParam, reinterpret_cast<msgparam_t>(param), 0, 0);
         g_modeMgr.SendMsg(CLoginMode::LoginMsg_SetMakingCharName,
-            reinterpret_cast<int>(m_nameEditCtrl ? m_nameEditCtrl->GetText() : ""), 0, 0);
+            reinterpret_cast<msgparam_t>(m_nameEditCtrl ? m_nameEditCtrl->GetText() : ""), 0, 0);
         return g_modeMgr.SendMsg(CLoginMode::LoginMsg_CreateCharacter, 0, 0, 0);
     }
 

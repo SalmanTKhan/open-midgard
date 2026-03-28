@@ -3,6 +3,14 @@
 #include <vector>
 
 bool CIjl::LoadJPG(const unsigned char* buffer, int size, int& width, int& height, u32*& data) {
+#if !RO_ENABLE_IJL
+    (void)buffer;
+    (void)size;
+    (void)width;
+    (void)height;
+    (void)data;
+    return false;
+#else
     if (!g_dllExports.ijlInit || !g_dllExports.ijlRead || !g_dllExports.ijlFree) return false;
 
     // Use a large enough buffer for JPEG_CORE_PROPERTIES (approx 20KB as seen in decompiler)
@@ -45,4 +53,5 @@ bool CIjl::LoadJPG(const unsigned char* buffer, int size, int& width, int& heigh
 
     g_dllExports.ijlFree(props);
     return true;
+#endif
 }

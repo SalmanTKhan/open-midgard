@@ -13,6 +13,7 @@ class CWorld;
 class CView;
 class CMousePointer;
 class CGameMode;
+class CLoginMode;
 
 enum class CursorAction : int {
     Arrow = 0,
@@ -42,7 +43,7 @@ public:
     virtual void OnInit(const char* worldName) {}
     virtual void OnExit() {}
     virtual int  OnRun() { return 0; }
-    virtual int  SendMsg(int msg, int wparam, int lparam, int extra) { return 0; }
+    virtual msgresult_t SendMsg(int msg, msgparam_t wparam, msgparam_t lparam, msgparam_t extra) { return 0; }
     virtual void OnUpdate() {}
     void SetCursorAction(CursorAction cursorActNum);
     void SetCursorAction(int cursorActNum);
@@ -79,8 +80,9 @@ public:
     void Run(int startMode, const char* worldName);
     void Switch(int newMode, const char* worldName);
     void PresentLoadingScreen(const char* message, float progress);
-    int SendMsg(int msg, int wparam, int lparam, int extra = 0);
+    msgresult_t SendMsg(int msg, msgparam_t wparam, msgparam_t lparam, msgparam_t extra = 0);
     CGameMode* GetCurrentGameMode() const;
+    CLoginMode* GetCurrentLoginMode() const;
     void Quit();
 
 private:

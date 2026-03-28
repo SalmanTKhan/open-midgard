@@ -282,7 +282,7 @@ void UIChooseWnd::CloseMenu()
     SetShow(0);
 }
 
-int UIChooseWnd::ActivateSelection()
+msgresult_t UIChooseWnd::ActivateSelection()
 {
     switch (m_selectedIndex) {
     case MenuEntry_CharacterSelect:
@@ -362,7 +362,7 @@ void UIChooseWnd::OnMouseMove(int x, int y)
     (void)y;
 }
 
-int UIChooseWnd::SendMsg(UIWindow* sender, int msg, int wparam, int lparam, int extra)
+msgresult_t UIChooseWnd::SendMsg(UIWindow* sender, int msg, msgparam_t wparam, msgparam_t lparam, msgparam_t extra)
 {
     (void)sender;
     (void)lparam;
@@ -373,7 +373,7 @@ int UIChooseWnd::SendMsg(UIWindow* sender, int msg, int wparam, int lparam, int 
     }
 
     if (wparam >= kMenuButtonBaseId && wparam < kMenuButtonBaseId + MenuEntry_Count) {
-        m_selectedIndex = wparam - kMenuButtonBaseId;
+        m_selectedIndex = static_cast<int>(wparam - kMenuButtonBaseId);
         return ActivateSelection();
     }
 

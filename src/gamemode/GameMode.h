@@ -96,7 +96,7 @@ public:
     virtual void OnExit() override;
     virtual int  OnRun() override;
     virtual void OnUpdate() override;
-    virtual int  SendMsg(int msg, int wparam, int lparam, int extra) override;
+    virtual msgresult_t SendMsg(int msg, msgparam_t wparam, msgparam_t lparam, msgparam_t extra) override;
     virtual void OnChangeState(int newState) override;
 
     // Memory layout from HighPriest.exe.h:30992

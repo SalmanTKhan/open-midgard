@@ -74,8 +74,15 @@ public:
     virtual void OnExit() override;
     virtual int  OnRun() override;
     virtual void OnUpdate() override;
-    virtual int  SendMsg(int msg, int wparam, int lparam, int extra) override;
+    virtual msgresult_t SendMsg(int msg, msgparam_t wparam, msgparam_t lparam, msgparam_t extra) override;
     virtual void OnChangeState(int newState) override;
+
+    const char* GetEmail() const { return m_emaiAddress; }
+    const char* GetMakingCharName() const { return m_makingCharName; }
+    const int* GetCharParam() const { return m_charParam; }
+    CHARACTER_INFO* GetCharInfo() { return m_charInfo; }
+    const CHARACTER_INFO* GetCharInfo() const { return m_charInfo; }
+    int GetCharCount() const { return m_numChar; }
 
     // Memory layout from HighPriest.exe.h:31161
     int m_charParam[8];

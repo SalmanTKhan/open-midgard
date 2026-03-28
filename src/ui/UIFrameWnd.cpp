@@ -10,7 +10,7 @@ UIFrameWnd::UIFrameWnd()
 UIFrameWnd::~UIFrameWnd() {
 }
 
-int UIFrameWnd::SendMsg(UIWindow* sender, int msg, int wparam, int lparam, int extra) {
+msgresult_t UIFrameWnd::SendMsg(UIWindow* sender, int msg, msgparam_t wparam, msgparam_t lparam, msgparam_t extra) {
     return 0;
 }
 

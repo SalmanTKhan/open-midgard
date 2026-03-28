@@ -3,6 +3,8 @@
 
 namespace {
 
+std::string g_lastLoadReport;
+
 std::string GetExeDirectory()
 {
     char modulePath[MAX_PATH] = {};
@@ -40,6 +42,10 @@ DLL_EXPORTS g_dllExports = { 0 };
 
 // Static member definition
 std::map<std::string, HMODULE> CDllMgr::m_dlls;
+
+const std::string& CDllMgr::GetLastLoadReport() {
+    return g_lastLoadReport;
+}
 
 bool CDllMgr::Load(const std::string& dllName) {
     if (m_dlls.find(dllName) != m_dlls.end()) return true;
@@ -118,34 +124,66 @@ void* CDllMgr::GetProc(const std::string& dllName, const std::string& procName) 
 }
 
 bool CDllMgr::LoadAll() {
-    // 1. Load the actual DLL files
-    std::vector<std::string> requiredDlls = {
-        "granny2.dll", "Mss32.dll", "binkw32.dll", "ijl15.dll", "cps.dll", "dbghelp.dll"
-    };
+    std::memset(&g_dllExports, 0, sizeof(g_dllExports));
+    g_lastLoadReport.clear();
 
-    bool allLoaded = true;
+    std::vector<std::string> requiredDlls;
+    std::vector<std::string> optionalDlls;
+#if RO_ENABLE_GRANNY
+    optionalDlls.emplace_back("granny2.dll");
+#endif
+#if RO_ENABLE_MILES_AUDIO
+    optionalDlls.emplace_back("Mss32.dll");
+#endif
+#if RO_ENABLE_BINK_VIDEO
+    optionalDlls.emplace_back("binkw32.dll");
+#endif
+#if RO_ENABLE_IJL
+    optionalDlls.emplace_back("ijl15.dll");
+#endif
+
+    std::vector<std::string> missingRequired;
+    std::vector<std::string> missingOptional;
+
     for (const auto& dll : requiredDlls) {
         if (!Load(dll)) {
-            allLoaded = false;
+            missingRequired.push_back(dll);
         }
     }
 
-    // 2. Resolve exports into g_dllExports structure
+#if RO_ENABLE_GRANNY
+    if (!Load("granny2.dll")) {
+        missingOptional.emplace_back("granny2.dll");
+    }
     const char* GR = "granny2.dll";
     g_dllExports.GrannyReadEntireFileFromMemory = (P_GrannyReadEntireFileFromMemory)GetProc(GR, "GrannyReadEntireFileFromMemory");
     g_dllExports.GrannyGetFileInfo = (P_GrannyGetFileInfo)GetProc(GR, "GrannyGetFileInfo");
     g_dllExports.GrannyFreeFile = (P_GrannyFreeFile)GetProc(GR, "GrannyFreeFile");
     g_dllExports.GrannyGetWorldPoseComposite4x4Array = (P_GrannyGetWorldPoseComposite4x4Array)GetProc(GR, "GrannyGetWorldPoseComposite4x4Array");
+#endif
 
+#if RO_ENABLE_MILES_AUDIO
+    if (!Load("Mss32.dll")) {
+        missingOptional.emplace_back("Mss32.dll");
+    }
     const char* MSS = "Mss32.dll";
     auto getMilesProc = [&](const char* decorated, const char* undecorated) -> void* {
         void* proc = nullptr;
+#if defined(_WIN64)
+        if (undecorated && *undecorated) {
+            proc = GetProc(MSS, undecorated);
+        }
+        if (!proc && decorated && *decorated) {
+            proc = GetProc(MSS, decorated);
+        }
+#else
         if (decorated && *decorated) {
             proc = GetProc(MSS, decorated);
         }
         if (!proc && undecorated && *undecorated) {
             proc = GetProc(MSS, undecorated);
         }
+#endif
         return proc;
     };
 
@@ -174,29 +212,61 @@ bool CDllMgr::LoadAll() {
     g_dllExports.AIL_set_stream_loop_count = (P_AIL_set_stream_loop_count)getMilesProc("_AIL_set_stream_loop_count@8", "AIL_set_stream_loop_count");
     g_dllExports.AIL_start_stream = (P_AIL_start_stream)getMilesProc("_AIL_start_stream@4", "AIL_start_stream");
     g_dllExports.AIL_stream_volume = (P_AIL_stream_volume)getMilesProc("_AIL_stream_volume@4", "AIL_stream_volume");
+#endif
 
+#if RO_ENABLE_BINK_VIDEO
+    if (!Load("binkw32.dll")) {
+        missingOptional.emplace_back("binkw32.dll");
+    }
     const char* BNK = "binkw32.dll";
-    g_dllExports.BinkOpen = (P_BinkOpen)GetProc(BNK, "_BinkOpen@8");
-    if (!g_dllExports.BinkOpen) g_dllExports.BinkOpen = (P_BinkOpen)GetProc(BNK, "BinkOpen");
-    g_dllExports.BinkClose = (P_BinkClose)GetProc(BNK, "_BinkClose@4");
-    if (!g_dllExports.BinkClose) g_dllExports.BinkClose = (P_BinkClose)GetProc(BNK, "BinkClose");
-    g_dllExports.BinkDoFrame = (P_BinkDoFrame)GetProc(BNK, "_BinkDoFrame@4");
-    g_dllExports.BinkNextFrame = (P_BinkNextFrame)GetProc(BNK, "_BinkNextFrame@4");
-    g_dllExports.BinkWait = (P_BinkWait)GetProc(BNK, "_BinkWait@4");
-    g_dllExports.BinkPause = (P_BinkPause)GetProc(BNK, "_BinkPause@8");
-    g_dllExports.BinkCopyToBuffer = (P_BinkCopyToBuffer)GetProc(BNK, "_BinkCopyToBuffer@28");
+    g_dllExports.BinkOpen = (P_BinkOpen)GetProc(BNK, "BinkOpen");
+    if (!g_dllExports.BinkOpen) g_dllExports.BinkOpen = (P_BinkOpen)GetProc(BNK, "_BinkOpen@8");
+    g_dllExports.BinkClose = (P_BinkClose)GetProc(BNK, "BinkClose");
+    if (!g_dllExports.BinkClose) g_dllExports.BinkClose = (P_BinkClose)GetProc(BNK, "_BinkClose@4");
+    g_dllExports.BinkDoFrame = (P_BinkDoFrame)GetProc(BNK, "BinkDoFrame");
+    if (!g_dllExports.BinkDoFrame) g_dllExports.BinkDoFrame = (P_BinkDoFrame)GetProc(BNK, "_BinkDoFrame@4");
+    g_dllExports.BinkNextFrame = (P_BinkNextFrame)GetProc(BNK, "BinkNextFrame");
+    if (!g_dllExports.BinkNextFrame) g_dllExports.BinkNextFrame = (P_BinkNextFrame)GetProc(BNK, "_BinkNextFrame@4");
+    g_dllExports.BinkWait = (P_BinkWait)GetProc(BNK, "BinkWait");
+    if (!g_dllExports.BinkWait) g_dllExports.BinkWait = (P_BinkWait)GetProc(BNK, "_BinkWait@4");
+    g_dllExports.BinkPause = (P_BinkPause)GetProc(BNK, "BinkPause");
+    if (!g_dllExports.BinkPause) g_dllExports.BinkPause = (P_BinkPause)GetProc(BNK, "_BinkPause@8");
+    g_dllExports.BinkCopyToBuffer = (P_BinkCopyToBuffer)GetProc(BNK, "BinkCopyToBuffer");
+    if (!g_dllExports.BinkCopyToBuffer) g_dllExports.BinkCopyToBuffer = (P_BinkCopyToBuffer)GetProc(BNK, "_BinkCopyToBuffer@28");
+#endif
 
+#if RO_ENABLE_IJL
+    if (!Load("ijl15.dll")) {
+        missingOptional.emplace_back("ijl15.dll");
+    }
     const char* IJL = "ijl15.dll";
     g_dllExports.ijlInit = (P_ijlInit)GetProc(IJL, "ijlInit");
     g_dllExports.ijlFree = (P_ijlFree)GetProc(IJL, "ijlFree");
     g_dllExports.ijlRead = (P_ijlRead)GetProc(IJL, "ijlRead");
+#endif
 
-    const char* CPS = "cps.dll";
-    g_dllExports.uncompress = (P_uncompress)GetProc(CPS, "uncompress");
+    if (!missingRequired.empty() || !missingOptional.empty()) {
+        auto appendList = [&](const char* prefix, const std::vector<std::string>& dlls) {
+            if (dlls.empty()) {
+                return;
+            }
+            g_lastLoadReport += prefix;
+            for (size_t index = 0; index < dlls.size(); ++index) {
+                if (index != 0) {
+                    g_lastLoadReport += ", ";
+                }
+                g_lastLoadReport += dlls[index];
+            }
+            g_lastLoadReport += "\n";
+        };
 
-    const char* DBG = "dbghelp.dll";
-    g_dllExports.SymInitialize = (P_SymInitialize)GetProc(DBG, "SymInitialize");
-    g_dllExports.MiniDumpWriteDump = (P_MiniDumpWriteDump)GetProc(DBG, "MiniDumpWriteDump");
+        appendList("Missing required runtime DLLs: ", missingRequired);
+        appendList("Missing optional runtime DLLs: ", missingOptional);
+    }
 
-    return allLoaded;
+#if RO_X64_FIRST_MILESTONE_BUILD
+    g_lastLoadReport += "x64 milestone build: legacy Miles, Bink, Granny, and IJL integrations are disabled by default.\n";
+#endif
+
+    return missingRequired.empty();
 }

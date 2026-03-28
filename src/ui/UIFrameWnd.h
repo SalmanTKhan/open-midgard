@@ -10,7 +10,7 @@ public:
     virtual ~UIFrameWnd();
 
     virtual bool IsFrameWnd() override { return true; }
-    virtual int SendMsg(UIWindow* sender, int msg, int wparam, int lparam, int extra) override;
+    virtual msgresult_t SendMsg(UIWindow* sender, int msg, msgparam_t wparam, msgparam_t lparam, msgparam_t extra) override;
     virtual void OnLBtnDown(int x, int y) override;
     virtual void OnMouseMove(int x, int y) override;
     virtual void OnLBtnUp(int x, int y) override;

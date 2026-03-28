@@ -527,7 +527,7 @@ bool UIRoMapWnd::IsUpdateNeed()
     return BuildVisualStateToken() != m_lastVisualStateToken;
 }
 
-int UIRoMapWnd::SendMsg(UIWindow* sender, int msg, int wparam, int lparam, int extra)
+msgresult_t UIRoMapWnd::SendMsg(UIWindow* sender, int msg, msgparam_t wparam, msgparam_t lparam, msgparam_t extra)
 {
     (void)sender;
     (void)lparam;

@@ -107,7 +107,7 @@ void CModeMgr::PresentLoadingScreen(const char* message, float progress)
     DrawLoadingScreenFrame(message, progress);
 }
 
-int CModeMgr::SendMsg(int msg, int wparam, int lparam, int extra)
+msgresult_t CModeMgr::SendMsg(int msg, msgparam_t wparam, msgparam_t lparam, msgparam_t extra)
 {
     if (!m_curMode) {
         return 0;
@@ -118,6 +118,11 @@ int CModeMgr::SendMsg(int msg, int wparam, int lparam, int extra)
 CGameMode* CModeMgr::GetCurrentGameMode() const
 {
     return m_curModeType == 1 ? dynamic_cast<CGameMode*>(m_curMode) : nullptr;
+}
+
+CLoginMode* CModeMgr::GetCurrentLoginMode() const
+{
+    return m_curModeType == 0 ? dynamic_cast<CLoginMode*>(m_curMode) : nullptr;
 }
 
 void CModeMgr::Run(int startMode, const char* worldName)

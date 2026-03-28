@@ -6,14 +6,38 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-# Force Win32 (x86) target – the original binary is 32-bit
 if(CMAKE_SIZEOF_VOID_P EQUAL 8)
-    message(FATAL_ERROR "This project must be built as Win32 (32-bit). "
-            "Add -A Win32 to CMake configuration.")
+    set(RO_TARGET_ARCH "x64")
+else()
+    set(RO_TARGET_ARCH "Win32")
 endif()
+
+option(RO_ENABLE_MILES_AUDIO "Enable Miles Sound System runtime loading" ON)
+option(RO_ENABLE_BINK_VIDEO "Enable Bink video runtime loading" ON)
+option(RO_ENABLE_GRANNY "Enable Granny runtime loading" ON)
+option(RO_ENABLE_IJL "Enable Intel JPEG Library runtime loading" OFF)
+
+if(CMAKE_SIZEOF_VOID_P EQUAL 8)
+    set(RO_X64_FIRST_MILESTONE_BUILD ON)
+    set(RO_ENABLE_MILES_AUDIO OFF CACHE BOOL "Enable Miles Sound System runtime loading" FORCE)
+    set(RO_ENABLE_BINK_VIDEO OFF CACHE BOOL "Enable Bink video runtime loading" FORCE)
+    set(RO_ENABLE_GRANNY OFF CACHE BOOL "Enable Granny runtime loading" FORCE)
+    set(RO_ENABLE_IJL OFF CACHE BOOL "Enable Intel JPEG Library runtime loading" FORCE)
+else()
+    set(RO_X64_FIRST_MILESTONE_BUILD OFF)
+endif()
+
+message(STATUS "Target architecture : ${RO_TARGET_ARCH}")
 
 add_definitions(-DWIN32 -D_WINDOWS -DUNICODE -D_UNICODE -DNOMINMAX)
 add_definitions(-D_CRT_SECURE_NO_WARNINGS -D_CRT_NONSTDC_NO_DEPRECATE)
+add_compile_definitions(
+    RO_ENABLE_MILES_AUDIO=$<BOOL:${RO_ENABLE_MILES_AUDIO}>
+    RO_ENABLE_BINK_VIDEO=$<BOOL:${RO_ENABLE_BINK_VIDEO}>
+    RO_ENABLE_GRANNY=$<BOOL:${RO_ENABLE_GRANNY}>
+    RO_ENABLE_IJL=$<BOOL:${RO_ENABLE_IJL}>
+    RO_X64_FIRST_MILESTONE_BUILD=$<BOOL:${RO_X64_FIRST_MILESTONE_BUILD}>
+)
 
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/src)
 
@@ -29,7 +53,11 @@ endif()
 # Set DX7_SDK_DIR to your DXSDK path, or it falls back to the Windows SDK.
 if(DEFINED ENV{DX7_SDK_DIR})
     set(DX7_INCLUDE "$ENV{DX7_SDK_DIR}/include")
-    set(DX7_LIBDIR  "$ENV{DX7_SDK_DIR}/lib/x86")
+    if(CMAKE_SIZEOF_VOID_P EQUAL 8)
+        set(DX7_LIBDIR "$ENV{DX7_SDK_DIR}/lib/x64")
+    else()
+        set(DX7_LIBDIR "$ENV{DX7_SDK_DIR}/lib/x86")
+    endif()
     message(STATUS "DirectX 7 SDK : $ENV{DX7_SDK_DIR}")
 else()
     message(STATUS "DX7_SDK_DIR not set – falling back to system headers")

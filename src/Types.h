@@ -29,6 +29,9 @@ typedef std::int64_t  s64;
 typedef float  f32;
 typedef double f64;
 
+typedef std::intptr_t  msgparam_t;
+typedef std::intptr_t  msgresult_t;
+
 // ---------------------------------------------------------------------------
 // Common structures
 // ---------------------------------------------------------------------------

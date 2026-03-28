@@ -583,7 +583,7 @@ bool UIItemWnd::IsUpdateNeed()
     return BuildVisualStateToken() != m_lastVisualStateToken;
 }
 
-int UIItemWnd::SendMsg(UIWindow* sender, int msg, int wparam, int lparam, int extra)
+msgresult_t UIItemWnd::SendMsg(UIWindow* sender, int msg, msgparam_t wparam, msgparam_t lparam, msgparam_t extra)
 {
     (void)sender;
     (void)lparam;

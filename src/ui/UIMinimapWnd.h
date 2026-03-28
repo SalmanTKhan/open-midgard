@@ -15,7 +15,7 @@ public:
     void SetShow(int show) override;
     void Move(int x, int y) override;
     bool IsUpdateNeed() override;
-    int SendMsg(UIWindow* sender, int msg, int wparam, int lparam, int extra) override;
+    msgresult_t SendMsg(UIWindow* sender, int msg, msgparam_t wparam, msgparam_t lparam, msgparam_t extra) override;
     void OnCreate(int x, int y) override;
     void OnProcess() override;
     void OnDraw() override;

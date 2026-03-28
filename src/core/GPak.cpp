@@ -19,7 +19,7 @@
 #include <cassert>
 #include <vector>
 #include <windows.h>
-#include "DllMgr.h"
+#include <zlib.h>
 #include "../DebugLog.h"
 
 #include "../cipher/CDec.h"
@@ -87,7 +87,7 @@ bool CGPak::Open(CMemFile* memFile)
     else if (verClass == 0x200)
     {
         DbgLog("[GPak::Open] Dispatching to OpenPak02, uncompress=%p\n",
-               (void*)g_dllExports.uncompress);
+               (void*)uncompress);
         ok = OpenPak02();
     }
     else
@@ -273,9 +273,9 @@ bool CGPak::OpenPak02()
     if (!compressed) return false;
 
     std::vector<uint8_t> plain(plainSz + 8);
-    u32 destLen = plainSz + 8; // Changed to match u32* signature
-    u32 sourceLen = compSz;
-    if (!g_dllExports.uncompress || g_dllExports.uncompress(plain.data(), &destLen, compressed, sourceLen) != 0)
+    uLongf destLen = static_cast<uLongf>(plainSz + 8);
+    const uLong sourceLen = static_cast<uLong>(compSz);
+    if (uncompress(plain.data(), &destLen, compressed, sourceLen) != Z_OK)
         return false;
 
     const unsigned char* iter = plain.data();
@@ -423,10 +423,9 @@ bool CGPak::GetData(const PakPack& pack, void* buffer)
     if (mtype & 0x01)
     {
         // zlib-compressed: decompress First[dataLen] -> dst[pack.m_size]
-        u32 outLen = pack.m_size;
-        u32 srcLen = static_cast<u32>(dataLen);
-        if (!g_dllExports.uncompress ||
-            g_dllExports.uncompress(dst, &outLen, First, srcLen) != 0)
+        uLongf outLen = static_cast<uLongf>(pack.m_size);
+        const uLong srcLen = static_cast<uLong>(dataLen);
+        if (uncompress(dst, &outLen, First, srcLen) != Z_OK)
             return false;
     }
     else

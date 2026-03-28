@@ -188,8 +188,9 @@ bool CFile::Seek(int offset, int origin)
 {
     if (m_hFile != INVALID_HANDLE_VALUE)
     {
-        SetFilePointer(m_hFile, offset, nullptr, (DWORD)origin);
-        return true;
+        LARGE_INTEGER move{};
+        move.QuadPart = static_cast<LONGLONG>(offset);
+        return SetFilePointerEx(m_hFile, move, nullptr, static_cast<DWORD>(origin)) != FALSE;
     }
     if (!m_buf) return false;
 

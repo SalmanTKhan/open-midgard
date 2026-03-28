@@ -73,7 +73,7 @@ public:
     virtual void OnRBtnDblClk(int x, int y);
     virtual void OnWheel(int delta);
     virtual void RefreshSnap();
-    virtual int  SendMsg(UIWindow* sender, int msg, int wparam, int lparam, int extra);
+    virtual msgresult_t SendMsg(UIWindow* sender, int msg, msgparam_t wparam, msgparam_t lparam, msgparam_t extra);
     virtual void OnChar(char c);
     virtual bool CanReceiveKeyInput() const;
 

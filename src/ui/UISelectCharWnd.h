@@ -36,7 +36,7 @@ public:
     void OnDraw() override;
     void OnProcess() override;
     void OnLBtnUp(int x, int y) override;
-    int SendMsg(UIWindow* sender, int msg, int wparam, int lparam, int extra) override;
+    msgresult_t SendMsg(UIWindow* sender, int msg, msgparam_t wparam, msgparam_t lparam, msgparam_t extra) override;
     void OnKeyDown(int virtualKey);
 
 private:

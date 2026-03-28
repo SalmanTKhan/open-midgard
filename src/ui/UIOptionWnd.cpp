@@ -1465,7 +1465,7 @@ void UIOptionWnd::OnLBtnDblClk(int x, int y)
     }
 }
 
-int UIOptionWnd::SendMsg(UIWindow* sender, int msg, int wparam, int lparam, int extra)
+msgresult_t UIOptionWnd::SendMsg(UIWindow* sender, int msg, msgparam_t wparam, msgparam_t lparam, msgparam_t extra)
 {
     (void)wparam;
     (void)extra;

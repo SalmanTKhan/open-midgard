@@ -180,7 +180,7 @@ void UINotifyLevelUpWnd::OnDraw()
     DrawChildren();
 }
 
-int UINotifyLevelUpWnd::SendMsg(UIWindow* sender, int msg, int wparam, int lparam, int extra)
+msgresult_t UINotifyLevelUpWnd::SendMsg(UIWindow* sender, int msg, msgparam_t wparam, msgparam_t lparam, msgparam_t extra)
 {
     if (msg != 6 || wparam != kNotifyButtonId) {
         return UIFrameWnd::SendMsg(sender, msg, wparam, lparam, extra);

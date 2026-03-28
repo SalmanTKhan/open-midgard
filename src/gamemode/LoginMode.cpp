@@ -562,7 +562,7 @@ void CLoginMode::OnUpdate() {
     Sleep(1);
 }
 
-int CLoginMode::SendMsg(int msg, int wparam, int lparam, int extra) {
+msgresult_t CLoginMode::SendMsg(int msg, msgparam_t wparam, msgparam_t lparam, msgparam_t extra) {
     switch (msg) {
     case LoginMsg_RequestConnect:
         m_nextSubMode = LoginSubMode_ConnectAccount;
@@ -571,11 +571,12 @@ int CLoginMode::SendMsg(int msg, int wparam, int lparam, int extra) {
 
     case LoginMsg_SelectClientInfo:
         if (wparam >= 0 && wparam < GetClientInfoConnectionCount()) {
-            SelectClientInfo(wparam);
+            const int clientIndex = static_cast<int>(wparam);
+            SelectClientInfo(clientIndex);
             const std::vector<ClientInfoConnection>& connections = GetClientInfoConnections();
-            const char* display = connections[wparam].display.empty()
-                ? connections[wparam].address.c_str()
-                : connections[wparam].display.c_str();
+            const char* display = connections[clientIndex].display.empty()
+                ? connections[clientIndex].address.c_str()
+                : connections[clientIndex].display.c_str();
             char status[160] = {};
             std::snprintf(status, sizeof(status), "Login: selected server '%s'.", display ? display : "");
             SetLoginStatus(status);
@@ -620,17 +621,17 @@ int CLoginMode::SendMsg(int msg, int wparam, int lparam, int extra) {
         return 1;
 
     case LoginMsg_GetEmail:
-        return reinterpret_cast<int>(m_emaiAddress);
+        return reinterpret_cast<msgresult_t>(GetEmail());
 
     case LoginMsg_GetMakingCharName:
-        return reinterpret_cast<int>(m_makingCharName);
+        return reinterpret_cast<msgresult_t>(GetMakingCharName());
 
     case LoginMsg_SetMakingCharName:
         CopyCString(m_makingCharName, sizeof(m_makingCharName), reinterpret_cast<const char*>(wparam));
         return 1;
 
     case LoginMsg_GetCharParam:
-        return reinterpret_cast<int>(m_charParam);
+        return reinterpret_cast<msgresult_t>(GetCharParam());
 
     case LoginMsg_SetCharParam:
         if (wparam != 0) {
@@ -639,30 +640,31 @@ int CLoginMode::SendMsg(int msg, int wparam, int lparam, int extra) {
         return 1;
 
     case LoginMsg_GetCharInfo:
-        return reinterpret_cast<int>(m_charInfo);
+        return reinterpret_cast<msgresult_t>(GetCharInfo());
 
     case LoginMsg_GetCharCount:
         return m_numChar;
 
     case LoginMsg_SelectCharacter:
         if (wparam >= 0 && wparam < m_numChar) {
-            m_selectedCharIndex = wparam;
-            m_selectedCharSlot = static_cast<int>(m_charInfo[wparam].CharNum);
-            g_session.SetSelectedCharacterAppearance(m_charInfo[wparam]);
+            const int selectedIndex = static_cast<int>(wparam);
+            m_selectedCharIndex = selectedIndex;
+            m_selectedCharSlot = static_cast<int>(m_charInfo[selectedIndex].CharNum);
+            g_session.SetSelectedCharacterAppearance(m_charInfo[selectedIndex]);
             m_nextSubMode = LoginSubMode_SelectChar;
             return 1;
         }
         return 0;
 
     case LoginMsg_RequestMakeCharacter: {
-        m_selectedCharSlot = wparam;
+        m_selectedCharSlot = static_cast<int>(wparam);
         m_nextSubMode = LoginSubMode_MakeChar;
         return 1;
     }
 
     case LoginMsg_RequestDeleteCharacter: {
         char msg[96];
-        std::snprintf(msg, sizeof(msg), "Login: delete-character for slot %d is not implemented yet.", wparam);
+        std::snprintf(msg, sizeof(msg), "Login: delete-character for slot %d is not implemented yet.", static_cast<int>(wparam));
         SetLoginStatus(msg);
         return 1;
     }

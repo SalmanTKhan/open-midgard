@@ -14,7 +14,7 @@ public:
     void OnCreate(int x, int y) override;
     void OnDraw() override;
     void OnProcess() override;
-    int SendMsg(UIWindow* sender, int msg, int wparam, int lparam, int extra) override;
+    msgresult_t SendMsg(UIWindow* sender, int msg, msgparam_t wparam, msgparam_t lparam, msgparam_t extra) override;
 
 protected:
     virtual int GetTargetWindowId() const;

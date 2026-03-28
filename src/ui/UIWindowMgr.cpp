@@ -1042,7 +1042,7 @@ void UIWindowMgr::SetComposeCursorState(int cursorActNum, u32 mouseAnimStartTick
     m_composeCursorEnabled = enabled;
 }
 
-void UIWindowMgr::SendMsg(int msg, int wparam, int lparam) {
+void UIWindowMgr::SendMsg(int msg, msgparam_t wparam, msgparam_t lparam) {
     if (msg != kUiChatEventMsg || wparam == 0) {
         return;
     }
@@ -1064,7 +1064,7 @@ void UIWindowMgr::SendMsg(int msg, int wparam, int lparam) {
     m_chatEvents.push_back(std::move(event));
 
     if (m_chatWnd) {
-        m_chatWnd->AddChatLine(text, static_cast<u32>(lparam) & 0x00FFFFFFu,
+        m_chatWnd->AddChatLine(event.text.c_str(), static_cast<u32>(lparam) & 0x00FFFFFFu,
             static_cast<u8>((static_cast<u32>(lparam) >> 24) & 0xFFu), GetTickCount());
     }
 }
