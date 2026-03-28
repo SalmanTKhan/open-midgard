@@ -345,6 +345,61 @@ void SubmitWorldQuad(const vector3d (&quad)[4],
     g_renderer.AddRP(face, renderFlags);
 }
 
+void SubmitWorldTeiRect(const vector3d& vec1,
+    const vector3d& vec2,
+    const vector3d& vec3,
+    const vector3d& vec4,
+    const matrix& viewMatrix,
+    CTexture* texture,
+    unsigned int color,
+    D3DBLEND destBlend,
+    float alphaSortKey,
+    int renderFlags)
+{
+    if (!texture || texture == &CTexMgr::s_dummy_texture) {
+        return;
+    }
+
+    const struct TriangleDef {
+        const vector3d* positions[3];
+        float uvs[3][2];
+    } triangles[2] = {
+        { { &vec1, &vec2, &vec3 }, { { 0.0f, 1.0f }, { 1.0f, 1.0f }, { 1.0f, 0.0f } } },
+        { { &vec4, &vec3, &vec1 }, { { 0.0f, 0.0f }, { 1.0f, 0.0f }, { 0.0f, 1.0f } } },
+    };
+
+    for (const TriangleDef& triangle : triangles) {
+        RPFace* face = g_renderer.BorrowNullRP();
+        if (!face) {
+            return;
+        }
+
+        face->primType = D3DPT_TRIANGLELIST;
+        face->verts = face->m_verts;
+        face->numVerts = 3;
+        face->indices = nullptr;
+        face->numIndices = 0;
+        face->tex = texture;
+        face->mtPreset = 0;
+        face->cullMode = D3DCULL_NONE;
+        face->srcAlphaMode = D3DBLEND_SRCALPHA;
+        face->destAlphaMode = destBlend;
+        face->alphaSortKey = alphaSortKey;
+
+        for (int index = 0; index < 3; ++index) {
+            if (!ProjectPoint(*triangle.positions[index], viewMatrix, &face->m_verts[index])) {
+                return;
+            }
+            face->m_verts[index].color = color;
+            face->m_verts[index].specular = 0xFF000000u;
+            face->m_verts[index].tu = triangle.uvs[index][0];
+            face->m_verts[index].tv = triangle.uvs[index][1];
+        }
+
+        g_renderer.AddRP(face, renderFlags);
+    }
+}
+
 void SetBandMode(EffectBandState* band, u8 mode)
 {
     if (!band) {
@@ -395,10 +450,11 @@ void RenderBandRibbon(const CEffectPrim& prim,
 
     const int sampleCount = static_cast<int>(band.heights.size());
     const vector3d center = prim.m_master ? prim.m_pos : base;
-    const float groundY = center.y + prim.m_deltaPos2.y;
+    const float groundY = ResolveGroundHeight(center) + prim.m_deltaPos2.y;
     const float ringRadius = (std::max)(0.4f, prim.m_size + band.distance * radiusScale);
-    const unsigned int topColor = PackColor(static_cast<unsigned int>((std::min)(255.0f, band.alpha)), prim.m_tintColor);
-    const unsigned int bottomColor = PackColor(static_cast<unsigned int>((std::min)(255.0f, band.alpha * 0.28f)), prim.m_tintColor);
+    const float clampedAlpha = (std::min)(255.0f, band.alpha);
+    const unsigned int topColor = PackColor(static_cast<unsigned int>(clampedAlpha), prim.m_tintColor);
+    const unsigned int bottomColor = PackColor(static_cast<unsigned int>((std::min)(255.0f, clampedAlpha * 0.72f)), prim.m_tintColor);
 
     for (int sampleIndex = 0; sampleIndex < sampleCount; ++sampleIndex) {
         const int nextIndex = (sampleIndex + 1) % sampleCount;
@@ -425,6 +481,67 @@ void RenderBandRibbon(const CEffectPrim& prim,
         const unsigned int colors[4] = { bottomColor, bottomColor, topColor, topColor };
         const float uvs[4][2] = { { 0.0f, 1.0f }, { 1.0f, 1.0f }, { 0.0f, 0.0f }, { 1.0f, 0.0f } };
         SubmitWorldQuad(quad, viewMatrix, texture, colors, uvs, D3DBLEND_ONE, 0.0f, static_cast<int>(prim.m_renderFlag));
+    }
+}
+
+void RenderCastingBandLowPolygon(const CEffectPrim& prim,
+    const vector3d& base,
+    const EffectBandState& band,
+    const matrix& viewMatrix,
+    CTexture* texture)
+{
+    if (!band.active || !texture || texture == &CTexMgr::s_dummy_texture || band.alpha <= 0.0f) {
+        return;
+    }
+
+    constexpr int kTexParts = 21;
+    constexpr int kSegments = 10;
+    constexpr int kFullDisplayAngle = 360;
+
+    const vector3d center = prim.m_master ? prim.m_pos : base;
+    const float groundY = ResolveGroundHeight(center) + prim.m_deltaPos2.y;
+    const float riseRadians = band.riseAngle * (kPi / 180.0f);
+    const float cosRise = std::cos(riseRadians);
+    const float sinRise = std::sin(riseRadians);
+    const float radius = (std::max)(0.0f, band.distance);
+    const unsigned int color = PackColor(static_cast<unsigned int>((std::min)(255.0f, band.alpha)), prim.m_tintColor);
+
+    const int basicAngle = kFullDisplayAngle / kSegments;
+    for (int segmentIndex = 0; segmentIndex < kSegments; ++segmentIndex) {
+        const int count0 = segmentIndex * basicAngle;
+        const int count1 = (segmentIndex + 1) * basicAngle;
+        const float angle0Deg = segmentIndex == kSegments ? band.rotStart : WrapAngle360(band.rotStart + static_cast<float>(count0));
+        const float angle1Deg = (segmentIndex + 1) == kSegments ? band.rotStart : WrapAngle360(band.rotStart + static_cast<float>(count1));
+        const float radians0 = angle0Deg * (kPi / 180.0f);
+        const float radians1 = angle1Deg * (kPi / 180.0f);
+
+        const size_t heightIndex0 = (std::min)(static_cast<size_t>(segmentIndex), band.heights.size() - 1);
+        const size_t heightIndex1 = (std::min)(static_cast<size_t>(segmentIndex + 1), band.heights.size() - 1);
+        const float height0 = band.heights[heightIndex0];
+        const float height1 = band.heights[heightIndex1];
+
+        const vector3d base0 = {
+            center.x + radius * std::cos(radians0),
+            groundY,
+            center.z + radius * std::sin(radians0)
+        };
+        const vector3d base1 = {
+            center.x + radius * std::cos(radians1),
+            groundY,
+            center.z + radius * std::sin(radians1)
+        };
+        const vector3d top0 = {
+            base0.x + cosRise * height0 * std::cos(radians0),
+            groundY - sinRise * height0,
+            base0.z + cosRise * height0 * std::sin(radians0)
+        };
+        const vector3d top1 = {
+            base1.x + cosRise * height1 * std::cos(radians1),
+            groundY - sinRise * height1,
+            base1.z + cosRise * height1 * std::sin(radians1)
+        };
+
+        SubmitWorldTeiRect(base0, base1, top1, top0, viewMatrix, texture, color, D3DBLEND_ONE, 0.0f, static_cast<int>(prim.m_renderFlag));
     }
 }
 
@@ -622,7 +739,6 @@ void UpdateCastingBands(CEffectPrim* prim)
         }
 
         ++band.process;
-        band.rotStart = WrapAngle360(band.rotStart + 5.0f);
         band.distance -= 0.05f;
         if (band.distance <= 0.0f) {
             band.distance = 10.0f;
@@ -1816,7 +1932,7 @@ void CEffectPrim::Render(matrix* viewMatrix)
         const bool hasBands = std::any_of(m_bands.begin(), m_bands.end(), [](const EffectBandState& band) { return band.active; });
         if (hasBands) {
             for (const EffectBandState& band : m_bands) {
-                RenderBandRibbon(*this, base, band, *viewMatrix, texture, 1.0f);
+                RenderCastingBandLowPolygon(*this, base, band, *viewMatrix, texture);
             }
             break;
         }
