@@ -27,6 +27,10 @@ private:
     void LayoutChildren();
     void LoadAssets();
     void ReleaseAssets();
+    void EnsureRenderCache(HDC referenceDc);
+    void ReleaseRenderCache();
+    void InvalidateRenderCache();
+    void DrawWindowContents(HDC hdc, int baseX, int baseY);
     void UpdateMinimapBitmap();
     std::string GetCurrentMinimapBitmapName() const;
     unsigned long long BuildVisualStateToken() const;
@@ -34,9 +38,14 @@ private:
     bool m_controlsCreated;
     UIBitmapButton* m_closeButton;
     HBITMAP m_titleBarBitmap;
-    HBITMAP m_titleTextBitmap;
     HBITMAP m_bodyBitmap;
     HBITMAP m_mapBitmap;
+    HDC m_renderCacheDC;
+    HBITMAP m_renderCacheBitmap;
+    HBITMAP m_renderCacheOldBitmap;
+    int m_renderCacheWidth;
+    int m_renderCacheHeight;
+    bool m_renderCacheDirty;
     int m_mapBitmapWidth;
     int m_mapBitmapHeight;
     std::string m_loadedBitmapName;

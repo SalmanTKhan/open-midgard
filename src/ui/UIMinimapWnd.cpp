@@ -311,7 +311,7 @@ void DrawBitmapStretched(HDC target, HBITMAP bitmap, const RECT& dst, const RECT
     }
 
     HGDIOBJ oldBitmap = SelectObject(srcDC, bitmap);
-    SetStretchBltMode(target, HALFTONE);
+    const int oldStretchMode = SetStretchBltMode(target, COLORONCOLOR);
     StretchBlt(target,
         dst.left,
         dst.top,
@@ -323,6 +323,7 @@ void DrawBitmapStretched(HDC target, HBITMAP bitmap, const RECT& dst, const RECT
         src.right - src.left,
         src.bottom - src.top,
         SRCCOPY);
+    SetStretchBltMode(target, oldStretchMode);
     SelectObject(srcDC, oldBitmap);
     DeleteDC(srcDC);
 }
@@ -421,63 +422,6 @@ void DrawWindowText(HDC hdc, int windowRight, int x, int y, const char* text, CO
     SelectObject(hdc, oldFont);
 }
 
-HBITMAP CreateMinimapTitleBitmap()
-{
-    constexpr int kBitmapWidth = 80;
-    constexpr int kBitmapHeight = 16;
-
-    HDC screenDc = GetDC(nullptr);
-    if (!screenDc) {
-        return nullptr;
-    }
-
-    HDC memDc = CreateCompatibleDC(screenDc);
-    if (!memDc) {
-        ReleaseDC(nullptr, screenDc);
-        return nullptr;
-    }
-
-    BITMAPINFO bmi{};
-    bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-    bmi.bmiHeader.biWidth = kBitmapWidth;
-    bmi.bmiHeader.biHeight = -kBitmapHeight;
-    bmi.bmiHeader.biPlanes = 1;
-    bmi.bmiHeader.biBitCount = 32;
-    bmi.bmiHeader.biCompression = BI_RGB;
-
-    void* bits = nullptr;
-    HBITMAP bitmap = CreateDIBSection(screenDc, &bmi, DIB_RGB_COLORS, &bits, nullptr, 0);
-    if (!bitmap || !bits) {
-        if (bitmap) {
-            DeleteObject(bitmap);
-        }
-        DeleteDC(memDc);
-        ReleaseDC(nullptr, screenDc);
-        return nullptr;
-    }
-
-    HGDIOBJ oldBitmap = SelectObject(memDc, bitmap);
-    RECT rect{ 0, 0, kBitmapWidth, kBitmapHeight };
-    HBRUSH bgBrush = CreateSolidBrush(RGB(255, 0, 255));
-    FillRect(memDc, &rect, bgBrush);
-    DeleteObject(bgBrush);
-
-    SetBkMode(memDc, TRANSPARENT);
-    HGDIOBJ oldFont = SelectObject(memDc, GetStockObject(DEFAULT_GUI_FONT));
-    SetTextColor(memDc, RGB(0, 0, 0));
-    RECT shadowRect{ 0, 0, kBitmapWidth, kBitmapHeight };
-    DrawTextA(memDc, "Mini Map", -1, &shadowRect, DT_LEFT | DT_TOP | DT_SINGLELINE);
-    SetTextColor(memDc, RGB(255, 255, 255));
-    RECT frontRect{ 1, 1, kBitmapWidth, kBitmapHeight };
-    DrawTextA(memDc, "Mini Map", -1, &frontRect, DT_LEFT | DT_TOP | DT_SINGLELINE);
-
-    SelectObject(memDc, oldFont);
-    SelectObject(memDc, oldBitmap);
-    DeleteDC(memDc);
-    ReleaseDC(nullptr, screenDc);
-    return bitmap;
-}
-
 void DrawSmallMarker(HDC hdc, const POINT& pt, COLORREF fillColor, COLORREF outlineColor, int radius)
 {
     HBRUSH brush = CreateSolidBrush(fillColor);
@@ -511,9 +455,14 @@ UIRoMapWnd::UIRoMapWnd()
     : m_controlsCreated(false),
       m_closeButton(nullptr),
       m_titleBarBitmap(nullptr),
-      m_titleTextBitmap(nullptr),
       m_bodyBitmap(nullptr),
       m_mapBitmap(nullptr),
+      m_renderCacheDC(nullptr),
+      m_renderCacheBitmap(nullptr),
+      m_renderCacheOldBitmap(nullptr),
+      m_renderCacheWidth(0),
+      m_renderCacheHeight(0),
+      m_renderCacheDirty(true),
       m_mapBitmapWidth(0),
       m_mapBitmapHeight(0),
       m_lastVisualStateToken(0ull),
@@ -555,6 +504,7 @@ void UIRoMapWnd::SetShow(int show)
         EnsureCreated();
         LayoutChildren();
         UpdateMinimapBitmap();
+        InvalidateRenderCache();
     }
 }
 
@@ -642,29 +592,21 @@ void UIRoMapWnd::OnProcess()
     m_lastPlayerY = playerY;
     m_lastPlayerDir = playerDir;
     m_lastDynamicInvalidateTick = now;
+    InvalidateRenderCache();
     Invalidate();
 }
 
-void UIRoMapWnd::OnDraw()
+void UIRoMapWnd::DrawWindowContents(HDC hdc, int baseX, int baseY)
 {
-    if (!g_hMainWnd || m_show == 0) {
-        return;
-    }
-
-    EnsureCreated();
-    UpdateMinimapBitmap();
-
-    const bool useShared = (UIWindow::GetSharedDrawDC() != nullptr);
-    HDC hdc = useShared ? UIWindow::GetSharedDrawDC() : GetDC(g_hMainWnd);
     if (!hdc) {
         return;
     }
 
-    RECT windowRect{ m_x, m_y, m_x + m_w, m_y + m_h };
-    RECT titleRect{ m_x, m_y, m_x + m_w, m_y + kTitleBarHeight };
-    RECT bodyRect{ m_x, m_y + kTitleBarHeight, m_x + m_w, m_y + m_h };
-    RECT mapRect{ m_x + kBodyInset, m_y + kMapTop, m_x + kBodyInset + kMapSize, m_y + kMapTop + kMapSize };
-    RECT coordsRect{ m_x + 8, m_y + kCoordsTop, m_x + m_w - 8, m_y + kCoordsTop + kCoordsHeight };
+    RECT windowRect{ baseX, baseY, baseX + m_w, baseY + m_h };
+    RECT titleRect{ baseX, baseY, baseX + m_w, baseY + kTitleBarHeight };
+    RECT bodyRect{ baseX, baseY + kTitleBarHeight, baseX + m_w, baseY + m_h };
+    RECT mapRect{ baseX + kBodyInset, baseY + kMapTop, baseX + kBodyInset + kMapSize, baseY + kMapTop + kMapSize };
+    RECT coordsRect{ baseX + 8, baseY + kCoordsTop, baseX + m_w - 8, baseY + kCoordsTop + kCoordsHeight };
 
     if (m_bodyBitmap) {
         DrawBitmapTransparent(hdc, m_bodyBitmap, bodyRect);
@@ -754,15 +696,8 @@ void UIRoMapWnd::OnDraw()
 
     FrameSolidRect(hdc, mapRect, RGB(72, 80, 96));
 
-    if (m_titleTextBitmap) {
-        RECT titleTextRect{ m_x + 17, m_y + 2, m_x + 17 + 80, m_y + 18 };
-        DrawBitmapTransparent(hdc, m_titleTextBitmap, titleTextRect);
-    } else {
-        RECT titleTextRectBack{ m_x + 17, m_y + 2, m_x + m_w - 24, m_y + kTitleBarHeight - 1 };
-        RECT titleTextRectFront{ m_x + 18, m_y + 3, m_x + m_w - 23, m_y + kTitleBarHeight };
-        DrawWindowText(hdc, m_x + m_w, titleTextRectBack.left, titleTextRectBack.top, "Mini Map", RGB(0, 0, 0), DT_LEFT | DT_TOP | DT_SINGLELINE);
-        DrawWindowText(hdc, m_x + m_w, titleTextRectFront.left, titleTextRectFront.top, "Mini Map", RGB(255, 255, 255), DT_LEFT | DT_TOP | DT_SINGLELINE);
-    }
+    DrawWindowText(hdc, baseX + m_w, baseX + 18, baseY + 3, "Mini Map", RGB(255, 255, 255), DT_LEFT | DT_TOP | DT_SINGLELINE);
+    DrawWindowText(hdc, baseX + m_w, baseX + 17, baseY + 2, "Mini Map", RGB(0, 0, 0), DT_LEFT | DT_TOP | DT_SINGLELINE);
 
     std::string mapName = StripExtension(GetCurrentMinimapBitmapName());
     if (!mapName.empty()) {
@@ -820,7 +755,7 @@ void UIRoMapWnd::OnDraw()
 
     char coordsText[64] = {};
     std::snprintf(coordsText, sizeof(coordsText), "X : %d    Y : %d", g_session.m_playerPosX, g_session.m_playerPosY);
-    DrawWindowText(hdc, m_x + m_w, coordsRect.left, coordsRect.top, coordsText, RGB(0, 0, 0), DT_CENTER | DT_TOP | DT_SINGLELINE);
+    DrawWindowText(hdc, baseX + m_w, coordsRect.left, coordsRect.top, coordsText, RGB(0, 0, 0), DT_CENTER | DT_TOP | DT_SINGLELINE);
 
     HPEN borderPen = CreatePen(PS_SOLID, 1, RGB(57, 66, 86));
     HGDIOBJ oldPen = SelectObject(hdc, borderPen);
@@ -835,13 +770,45 @@ void UIRoMapWnd::OnDraw()
     SelectObject(hdc, oldBrush);
     SelectObject(hdc, oldPen);
     DeleteObject(borderPen);
+}
+
+void UIRoMapWnd::OnDraw()
+{
+    if (!g_hMainWnd || m_show == 0) {
+        return;
+    }
+
+    EnsureCreated();
+    UpdateMinimapBitmap();
+
+    const unsigned long long visualStateToken = BuildVisualStateToken();
+    if (!m_hasVisualStateToken || visualStateToken != m_lastVisualStateToken) {
+        InvalidateRenderCache();
+    }
+
+    const bool useShared = (UIWindow::GetSharedDrawDC() != nullptr);
+    HDC hdc = useShared ? UIWindow::GetSharedDrawDC() : GetDC(g_hMainWnd);
+    if (!hdc) {
+        return;
+    }
+
+    EnsureRenderCache(hdc);
+    if (m_renderCacheDC && m_renderCacheBitmap) {
+        if (m_renderCacheDirty) {
+            DrawWindowContents(m_renderCacheDC, 0, 0);
+            m_renderCacheDirty = false;
+        }
+        BitBlt(hdc, m_x, m_y, m_w, m_h, m_renderCacheDC, 0, 0, SRCCOPY);
+    } else {
+        DrawWindowContents(hdc, m_x, m_y);
+    }
 
     DrawChildren();
     if (!useShared) {
         ReleaseDC(g_hMainWnd, hdc);
     }
 
-    m_lastVisualStateToken = BuildVisualStateToken();
+    m_lastVisualStateToken = visualStateToken;
     m_hasVisualStateToken = true;
     m_isDirty = 0;
 }
@@ -851,6 +818,7 @@ void UIRoMapWnd::OnWheel(int delta)
     const float direction = delta > 0 ? 1.0f : -1.0f;
     const float nextZoom = g_windowMgr.m_miniMapZoomFactor + direction * kZoomStep;
     g_windowMgr.m_miniMapZoomFactor = (std::max)(kMinZoom, (std::min)(kMaxZoom, nextZoom));
+    InvalidateRenderCache();
     Invalidate();
 }
 
@@ -879,19 +847,17 @@ void UIRoMapWnd::LoadAssets()
     if (!m_titleBarBitmap) {
         m_titleBarBitmap = LoadBitmapFromGameData(ResolveUiAssetPath("titlebar_fix.bmp"));
     }
-    if (!m_titleTextBitmap) {
-        m_titleTextBitmap = CreateMinimapTitleBitmap();
-    }
     if (!m_bodyBitmap) {
         m_bodyBitmap = LoadBitmapFromGameData(ResolveUiAssetPath("itemwin_mid.bmp"));
     }
+    InvalidateRenderCache();
 }
 
 void UIRoMapWnd::ReleaseAssets()
 {
+    ReleaseRenderCache();
     HBITMAP* bitmaps[] = {
         &m_titleBarBitmap,
-        &m_titleTextBitmap,
         &m_bodyBitmap,
         &m_mapBitmap,
     };
@@ -903,6 +869,58 @@ void UIRoMapWnd::ReleaseAssets()
     }
     m_mapBitmapWidth = 0;
     m_mapBitmapHeight = 0;
+}
+
+void UIRoMapWnd::EnsureRenderCache(HDC referenceDc)
+{
+    if (!referenceDc || m_w <= 0 || m_h <= 0) {
+        return;
+    }
+    if (m_renderCacheDC && m_renderCacheBitmap && m_renderCacheWidth == m_w && m_renderCacheHeight == m_h) {
+        return;
+    }
+
+    ReleaseRenderCache();
+
+    m_renderCacheDC = CreateCompatibleDC(referenceDc);
+    if (!m_renderCacheDC) {
+        return;
+    }
+
+    m_renderCacheBitmap = CreateCompatibleBitmap(referenceDc, m_w, m_h);
+    if (!m_renderCacheBitmap) {
+        ReleaseRenderCache();
+        return;
+    }
+
+    m_renderCacheOldBitmap = static_cast<HBITMAP>(SelectObject(m_renderCacheDC, m_renderCacheBitmap));
+    m_renderCacheWidth = m_w;
+    m_renderCacheHeight = m_h;
+    m_renderCacheDirty = true;
+}
+
+void UIRoMapWnd::ReleaseRenderCache()
+{
+    if (m_renderCacheDC && m_renderCacheOldBitmap) {
+        SelectObject(m_renderCacheDC, m_renderCacheOldBitmap);
+    }
+    m_renderCacheOldBitmap = nullptr;
+    if (m_renderCacheBitmap) {
+        DeleteObject(m_renderCacheBitmap);
+        m_renderCacheBitmap = nullptr;
+    }
+    if (m_renderCacheDC) {
+        DeleteDC(m_renderCacheDC);
+        m_renderCacheDC = nullptr;
+    }
+    m_renderCacheWidth = 0;
+    m_renderCacheHeight = 0;
+    m_renderCacheDirty = true;
+}
+
+void UIRoMapWnd::InvalidateRenderCache()
+{
+    m_renderCacheDirty = true;
 }
 
 void UIRoMapWnd::UpdateMinimapBitmap()
@@ -917,6 +935,7 @@ void UIRoMapWnd::UpdateMinimapBitmap()
         m_mapBitmapHeight = 0;
         m_loadedBitmapName.clear();
         m_loadedBitmapPath.clear();
+        InvalidateRenderCache();
         return;
     }
 
@@ -936,6 +955,7 @@ void UIRoMapWnd::UpdateMinimapBitmap()
     if (!resolvedPath.empty()) {
         m_mapBitmap = LoadBitmapFromGameData(resolvedPath, &m_mapBitmapWidth, &m_mapBitmapHeight);
     }
+    InvalidateRenderCache();
     Invalidate();
 }
 

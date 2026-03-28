@@ -5364,7 +5364,6 @@ int  CGameMode::OnRun() {
                 DrawModeCursor(m_cursorActNum, m_mouseAnimStartTick);
             }
         }
-
         g_framePerfStats.frames += 1;
         g_framePerfStats.updateMs += static_cast<u64>(updateEnd - updateStart);
         g_framePerfStats.processUiMs += static_cast<u64>(processUiEnd - processUiStart);
