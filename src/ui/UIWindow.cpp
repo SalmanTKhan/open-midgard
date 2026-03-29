@@ -794,6 +794,9 @@ void UIEditCtrl::OnChar(char c)
             m_text.pop_back();
         }
     } else if (static_cast<unsigned char>(c) >= 0x20u) {
+        if (m_type == 1 && (c < '0' || c > '9')) {
+            return;
+        }
         if (m_maxchar <= 0 || static_cast<int>(m_text.size()) < m_maxchar) {
             m_text += c;
         }

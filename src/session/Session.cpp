@@ -8,6 +8,7 @@
 #include <cstring>
 #include <cstdio>
 #include <filesystem>
+#include <limits>
 #include <mmsystem.h>
 
 namespace {
@@ -29,6 +30,11 @@ constexpr const char* kHitSwordWave = "_hit_sword.wav";
 constexpr const char* kHitSpearWave = "_hit_spear.wav";
 constexpr const char* kHitAxeWave = "_hit_axe.wav";
 constexpr const char* kHitArrowWave = "_hit_arrow.wav";
+
+int ClampShortcutPageIndex(int page)
+{
+    return (std::max)(0, (std::min)(page, kShortcutPageCount - 1));
+}
 
 constexpr const char* kEnemyHitNormalWaves[] = {
     "_enemy_hit_normal1.wav",
@@ -251,6 +257,7 @@ CSession::CSession() : m_aid(0), m_authCode(0), m_sex(0), m_isEffectOn(true), m_
     std::memset(m_curMap, 0, sizeof(m_curMap));
     std::memset(m_playerName, 0, sizeof(m_playerName));
     std::memset(&m_selectedCharacterInfo, 0, sizeof(m_selectedCharacterInfo));
+    ClearShortcutSlots();
     InitJobHitWaveName();
     InitWeaponHitWaveName();
 }
@@ -329,6 +336,34 @@ void CSession::SetSelectedCharacterAppearance(const CHARACTER_INFO& info)
     m_playerAccessory = info.accessory;
     m_playerAccessory2 = info.accessory2;
     m_playerAccessory3 = info.accessory3;
+    m_plusStr = 0;
+    m_plusAgi = 0;
+    m_plusVit = 0;
+    m_plusInt = 0;
+    m_plusDex = 0;
+    m_plusLuk = 0;
+    m_standardStr = 2;
+    m_standardAgi = 2;
+    m_standardVit = 2;
+    m_standardInt = 2;
+    m_standardDex = 2;
+    m_standardLuk = 2;
+    m_attPower = 0;
+    m_refiningPower = 0;
+    m_maxMatkPower = 0;
+    m_minMatkPower = 0;
+    m_itemDefPower = 0;
+    m_plusDefPower = 0;
+    m_mdefPower = 0;
+    m_plusMdefPower = 0;
+    m_hitSuccessValue = 0;
+    m_avoidSuccessValue = 0;
+    m_plusAvoidSuccessValue = 0;
+    m_criticalSuccessValue = 0;
+    m_aspd = 0;
+    m_plusAspd = 0;
+    ClearNpcShopState();
+    ClearShortcutSlots();
 
     std::memset(m_playerName, 0, sizeof(m_playerName));
     std::memcpy(m_playerName, info.name, sizeof(info.name));
@@ -583,9 +618,265 @@ const std::list<ITEM_INFO>& CSession::GetInventoryItems() const
     return m_inventoryItems;
 }
 
+const ITEM_INFO* CSession::GetInventoryItemByIndex(unsigned int itemIndex) const
+{
+    for (const ITEM_INFO& item : m_inventoryItems) {
+        if (item.m_itemIndex == itemIndex) {
+            return &item;
+        }
+    }
+    return nullptr;
+}
+
+const ITEM_INFO* CSession::GetInventoryItemByItemId(unsigned int itemId) const
+{
+    const ITEM_INFO* bestMatch = nullptr;
+    for (const ITEM_INFO& item : m_inventoryItems) {
+        if (item.GetItemId() != itemId || item.m_num <= 0) {
+            continue;
+        }
+        if (item.m_wearLocation == 0) {
+            return &item;
+        }
+        if (!bestMatch) {
+            bestMatch = &item;
+        }
+    }
+    return bestMatch;
+}
+
 const std::list<PLAYER_SKILL_INFO>& CSession::GetSkillItems() const
 {
     return m_skillItems;
+}
+
+const PLAYER_SKILL_INFO* CSession::GetSkillItemBySkillId(int skillId) const
+{
+    for (const PLAYER_SKILL_INFO& skill : m_skillItems) {
+        if (skill.SKID == skillId) {
+            return &skill;
+        }
+    }
+    return nullptr;
+}
+
+void CSession::ClearNpcShopState()
+{
+    m_shopNpcId = 0;
+    m_shopMode = NpcShopMode::None;
+    m_shopSelectedSourceRow = -1;
+    m_shopSelectedDealRow = -1;
+    m_shopDealTotal = 0;
+    m_shopRows.clear();
+    m_shopDealRows.clear();
+}
+
+void CSession::SetNpcShopChoice(u32 npcId)
+{
+    ClearNpcShopState();
+    m_shopNpcId = npcId;
+}
+
+void CSession::SetNpcShopRows(u32 npcId, NpcShopMode mode, const std::vector<NPC_SHOP_ROW>& rows)
+{
+    m_shopNpcId = npcId;
+    m_shopMode = mode;
+    m_shopRows = rows;
+    m_shopDealRows.clear();
+    m_shopDealTotal = 0;
+    m_shopSelectedSourceRow = rows.empty() ? -1 : 0;
+    m_shopSelectedDealRow = -1;
+}
+
+int CSession::GetNpcShopUnitPrice(const NPC_SHOP_ROW& row) const
+{
+    if (row.secondaryPrice > 0) {
+        return row.secondaryPrice;
+    }
+    return row.price;
+}
+
+void CSession::ClearShortcutSlots()
+{
+    m_shortcutPage = 0;
+    for (SHORTCUT_SLOT& slot : m_shortcutSlots) {
+        slot = SHORTCUT_SLOT{};
+    }
+}
+
+int CSession::GetShortcutPage() const
+{
+    return ClampShortcutPageIndex(m_shortcutPage);
+}
+
+void CSession::SetShortcutPage(int page)
+{
+    m_shortcutPage = ClampShortcutPageIndex(page);
+}
+
+int CSession::GetShortcutSlotAbsoluteIndex(int visibleSlot) const
+{
+    if (visibleSlot < 0 || visibleSlot >= kShortcutSlotsPerPage) {
+        return -1;
+    }
+    return GetShortcutPage() * kShortcutSlotsPerPage + visibleSlot;
+}
+
+const SHORTCUT_SLOT* CSession::GetShortcutSlotByAbsoluteIndex(int absoluteIndex) const
+{
+    if (absoluteIndex < 0 || absoluteIndex >= kShortcutSlotCount) {
+        return nullptr;
+    }
+    return &m_shortcutSlots[static_cast<size_t>(absoluteIndex)];
+}
+
+const SHORTCUT_SLOT* CSession::GetShortcutSlotByVisibleIndex(int visibleSlot) const
+{
+    return GetShortcutSlotByAbsoluteIndex(GetShortcutSlotAbsoluteIndex(visibleSlot));
+}
+
+bool CSession::SetShortcutSlotByAbsoluteIndex(int absoluteIndex, unsigned char isSkill, unsigned int id, unsigned short count)
+{
+    if (absoluteIndex < 0 || absoluteIndex >= kShortcutSlotCount) {
+        return false;
+    }
+
+    SHORTCUT_SLOT normalized{};
+    if (id != 0) {
+        normalized.isSkill = isSkill != 0 ? 1 : 0;
+        normalized.id = id;
+        normalized.count = count;
+    }
+
+    SHORTCUT_SLOT& slot = m_shortcutSlots[static_cast<size_t>(absoluteIndex)];
+    if (slot.isSkill == normalized.isSkill
+        && slot.id == normalized.id
+        && slot.count == normalized.count) {
+        return false;
+    }
+
+    slot = normalized;
+    return true;
+}
+
+bool CSession::SetShortcutSlotByVisibleIndex(int visibleSlot, unsigned char isSkill, unsigned int id, unsigned short count)
+{
+    return SetShortcutSlotByAbsoluteIndex(GetShortcutSlotAbsoluteIndex(visibleSlot), isSkill, id, count);
+}
+
+bool CSession::ClearShortcutSlotByAbsoluteIndex(int absoluteIndex)
+{
+    return SetShortcutSlotByAbsoluteIndex(absoluteIndex, 0, 0, 0);
+}
+
+bool CSession::ClearShortcutSlotByVisibleIndex(int visibleSlot)
+{
+    return ClearShortcutSlotByAbsoluteIndex(GetShortcutSlotAbsoluteIndex(visibleSlot));
+}
+
+int CSession::FindShortcutSlotByItemId(unsigned int itemId) const
+{
+    for (size_t index = 0; index < m_shortcutSlots.size(); ++index) {
+        const SHORTCUT_SLOT& slot = m_shortcutSlots[index];
+        if (slot.id == itemId && slot.isSkill == 0) {
+            return static_cast<int>(index);
+        }
+    }
+    return -1;
+}
+
+int CSession::FindShortcutSlotBySkillId(int skillId) const
+{
+    for (size_t index = 0; index < m_shortcutSlots.size(); ++index) {
+        const SHORTCUT_SLOT& slot = m_shortcutSlots[index];
+        if (slot.id == static_cast<unsigned int>(skillId) && slot.isSkill != 0) {
+            return static_cast<int>(index);
+        }
+    }
+    return -1;
+}
+
+bool CSession::AdjustNpcShopDealBySourceRow(size_t sourceRowIndex, int deltaQuantity)
+{
+    if (deltaQuantity == 0 || sourceRowIndex >= m_shopRows.size()) {
+        return false;
+    }
+
+    const NPC_SHOP_ROW& row = m_shopRows[sourceRowIndex];
+    const int maxQuantity = row.availableCount > 0
+        ? row.availableCount
+        : static_cast<int>((std::min)(static_cast<long long>(std::numeric_limits<int>::max()), 30000ll));
+    if (maxQuantity <= 0 && deltaQuantity > 0) {
+        return false;
+    }
+
+    auto it = std::find_if(m_shopDealRows.begin(), m_shopDealRows.end(), [&](const NPC_SHOP_DEAL_ROW& dealRow) {
+        return dealRow.sourceItemIndex == row.sourceItemIndex
+            && dealRow.itemInfo.GetItemId() == row.itemInfo.GetItemId();
+    });
+
+    if (it == m_shopDealRows.end()) {
+        if (deltaQuantity < 0) {
+            return false;
+        }
+
+        NPC_SHOP_DEAL_ROW dealRow{};
+        dealRow.itemInfo = row.itemInfo;
+        dealRow.itemInfo.m_num = 0;
+        dealRow.sourceItemIndex = row.sourceItemIndex;
+        dealRow.unitPrice = GetNpcShopUnitPrice(row);
+        m_shopDealRows.push_back(std::move(dealRow));
+        it = std::prev(m_shopDealRows.end());
+    }
+
+    const int oldQuantity = it->quantity;
+    const int unclampedQuantity = oldQuantity + deltaQuantity;
+    const int newQuantity = (std::max)(0, (std::min)(maxQuantity, unclampedQuantity));
+    if (newQuantity == oldQuantity) {
+        return false;
+    }
+
+    if (newQuantity <= 0) {
+        const size_t erasedIndex = static_cast<size_t>(std::distance(m_shopDealRows.begin(), it));
+        m_shopDealRows.erase(it);
+        if (m_shopDealRows.empty()) {
+            m_shopSelectedDealRow = -1;
+        } else if (m_shopSelectedDealRow >= static_cast<int>(m_shopDealRows.size())) {
+            m_shopSelectedDealRow = static_cast<int>(m_shopDealRows.size()) - 1;
+        } else if (m_shopSelectedDealRow == static_cast<int>(erasedIndex)) {
+            m_shopSelectedDealRow = (std::min)(m_shopSelectedDealRow, static_cast<int>(m_shopDealRows.size()) - 1);
+        }
+    } else {
+        it->quantity = newQuantity;
+        it->itemInfo.m_num = newQuantity;
+        m_shopSelectedDealRow = static_cast<int>(std::distance(m_shopDealRows.begin(), it));
+    }
+
+    long long total = 0;
+    for (const NPC_SHOP_DEAL_ROW& dealRow : m_shopDealRows) {
+        total += static_cast<long long>(dealRow.unitPrice) * static_cast<long long>(dealRow.quantity);
+    }
+    m_shopDealTotal = static_cast<int>((std::min)(total, static_cast<long long>(std::numeric_limits<int>::max())));
+    m_shopSelectedSourceRow = static_cast<int>(sourceRowIndex);
+    return true;
+}
+
+bool CSession::AdjustNpcShopDealByDealRow(size_t dealRowIndex, int deltaQuantity)
+{
+    if (dealRowIndex >= m_shopDealRows.size()) {
+        return false;
+    }
+
+    const NPC_SHOP_DEAL_ROW& dealRow = m_shopDealRows[dealRowIndex];
+    for (size_t sourceRowIndex = 0; sourceRowIndex < m_shopRows.size(); ++sourceRowIndex) {
+        const NPC_SHOP_ROW& row = m_shopRows[sourceRowIndex];
+        if (row.sourceItemIndex == dealRow.sourceItemIndex
+            && row.itemInfo.GetItemId() == dealRow.itemInfo.GetItemId()) {
+            return AdjustNpcShopDealBySourceRow(sourceRowIndex, deltaQuantity);
+        }
+    }
+
+    return false;
 }
 
 int CSession::GetPlayerSkillPointCount() const

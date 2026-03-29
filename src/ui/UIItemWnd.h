@@ -24,8 +24,10 @@ public:
     void OnDraw() override;
     void OnLBtnDblClk(int x, int y) override;
     void OnLBtnDown(int x, int y) override;
+    void OnLBtnUp(int x, int y) override;
     void OnMouseMove(int x, int y) override;
     void OnMouseHover(int x, int y) override;
+    void DragAndDrop(int x, int y, const DRAG_INFO* const info) override;
     void StoreInfo() override;
     void DrawHoverOverlay(HDC hdc, const RECT& clientRect) const;
 
@@ -67,6 +69,11 @@ private:
     HBITMAP m_hoverBitmap;
     std::unordered_map<unsigned int, HBITMAP> m_iconCache;
     std::vector<VisibleItem> m_visibleItems;
+    bool m_dragArmed;
+    POINT m_dragStartPoint;
+    unsigned int m_dragItemId;
+    unsigned int m_dragItemIndex;
+    int m_dragItemEquipLocation;
     unsigned long long m_lastVisualStateToken;
     bool m_hasVisualStateToken;
 };

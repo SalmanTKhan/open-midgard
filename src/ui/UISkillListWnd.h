@@ -65,6 +65,10 @@ private:
     int m_viewOffset;
     int m_selectedSkillId;
     int m_pressedUpgradeSkillId;
+    int m_dragSkillId;
+    int m_dragSkillLevel;
+    bool m_dragArmed;
+    POINT m_dragStartPoint;
     int m_isDraggingScrollThumb;
     int m_scrollDragOffsetY;
     std::array<UIBitmapButton*, 3> m_systemButtons;

@@ -1,4 +1,5 @@
 #pragma once
+#include <array>
 #include <string>
 #include <list>
 #include <vector>
@@ -31,6 +32,37 @@ struct PLAYER_SKILL_INFO {
     std::vector<std::string> descriptionLines;
     std::vector<int> needSkillList;
 };
+
+enum class NpcShopMode : int {
+    None = 0,
+    Buy = 1,
+    Sell = 2,
+};
+
+struct NPC_SHOP_ROW {
+    ITEM_INFO itemInfo;
+    unsigned int sourceItemIndex = 0;
+    int price = 0;
+    int secondaryPrice = 0;
+    int availableCount = 0;
+};
+
+struct NPC_SHOP_DEAL_ROW {
+    ITEM_INFO itemInfo;
+    unsigned int sourceItemIndex = 0;
+    int unitPrice = 0;
+    int quantity = 0;
+};
+
+struct SHORTCUT_SLOT {
+    unsigned char isSkill = 0;
+    unsigned int id = 0;
+    unsigned short count = 0;
+};
+
+constexpr int kShortcutSlotsPerPage = 9;
+constexpr int kShortcutPageCount = 3;
+constexpr int kShortcutSlotCount = kShortcutSlotsPerPage * kShortcutPageCount;
 
 class CSession
 {
@@ -68,6 +100,41 @@ public:
     int m_playerAccessory2;
     int m_playerAccessory3;
     char m_playerName[25];
+    int m_plusStr = 0;
+    int m_plusAgi = 0;
+    int m_plusVit = 0;
+    int m_plusInt = 0;
+    int m_plusDex = 0;
+    int m_plusLuk = 0;
+    int m_standardStr = 2;
+    int m_standardAgi = 2;
+    int m_standardVit = 2;
+    int m_standardInt = 2;
+    int m_standardDex = 2;
+    int m_standardLuk = 2;
+    int m_attPower = 0;
+    int m_refiningPower = 0;
+    int m_maxMatkPower = 0;
+    int m_minMatkPower = 0;
+    int m_itemDefPower = 0;
+    int m_plusDefPower = 0;
+    int m_mdefPower = 0;
+    int m_plusMdefPower = 0;
+    int m_hitSuccessValue = 0;
+    int m_avoidSuccessValue = 0;
+    int m_plusAvoidSuccessValue = 0;
+    int m_criticalSuccessValue = 0;
+    int m_aspd = 0;
+    int m_plusAspd = 0;
+    u32 m_shopNpcId = 0;
+    NpcShopMode m_shopMode = NpcShopMode::None;
+    int m_shopSelectedSourceRow = -1;
+    int m_shopSelectedDealRow = -1;
+    int m_shopDealTotal = 0;
+    std::vector<NPC_SHOP_ROW> m_shopRows;
+    std::vector<NPC_SHOP_DEAL_ROW> m_shopDealRows;
+    int m_shortcutPage = 0;
+    std::array<SHORTCUT_SLOT, kShortcutSlotCount> m_shortcutSlots{};
     
     void SetServerTime(u32 time);
     u32 GetServerTime() const;
@@ -92,7 +159,28 @@ public:
     void ClearInventoryWearLocationMask(int wearMask, unsigned int exceptItemIndex = 0);
     void RebuildPlayerEquipmentAppearanceFromInventory();
     const std::list<ITEM_INFO>& GetInventoryItems() const;
+    const ITEM_INFO* GetInventoryItemByIndex(unsigned int itemIndex) const;
+    const ITEM_INFO* GetInventoryItemByItemId(unsigned int itemId) const;
     const std::list<PLAYER_SKILL_INFO>& GetSkillItems() const;
+    const PLAYER_SKILL_INFO* GetSkillItemBySkillId(int skillId) const;
+    void ClearNpcShopState();
+    void SetNpcShopChoice(u32 npcId);
+    void SetNpcShopRows(u32 npcId, NpcShopMode mode, const std::vector<NPC_SHOP_ROW>& rows);
+    bool AdjustNpcShopDealBySourceRow(size_t sourceRowIndex, int deltaQuantity);
+    bool AdjustNpcShopDealByDealRow(size_t dealRowIndex, int deltaQuantity);
+    int GetNpcShopUnitPrice(const NPC_SHOP_ROW& row) const;
+    void ClearShortcutSlots();
+    int GetShortcutPage() const;
+    void SetShortcutPage(int page);
+    int GetShortcutSlotAbsoluteIndex(int visibleSlot) const;
+    const SHORTCUT_SLOT* GetShortcutSlotByAbsoluteIndex(int absoluteIndex) const;
+    const SHORTCUT_SLOT* GetShortcutSlotByVisibleIndex(int visibleSlot) const;
+    bool SetShortcutSlotByAbsoluteIndex(int absoluteIndex, unsigned char isSkill, unsigned int id, unsigned short count);
+    bool SetShortcutSlotByVisibleIndex(int visibleSlot, unsigned char isSkill, unsigned int id, unsigned short count);
+    bool ClearShortcutSlotByAbsoluteIndex(int absoluteIndex);
+    bool ClearShortcutSlotByVisibleIndex(int visibleSlot);
+    int FindShortcutSlotByItemId(unsigned int itemId) const;
+    int FindShortcutSlotBySkillId(int skillId) const;
     int GetPlayerSkillPointCount() const;
     const char* GetPlayerName() const;
     const char* GetJobName(int job) const;

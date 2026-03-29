@@ -122,9 +122,30 @@ struct CHARACTER_INFO
     s16 bIsChangedCharName;
 };
 
+enum class DragType : int {
+    None = 0,
+    ShortcutItem = 1,
+    ShortcutSkill = 2,
+};
+
+enum class DragSource : int {
+    None = 0,
+    InventoryWindow = 1,
+    EquipmentWindow = 2,
+    SkillListWindow = 3,
+    ShortcutWindow = 4,
+};
+
 struct DRAG_INFO {
-    int type;
-    void* data;
+    int type = 0;
+    int source = 0;
+    void* data = nullptr;
+    unsigned int itemId = 0;
+    unsigned int itemIndex = 0;
+    int itemEquipLocation = 0;
+    int shortcutSlotAbsoluteIndex = -1;
+    int skillId = 0;
+    int skillLevel = 0;
 };
 
 // ---------------------------------------------------------------------------

@@ -13,10 +13,29 @@ add_library(ro_ui STATIC
     UINewChatWnd.cpp
     UIBasicInfoWnd.h
     UIBasicInfoWnd.cpp
+    UIStatusWnd.h
+    UIStatusWnd.cpp
+    UISayDialogWnd.h
+    UISayDialogWnd.cpp
+    UINpcMenuWnd.h
+    UINpcMenuWnd.cpp
+    UINpcInputWnd.h
+    UINpcInputWnd.cpp
+    UIChooseSellBuyWnd.h
+    UIChooseSellBuyWnd.cpp
     UINotifyLevelUpWnd.h
     UINotifyLevelUpWnd.cpp
     UIItemWnd.h
     UIItemWnd.cpp
+    UIShortCutWnd.h
+    UIShortCutWnd.cpp
+    UIItemShopWnd.h
+    UIItemShopWnd.cpp
+    UIItemPurchaseWnd.h
+    UIItemPurchaseWnd.cpp
+    UIItemSellWnd.h
+    UIItemSellWnd.cpp
+    UIShopCommon.h
     UIMinimapWnd.h
     UIMinimapWnd.cpp
     UIEquipWnd.h

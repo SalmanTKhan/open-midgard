@@ -1618,6 +1618,11 @@ void UpdateGameplayCursor(CGameMode& mode)
         return;
     }
 
+    if (g_windowMgr.HasActiveNpcDialog()) {
+        SetModeCursorAction(mode, CursorAction::Arrow);
+        return;
+    }
+
     if (g_windowMgr.HasWindowAtPoint(mode.m_oldMouseX, mode.m_oldMouseY)) {
         SetModeCursorAction(mode, CursorAction::Arrow);
         return;
@@ -2362,9 +2367,10 @@ void FinishMapLoading(CGameMode& mode)
 {
     g_windowMgr.HideLoadingScreen();
     g_windowMgr.ClearChatEvents();
+    g_windowMgr.EnsureChatWindowVisible();
     g_windowMgr.MakeWindow(UIWindowMgr::WID_BASICINFOWND);
+    g_windowMgr.MakeWindow(UIWindowMgr::WID_SHORTCUTWND);
     g_windowMgr.MakeWindow(UIWindowMgr::WID_ROMAPWND);
-    g_windowMgr.MakeWindow(UIWindowMgr::WID_SAYDIALOGWND);
     DbgLog("[GameMode] map loading finished world='%s' actors=%zu runtime=%zu\n",
         mode.m_rswName,
         mode.m_actorPosList.size(),
@@ -3565,6 +3571,388 @@ bool RequestUpgradeSkillLevel(u16 skillId)
         static_cast<unsigned int>(skillId),
         sent ? 1 : 0);
     return sent;
+}
+
+u32 ResolveShortcutSkillTargetId(const CGameMode* gameMode)
+{
+    if (gameMode && gameMode->m_lastLockOnMonGid != 0) {
+        return gameMode->m_lastLockOnMonGid;
+    }
+    if (g_session.m_gid != 0) {
+        return g_session.m_gid;
+    }
+    return g_session.m_aid;
+}
+
+bool RequestShortcutSlotUpdate(int absoluteSlotIndex)
+{
+    const SHORTCUT_SLOT* slot = g_session.GetShortcutSlotByAbsoluteIndex(absoluteSlotIndex);
+    if (!slot) {
+        return false;
+    }
+
+    PACKET_CZ_SHORTCUT_KEY_CHANGE packet{};
+    packet.PacketType = PacketProfile::LegacyShortcutSend::kKeyChange;
+    packet.Index = static_cast<u16>(absoluteSlotIndex);
+    packet.IsSkill = slot->id != 0 ? static_cast<u8>(slot->isSkill != 0 ? 1 : 0) : 0;
+    packet.Id = slot->id;
+    packet.Count = slot->count;
+
+    const bool sent = CRagConnection::instance()->SendPacket(
+        reinterpret_cast<const char*>(&packet),
+        static_cast<int>(sizeof(packet)));
+    DbgLog("[GameMode] shortcut update slot=%d skill=%u id=%u count=%u sent=%d\n",
+        absoluteSlotIndex,
+        static_cast<unsigned int>(packet.IsSkill),
+        static_cast<unsigned int>(packet.Id),
+        static_cast<unsigned int>(packet.Count),
+        sent ? 1 : 0);
+    return sent;
+}
+
+bool RequestShortcutSlotUse(int visibleSlot)
+{
+    const SHORTCUT_SLOT* slot = g_session.GetShortcutSlotByVisibleIndex(visibleSlot);
+    if (!slot || slot->id == 0) {
+        return false;
+    }
+
+    if (slot->isSkill == 0) {
+        const ITEM_INFO* item = g_session.GetInventoryItemByItemId(slot->id);
+        if (!item || item->m_itemIndex == 0) {
+            return false;
+        }
+
+        PACKET_CZ_USEITEM2 packet{};
+        packet.PacketType = PacketProfile::ActiveMapServerSend::kUseItem;
+        packet.ItemIndex = static_cast<u16>(item->m_itemIndex);
+        packet.TargetAID = g_session.m_aid;
+
+        const bool sent = CRagConnection::instance()->SendPacket(
+            reinterpret_cast<const char*>(&packet),
+            static_cast<int>(sizeof(packet)));
+        if (sent) {
+            if (CGameMode* gameMode = g_modeMgr.GetCurrentGameMode()) {
+                gameMode->m_waitingUseItemAck = static_cast<int>(item->m_itemIndex);
+            }
+        }
+        DbgLog("[GameMode] shortcut item use slot=%d itemId=%u index=%u sent=%d\n",
+            visibleSlot,
+            static_cast<unsigned int>(slot->id),
+            static_cast<unsigned int>(item->m_itemIndex),
+            sent ? 1 : 0);
+        return sent;
+    }
+
+    const PLAYER_SKILL_INFO* skill = g_session.GetSkillItemBySkillId(static_cast<int>(slot->id));
+    const u16 skillLevel = static_cast<u16>(skill && skill->level > 0
+        ? skill->level
+        : (slot->count > 0 ? slot->count : 1));
+    if (slot->id == 0 || skillLevel == 0) {
+        return false;
+    }
+
+    PACKET_CZ_USESKILLTOID2 packet{};
+    packet.PacketType = PacketProfile::ActiveMapServerSend::kUseSkillToId;
+    packet.SkillId = static_cast<u16>(slot->id & 0xFFFFu);
+    packet.SkillLevel = skillLevel;
+    packet.TargetGID = ResolveShortcutSkillTargetId(g_modeMgr.GetCurrentGameMode());
+
+    const bool sent = CRagConnection::instance()->SendPacket(
+        reinterpret_cast<const char*>(&packet),
+        static_cast<int>(sizeof(packet)));
+    DbgLog("[GameMode] shortcut skill use slot=%d skillId=%u level=%u target=%u sent=%d\n",
+        visibleSlot,
+        static_cast<unsigned int>(slot->id),
+        static_cast<unsigned int>(skillLevel),
+        static_cast<unsigned int>(packet.TargetGID),
+        sent ? 1 : 0);
+    return sent;
+}
+
+bool RequestIncreaseStatus(u16 statusId)
+{
+    if (statusId < 13 || statusId > 18) {
+        return false;
+    }
+
+    PACKET_CZ_STATUS_CHANGE packet{};
+    packet.PacketType = 0x00BB;
+    packet.StatusId = statusId;
+    packet.Amount = 1;
+
+    const bool sent = CRagConnection::instance()->SendPacket(
+        reinterpret_cast<const char*>(&packet),
+        static_cast<int>(sizeof(packet)));
+    DbgLog("[GameMode] status increase request status=%u sent=%d\n",
+        static_cast<unsigned int>(statusId),
+        sent ? 1 : 0);
+    return sent;
+}
+
+bool RequestNpcContact(u32 npcId)
+{
+    if (npcId == 0) {
+        return false;
+    }
+
+    PACKET_CZ_CONTACTNPC packet{};
+    packet.PacketType = PacketProfile::LegacyNpcScriptSend::kContactNpc;
+    packet.NpcId = npcId;
+    packet.Type = 1;
+
+    const bool sent = CRagConnection::instance()->SendPacket(
+        reinterpret_cast<const char*>(&packet),
+        static_cast<int>(sizeof(packet)));
+    DbgLog("[GameMode] npc contact npc=%u sent=%d\n",
+        static_cast<unsigned int>(npcId),
+        sent ? 1 : 0);
+    return sent;
+}
+
+bool RequestNpcMenuSelection(u32 npcId, u8 choice)
+{
+    if (npcId == 0 || choice == 0) {
+        return false;
+    }
+
+    PACKET_CZ_NPC_SELECTMENU packet{};
+    packet.PacketType = PacketProfile::LegacyNpcScriptSend::kSelectMenu;
+    packet.NpcId = npcId;
+    packet.Choice = choice;
+
+    const bool sent = CRagConnection::instance()->SendPacket(
+        reinterpret_cast<const char*>(&packet),
+        static_cast<int>(sizeof(packet)));
+    DbgLog("[GameMode] npc menu npc=%u choice=%u sent=%d\n",
+        static_cast<unsigned int>(npcId),
+        static_cast<unsigned int>(choice),
+        sent ? 1 : 0);
+    return sent;
+}
+
+bool RequestNpcNext(u32 npcId)
+{
+    if (npcId == 0) {
+        return false;
+    }
+
+    PACKET_CZ_NPC_NEXT_CLICK packet{};
+    packet.PacketType = PacketProfile::LegacyNpcScriptSend::kNextClick;
+    packet.NpcId = npcId;
+
+    const bool sent = CRagConnection::instance()->SendPacket(
+        reinterpret_cast<const char*>(&packet),
+        static_cast<int>(sizeof(packet)));
+    DbgLog("[GameMode] npc next npc=%u sent=%d\n",
+        static_cast<unsigned int>(npcId),
+        sent ? 1 : 0);
+    return sent;
+}
+
+bool RequestNpcInputNumber(u32 npcId, u32 value)
+{
+    if (npcId == 0) {
+        return false;
+    }
+
+    PACKET_CZ_NPC_INPUT_NUMBER packet{};
+    packet.PacketType = PacketProfile::LegacyNpcScriptSend::kInputNumber;
+    packet.NpcId = npcId;
+    packet.Value = value;
+
+    const bool sent = CRagConnection::instance()->SendPacket(
+        reinterpret_cast<const char*>(&packet),
+        static_cast<int>(sizeof(packet)));
+    DbgLog("[GameMode] npc input number npc=%u value=%u sent=%d\n",
+        static_cast<unsigned int>(npcId),
+        static_cast<unsigned int>(value),
+        sent ? 1 : 0);
+    return sent;
+}
+
+bool RequestNpcInputString(u32 npcId, const char* text)
+{
+    if (npcId == 0 || !text || *text == '\0') {
+        return false;
+    }
+
+    const size_t textLen = std::strlen(text);
+    const size_t packetLen = sizeof(PACKET_CZ_NPC_INPUT_STRING) + textLen + 1;
+    if (packetLen > 0xFFFFu) {
+        return false;
+    }
+
+    std::vector<u8> bytes(packetLen, 0);
+    auto* packet = reinterpret_cast<PACKET_CZ_NPC_INPUT_STRING*>(bytes.data());
+    packet->PacketType = PacketProfile::LegacyNpcScriptSend::kInputString;
+    packet->PacketLength = static_cast<u16>(packetLen);
+    packet->NpcId = npcId;
+    std::memcpy(bytes.data() + sizeof(PACKET_CZ_NPC_INPUT_STRING), text, textLen);
+
+    const bool sent = CRagConnection::instance()->SendPacket(
+        reinterpret_cast<const char*>(bytes.data()),
+        static_cast<int>(bytes.size()));
+    DbgLog("[GameMode] npc input string npc=%u len=%zu sent=%d\n",
+        static_cast<unsigned int>(npcId),
+        textLen,
+        sent ? 1 : 0);
+    return sent;
+}
+
+bool RequestNpcCloseDialog(u32 npcId)
+{
+    if (npcId == 0) {
+        return false;
+    }
+
+    PACKET_CZ_NPC_CLOSE_DIALOG packet{};
+    packet.PacketType = PacketProfile::LegacyNpcScriptSend::kCloseDialog;
+    packet.NpcId = npcId;
+
+    const bool sent = CRagConnection::instance()->SendPacket(
+        reinterpret_cast<const char*>(&packet),
+        static_cast<int>(sizeof(packet)));
+    DbgLog("[GameMode] npc close npc=%u sent=%d\n",
+        static_cast<unsigned int>(npcId),
+        sent ? 1 : 0);
+    return sent;
+}
+
+bool RequestNpcShopDealType(u8 dealType)
+{
+    if (g_session.m_shopNpcId == 0 || dealType > 1) {
+        return false;
+    }
+
+    PACKET_CZ_ACK_SELECT_DEALTYPE packet{};
+    packet.PacketType = PacketProfile::LegacyNpcShopSend::kSelectDealType;
+    packet.NpcId = g_session.m_shopNpcId;
+    packet.Type = dealType;
+
+    const bool sent = CRagConnection::instance()->SendPacket(
+        reinterpret_cast<const char*>(&packet),
+        static_cast<int>(sizeof(packet)));
+    DbgLog("[GameMode] npc shop deal type npc=%u type=%u sent=%d\n",
+        static_cast<unsigned int>(packet.NpcId),
+        static_cast<unsigned int>(packet.Type),
+        sent ? 1 : 0);
+    return sent;
+}
+
+bool RequestNpcShopPurchaseList()
+{
+    if (g_session.m_shopMode != NpcShopMode::Buy || g_session.m_shopDealRows.empty()) {
+        return false;
+    }
+
+    const size_t rowCount = g_session.m_shopDealRows.size();
+    const size_t packetLen = sizeof(PACKET_CZ_PC_PURCHASE_ITEMLIST) + rowCount * 4;
+    if (packetLen > 0xFFFFu) {
+        return false;
+    }
+
+    std::vector<u8> bytes(packetLen, 0);
+    auto* packet = reinterpret_cast<PACKET_CZ_PC_PURCHASE_ITEMLIST*>(bytes.data());
+    packet->PacketType = PacketProfile::LegacyNpcShopSend::kPurchaseItemList;
+    packet->PacketLength = static_cast<u16>(packetLen);
+
+    size_t offset = sizeof(PACKET_CZ_PC_PURCHASE_ITEMLIST);
+    for (const NPC_SHOP_DEAL_ROW& row : g_session.m_shopDealRows) {
+        const u16 amount = static_cast<u16>((std::max)(0, (std::min)(row.quantity, 0xFFFF)));
+        const u16 itemId = static_cast<u16>(row.itemInfo.GetItemId() & 0xFFFFu);
+        bytes[offset + 0] = static_cast<u8>(amount & 0xFFu);
+        bytes[offset + 1] = static_cast<u8>((amount >> 8) & 0xFFu);
+        bytes[offset + 2] = static_cast<u8>(itemId & 0xFFu);
+        bytes[offset + 3] = static_cast<u8>((itemId >> 8) & 0xFFu);
+        offset += 4;
+    }
+
+    const bool sent = CRagConnection::instance()->SendPacket(
+        reinterpret_cast<const char*>(bytes.data()),
+        static_cast<int>(bytes.size()));
+    DbgLog("[GameMode] npc shop purchase rows=%u sent=%d\n",
+        static_cast<unsigned int>(rowCount),
+        sent ? 1 : 0);
+    return sent;
+}
+
+bool RequestNpcShopSellList()
+{
+    if (g_session.m_shopMode != NpcShopMode::Sell || g_session.m_shopDealRows.empty()) {
+        return false;
+    }
+
+    const size_t rowCount = g_session.m_shopDealRows.size();
+    const size_t packetLen = sizeof(PACKET_CZ_PC_SELL_ITEMLIST) + rowCount * 4;
+    if (packetLen > 0xFFFFu) {
+        return false;
+    }
+
+    std::vector<u8> bytes(packetLen, 0);
+    auto* packet = reinterpret_cast<PACKET_CZ_PC_SELL_ITEMLIST*>(bytes.data());
+    packet->PacketType = PacketProfile::LegacyNpcShopSend::kSellItemList;
+    packet->PacketLength = static_cast<u16>(packetLen);
+
+    size_t offset = sizeof(PACKET_CZ_PC_SELL_ITEMLIST);
+    for (const NPC_SHOP_DEAL_ROW& row : g_session.m_shopDealRows) {
+        const u16 itemIndex = static_cast<u16>(row.sourceItemIndex & 0xFFFFu);
+        const u16 amount = static_cast<u16>((std::max)(0, (std::min)(row.quantity, 0xFFFF)));
+        bytes[offset + 0] = static_cast<u8>(itemIndex & 0xFFu);
+        bytes[offset + 1] = static_cast<u8>((itemIndex >> 8) & 0xFFu);
+        bytes[offset + 2] = static_cast<u8>(amount & 0xFFu);
+        bytes[offset + 3] = static_cast<u8>((amount >> 8) & 0xFFu);
+        offset += 4;
+    }
+
+    const bool sent = CRagConnection::instance()->SendPacket(
+        reinterpret_cast<const char*>(bytes.data()),
+        static_cast<int>(bytes.size()));
+    DbgLog("[GameMode] npc shop sell rows=%u sent=%d\n",
+        static_cast<unsigned int>(rowCount),
+        sent ? 1 : 0);
+    return sent;
+}
+
+bool TryRequestNpcTalkFromScreenPoint(CGameMode& mode, int screenX, int screenY)
+{
+    if (!mode.m_world || !mode.m_view || mode.m_canRotateView) {
+        return false;
+    }
+
+    CGameActor* hoveredActor = nullptr;
+    if (!mode.m_world->FindHoveredActorScreen(mode.m_view->GetViewMatrix(),
+        mode.m_view->GetCameraLongitude(),
+        screenX,
+        screenY,
+        &hoveredActor,
+        nullptr,
+        nullptr)) {
+        return false;
+    }
+
+    if (!IsNpcLikeHoverActor(hoveredActor)) {
+        return false;
+    }
+
+    if (!RequestNpcContact(hoveredActor->m_gid)) {
+        return false;
+    }
+
+    mode.m_lastMonGid = 0;
+    mode.m_lastLockOnMonGid = 0;
+    mode.m_isAutoMoveClickOn = 0;
+    mode.m_isLeftButtonHeld = 0;
+    mode.m_hasHeldMoveTarget = 0;
+    mode.m_lastMoveRequestCellX = -1;
+    mode.m_lastMoveRequestCellY = -1;
+    mode.m_heldMoveTargetCellX = -1;
+    mode.m_heldMoveTargetCellY = -1;
+    mode.m_lastMoveRequestTick = 0;
+    mode.m_lastAttackRequestTick = 0;
+    ClearPickupIntent(mode);
+    ClearAttackChaseHint(mode);
+    return true;
 }
 
 bool TryRequestAttackFromScreenPoint(CGameMode& mode, int screenX, int screenY)
@@ -6147,6 +6535,17 @@ msgresult_t CGameMode::SendMsg(int msg, msgparam_t wparam, msgparam_t lparam, ms
     case GameMsg_LButtonDown: {
         const int mouseX = static_cast<int>(wparam);
         const int mouseY = static_cast<int>(lparam);
+        if (g_windowMgr.HasActiveNpcDialog()) {
+            m_isLeftButtonHeld = 0;
+            m_hasHeldMoveTarget = 0;
+            m_lastMoveRequestCellX = -1;
+            m_lastMoveRequestCellY = -1;
+            m_lastMoveRequestTick = 0;
+            m_lastAttackRequestTick = 0;
+            ClearPickupIntent(*this);
+            ClearAttackChaseHint(*this);
+            return 1;
+        }
         if (m_world && m_world->m_player) {
             if (ShouldUseTurnOnlyGroundClick(*this)) {
                 ClearPickupIntent(*this);
@@ -6171,6 +6570,9 @@ msgresult_t CGameMode::SendMsg(int msg, msgparam_t wparam, msgparam_t lparam, ms
         }
         if (TryRequestAttackFromScreenPoint(*this, mouseX, mouseY)) {
             m_isLeftButtonHeld = 0;
+            return 1;
+        }
+        if (TryRequestNpcTalkFromScreenPoint(*this, mouseX, mouseY)) {
             return 1;
         }
 
@@ -6322,6 +6724,42 @@ msgresult_t CGameMode::SendMsg(int msg, msgparam_t wparam, msgparam_t lparam, ms
 
     case GameMsg_RequestUpgradeSkillLevel:
         return RequestUpgradeSkillLevel(static_cast<u16>(wparam)) ? 1 : 0;
+
+    case GameMsg_RequestIncreaseStatus:
+        return RequestIncreaseStatus(static_cast<u16>(wparam)) ? 1 : 0;
+
+    case GameMsg_RequestNpcContact:
+        return RequestNpcContact(static_cast<u32>(wparam)) ? 1 : 0;
+
+    case GameMsg_RequestNpcSelectMenu:
+        return RequestNpcMenuSelection(static_cast<u32>(wparam), static_cast<u8>(lparam)) ? 1 : 0;
+
+    case GameMsg_RequestNpcNext:
+        return RequestNpcNext(static_cast<u32>(wparam)) ? 1 : 0;
+
+    case GameMsg_RequestNpcInputNumber:
+        return RequestNpcInputNumber(static_cast<u32>(wparam), static_cast<u32>(lparam)) ? 1 : 0;
+
+    case GameMsg_RequestNpcInputString:
+        return RequestNpcInputString(static_cast<u32>(wparam), reinterpret_cast<const char*>(lparam)) ? 1 : 0;
+
+    case GameMsg_RequestNpcCloseDialog:
+        return RequestNpcCloseDialog(static_cast<u32>(wparam)) ? 1 : 0;
+
+    case GameMsg_RequestShopDealType:
+        return RequestNpcShopDealType(static_cast<u8>(wparam)) ? 1 : 0;
+
+    case GameMsg_RequestShopBuyList:
+        return RequestNpcShopPurchaseList() ? 1 : 0;
+
+    case GameMsg_RequestShopSellList:
+        return RequestNpcShopSellList() ? 1 : 0;
+
+    case GameMsg_RequestShortcutUpdate:
+        return RequestShortcutSlotUpdate(static_cast<int>(wparam)) ? 1 : 0;
+
+    case GameMsg_RequestShortcutUse:
+        return RequestShortcutSlotUse(static_cast<int>(wparam)) ? 1 : 0;
 
     case GameMsg_RButtonUp:
         m_canRotateView = 0;

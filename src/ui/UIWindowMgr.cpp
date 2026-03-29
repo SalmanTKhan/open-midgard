@@ -2,13 +2,23 @@
 #include "UILoadingWnd.h"
 #include "UINewChatWnd.h"
 #include "UIBasicInfoWnd.h"
+#include "UIStatusWnd.h"
+#include "UISayDialogWnd.h"
+#include "UINpcMenuWnd.h"
+#include "UINpcInputWnd.h"
 #include "UIChooseWnd.h"
+#include "UIChooseSellBuyWnd.h"
 #include "UIEquipWnd.h"
 #include "UIItemWnd.h"
+#include "UIItemPurchaseWnd.h"
+#include "UIItemSellWnd.h"
+#include "UIItemShopWnd.h"
+#include "UIShortCutWnd.h"
 #include "UIMinimapWnd.h"
 #include "UISkillListWnd.h"
 #include "UILoginWnd.h"
 #include "UISelectServerWnd.h"
+#include "session/Session.h"
 #include "UIMakeCharWnd.h"
 #include "UINotifyLevelUpWnd.h"
 #include "UIOptionWnd.h"
@@ -203,7 +213,7 @@ UIWindowMgr::UIWindowMgr()
       m_miniMapZoomFactor(1.0f), m_miniMapArgb(0), m_isDrawCompass(0),
       m_isDragAll(0), m_conversionMode(0),
       m_captureWindow(nullptr), m_editWindow(nullptr), m_modalWindow(nullptr), m_lastHitWindow(nullptr),
-      m_loadingWnd(nullptr), m_roMapWnd(nullptr), m_minimapZoomWnd(nullptr), m_statusWnd(nullptr), m_chatWnd(nullptr),
+      m_loadingWnd(nullptr), m_roMapWnd(nullptr), m_minimapZoomWnd(nullptr), m_statusWnd(nullptr), m_sayDialogWnd(nullptr), m_npcMenuWnd(nullptr), m_npcInputWnd(nullptr), m_chooseSellBuyWnd(nullptr), m_itemShopWnd(nullptr), m_itemPurchaseWnd(nullptr), m_itemSellWnd(nullptr), m_shortCutWnd(nullptr), m_chatWnd(nullptr),
     m_loginWnd(nullptr), m_selectServerWnd(nullptr), m_selectCharWnd(nullptr), m_makeCharWnd(nullptr), m_chooseWnd(nullptr), m_optionWnd(nullptr), m_itemWnd(nullptr), m_questWnd(nullptr), m_basicInfoWnd(nullptr), m_notifyLevelUpWnd(nullptr), m_notifyJobLevelUpWnd(nullptr), m_equipWnd(nullptr), m_skillListWnd(nullptr),
       m_wallpaperSurface(nullptr), m_uiComposeDC(nullptr), m_uiComposeBitmap(nullptr), m_uiComposeBits(nullptr), m_uiComposeWidth(0), m_uiComposeHeight(0),
       m_composeCursorActNum(0), m_composeCursorStartTick(0), m_composeCursorEnabled(false)
@@ -307,6 +317,58 @@ void UIWindowMgr::SnapWindowToNearby(UIWindow* window, int* x, int* y) const
     ClampWindowToClient(x, y, window->m_w, window->m_h);
 }
 
+void UIWindowMgr::EnsureChatWindowVisible()
+{
+    if (!m_chatWnd) {
+        m_chatWnd = new UINewChatWnd();
+        m_children.push_back(m_chatWnd);
+    }
+
+    m_children.remove(m_chatWnd);
+    m_children.push_back(m_chatWnd);
+    m_chatWnd->SetShow(1);
+}
+
+bool UIWindowMgr::HasActiveNpcDialog() const
+{
+    return (m_sayDialogWnd && m_sayDialogWnd->m_show != 0)
+        || (m_npcMenuWnd && m_npcMenuWnd->m_show != 0)
+        || (m_npcInputWnd && m_npcInputWnd->m_show != 0);
+}
+
+void UIWindowMgr::CloseNpcDialogWindows()
+{
+    if (m_sayDialogWnd) {
+        m_sayDialogWnd->HideConversation();
+    }
+    if (m_npcMenuWnd) {
+        m_npcMenuWnd->HideMenu();
+    }
+    if (m_npcInputWnd) {
+        m_npcInputWnd->HideInput();
+    }
+}
+
+void UIWindowMgr::CloseNpcShopWindows()
+{
+    if (m_chooseSellBuyWnd) {
+        m_chooseSellBuyWnd->SetShow(0);
+        m_chooseSellBuyWnd->StoreInfo();
+    }
+    if (m_itemShopWnd) {
+        m_itemShopWnd->SetShow(0);
+        m_itemShopWnd->StoreInfo();
+    }
+    if (m_itemPurchaseWnd) {
+        m_itemPurchaseWnd->SetShow(0);
+        m_itemPurchaseWnd->StoreInfo();
+    }
+    if (m_itemSellWnd) {
+        m_itemSellWnd->SetShow(0);
+        m_itemSellWnd->StoreInfo();
+    }
+}
+
 void UIWindowMgr::ReleaseComposeSurface()
 {
     if (m_uiComposeBitmap) {
@@ -386,6 +448,76 @@ UIWindow* UIWindowMgr::MakeWindow(int windowId)
         m_children.push_front(m_basicInfoWnd);
         m_basicInfoWnd->SetShow(1);
         return m_basicInfoWnd;
+
+    case WID_STATUSWND:
+        if (!m_statusWnd) {
+            m_statusWnd = new UIStatusWnd();
+            m_children.push_back(m_statusWnd);
+        }
+        m_children.remove(m_statusWnd);
+        m_children.push_back(m_statusWnd);
+        m_statusWnd->SetShow(1);
+        return m_statusWnd;
+
+    case WID_NPCMENUWND:
+        if (!m_npcMenuWnd) {
+            m_npcMenuWnd = new UINpcMenuWnd();
+            m_children.push_back(m_npcMenuWnd);
+        }
+        m_children.remove(m_npcMenuWnd);
+        m_children.push_back(m_npcMenuWnd);
+        m_npcMenuWnd->SetShow(1);
+        return m_npcMenuWnd;
+
+    case WID_CHOOSESELLBUYWND:
+        if (!m_chooseSellBuyWnd) {
+            m_chooseSellBuyWnd = new UIChooseSellBuyWnd();
+            m_children.push_back(m_chooseSellBuyWnd);
+        }
+        m_children.remove(m_chooseSellBuyWnd);
+        m_children.push_back(m_chooseSellBuyWnd);
+        m_chooseSellBuyWnd->SetShow(1);
+        return m_chooseSellBuyWnd;
+
+    case WID_ITEMSHOPWND:
+        if (!m_itemShopWnd) {
+            m_itemShopWnd = new UIItemShopWnd();
+            m_children.push_back(m_itemShopWnd);
+        }
+        m_children.remove(m_itemShopWnd);
+        m_children.push_back(m_itemShopWnd);
+        m_itemShopWnd->SetShow(1);
+        return m_itemShopWnd;
+
+    case WID_ITEMPURCHASEWND:
+        if (!m_itemPurchaseWnd) {
+            m_itemPurchaseWnd = new UIItemPurchaseWnd();
+            m_children.push_back(m_itemPurchaseWnd);
+        }
+        m_children.remove(m_itemPurchaseWnd);
+        m_children.push_back(m_itemPurchaseWnd);
+        m_itemPurchaseWnd->SetShow(1);
+        return m_itemPurchaseWnd;
+
+    case WID_ITEMSELLWND:
+        if (!m_itemSellWnd) {
+            m_itemSellWnd = new UIItemSellWnd();
+            m_children.push_back(m_itemSellWnd);
+        }
+        m_children.remove(m_itemSellWnd);
+        m_children.push_back(m_itemSellWnd);
+        m_itemSellWnd->SetShow(1);
+        return m_itemSellWnd;
+
+    case WID_SHORTCUTWND:
+        if (!m_shortCutWnd) {
+            m_shortCutWnd = new UIShortCutWnd();
+            m_children.push_back(m_shortCutWnd);
+        }
+        m_children.remove(m_shortCutWnd);
+        m_children.push_back(m_shortCutWnd);
+        m_shortCutWnd->SetShow(1);
+        return m_shortCutWnd;
 
     case WID_NOTIFYLEVELUPWND:
         if (!m_notifyLevelUpWnd) {
@@ -500,12 +632,24 @@ UIWindow* UIWindowMgr::MakeWindow(int windowId)
         return m_makeCharWnd;
 
     case WID_SAYDIALOGWND:
-        if (!m_chatWnd) {
-            m_chatWnd = new UINewChatWnd();
-            m_children.push_back(m_chatWnd);
+        if (!m_sayDialogWnd) {
+            m_sayDialogWnd = new UISayDialogWnd();
+            m_children.push_back(m_sayDialogWnd);
         }
-        m_chatWnd->SetShow(1);
-        return m_chatWnd;
+        m_children.remove(m_sayDialogWnd);
+        m_children.push_back(m_sayDialogWnd);
+        m_sayDialogWnd->SetShow(1);
+        return m_sayDialogWnd;
+
+    case WID_NPCINPUTWND:
+        if (!m_npcInputWnd) {
+            m_npcInputWnd = new UINpcInputWnd();
+            m_children.push_back(m_npcInputWnd);
+        }
+        m_children.remove(m_npcInputWnd);
+        m_children.push_back(m_npcInputWnd);
+        m_npcInputWnd->SetShow(1);
+        return m_npcInputWnd;
 
     case WID_CHOOSEWND:
         if (!m_chooseWnd) {
@@ -536,6 +680,9 @@ bool UIWindowMgr::ToggleWindow(int windowId)
 {
     UIWindow* window = nullptr;
     switch (windowId) {
+    case WID_STATUSWND:
+        window = m_statusWnd;
+        break;
     case WID_ITEMWND:
         window = m_itemWnd;
         break;
@@ -577,6 +724,9 @@ void UIWindowMgr::DeleteWindow(UIWindow* window)
     if (m_editWindow == window) {
         m_editWindow = nullptr;
     }
+    if (window == m_npcInputWnd && m_npcInputWnd && m_editWindow == m_npcInputWnd->GetEditCtrl()) {
+        m_editWindow = nullptr;
+    }
     if (m_modalWindow == window) {
         m_modalWindow = nullptr;
     }
@@ -616,6 +766,33 @@ void UIWindowMgr::DeleteWindow(UIWindow* window)
     if (window == m_basicInfoWnd) {
         m_basicInfoWnd = nullptr;
     }
+    if (window == m_statusWnd) {
+        m_statusWnd = nullptr;
+    }
+    if (window == m_sayDialogWnd) {
+        m_sayDialogWnd = nullptr;
+    }
+    if (window == m_npcMenuWnd) {
+        m_npcMenuWnd = nullptr;
+    }
+    if (window == m_npcInputWnd) {
+        m_npcInputWnd = nullptr;
+    }
+    if (window == m_chooseSellBuyWnd) {
+        m_chooseSellBuyWnd = nullptr;
+    }
+    if (window == m_itemShopWnd) {
+        m_itemShopWnd = nullptr;
+    }
+    if (window == m_itemPurchaseWnd) {
+        m_itemPurchaseWnd = nullptr;
+    }
+    if (window == m_itemSellWnd) {
+        m_itemSellWnd = nullptr;
+    }
+    if (window == m_shortCutWnd) {
+        m_shortCutWnd = nullptr;
+    }
     if (window == m_notifyLevelUpWnd) {
         m_notifyLevelUpWnd = nullptr;
     }
@@ -650,6 +827,14 @@ void UIWindowMgr::RemoveAllWindows()
     m_roMapWnd = nullptr;
     m_minimapZoomWnd = nullptr;
     m_statusWnd = nullptr;
+    m_sayDialogWnd = nullptr;
+    m_npcMenuWnd = nullptr;
+    m_npcInputWnd = nullptr;
+    m_chooseSellBuyWnd = nullptr;
+    m_itemShopWnd = nullptr;
+    m_itemPurchaseWnd = nullptr;
+    m_itemSellWnd = nullptr;
+    m_shortCutWnd = nullptr;
     m_chatWnd = nullptr;
     m_basicInfoWnd = nullptr;
     m_notifyLevelUpWnd = nullptr;
@@ -1135,6 +1320,40 @@ void UIWindowMgr::OnLBtnUp(int x, int y)
         m_captureWindow->OnLBtnUp(x, y);
         m_captureWindow = nullptr;
     }
+
+    if (CGameMode* gameMode = g_modeMgr.GetCurrentGameMode()) {
+        if (gameMode->m_dragType != static_cast<int>(DragType::None)) {
+            UIWindow* dropTarget = HitTestWindow(x, y);
+            if (dropTarget) {
+                dropTarget->DragAndDrop(x, y, &gameMode->m_dragInfo);
+            }
+            if (gameMode->m_dragInfo.source == static_cast<int>(DragSource::ShortcutWindow)
+                && gameMode->m_dragInfo.shortcutSlotAbsoluteIndex >= 0
+                && dropTarget != m_shortCutWnd) {
+                if (g_session.ClearShortcutSlotByAbsoluteIndex(gameMode->m_dragInfo.shortcutSlotAbsoluteIndex)) {
+                    g_modeMgr.SendMsg(
+                        CGameMode::GameMsg_RequestShortcutUpdate,
+                        gameMode->m_dragInfo.shortcutSlotAbsoluteIndex,
+                        0,
+                        0);
+                }
+            }
+            gameMode->m_dragType = static_cast<int>(DragType::None);
+            gameMode->m_dragInfo = DRAG_INFO{};
+            if (m_itemWnd) {
+                m_itemWnd->Invalidate();
+            }
+            if (m_equipWnd) {
+                m_equipWnd->Invalidate();
+            }
+            if (m_skillListWnd) {
+                m_skillListWnd->Invalidate();
+            }
+            if (m_shortCutWnd) {
+                m_shortCutWnd->Invalidate();
+            }
+        }
+    }
 }
 
 void UIWindowMgr::OnMouseMove(int x, int y)
@@ -1204,6 +1423,18 @@ void UIWindowMgr::OnChar(char c)
             static_cast<void*>(m_editWindow));
     }
 
+    if (m_npcInputWnd && m_npcInputWnd->m_show != 0) {
+        if (UIEditCtrl* editCtrl = m_npcInputWnd->GetEditCtrl()) {
+            m_editWindow = editCtrl;
+            editCtrl->OnChar(c);
+        }
+        return;
+    }
+
+    if (HasActiveNpcDialog()) {
+        return;
+    }
+
     if (m_chatWnd && m_chatWnd->m_show != 0 && m_chatWnd->HandleChar(c)) {
         return;
     }
@@ -1229,6 +1460,9 @@ void UIWindowMgr::OnKeyDown(int virtualKey)
 
     if (isAltDown && !hasFrontMenuUi) {
         switch (virtualKey) {
+        case 'A':
+            ToggleWindow(WID_STATUSWND);
+            return;
         case 'E':
             ToggleWindow(WID_ITEMWND);
             return;
@@ -1254,6 +1488,41 @@ void UIWindowMgr::OnKeyDown(int virtualKey)
             static_cast<void*>(m_editWindow));
     }
 
+    if (m_npcInputWnd && m_npcInputWnd->m_show != 0) {
+        m_npcInputWnd->HandleKeyDown(virtualKey);
+        return;
+    }
+
+    if (m_npcMenuWnd && m_npcMenuWnd->m_show != 0) {
+        m_npcMenuWnd->HandleKeyDown(virtualKey);
+        return;
+    }
+
+    if (m_sayDialogWnd && m_sayDialogWnd->m_show != 0) {
+        m_sayDialogWnd->HandleKeyDown(virtualKey);
+        return;
+    }
+
+    if (m_itemPurchaseWnd && m_itemPurchaseWnd->m_show != 0) {
+        m_itemPurchaseWnd->HandleKeyDown(virtualKey);
+        return;
+    }
+
+    if (m_itemSellWnd && m_itemSellWnd->m_show != 0) {
+        m_itemSellWnd->HandleKeyDown(virtualKey);
+        return;
+    }
+
+    if (m_itemShopWnd && m_itemShopWnd->m_show != 0) {
+        m_itemShopWnd->HandleKeyDown(virtualKey);
+        return;
+    }
+
+    if (m_chooseSellBuyWnd && m_chooseSellBuyWnd->m_show != 0) {
+        m_chooseSellBuyWnd->HandleKeyDown(virtualKey);
+        return;
+    }
+
     if (m_chatWnd && m_chatWnd->m_show != 0 && m_chatWnd->HandleKeyDown(virtualKey)) {
         if (virtualKey == VK_RETURN || virtualKey == VK_ESCAPE) {
             DbgLog("[UI] keydown consumed by chat vk=%d\n", virtualKey);
@@ -1274,6 +1543,15 @@ void UIWindowMgr::OnKeyDown(int virtualKey)
 
     if (m_optionWnd && m_optionWnd->m_show != 0) {
         m_optionWnd->OnKeyDown(virtualKey);
+        return;
+    }
+
+    if (!hasFrontMenuUi && m_chatWnd && m_chatWnd->IsInputActive()) {
+        return;
+    }
+
+    if (!hasFrontMenuUi && virtualKey >= VK_F1 && virtualKey <= VK_F9) {
+        g_modeMgr.SendMsg(CGameMode::GameMsg_RequestShortcutUse, virtualKey - VK_F1, 0, 0);
         return;
     }
 

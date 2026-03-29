@@ -22,7 +22,11 @@ public:
     void OnCreate(int x, int y) override;
     void OnDestroy() override;
     void OnDraw() override;
+    void OnLBtnDown(int x, int y) override;
+    void OnLBtnUp(int x, int y) override;
+    void OnMouseMove(int x, int y) override;
     void OnLBtnDblClk(int x, int y) override;
+    void DragAndDrop(int x, int y, const DRAG_INFO* const info) override;
     void StoreInfo() override;
 
 private:
@@ -46,6 +50,11 @@ private:
     HBITMAP m_titleBarMid;
     HBITMAP m_titleBarRight;
     std::unordered_map<unsigned int, HBITMAP> m_iconCache;
+    bool m_dragArmed;
+    POINT m_dragStartPoint;
+    unsigned int m_dragItemId;
+    unsigned int m_dragItemIndex;
+    int m_dragItemEquipLocation;
     unsigned long long m_lastVisualStateToken;
     bool m_hasVisualStateToken;
 };

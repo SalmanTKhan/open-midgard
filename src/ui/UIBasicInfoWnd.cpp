@@ -401,6 +401,9 @@ msgresult_t UIBasicInfoWnd::SendMsg(UIWindow* sender, int msg, msgparam_t wparam
     }
 
     switch (wparam) {
+    case kButtonIdStatus:
+        g_windowMgr.ToggleWindow(UIWindowMgr::WID_STATUSWND);
+        return 1;
     case kButtonIdBase:
         SetMiniMode(false);
         return 1;

@@ -95,6 +95,30 @@ std::string ToLowerAscii(std::string value)
     return value;
 }
 
+std::string CollapseUtf8Latin1ToBytes(const std::string& value)
+{
+    std::string out;
+    out.reserve(value.size());
+    bool changed = false;
+    for (size_t i = 0; i < value.size(); ++i) {
+        const unsigned char ch = static_cast<unsigned char>(value[i]);
+        if (ch == 0xC2 && i + 1 < value.size()) {
+            out.push_back(value[i + 1]);
+            ++i;
+            changed = true;
+            continue;
+        }
+        if (ch == 0xC3 && i + 1 < value.size()) {
+            out.push_back(static_cast<char>(static_cast<unsigned char>(value[i + 1]) + 0x40u));
+            ++i;
+            changed = true;
+            continue;
+        }
+        out.push_back(static_cast<char>(ch));
+    }
+    return changed ? out : value;
+}
+
 const RagEffectCatalogEntry* FindRagEffectCatalogEntry(int effectId)
 {
     const auto begin = std::begin(kRagEffectCatalog);
@@ -989,7 +1013,7 @@ std::string ResolveWorldStrName(const std::string& rawName)
         return std::string();
     }
 
-    std::string normalized = rawName;
+    std::string normalized = CollapseUtf8Latin1ToBytes(rawName);
     std::replace(normalized.begin(), normalized.end(), '/', '\\');
     if (normalized.find('.') == std::string::npos) {
         normalized += ".str";
@@ -1023,6 +1047,17 @@ std::string ResolveWorldStrName(const std::string& rawName)
                 }
                 return candidate;
             }
+        }
+
+        std::string basename = variant;
+        const size_t slash = basename.find_last_of("\\/");
+        if (slash != std::string::npos) {
+            basename = basename.substr(slash + 1);
+        }
+        const std::string lookupKey = ToLowerAscii(basename);
+        const std::string& resolvedByBasename = ResolveDataPathByBasename(lookupKey.c_str());
+        if (!resolvedByBasename.empty()) {
+            return resolvedByBasename;
         }
     }
 
@@ -1059,6 +1094,7 @@ const std::string& ResolveDataPathByBasename(const char* basename)
         std::vector<std::string> names;
         g_fileMgr.CollectDataNamesByExtension("act", names);
         g_fileMgr.CollectDataNamesByExtension("spr", names);
+        g_fileMgr.CollectDataNamesByExtension("str", names);
         g_fileMgr.CollectDataNamesByExtension("bmp", names);
         g_fileMgr.CollectDataNamesByExtension("tga", names);
         for (const std::string& name : names) {
@@ -1255,7 +1291,12 @@ void AddXformDelta(KAC_XFORMDATA* target, const KAC_XFORMDATA& delta)
 std::string ResolveStrName(int effectId)
 {
     const RagEffectCatalogEntry* entry = FindRagEffectCatalogEntry(effectId);
-    return entry ? ResolveCatalogStrName(*entry) : std::string();
+    if (!entry) {
+        return std::string();
+    }
+
+    const std::string resolved = ResolveCatalogStrName(*entry);
+    return resolved.empty() ? resolved : ResolveWorldStrName(resolved);
 }
 
 COLORREF ResolvePortalTint(const std::string& name)

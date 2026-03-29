@@ -87,6 +87,18 @@ public:
         GameMsg_RequestUnequipInventoryItem = 20011,
         GameMsg_ToggleSitStand = 20012,
         GameMsg_RequestUpgradeSkillLevel = 20013,
+        GameMsg_RequestIncreaseStatus = 20014,
+        GameMsg_RequestNpcContact = 20015,
+        GameMsg_RequestNpcSelectMenu = 20016,
+        GameMsg_RequestNpcNext = 20017,
+        GameMsg_RequestNpcInputNumber = 20018,
+        GameMsg_RequestNpcInputString = 20019,
+        GameMsg_RequestNpcCloseDialog = 20020,
+        GameMsg_RequestShopDealType = 20021,
+        GameMsg_RequestShopBuyList = 20022,
+        GameMsg_RequestShopSellList = 20023,
+        GameMsg_RequestShortcutUpdate = 20024,
+        GameMsg_RequestShortcutUse = 20025,
     };
 
     CGameMode();

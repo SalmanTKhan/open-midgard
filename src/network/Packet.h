@@ -74,6 +74,25 @@ constexpr u16 kChangeDir = PacketVer23MapServerSend::kChangeDir;
 constexpr u16 kGetCharNameRequest = PacketVer23MapServerSend::kGetCharNameRequest;
 constexpr u16 kGlobalMessage = PacketVer23MapServerSend::kGlobalMessage;
 }
+
+namespace LegacyNpcScriptSend {
+constexpr u16 kContactNpc = 0x0090;
+constexpr u16 kSelectMenu = 0x00B8;
+constexpr u16 kNextClick = 0x00B9;
+constexpr u16 kInputNumber = 0x0143;
+constexpr u16 kInputString = 0x01D5;
+constexpr u16 kCloseDialog = 0x0146;
+}
+
+namespace LegacyNpcShopSend {
+constexpr u16 kSelectDealType = 0x00C5;
+constexpr u16 kPurchaseItemList = 0x00C8;
+constexpr u16 kSellItemList = 0x00C9;
+}
+
+namespace LegacyShortcutSend {
+constexpr u16 kKeyChange = 0x02BA;
+}
 }
 
 // CA_LOGIN: sent to account server  [55 bytes]
@@ -195,6 +214,12 @@ struct PACKET_CZ_SKILLUP {
     u16 SkillId;
 };
 
+struct PACKET_CZ_STATUS_CHANGE {
+    u16 PacketType;    // 0x00BB
+    u16 StatusId;
+    u8  Amount;
+};
+
 struct PACKET_CZ_TAKE_ITEM2 {
     u16 PacketType;    // 0x00F5 for packet_ver 23 profile
     u16 padding;
@@ -210,6 +235,67 @@ struct PACKET_CZ_REQ_WEAR_EQUIP {
 struct PACKET_CZ_REQ_TAKEOFF_EQUIP {
     u16 PacketType;    // 0x00AB
     u16 ItemIndex;
+};
+
+struct PACKET_CZ_CONTACTNPC {
+    u16 PacketType;    // 0x0090
+    u32 NpcId;
+    u8  Type;
+};
+
+struct PACKET_CZ_NPC_SELECTMENU {
+    u16 PacketType;    // 0x00B8
+    u32 NpcId;
+    u8  Choice;
+};
+
+struct PACKET_CZ_NPC_NEXT_CLICK {
+    u16 PacketType;    // 0x00B9
+    u32 NpcId;
+};
+
+struct PACKET_CZ_NPC_INPUT_NUMBER {
+    u16 PacketType;    // 0x0143
+    u32 NpcId;
+    u32 Value;
+};
+
+struct PACKET_CZ_NPC_INPUT_STRING {
+    u16 PacketType;    // 0x01D5
+    u16 PacketLength;
+    u32 NpcId;
+    // Followed by a null-terminated string payload.
+};
+
+struct PACKET_CZ_NPC_CLOSE_DIALOG {
+    u16 PacketType;    // 0x0146
+    u32 NpcId;
+};
+
+struct PACKET_CZ_ACK_SELECT_DEALTYPE {
+    u16 PacketType;    // 0x00C5
+    u32 NpcId;
+    u8  Type;          // 0 = buy, 1 = sell
+};
+
+struct PACKET_CZ_PC_PURCHASE_ITEMLIST {
+    u16 PacketType;    // 0x00C8
+    u16 PacketLength;
+    // Followed by repeated { amount.W, itemId.W } rows.
+};
+
+struct PACKET_CZ_PC_SELL_ITEMLIST {
+    u16 PacketType;    // 0x00C9
+    u16 PacketLength;
+    // Followed by repeated { index.W, amount.W } rows.
+};
+
+struct PACKET_CZ_SHORTCUT_KEY_CHANGE {
+    u16 PacketType;    // 0x02BA
+    u16 Index;
+    u8  IsSkill;       // 0 = item, 1 = skill
+    u32 Id;            // item or skill id
+    u16 Count;         // skill level or item placeholder
 };
 
 // Legacy PCBANG login
@@ -258,6 +344,7 @@ struct PACKET_HC_REFUSE_MAKECHAR {
 static_assert(sizeof(PACKET_CA_LOGIN) == 55, "PACKET_CA_LOGIN size mismatch");
 static_assert(sizeof(PACKET_CA_ENTER) == 17, "PACKET_CA_ENTER size mismatch");
 static_assert(sizeof(PACKET_CZ_SELECT_CHAR) == 3, "PACKET_CZ_SELECT_CHAR size mismatch");
+static_assert(sizeof(PACKET_CZ_STATUS_CHANGE) == 5, "PACKET_CZ_STATUS_CHANGE size mismatch");
 static_assert(sizeof(PACKET_CZ_RESTART) == 3, "PACKET_CZ_RESTART size mismatch");
 static_assert(sizeof(PACKET_CZ_QUITGAME) == 4, "PACKET_CZ_QUITGAME size mismatch");
 static_assert(sizeof(PACKET_CZ_MAKE_CHAR) == 37, "PACKET_CZ_MAKE_CHAR size mismatch");
@@ -274,5 +361,15 @@ static_assert(sizeof(PACKET_CZ_SKILLUP) == 4, "PACKET_CZ_SKILLUP size mismatch")
 static_assert(sizeof(PACKET_CZ_TAKE_ITEM2) == 8, "PACKET_CZ_TAKE_ITEM2 size mismatch");
 static_assert(sizeof(PACKET_CZ_REQ_WEAR_EQUIP) == 6, "PACKET_CZ_REQ_WEAR_EQUIP size mismatch");
 static_assert(sizeof(PACKET_CZ_REQ_TAKEOFF_EQUIP) == 4, "PACKET_CZ_REQ_TAKEOFF_EQUIP size mismatch");
+static_assert(sizeof(PACKET_CZ_CONTACTNPC) == 7, "PACKET_CZ_CONTACTNPC size mismatch");
+static_assert(sizeof(PACKET_CZ_NPC_SELECTMENU) == 7, "PACKET_CZ_NPC_SELECTMENU size mismatch");
+static_assert(sizeof(PACKET_CZ_NPC_NEXT_CLICK) == 6, "PACKET_CZ_NPC_NEXT_CLICK size mismatch");
+static_assert(sizeof(PACKET_CZ_NPC_INPUT_NUMBER) == 10, "PACKET_CZ_NPC_INPUT_NUMBER size mismatch");
+static_assert(sizeof(PACKET_CZ_NPC_INPUT_STRING) == 8, "PACKET_CZ_NPC_INPUT_STRING size mismatch");
+static_assert(sizeof(PACKET_CZ_NPC_CLOSE_DIALOG) == 6, "PACKET_CZ_NPC_CLOSE_DIALOG size mismatch");
+static_assert(sizeof(PACKET_CZ_ACK_SELECT_DEALTYPE) == 7, "PACKET_CZ_ACK_SELECT_DEALTYPE size mismatch");
+static_assert(sizeof(PACKET_CZ_PC_PURCHASE_ITEMLIST) == 4, "PACKET_CZ_PC_PURCHASE_ITEMLIST size mismatch");
+static_assert(sizeof(PACKET_CZ_PC_SELL_ITEMLIST) == 4, "PACKET_CZ_PC_SELL_ITEMLIST size mismatch");
+static_assert(sizeof(PACKET_CZ_SHORTCUT_KEY_CHANGE) == 11, "PACKET_CZ_SHORTCUT_KEY_CHANGE size mismatch");
 
 #pragma pack(pop)

@@ -2,6 +2,8 @@
 
 #include "gamemode/GameMode.h"
 #include "gamemode/Mode.h"
+#include "UIItemWnd.h"
+#include "UIShortCutWnd.h"
 #include "UIWindowMgr.h"
 #include "core/File.h"
 #include "item/Item.h"
@@ -809,6 +811,11 @@ UIEquipWnd::UIEquipWnd()
       m_titleBarLeft(nullptr),
       m_titleBarMid(nullptr),
       m_titleBarRight(nullptr),
+      m_dragArmed(false),
+      m_dragStartPoint{},
+      m_dragItemId(0),
+      m_dragItemIndex(0),
+      m_dragItemEquipLocation(0),
       m_lastVisualStateToken(0ull),
       m_hasVisualStateToken(false)
 {
@@ -1015,6 +1022,11 @@ void UIEquipWnd::OnDraw()
     DrawWindowText(hdc, m_x + 17, m_y + 2, "Equipment", RGB(0, 0, 0));
 
     if (m_h > kMiniHeight) {
+        const CGameMode* gameMode = g_modeMgr.GetCurrentGameMode();
+        const bool hideDraggedItem = gameMode
+            && gameMode->m_dragType == static_cast<int>(DragType::ShortcutItem)
+            && gameMode->m_dragInfo.source == static_cast<int>(DragSource::EquipmentWindow)
+            && gameMode->m_dragInfo.itemIndex != 0;
         RECT centerPanel{
             m_x + kCenterPanelLeft,
             m_y + kCenterPanelTop,
@@ -1033,8 +1045,14 @@ void UIEquipWnd::OnDraw()
                 m_x + kEquipSlots[i].iconX + kSlotIconSize,
                 m_y + kEquipSlots[i].iconY + kSlotIconSize
             };
-            if (slotItems[i]) {
-                if (HBITMAP icon = GetItemIcon(*slotItems[i])) {
+            const ITEM_INFO* drawItem = slotItems[i];
+            if (drawItem
+                && hideDraggedItem
+                && drawItem->m_itemIndex == gameMode->m_dragInfo.itemIndex) {
+                drawItem = nullptr;
+            }
+            if (drawItem) {
+                if (HBITMAP icon = GetItemIcon(*drawItem)) {
                     DrawBitmapTransparent(hdc, icon, slotRect);
                 }
 
@@ -1050,7 +1068,7 @@ void UIEquipWnd::OnDraw()
                 textRect.top = slotRect.top + 2;
                 textRect.bottom = slotRect.bottom;
 
-                const std::string itemText = slotItems[i]->GetEquipDisplayName();
+                const std::string itemText = drawItem->GetEquipDisplayName();
                 const UINT textFormat = (leftColumn ? DT_LEFT : DT_RIGHT) | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS;
                 DrawWindowTextRect(hdc, textRect, itemText, RGB(0, 0, 0), textFormat);
             }
@@ -1065,6 +1083,88 @@ void UIEquipWnd::OnDraw()
     m_lastVisualStateToken = BuildVisualStateToken();
     m_hasVisualStateToken = true;
     m_isDirty = 0;
+}
+
+void UIEquipWnd::OnLBtnDown(int x, int y)
+{
+    m_dragArmed = false;
+    m_dragItemId = 0;
+    m_dragItemIndex = 0;
+    m_dragItemEquipLocation = 0;
+
+    if (y >= m_y && y < m_y + kTitleBarHeight) {
+        UIFrameWnd::OnLBtnDown(x, y);
+        return;
+    }
+
+    if (m_h <= kMiniHeight) {
+        return;
+    }
+
+    const std::vector<const ITEM_INFO*> slotItems = BuildSlotAssignments();
+    for (size_t i = 0; i < kEquipSlots.size(); ++i) {
+        const ITEM_INFO* item = slotItems[i];
+        if (!item) {
+            continue;
+        }
+
+        RECT slotRect{
+            m_x + kEquipSlots[i].iconX,
+            m_y + kEquipSlots[i].iconY,
+            m_x + kEquipSlots[i].iconX + kSlotIconSize,
+            m_y + kEquipSlots[i].iconY + kSlotIconSize
+        };
+        if (x >= slotRect.left && x < slotRect.right && y >= slotRect.top && y < slotRect.bottom) {
+            m_dragArmed = true;
+            m_dragStartPoint = POINT{ x, y };
+            m_dragItemId = item->GetItemId();
+            m_dragItemIndex = item->m_itemIndex;
+            m_dragItemEquipLocation = item->m_location;
+            return;
+        }
+    }
+}
+
+void UIEquipWnd::OnLBtnUp(int x, int y)
+{
+    m_dragArmed = false;
+    m_dragItemId = 0;
+    m_dragItemIndex = 0;
+    m_dragItemEquipLocation = 0;
+    UIFrameWnd::OnLBtnUp(x, y);
+}
+
+void UIEquipWnd::OnMouseMove(int x, int y)
+{
+    UIFrameWnd::OnMouseMove(x, y);
+    if (!m_dragArmed) {
+        return;
+    }
+
+    const int dx = x - m_dragStartPoint.x;
+    const int dy = y - m_dragStartPoint.y;
+    if ((dx * dx) + (dy * dy) < 16) {
+        return;
+    }
+
+    if (CGameMode* gameMode = g_modeMgr.GetCurrentGameMode()) {
+        gameMode->m_dragType = static_cast<int>(DragType::ShortcutItem);
+        gameMode->m_dragInfo = DRAG_INFO{};
+        gameMode->m_dragInfo.type = static_cast<int>(DragType::ShortcutItem);
+        gameMode->m_dragInfo.source = static_cast<int>(DragSource::EquipmentWindow);
+        gameMode->m_dragInfo.itemId = m_dragItemId;
+        gameMode->m_dragInfo.itemIndex = m_dragItemIndex;
+        gameMode->m_dragInfo.itemEquipLocation = m_dragItemEquipLocation;
+        Invalidate();
+        if (g_windowMgr.m_itemWnd) {
+            g_windowMgr.m_itemWnd->Invalidate();
+        }
+        if (g_windowMgr.m_shortCutWnd) {
+            g_windowMgr.m_shortCutWnd->Invalidate();
+        }
+    }
+
+    m_dragArmed = false;
 }
 
 void UIEquipWnd::OnLBtnDblClk(int x, int y)
@@ -1100,6 +1200,34 @@ void UIEquipWnd::OnLBtnDblClk(int x, int y)
     }
 
     UIFrameWnd::OnLBtnDblClk(x, y);
+}
+
+void UIEquipWnd::DragAndDrop(int x, int y, const DRAG_INFO* const dragInfo)
+{
+    if (m_show == 0 || m_h <= kMiniHeight || !dragInfo) {
+        return;
+    }
+    if (dragInfo->type != static_cast<int>(DragType::ShortcutItem)
+        || dragInfo->source != static_cast<int>(DragSource::InventoryWindow)
+        || dragInfo->itemIndex == 0
+        || dragInfo->itemEquipLocation == 0) {
+        return;
+    }
+
+    if (x < m_x || x >= m_x + m_w || y < m_y + kTitleBarHeight || y >= m_y + m_h) {
+        return;
+    }
+
+    if (g_modeMgr.SendMsg(
+            CGameMode::GameMsg_RequestEquipInventoryItem,
+            static_cast<int>(dragInfo->itemIndex),
+            dragInfo->itemEquipLocation,
+            0) != 0) {
+        Invalidate();
+        if (g_windowMgr.m_itemWnd) {
+            g_windowMgr.m_itemWnd->Invalidate();
+        }
+    }
 }
 
 void UIEquipWnd::StoreInfo()
@@ -1293,6 +1421,12 @@ unsigned long long UIEquipWnd::BuildVisualStateToken() const
     HashTokenValue(&hash, static_cast<unsigned long long>(m_y));
     HashTokenValue(&hash, static_cast<unsigned long long>(m_w));
     HashTokenValue(&hash, static_cast<unsigned long long>(m_h));
+    if (const CGameMode* gameMode = g_modeMgr.GetCurrentGameMode()) {
+        HashTokenValue(&hash, static_cast<unsigned long long>(gameMode->m_dragType));
+        HashTokenValue(&hash, static_cast<unsigned long long>(gameMode->m_dragInfo.source));
+        HashTokenValue(&hash, static_cast<unsigned long long>(gameMode->m_dragInfo.itemIndex));
+        HashTokenValue(&hash, static_cast<unsigned long long>(gameMode->m_dragInfo.itemId));
+    }
 
     const std::list<ITEM_INFO>& items = g_session.GetInventoryItems();
     HashTokenValue(&hash, static_cast<unsigned long long>(items.size()));

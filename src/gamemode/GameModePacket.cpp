@@ -11,11 +11,21 @@
 #include "Mode.h"
 #include "DebugLog.h"
 #include "audio/Audio.h"
+#include "ui/UIBasicInfoWnd.h"
+#include "ui/UISayDialogWnd.h"
+#include "ui/UINpcMenuWnd.h"
+#include "ui/UINpcInputWnd.h"
+#include "ui/UIChooseSellBuyWnd.h"
+#include "ui/UIItemPurchaseWnd.h"
+#include "ui/UIItemSellWnd.h"
+#include "ui/UIItemShopWnd.h"
+#include "ui/UIStatusWnd.h"
 #include "ui/UIWindowMgr.h"
 #include "world/GameActor.h"
 #include "world/World.h"
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <cstring>
 #include <cstdio>
@@ -67,12 +77,33 @@ constexpr u32 kStatusVit = 15;
 constexpr u32 kStatusInt = 16;
 constexpr u32 kStatusDex = 17;
 constexpr u32 kStatusLuk = 18;
+constexpr u32 kStatusNeedStr = 32;
+constexpr u32 kStatusNeedAgi = 33;
+constexpr u32 kStatusNeedVit = 34;
+constexpr u32 kStatusNeedInt = 35;
+constexpr u32 kStatusNeedDex = 36;
+constexpr u32 kStatusNeedLuk = 37;
+constexpr u32 kStatusAtk = 41;
+constexpr u32 kStatusRefineAtk = 42;
+constexpr u32 kStatusMatkMax = 43;
+constexpr u32 kStatusMatkMin = 44;
+constexpr u32 kStatusDef = 45;
+constexpr u32 kStatusDefBonus = 46;
+constexpr u32 kStatusMdef = 47;
+constexpr u32 kStatusMdefBonus = 48;
+constexpr u32 kStatusHit = 49;
+constexpr u32 kStatusFlee = 50;
+constexpr u32 kStatusFleeBonus = 51;
+constexpr u32 kStatusCritical = 52;
+constexpr u32 kStatusAspd = 53;
+constexpr u32 kStatusPlusAspd = 54;
 constexpr u32 kStatusJobLevel = 55;
 constexpr u32 kNotifyEffectBaseLevelUp = 0;
 constexpr u32 kNotifyEffectJobLevelUp = 1;
 constexpr u32 kNotifyEffectBaseLevelUpSuperNovice = 7;
 constexpr u32 kNotifyEffectJobLevelUpSuperNovice = 8;
 constexpr u32 kNotifyEffectBaseLevelUpTaekwon = 9;
+constexpr u32 kEffectIdRecovery = 78;
 constexpr u32 kEffectIdBaseLevelUp = 371;
 constexpr u32 kEffectIdJobLevelUp = 158;
 constexpr u32 kEffectIdBaseLevelUpSuperNovice = 338;
@@ -94,6 +125,7 @@ u32 ReadLE32(const u8* data);
 float TileToWorldCoordX(const CWorld* world, int tileX);
 float TileToWorldCoordZ(const CWorld* world, int tileY);
 float PacketDirToRotationDegrees(int dir);
+bool ApplySelfStatusUpdate(CGameMode& mode, u32 statusType, u32 value);
 
 std::string ToLowerAsciiStatus(std::string value)
 {
@@ -346,6 +378,218 @@ void HandleIgnorePacket(CGameMode&, const PacketView&)
 {
 }
 
+int ResolvePotionEffectId(unsigned int itemId)
+{
+    switch (itemId) {
+    case 501:
+    case 507:
+    case 545:
+    case 569:
+    case 578:
+    case 598:
+        return 204;
+    case 502:
+    case 579:
+    case 599:
+        return 205;
+    case 503:
+    case 508:
+    case 546:
+    case 11500:
+        return 206;
+    case 504:
+    case 509:
+    case 547:
+    case 555:
+    case 556:
+    case 557:
+    case 11501:
+    case 11503:
+        return 207;
+    case 505:
+    case 510:
+    case 11504:
+        return 208;
+    case 506:
+    case 511:
+        return 209;
+    case 512:
+    case 513:
+    case 515:
+    case 516:
+    case 531:
+    case 532:
+    case 534:
+    case 535:
+    case 548:
+    case 549:
+    case 550:
+    case 574:
+    case 582:
+    case 682:
+        return 210;
+    case 514:
+    case 533:
+    case 568:
+    case 680:
+    case 683:
+        return 211;
+    case 517:
+    case 518:
+    case 519:
+    case 520:
+    case 521:
+    case 526:
+    case 528:
+    case 529:
+    case 530:
+    case 536:
+    case 537:
+    case 538:
+    case 539:
+    case 540:
+    case 541:
+    case 542:
+    case 543:
+    case 544:
+    case 551:
+    case 552:
+    case 553:
+    case 562:
+    case 563:
+    case 564:
+    case 565:
+    case 566:
+    case 567:
+    case 570:
+    case 571:
+    case 572:
+    case 575:
+    case 576:
+    case 577:
+    case 580:
+    case 581:
+    case 583:
+    case 584:
+    case 585:
+    case 586:
+        return 7;
+    default:
+        return -1;
+    }
+}
+
+void MakePotionEffect(CGameMode& mode, unsigned int itemId, u32 actorId)
+{
+    CGameActor* actor = ResolveNotifyEffectActor(mode, actorId);
+    if (!actor) {
+        return;
+    }
+
+    const int effectId = ResolvePotionEffectId(itemId);
+    if (effectId <= 0) {
+        return;
+    }
+
+    if (!actor->LaunchEffect(effectId, vector3d{ 0.0f, 0.0f, 0.0f }, 0.0f)) {
+        DbgLog("[GameMode] potion effect launch failed itemId=%u actor=%u effect=%d\n",
+            static_cast<unsigned int>(itemId),
+            static_cast<unsigned int>(actorId),
+            effectId);
+        return;
+    }
+
+    DbgLog("[GameMode] potion effect itemId=%u actor=%u effect=%d\n",
+        static_cast<unsigned int>(itemId),
+        static_cast<unsigned int>(actorId),
+        effectId);
+}
+
+void HandleUseItemAck2(CGameMode&, const PacketView& packet)
+{
+    if (!packet.data || packet.packetLength < 13) {
+        return;
+    }
+
+    const unsigned int itemIndex = static_cast<unsigned int>(ReadLE16(packet.data + 2));
+    const unsigned int itemId = static_cast<unsigned int>(ReadLE16(packet.data + 4));
+    const unsigned int actorId = ReadLE32(packet.data + 6);
+    const int remainingAmount = static_cast<int>(ReadLE16(packet.data + 10));
+    const bool ok = packet.data[12] != 0;
+
+    if (const ITEM_INFO* existing = g_session.GetInventoryItemByIndex(itemIndex)) {
+        ITEM_INFO updated = *existing;
+        updated.SetItemId(itemId);
+        updated.m_num = (std::max)(0, remainingAmount);
+        g_session.SetInventoryItem(updated);
+    }
+
+    if (ok) {
+        if (CGameMode* gameMode = g_modeMgr.GetCurrentGameMode()) {
+            MakePotionEffect(*gameMode, itemId, actorId);
+        }
+    }
+
+    DbgLog("[GameMode] use item ack2 index=%u itemId=%u actor=%u amount=%d ok=%d\n",
+        itemIndex,
+        itemId,
+        actorId,
+        remainingAmount,
+        ok ? 1 : 0);
+}
+
+void HandleRecovery(CGameMode& mode, const PacketView& packet)
+{
+    if (!packet.data || packet.packetLength < 6) {
+        return;
+    }
+
+    const u32 statusType = ReadLE16(packet.data + 2);
+    const u32 amount = ReadLE16(packet.data + 4);
+    if (amount == 0) {
+        return;
+    }
+
+    u32 currentValue = 0;
+    u32 maxValue = 0;
+    if (mode.m_world && mode.m_world->m_player) {
+        const CPlayer* player = mode.m_world->m_player;
+        if (statusType == kStatusHp) {
+            currentValue = player->m_Hp;
+            maxValue = player->m_MaxHp;
+        } else if (statusType == kStatusSp) {
+            currentValue = player->m_Sp;
+            maxValue = player->m_MaxSp;
+        }
+    } else if (const CHARACTER_INFO* info = g_session.GetSelectedCharacterInfo()) {
+        if (statusType == kStatusHp) {
+            currentValue = static_cast<u32>((std::max)(0, static_cast<int>(info->hp)));
+            maxValue = static_cast<u32>((std::max)(0, static_cast<int>(info->maxhp)));
+        } else if (statusType == kStatusSp) {
+            currentValue = static_cast<u32>((std::max)(0, static_cast<int>(info->sp)));
+            maxValue = static_cast<u32>((std::max)(0, static_cast<int>(info->maxsp)));
+        }
+    }
+
+    if (statusType == kStatusHp || statusType == kStatusSp) {
+        const u32 healedValue = maxValue > 0 ? (std::min)(maxValue, currentValue + amount) : (currentValue + amount);
+        ApplySelfStatusUpdate(mode, statusType, healedValue);
+    }
+
+    if (mode.m_world && mode.m_world->m_player) {
+        CGameActor* actor = mode.m_world->m_player;
+        if (!actor->LaunchEffect(static_cast<int>(kEffectIdRecovery), vector3d{ 0.0f, 0.0f, 0.0f }, 0.0f)) {
+            DbgLog("[GameMode] recovery effect launch failed status=%u amount=%u\n",
+                static_cast<unsigned int>(statusType),
+                static_cast<unsigned int>(amount));
+        }
+    }
+
+    DbgLog("[GameMode] recovery status=%u amount=%u\n",
+        static_cast<unsigned int>(statusType),
+        static_cast<unsigned int>(amount));
+}
+
 void HandleAttackRange(CGameMode& mode, const PacketView& packet)
 {
     if (!packet.data || packet.packetLength < 4) {
@@ -383,8 +627,147 @@ u16 ClampToU16(u32 value)
     return static_cast<u16>((std::min)(value, static_cast<u32>(0xFFFFu)));
 }
 
+int ConvertRawAspdToDisplay(int rawMotion)
+{
+    const int clampedMotion = (std::max)(0, (std::min)(rawMotion, 2000));
+    return (std::max)(0, (2000 - clampedMotion) / 10);
+}
+
+void SyncLocalPlayerPrimaryStatsFromSession(CGameMode& mode)
+{
+    CPlayer* player = mode.m_world ? mode.m_world->m_player : nullptr;
+    if (!player) {
+        return;
+    }
+
+    const CHARACTER_INFO* info = g_session.GetSelectedCharacterInfo();
+    if (!info) {
+        return;
+    }
+
+    player->m_Str = ClampToU16(static_cast<u32>(info->Str) + static_cast<u32>((std::max)(0, g_session.m_plusStr)));
+    player->m_Agi = ClampToU16(static_cast<u32>(info->Agi) + static_cast<u32>((std::max)(0, g_session.m_plusAgi)));
+    player->m_Vit = ClampToU16(static_cast<u32>(info->Vit) + static_cast<u32>((std::max)(0, g_session.m_plusVit)));
+    player->m_Int = ClampToU16(static_cast<u32>(info->Int) + static_cast<u32>((std::max)(0, g_session.m_plusInt)));
+    player->m_Dex = ClampToU16(static_cast<u32>(info->Dex) + static_cast<u32>((std::max)(0, g_session.m_plusDex)));
+    player->m_Luk = ClampToU16(static_cast<u32>(info->Luk) + static_cast<u32>((std::max)(0, g_session.m_plusLuk)));
+}
+
+bool ApplyCombatStatusParamToSession(u32 statusType, int value, bool aspdIsRawMotion)
+{
+    switch (statusType) {
+    case kStatusAtk:
+        g_session.m_attPower = value;
+        return true;
+    case kStatusRefineAtk:
+        g_session.m_refiningPower = value;
+        return true;
+    case kStatusMatkMax:
+        g_session.m_maxMatkPower = value;
+        return true;
+    case kStatusMatkMin:
+        g_session.m_minMatkPower = value;
+        return true;
+    case kStatusDef:
+        g_session.m_itemDefPower = value;
+        return true;
+    case kStatusDefBonus:
+        g_session.m_plusDefPower = value;
+        return true;
+    case kStatusMdef:
+        g_session.m_mdefPower = value;
+        return true;
+    case kStatusMdefBonus:
+        g_session.m_plusMdefPower = value;
+        return true;
+    case kStatusHit:
+        g_session.m_hitSuccessValue = value;
+        return true;
+    case kStatusFlee:
+        g_session.m_avoidSuccessValue = value;
+        return true;
+    case kStatusFleeBonus:
+        g_session.m_plusAvoidSuccessValue = value;
+        return true;
+    case kStatusCritical:
+        g_session.m_criticalSuccessValue = value;
+        return true;
+    case kStatusAspd:
+        g_session.m_aspd = aspdIsRawMotion ? ConvertRawAspdToDisplay(value) : value;
+        return true;
+    case kStatusPlusAspd:
+        g_session.m_plusAspd = value;
+        return true;
+    default:
+        return false;
+    }
+}
+
+void ApplyStatusBaseAndCostSummary(CGameMode& mode,
+    int statusPoint,
+    const std::array<int, 6>& baseStats,
+    const std::array<int, 6>& statCosts)
+{
+    if (CHARACTER_INFO* info = g_session.GetMutableSelectedCharacterInfo()) {
+        if (statusPoint >= 0) {
+            info->sppoint = static_cast<s16>(ClampToU16(static_cast<u32>(statusPoint)));
+        }
+        info->Str = static_cast<u8>((std::min)(baseStats[0], 0xFF));
+        info->Agi = static_cast<u8>((std::min)(baseStats[1], 0xFF));
+        info->Vit = static_cast<u8>((std::min)(baseStats[2], 0xFF));
+        info->Int = static_cast<u8>((std::min)(baseStats[3], 0xFF));
+        info->Dex = static_cast<u8>((std::min)(baseStats[4], 0xFF));
+        info->Luk = static_cast<u8>((std::min)(baseStats[5], 0xFF));
+    }
+
+    g_session.m_standardStr = (std::max)(0, statCosts[0]);
+    g_session.m_standardAgi = (std::max)(0, statCosts[1]);
+    g_session.m_standardVit = (std::max)(0, statCosts[2]);
+    g_session.m_standardInt = (std::max)(0, statCosts[3]);
+    g_session.m_standardDex = (std::max)(0, statCosts[4]);
+    g_session.m_standardLuk = (std::max)(0, statCosts[5]);
+    SyncLocalPlayerPrimaryStatsFromSession(mode);
+}
+
+void ApplyCombatStatusSummary(CGameMode& mode,
+    int attack,
+    int refineAttack,
+    int matkMax,
+    int matkMin,
+    int itemDef,
+    int plusDef,
+    int mdef,
+    int plusMdef,
+    int hit,
+    int flee,
+    int plusFlee,
+    int critical,
+    int aspdDisplay,
+    int plusAspd)
+{
+    g_session.m_attPower = (std::max)(0, attack);
+    g_session.m_refiningPower = (std::max)(0, refineAttack);
+    g_session.m_maxMatkPower = (std::max)(0, matkMax);
+    g_session.m_minMatkPower = (std::max)(0, matkMin);
+    g_session.m_itemDefPower = (std::max)(0, itemDef);
+    g_session.m_plusDefPower = (std::max)(0, plusDef);
+    g_session.m_mdefPower = (std::max)(0, mdef);
+    g_session.m_plusMdefPower = (std::max)(0, plusMdef);
+    g_session.m_hitSuccessValue = (std::max)(0, hit);
+    g_session.m_avoidSuccessValue = (std::max)(0, flee);
+    g_session.m_plusAvoidSuccessValue = (std::max)(0, plusFlee);
+    g_session.m_criticalSuccessValue = (std::max)(0, critical);
+    g_session.m_aspd = (std::max)(0, aspdDisplay);
+    g_session.m_plusAspd = (std::max)(0, plusAspd);
+    SyncLocalPlayerPrimaryStatsFromSession(mode);
+}
+
 bool ApplySelfStatusUpdateToSession(u32 statusType, u32 value)
 {
+    if (ApplyCombatStatusParamToSession(statusType, static_cast<int>(value), true)) {
+        return true;
+    }
+
     CHARACTER_INFO* info = g_session.GetMutableSelectedCharacterInfo();
     switch (statusType) {
     case kStatusBaseExp:
@@ -685,6 +1068,27 @@ void HandlePlayerSkillAdd(CGameMode&, const PacketView& packet)
         return;
     }
     g_session.SetSkillItem(skillInfo);
+}
+
+void HandleShortcutKeyList(CGameMode&, const PacketView& packet)
+{
+    constexpr size_t kShortcutEntrySize = 7;
+    constexpr size_t kShortcutPayloadSize = static_cast<size_t>(kShortcutSlotCount) * kShortcutEntrySize;
+    constexpr size_t kExpectedPacketSize = 2 + kShortcutPayloadSize;
+    if (!packet.data || packet.packetLength < kExpectedPacketSize) {
+        return;
+    }
+
+    g_session.ClearShortcutSlots();
+    for (int index = 0; index < kShortcutSlotCount; ++index) {
+        const size_t offset = 2 + static_cast<size_t>(index) * kShortcutEntrySize;
+        const unsigned char isSkill = packet.data[offset + 0];
+        const unsigned int id = ReadLE32(packet.data + offset + 1);
+        const unsigned short count = ReadLE16(packet.data + offset + 5);
+        g_session.SetShortcutSlotByAbsoluteIndex(index, isSkill, id, count);
+    }
+
+    DbgLog("[GameMode] shortcut key list synced slots=%d\n", kShortcutSlotCount);
 }
 
 void HandleNormalInventoryList(CGameMode&, const PacketView& packet)
@@ -1014,6 +1418,29 @@ bool ApplySelfStatusUpdate(CGameMode& mode, u32 statusType, u32 value)
 
 bool ApplySelfStatUpdate(CGameMode& mode, u32 statusType, u32 baseValue, u32 plusValue)
 {
+    switch (statusType) {
+    case kStatusStr:
+        g_session.m_plusStr = static_cast<int>(plusValue);
+        break;
+    case kStatusAgi:
+        g_session.m_plusAgi = static_cast<int>(plusValue);
+        break;
+    case kStatusVit:
+        g_session.m_plusVit = static_cast<int>(plusValue);
+        break;
+    case kStatusInt:
+        g_session.m_plusInt = static_cast<int>(plusValue);
+        break;
+    case kStatusDex:
+        g_session.m_plusDex = static_cast<int>(plusValue);
+        break;
+    case kStatusLuk:
+        g_session.m_plusLuk = static_cast<int>(plusValue);
+        break;
+    default:
+        break;
+    }
+
     CHARACTER_INFO* info = g_session.GetMutableSelectedCharacterInfo();
     if (info) {
         switch (statusType) {
@@ -1070,6 +1497,129 @@ bool ApplySelfStatUpdate(CGameMode& mode, u32 statusType, u32 baseValue, u32 plu
     }
 }
 
+void InvalidateStatusWindows()
+{
+    if (g_windowMgr.m_statusWnd) {
+        g_windowMgr.m_statusWnd->Invalidate();
+    }
+    if (g_windowMgr.m_basicInfoWnd) {
+        g_windowMgr.m_basicInfoWnd->Invalidate();
+    }
+}
+
+void UpdateStatusPointCost(u32 statusType, int value)
+{
+    const int clamped = (std::max)(0, value);
+    switch (statusType) {
+    case kStatusNeedStr:
+        g_session.m_standardStr = clamped;
+        break;
+    case kStatusNeedAgi:
+        g_session.m_standardAgi = clamped;
+        break;
+    case kStatusNeedVit:
+        g_session.m_standardVit = clamped;
+        break;
+    case kStatusNeedInt:
+        g_session.m_standardInt = clamped;
+        break;
+    case kStatusNeedDex:
+        g_session.m_standardDex = clamped;
+        break;
+    case kStatusNeedLuk:
+        g_session.m_standardLuk = clamped;
+        break;
+    default:
+        break;
+    }
+}
+
+void UpdateStatusSummaryFromPacket214(CGameMode& mode, const PacketView& packet)
+{
+    if (!packet.data || packet.packetLength < 42) {
+        return;
+    }
+
+    const std::array<int, 6> baseStats = {
+        static_cast<int>(packet.data[2]),
+        static_cast<int>(packet.data[4]),
+        static_cast<int>(packet.data[6]),
+        static_cast<int>(packet.data[8]),
+        static_cast<int>(packet.data[10]),
+        static_cast<int>(packet.data[12]),
+    };
+    const std::array<int, 6> statCosts = {
+        static_cast<int>(packet.data[3]),
+        static_cast<int>(packet.data[5]),
+        static_cast<int>(packet.data[7]),
+        static_cast<int>(packet.data[9]),
+        static_cast<int>(packet.data[11]),
+        static_cast<int>(packet.data[13]),
+    };
+
+    ApplyStatusBaseAndCostSummary(mode, -1, baseStats, statCosts);
+    ApplyCombatStatusSummary(mode,
+        static_cast<int>(ReadLE16(packet.data + 14)),
+        static_cast<int>(ReadLE16(packet.data + 16)),
+        static_cast<int>(ReadLE16(packet.data + 18)),
+        static_cast<int>(ReadLE16(packet.data + 20)),
+        static_cast<int>(ReadLE16(packet.data + 22)),
+        static_cast<int>(ReadLE16(packet.data + 24)),
+        static_cast<int>(ReadLE16(packet.data + 26)),
+        static_cast<int>(ReadLE16(packet.data + 28)),
+        static_cast<int>(ReadLE16(packet.data + 30)),
+        static_cast<int>(ReadLE16(packet.data + 32)),
+        static_cast<int>(ReadLE16(packet.data + 34)),
+        static_cast<int>(ReadLE16(packet.data + 36)),
+        static_cast<int>(ReadLE16(packet.data + 38)),
+        static_cast<int>(ReadLE16(packet.data + 40)));
+
+    InvalidateStatusWindows();
+}
+
+void UpdateStatusSummaryFromPacket00BD(CGameMode& mode, const PacketView& packet)
+{
+    if (!packet.data || packet.packetLength < 44) {
+        return;
+    }
+
+    const std::array<int, 6> baseStats = {
+        static_cast<int>(packet.data[4]),
+        static_cast<int>(packet.data[6]),
+        static_cast<int>(packet.data[8]),
+        static_cast<int>(packet.data[10]),
+        static_cast<int>(packet.data[12]),
+        static_cast<int>(packet.data[14]),
+    };
+    const std::array<int, 6> statCosts = {
+        static_cast<int>(packet.data[5]),
+        static_cast<int>(packet.data[7]),
+        static_cast<int>(packet.data[9]),
+        static_cast<int>(packet.data[11]),
+        static_cast<int>(packet.data[13]),
+        static_cast<int>(packet.data[15]),
+    };
+
+    ApplyStatusBaseAndCostSummary(mode, static_cast<int>(ReadLE16(packet.data + 2)), baseStats, statCosts);
+    ApplyCombatStatusSummary(mode,
+        static_cast<int>(ReadLE16(packet.data + 16)),
+        static_cast<int>(ReadLE16(packet.data + 18)),
+        static_cast<int>(ReadLE16(packet.data + 20)),
+        static_cast<int>(ReadLE16(packet.data + 22)),
+        static_cast<int>(ReadLE16(packet.data + 24)),
+        static_cast<int>(ReadLE16(packet.data + 26)),
+        static_cast<int>(ReadLE16(packet.data + 28)),
+        static_cast<int>(ReadLE16(packet.data + 30)),
+        static_cast<int>(ReadLE16(packet.data + 32)),
+        static_cast<int>(ReadLE16(packet.data + 34)),
+        static_cast<int>(ReadLE16(packet.data + 36)),
+        static_cast<int>(ReadLE16(packet.data + 38)),
+        ConvertRawAspdToDisplay(static_cast<int>(ReadLE16(packet.data + 40))),
+        static_cast<int>(ReadLE16(packet.data + 42)));
+
+    InvalidateStatusWindows();
+}
+
 void HandleSelfStatusParam(CGameMode& mode, const PacketView& packet)
 {
     if (!packet.data || packet.packetLength < 8) {
@@ -1103,6 +1653,7 @@ void HandleSelfStatusParam(CGameMode& mode, const PacketView& packet)
             static_cast<unsigned int>(player ? player->m_MaxHp : 0),
             static_cast<unsigned int>(player ? player->m_Sp : 0),
             static_cast<unsigned int>(player ? player->m_MaxSp : 0));
+        InvalidateStatusWindows();
 
         if (hadPreviousValue && value > previousValue) {
             if (statusType == kStatusBaseLevel) {
@@ -1157,7 +1708,79 @@ void HandleSelfStatInfo(CGameMode& mode, const PacketView& packet)
             static_cast<unsigned int>(player ? player->m_Int : 0),
             static_cast<unsigned int>(player ? player->m_Dex : 0),
             static_cast<unsigned int>(player ? player->m_Luk : 0));
+        InvalidateStatusWindows();
     }
+}
+
+void HandleStatusSummary(CGameMode& mode, const PacketView& packet)
+{
+    UpdateStatusSummaryFromPacket214(mode, packet);
+}
+
+void HandleInitialStatusSummary(CGameMode& mode, const PacketView& packet)
+{
+    UpdateStatusSummaryFromPacket00BD(mode, packet);
+}
+
+void HandleStatusChangeAck(CGameMode& mode, const PacketView& packet)
+{
+    if (!packet.data || packet.packetLength < 6) {
+        return;
+    }
+
+    const u32 statusType = ReadLE16(packet.data + 2);
+    const bool ok = packet.data[4] != 0;
+    const u32 value = static_cast<u32>(packet.data[5]);
+    if (!ok) {
+        return;
+    }
+
+    if (ApplyCombatStatusParamToSession(statusType, static_cast<int>(value), true)) {
+        InvalidateStatusWindows();
+        return;
+    }
+
+    CHARACTER_INFO* info = g_session.GetMutableSelectedCharacterInfo();
+    if (info) {
+        switch (statusType) {
+        case kStatusStr:
+            info->Str = static_cast<u8>(value);
+            break;
+        case kStatusAgi:
+            info->Agi = static_cast<u8>(value);
+            break;
+        case kStatusVit:
+            info->Vit = static_cast<u8>(value);
+            break;
+        case kStatusInt:
+            info->Int = static_cast<u8>(value);
+            break;
+        case kStatusDex:
+            info->Dex = static_cast<u8>(value);
+            break;
+        case kStatusLuk:
+            info->Luk = static_cast<u8>(value);
+            break;
+        default:
+            break;
+        }
+    }
+
+    SyncLocalPlayerPrimaryStatsFromSession(mode);
+    InvalidateStatusWindows();
+}
+
+void HandleStatusPointCostUpdate(CGameMode& mode, const PacketView& packet)
+{
+    (void)mode;
+    if (!packet.data || packet.packetLength < 5) {
+        return;
+    }
+
+    const u32 statusType = ReadLE16(packet.data + 2);
+    const int value = static_cast<int>(packet.data[4]);
+    UpdateStatusPointCost(statusType, value);
+    InvalidateStatusWindows();
 }
 
 void HandleNotifyTime(CGameMode& mode, const PacketView& packet)
@@ -1255,6 +1878,269 @@ std::string ExtractFixedPacketString(const PacketView& packet, size_t offset, si
     }
 
     return std::string(reinterpret_cast<const char*>(packet.data + offset), len);
+}
+
+std::vector<std::string> SplitNpcMenuOptions(const std::string& text)
+{
+    std::vector<std::string> options;
+    size_t start = 0;
+    while (start <= text.size()) {
+        const size_t separator = text.find(':', start);
+        const size_t end = (separator == std::string::npos) ? text.size() : separator;
+        if (end > start) {
+            options.push_back(text.substr(start, end - start));
+        }
+        if (separator == std::string::npos) {
+            break;
+        }
+        start = separator + 1;
+    }
+    return options;
+}
+
+void CloseNpcShopWindows()
+{
+    g_windowMgr.CloseNpcShopWindows();
+}
+
+void PushShopResultMessage(const char* text, u32 color)
+{
+    if (!text || *text == '\0') {
+        return;
+    }
+    g_windowMgr.PushChatEvent(text, color, 6);
+}
+
+void HandleNpcDialogText(CGameMode&, const PacketView& packet)
+{
+    if (!packet.data || packet.packetLength < 8) {
+        return;
+    }
+
+    const u32 npcId = ReadLE32(packet.data + 4);
+    auto* sayWnd = static_cast<UISayDialogWnd*>(g_windowMgr.MakeWindow(UIWindowMgr::WID_SAYDIALOGWND));
+    if (!sayWnd) {
+        return;
+    }
+    sayWnd->AppendText(npcId, ExtractPacketString(packet, 8));
+}
+
+void HandleNpcDialogNext(CGameMode&, const PacketView& packet)
+{
+    if (!packet.data || packet.packetLength < 6) {
+        return;
+    }
+
+    const u32 npcId = ReadLE32(packet.data + 2);
+    if (g_windowMgr.m_npcMenuWnd) {
+        g_windowMgr.m_npcMenuWnd->HideMenu();
+    }
+    if (g_windowMgr.m_npcInputWnd) {
+        g_windowMgr.m_npcInputWnd->HideInput();
+    }
+
+    auto* sayWnd = static_cast<UISayDialogWnd*>(g_windowMgr.MakeWindow(UIWindowMgr::WID_SAYDIALOGWND));
+    if (sayWnd) {
+        sayWnd->ShowNext(npcId);
+    }
+}
+
+void HandleNpcDialogClose(CGameMode&, const PacketView& packet)
+{
+    if (!packet.data || packet.packetLength < 6) {
+        return;
+    }
+
+    const u32 npcId = ReadLE32(packet.data + 2);
+    if (g_windowMgr.m_npcMenuWnd) {
+        g_windowMgr.m_npcMenuWnd->HideMenu();
+    }
+    if (g_windowMgr.m_npcInputWnd) {
+        g_windowMgr.m_npcInputWnd->HideInput();
+    }
+
+    if (g_windowMgr.m_sayDialogWnd && g_windowMgr.m_sayDialogWnd->m_show != 0) {
+        g_windowMgr.m_sayDialogWnd->ShowClose(npcId);
+        return;
+    }
+
+    g_windowMgr.CloseNpcDialogWindows();
+}
+
+void HandleNpcDialogMenu(CGameMode&, const PacketView& packet)
+{
+    if (!packet.data || packet.packetLength < 8) {
+        return;
+    }
+
+    const u32 npcId = ReadLE32(packet.data + 4);
+    const std::vector<std::string> options = SplitNpcMenuOptions(ExtractPacketString(packet, 8));
+    if (g_windowMgr.m_sayDialogWnd) {
+        g_windowMgr.m_sayDialogWnd->ClearAction();
+    }
+    if (g_windowMgr.m_npcInputWnd) {
+        g_windowMgr.m_npcInputWnd->HideInput();
+    }
+
+    auto* menuWnd = static_cast<UINpcMenuWnd*>(g_windowMgr.MakeWindow(UIWindowMgr::WID_NPCMENUWND));
+    if (menuWnd) {
+        menuWnd->SetMenu(npcId, options);
+    }
+}
+
+void HandleNpcDialogNumberInput(CGameMode&, const PacketView& packet)
+{
+    if (!packet.data || packet.packetLength < 6) {
+        return;
+    }
+
+    const u32 npcId = ReadLE32(packet.data + 2);
+    if (g_windowMgr.m_sayDialogWnd) {
+        g_windowMgr.m_sayDialogWnd->ClearAction();
+    }
+    if (g_windowMgr.m_npcMenuWnd) {
+        g_windowMgr.m_npcMenuWnd->HideMenu();
+    }
+
+    auto* inputWnd = static_cast<UINpcInputWnd*>(g_windowMgr.MakeWindow(UIWindowMgr::WID_NPCINPUTWND));
+    if (inputWnd) {
+        inputWnd->OpenNumber(npcId);
+    }
+}
+
+void HandleNpcDialogStringInput(CGameMode&, const PacketView& packet)
+{
+    if (!packet.data || packet.packetLength < 6) {
+        return;
+    }
+
+    const u32 npcId = ReadLE32(packet.data + 2);
+    if (g_windowMgr.m_sayDialogWnd) {
+        g_windowMgr.m_sayDialogWnd->ClearAction();
+    }
+    if (g_windowMgr.m_npcMenuWnd) {
+        g_windowMgr.m_npcMenuWnd->HideMenu();
+    }
+
+    auto* inputWnd = static_cast<UINpcInputWnd*>(g_windowMgr.MakeWindow(UIWindowMgr::WID_NPCINPUTWND));
+    if (inputWnd) {
+        inputWnd->OpenString(npcId);
+    }
+}
+
+void HandleNpcShopDealType(CGameMode&, const PacketView& packet)
+{
+    if (!packet.data || packet.packetLength < 6) {
+        return;
+    }
+
+    const u32 npcId = ReadLE32(packet.data + 2);
+    g_session.SetNpcShopChoice(npcId);
+    CloseNpcShopWindows();
+    g_windowMgr.MakeWindow(UIWindowMgr::WID_CHOOSESELLBUYWND);
+}
+
+void HandleNpcShopBuyList(CGameMode&, const PacketView& packet)
+{
+    if (!packet.data || packet.packetLength < 4) {
+        return;
+    }
+
+    std::vector<NPC_SHOP_ROW> rows;
+    const size_t payloadLength = static_cast<size_t>(packet.packetLength - 4);
+    rows.reserve(payloadLength / 11);
+    for (size_t offset = 4; offset + 11 <= static_cast<size_t>(packet.packetLength); offset += 11) {
+        NPC_SHOP_ROW row{};
+        row.price = static_cast<int>(ReadLE32(packet.data + offset + 0));
+        row.secondaryPrice = static_cast<int>(ReadLE32(packet.data + offset + 4));
+        row.itemInfo.m_itemType = packet.data[offset + 8];
+        row.itemInfo.SetItemId(ReadLE16(packet.data + offset + 9));
+        row.itemInfo.m_isIdentified = 1;
+        rows.push_back(std::move(row));
+    }
+
+    g_session.SetNpcShopRows(g_session.m_shopNpcId, NpcShopMode::Buy, rows);
+    if (g_windowMgr.m_chooseSellBuyWnd) {
+        g_windowMgr.DeleteWindow(g_windowMgr.m_chooseSellBuyWnd);
+    }
+    g_windowMgr.MakeWindow(UIWindowMgr::WID_ITEMSHOPWND);
+    g_windowMgr.MakeWindow(UIWindowMgr::WID_ITEMPURCHASEWND);
+}
+
+void HandleNpcShopSellList(CGameMode&, const PacketView& packet)
+{
+    if (!packet.data || packet.packetLength < 4) {
+        return;
+    }
+
+    std::vector<NPC_SHOP_ROW> rows;
+    const size_t payloadLength = static_cast<size_t>(packet.packetLength - 4);
+    rows.reserve(payloadLength / 10);
+    for (size_t offset = 4; offset + 10 <= static_cast<size_t>(packet.packetLength); offset += 10) {
+        const unsigned int itemIndex = ReadLE16(packet.data + offset + 0);
+        const ITEM_INFO* itemInfo = g_session.GetInventoryItemByIndex(itemIndex);
+        if (!itemInfo || itemInfo->m_wearLocation != 0) {
+            continue;
+        }
+
+        NPC_SHOP_ROW row{};
+        row.itemInfo = *itemInfo;
+        row.sourceItemIndex = itemIndex;
+        row.price = static_cast<int>(ReadLE32(packet.data + offset + 2));
+        row.secondaryPrice = static_cast<int>(ReadLE32(packet.data + offset + 6));
+        row.availableCount = itemInfo->m_num;
+        rows.push_back(std::move(row));
+    }
+
+    g_session.SetNpcShopRows(g_session.m_shopNpcId, NpcShopMode::Sell, rows);
+    if (g_windowMgr.m_chooseSellBuyWnd) {
+        g_windowMgr.DeleteWindow(g_windowMgr.m_chooseSellBuyWnd);
+    }
+    g_windowMgr.MakeWindow(UIWindowMgr::WID_ITEMSHOPWND);
+    g_windowMgr.MakeWindow(UIWindowMgr::WID_ITEMSELLWND);
+}
+
+void HandleNpcShopBuyResult(CGameMode&, const PacketView& packet)
+{
+    if (!packet.data || packet.packetLength < 3) {
+        return;
+    }
+
+    switch (packet.data[2]) {
+    case 0:
+        PushShopResultMessage("The deal has successfully completed.", 0x00FFFF00u);
+        break;
+    case 1:
+        PushShopResultMessage("You do not have enough zeny.", 0x000000FFu);
+        break;
+    case 2:
+        PushShopResultMessage("You cannot carry more items because you are overweight.", 0x000000FFu);
+        break;
+    case 3:
+        PushShopResultMessage("You cannot carry any more items.", 0x000000FFu);
+        break;
+    default:
+        break;
+    }
+
+    CloseNpcShopWindows();
+    g_session.ClearNpcShopState();
+}
+
+void HandleNpcShopSellResult(CGameMode&, const PacketView& packet)
+{
+    if (!packet.data || packet.packetLength < 3) {
+        return;
+    }
+
+    if (packet.data[2] == 0) {
+        PushShopResultMessage("The deal has successfully completed.", 0x00FFFF00u);
+    } else if (packet.data[2] == 1) {
+        PushShopResultMessage("The deal has failed.", 0x000000FFu);
+    }
+
+    CloseNpcShopWindows();
+    g_session.ClearNpcShopState();
 }
 
 std::string SanitizeNpcDisplayName(std::string name)
@@ -4479,6 +5365,17 @@ void RegisterDefaultGameModePacketHandlers(CGameModePacketRouter& router)
     router.Register(0x0097, HandleWhisper);
     router.Register(0x0098, HandleAckWhisper);
     router.Register(0x009A, HandleBroadcast);
+    router.Register(0x00B4, HandleNpcDialogText);
+    router.Register(0x00B5, HandleNpcDialogNext);
+    router.Register(0x00B6, HandleNpcDialogClose);
+    router.Register(0x00B7, HandleNpcDialogMenu);
+    router.Register(0x00C4, HandleNpcShopDealType);
+    router.Register(0x00C6, HandleNpcShopBuyList);
+    router.Register(0x00C7, HandleNpcShopSellList);
+    router.Register(0x00CA, HandleNpcShopBuyResult);
+    router.Register(0x00CB, HandleNpcShopSellResult);
+    router.Register(0x0142, HandleNpcDialogNumberInput);
+    router.Register(0x01D4, HandleNpcDialogStringInput);
     router.Register(0x01C3, HandleBroadcast);
     router.Register(0x02DC, HandleBattlefieldChat);
     router.Register(0x0095, HandleActorNameAck);
@@ -4494,8 +5391,10 @@ void RegisterDefaultGameModePacketHandlers(CGameModePacketRouter& router)
     router.Register(0x00AA, HandleEquipItemAck);
     router.Register(0x00AF, HandleItemRemove);
     router.Register(0x00AC, HandleUnequipItemAck);
+    router.Register(0x01C8, HandleUseItemAck2);
     router.Register(0x01EE, HandleNormalInventoryList);
     router.Register(0x01EF, HandleEquipInventoryList);
+    router.Register(0x01F8, HandleIgnorePacket);
     router.Register(0x02D0, HandleEquipInventoryList);
     router.Register(0x02E8, HandleNormalInventoryList);
     router.Register(0x07FA, HandleItemRemove);
@@ -4508,8 +5407,11 @@ void RegisterDefaultGameModePacketHandlers(CGameModePacketRouter& router)
     // but must stay in sync so later actor packets are framed correctly.
     router.Register(0x00B0, HandleSelfStatusParam);
     router.Register(0x00B1, HandleSelfStatusParam);
-    router.Register(0x00BD, HandleIgnorePacket);
+    router.Register(0x00BC, HandleStatusChangeAck);
+    router.Register(0x00BD, HandleInitialStatusSummary);
+    router.Register(0x00BE, HandleStatusPointCostUpdate);
     router.Register(0x00C0, HandleIgnorePacket);
+    router.Register(0x013D, HandleRecovery);
     router.Register(0x013E, HandleIgnorePacket);
     router.Register(0x01B0, HandleIgnorePacket);
     router.Register(0x0106, HandleIgnorePacket);
@@ -4532,10 +5434,11 @@ void RegisterDefaultGameModePacketHandlers(CGameModePacketRouter& router)
     router.Register(0x01F3, HandleNotifyEffect2);
     router.Register(0x0201, HandleIgnorePacket);
     router.Register(0x0209, HandleIgnorePacket);
+    router.Register(0x0214, HandleStatusSummary);
     router.Register(0x02DD, HandleIgnorePacket);
     router.Register(0x0283, HandleIgnorePacket);
     router.Register(0x02C9, HandleIgnorePacket);
-    router.Register(0x02B9, HandleIgnorePacket);
+    router.Register(0x02B9, HandleShortcutKeyList);
     router.Register(0x02D1, HandleIgnorePacket);
     router.Register(0x02D2, HandleIgnorePacket);
     router.Register(0x02D3, HandleIgnorePacket);

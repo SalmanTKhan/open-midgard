@@ -23,7 +23,13 @@ class UIOptionWnd;
 class UIShortCutWnd;
 class UIItemDropCntWnd;
 class UISayDialogWnd;
+class UINpcMenuWnd;
+class UINpcInputWnd;
 class UIChooseWnd;
+class UIChooseSellBuyWnd;
+class UIItemShopWnd;
+class UIItemPurchaseWnd;
+class UIItemSellWnd;
 class CBitmapRes;
 class CSurface;
 
@@ -55,10 +61,18 @@ public:
         WID_NOTICECONFIRMWND  = 8,
         WID_SAYDIALOGWND      = 9,
         WID_LOADINGWND        = 10,
+        WID_STATUSWND         = 11,
+        WID_NPCMENUWND        = 12,
         WID_OPTIONWND         = 13,
         WID_EQUIPWND          = 14,
         WID_SKILLLISTWND      = 15,
+        WID_NPCINPUTWND       = 16,
+        WID_CHOOSESELLBUYWND  = 18,
+        WID_ITEMSHOPWND       = 19,
+        WID_ITEMPURCHASEWND   = 20,
         WID_NOTIFYLEVELUPWND  = 21,
+        WID_ITEMSELLWND       = 22,
+        WID_SHORTCUTWND       = 23,
         WID_CHOOSEWND         = 17,
         WID_ROMAPWND          = 0x93,
         WID_NOTIFYJOBLEVELUPWND = 49,
@@ -109,6 +123,10 @@ public:
     bool HasWindowAtPoint(int x, int y) const;
     void ClampWindowToClient(int* x, int* y, int w, int h) const;
     void SnapWindowToNearby(UIWindow* window, int* x, int* y) const;
+    void EnsureChatWindowVisible();
+    bool HasActiveNpcDialog() const;
+    void CloseNpcDialogWindows();
+    void CloseNpcShopWindows();
 
     // Memory layout from HighPriest.exe.h:10334
     int m_chatWndX, m_chatWndY;
@@ -138,6 +156,14 @@ public:
     UIRoMapWnd* m_roMapWnd;
     UIMinimapZoomWnd* m_minimapZoomWnd;
     UIStatusWnd* m_statusWnd;
+    UISayDialogWnd* m_sayDialogWnd;
+    UINpcMenuWnd* m_npcMenuWnd;
+    UINpcInputWnd* m_npcInputWnd;
+    UIChooseSellBuyWnd* m_chooseSellBuyWnd;
+    UIItemShopWnd* m_itemShopWnd;
+    UIItemPurchaseWnd* m_itemPurchaseWnd;
+    UIItemSellWnd* m_itemSellWnd;
+    UIShortCutWnd* m_shortCutWnd;
     UINewChatWnd* m_chatWnd;
     UILoginWnd* m_loginWnd;
     UISelectServerWnd* m_selectServerWnd;

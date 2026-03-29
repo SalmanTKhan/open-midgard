@@ -1,6 +1,8 @@
 #include "UIItemWnd.h"
 
 #include "gamemode/GameMode.h"
+#include "UIEquipWnd.h"
+#include "UIShortCutWnd.h"
 #include "UIWindowMgr.h"
 #include "core/File.h"
 #include "item/Item.h"
@@ -537,6 +539,11 @@ UIItemWnd::UIItemWnd()
     m_titleBarBitmap(nullptr),
       m_tabBitmaps{ nullptr, nullptr, nullptr },
       m_hoverBitmap(nullptr),
+      m_dragArmed(false),
+      m_dragStartPoint{},
+      m_dragItemId(0),
+      m_dragItemIndex(0),
+      m_dragItemEquipLocation(0),
       m_lastVisualStateToken(0ull),
       m_hasVisualStateToken(false)
 {
@@ -671,6 +678,10 @@ void UIItemWnd::OnDraw()
     m_hoverOverlayRect = RECT{};
 
     if (m_h > kMiniHeight) {
+        const CGameMode* gameMode = g_modeMgr.GetCurrentGameMode();
+        const bool hideDraggedItem = gameMode
+            && gameMode->m_dragType == static_cast<int>(DragType::ShortcutItem)
+            && gameMode->m_dragInfo.itemIndex != 0;
         const int columns = GetItemColumns();
         const int rows = GetItemRows();
         const int firstIndex = m_viewOffset * columns;
@@ -721,6 +732,10 @@ void UIItemWnd::OnDraw()
     DrawBitmapTransparent(hdc, m_tabBitmaps[m_currentTab], activeTabStrip);
 
     if (m_h > kMiniHeight) {
+        const CGameMode* gameMode = g_modeMgr.GetCurrentGameMode();
+        const bool hideDraggedItem = gameMode
+            && gameMode->m_dragType == static_cast<int>(DragType::ShortcutItem)
+            && gameMode->m_dragInfo.itemIndex != 0;
         const int columns = GetItemColumns();
         const int rows = GetItemRows();
         const int firstIndex = m_viewOffset * columns;
@@ -740,21 +755,25 @@ void UIItemWnd::OnDraw()
             const ITEM_INFO* item = itemIndex < static_cast<int>(filteredItems.size())
                 ? filteredItems[itemIndex]
                 : nullptr;
-            const bool hovered = item && itemIndex == m_hoveredItemIndex;
+            const bool isDraggedSource = item
+                && hideDraggedItem
+                && item->m_itemIndex == gameMode->m_dragInfo.itemIndex;
+            const ITEM_INFO* drawItem = isDraggedSource ? nullptr : item;
+            const bool hovered = drawItem && itemIndex == m_hoveredItemIndex;
             DrawItemSlot(hdc,
                 m_backgroundMid,
                 m_hoverBitmap,
-                item ? GetItemIcon(*item) : nullptr,
+                drawItem ? GetItemIcon(*drawItem) : nullptr,
                 cellRect,
-                item,
+                drawItem,
                 hovered);
 
             if (hovered) {
-                m_hoverOverlayItem = item;
+                m_hoverOverlayItem = drawItem;
                 m_hoverOverlayRect = cellRect;
             }
 
-            m_visibleItems.push_back({ item, cellRect });
+            m_visibleItems.push_back({ drawItem, cellRect });
         }
 
         RECT scrollbarRect{ m_x + m_w - 14, m_y + kGridTop, m_x + m_w - 4, m_y + m_h - kGridBottomMargin };
@@ -828,6 +847,11 @@ void UIItemWnd::OnLBtnDblClk(int x, int y)
 
 void UIItemWnd::OnLBtnDown(int x, int y)
 {
+    m_dragArmed = false;
+    m_dragItemId = 0;
+    m_dragItemIndex = 0;
+    m_dragItemEquipLocation = 0;
+
     if (y >= m_y && y < m_y + kTitleBarHeight) {
         UIFrameWnd::OnLBtnDown(x, y);
         return;
@@ -854,17 +878,86 @@ void UIItemWnd::OnLBtnDown(int x, int y)
     }
 
     UpdateHoveredItem(x, y);
+    if (m_hoveredItemIndex >= 0) {
+        const std::vector<const ITEM_INFO*> filteredItems = GetFilteredItems();
+        if (m_hoveredItemIndex < static_cast<int>(filteredItems.size())) {
+            const ITEM_INFO* item = filteredItems[m_hoveredItemIndex];
+            if (item) {
+                m_dragArmed = true;
+                m_dragStartPoint = POINT{ x, y };
+                m_dragItemId = item->GetItemId();
+                m_dragItemIndex = item->m_itemIndex;
+                m_dragItemEquipLocation = item->m_location;
+            }
+        }
+    }
+}
+
+void UIItemWnd::OnLBtnUp(int x, int y)
+{
+    m_dragArmed = false;
+    m_dragItemId = 0;
+    m_dragItemIndex = 0;
+    m_dragItemEquipLocation = 0;
+    UIFrameWnd::OnLBtnUp(x, y);
 }
 
 void UIItemWnd::OnMouseMove(int x, int y)
 {
     UIFrameWnd::OnMouseMove(x, y);
+    if (m_dragArmed) {
+        const int dx = x - m_dragStartPoint.x;
+        const int dy = y - m_dragStartPoint.y;
+        if ((dx * dx) + (dy * dy) >= 16) {
+            if (CGameMode* gameMode = g_modeMgr.GetCurrentGameMode()) {
+                gameMode->m_dragType = static_cast<int>(DragType::ShortcutItem);
+                gameMode->m_dragInfo = DRAG_INFO{};
+                gameMode->m_dragInfo.type = static_cast<int>(DragType::ShortcutItem);
+                gameMode->m_dragInfo.source = static_cast<int>(DragSource::InventoryWindow);
+                gameMode->m_dragInfo.itemId = m_dragItemId;
+                gameMode->m_dragInfo.itemIndex = m_dragItemIndex;
+                gameMode->m_dragInfo.itemEquipLocation = m_dragItemEquipLocation;
+                Invalidate();
+                if (g_windowMgr.m_shortCutWnd) {
+                    g_windowMgr.m_shortCutWnd->Invalidate();
+                }
+            }
+            m_dragArmed = false;
+        }
+    }
     UpdateHoveredItem(x, y);
 }
 
 void UIItemWnd::OnMouseHover(int x, int y)
 {
     UpdateHoveredItem(x, y);
+}
+
+void UIItemWnd::DragAndDrop(int x, int y, const DRAG_INFO* const dragInfo)
+{
+    if (m_show == 0 || m_h <= kMiniHeight || !dragInfo) {
+        return;
+    }
+    if (dragInfo->type != static_cast<int>(DragType::ShortcutItem)
+        || dragInfo->source != static_cast<int>(DragSource::EquipmentWindow)
+        || dragInfo->itemIndex == 0) {
+        return;
+    }
+
+    if (x < m_x || x >= m_x + m_w || y < m_y + kTitleBarHeight || y >= m_y + m_h) {
+        return;
+    }
+
+    if (g_modeMgr.SendMsg(
+            CGameMode::GameMsg_RequestUnequipInventoryItem,
+            static_cast<int>(dragInfo->itemIndex),
+            0,
+            0) != 0) {
+        Invalidate();
+        if (g_windowMgr.m_equipWnd) {
+            g_windowMgr.m_equipWnd->Invalidate();
+        }
+    }
 }
 
 void UIItemWnd::StoreInfo()
@@ -1081,6 +1174,12 @@ unsigned long long UIItemWnd::BuildVisualStateToken() const
     HashTokenValue(&hash, static_cast<unsigned long long>(m_currentTab));
     HashTokenValue(&hash, static_cast<unsigned long long>(m_viewOffset));
     HashTokenValue(&hash, static_cast<unsigned long long>(static_cast<unsigned int>(m_hoveredItemIndex)));
+    if (const CGameMode* gameMode = g_modeMgr.GetCurrentGameMode()) {
+        HashTokenValue(&hash, static_cast<unsigned long long>(gameMode->m_dragType));
+        HashTokenValue(&hash, static_cast<unsigned long long>(gameMode->m_dragInfo.source));
+        HashTokenValue(&hash, static_cast<unsigned long long>(gameMode->m_dragInfo.itemIndex));
+        HashTokenValue(&hash, static_cast<unsigned long long>(gameMode->m_dragInfo.itemId));
+    }
 
     const std::list<ITEM_INFO>& items = g_session.GetInventoryItems();
     HashTokenValue(&hash, static_cast<unsigned long long>(items.size()));

@@ -2,6 +2,7 @@
 
 #include "gamemode/GameMode.h"
 #include "gamemode/Mode.h"
+#include "UIShortCutWnd.h"
 #include "UIWindowMgr.h"
 #include "core/File.h"
 #include "main/WinMain.h"
@@ -351,6 +352,10 @@ UISkillListWnd::UISkillListWnd()
       m_viewOffset(0),
       m_selectedSkillId(0),
       m_pressedUpgradeSkillId(0),
+      m_dragSkillId(0),
+      m_dragSkillLevel(0),
+      m_dragArmed(false),
+      m_dragStartPoint{},
       m_isDraggingScrollThumb(0),
       m_scrollDragOffsetY(0),
       m_systemButtons{},
@@ -397,9 +402,10 @@ UISkillListWnd::~UISkillListWnd()
 
 void UISkillListWnd::SetShow(int show)
 {
-    m_show = show;
+    UIWindow::SetShow(show);
     if (show != 0) {
         EnsureCreated();
+        LayoutChildren();
     }
 }
 
@@ -522,6 +528,10 @@ void UISkillListWnd::OnDraw()
     const int rowRight = m_x + m_w - kListRightMargin - 4;
     const int firstIndex = m_viewOffset;
     const int lastIndex = std::min(static_cast<int>(skills.size()), firstIndex + visibleRows);
+    const CGameMode* gameMode = g_modeMgr.GetCurrentGameMode();
+    const bool hideDraggedSkill = gameMode
+        && gameMode->m_dragType == static_cast<int>(DragType::ShortcutSkill)
+        && gameMode->m_dragInfo.skillId != 0;
     for (int drawIndex = firstIndex; drawIndex < lastIndex; ++drawIndex) {
         const int rowIndex = drawIndex - firstIndex;
         const int rowTop = m_y + kListTop + rowIndex * kRowHeight;
@@ -547,8 +557,11 @@ void UISkillListWnd::OnDraw()
         }
 
         if (skill) {
-            if (HBITMAP icon = GetSkillIcon(skill->SKID)) {
-                DrawBitmapTransparent(hdc, icon, iconRect);
+            const bool isDraggedSource = hideDraggedSkill && skill->SKID == gameMode->m_dragInfo.skillId;
+            if (!isDraggedSource) {
+                if (HBITMAP icon = GetSkillIcon(skill->SKID)) {
+                    DrawBitmapTransparent(hdc, icon, iconRect);
+                }
             }
 
             const std::string skillName = skill->skillName.empty() ? skill->skillIdName : skill->skillName;
@@ -596,6 +609,10 @@ void UISkillListWnd::OnDraw()
 
 void UISkillListWnd::OnLBtnDown(int x, int y)
 {
+    m_dragArmed = false;
+    m_dragSkillId = 0;
+    m_dragSkillLevel = 0;
+
     if (y >= m_y && y < m_y + kTitleBarHeight) {
         UIFrameWnd::OnLBtnDown(x, y);
         return;
@@ -644,6 +661,10 @@ void UISkillListWnd::OnLBtnDown(int x, int y)
         const VisibleSkill& visible = m_visibleSkills[m_hoveredRow];
         if (visible.skill) {
             m_selectedSkillId = visible.skill->SKID;
+            m_dragArmed = true;
+            m_dragSkillId = visible.skill->SKID;
+            m_dragSkillLevel = visible.skill->level;
+            m_dragStartPoint = POINT{ x, y };
         }
     }
 }
@@ -678,12 +699,34 @@ void UISkillListWnd::OnLBtnUp(int x, int y)
         }
     }
     m_pressedUpgradeSkillId = 0;
+    m_dragArmed = false;
+    m_dragSkillId = 0;
+    m_dragSkillLevel = 0;
 }
 
 void UISkillListWnd::OnMouseMove(int x, int y)
 {
     UIFrameWnd::OnMouseMove(x, y);
     UpdateHover(x, y);
+    if (m_dragArmed) {
+        const int dx = x - m_dragStartPoint.x;
+        const int dy = y - m_dragStartPoint.y;
+        if ((dx * dx) + (dy * dy) >= 16) {
+            if (CGameMode* gameMode = g_modeMgr.GetCurrentGameMode()) {
+                gameMode->m_dragType = static_cast<int>(DragType::ShortcutSkill);
+                gameMode->m_dragInfo = DRAG_INFO{};
+                gameMode->m_dragInfo.type = static_cast<int>(DragType::ShortcutSkill);
+                gameMode->m_dragInfo.source = static_cast<int>(DragSource::SkillListWindow);
+                gameMode->m_dragInfo.skillId = m_dragSkillId;
+                gameMode->m_dragInfo.skillLevel = m_dragSkillLevel;
+                Invalidate();
+                if (g_windowMgr.m_shortCutWnd) {
+                    g_windowMgr.m_shortCutWnd->Invalidate();
+                }
+            }
+            m_dragArmed = false;
+        }
+    }
     if (m_isDraggingScrollThumb) {
         UpdateScrollFromThumbPosition(y - m_scrollDragOffsetY, static_cast<int>(GetSortedSkills().size()));
     }
@@ -1001,6 +1044,11 @@ unsigned long long UISkillListWnd::BuildVisualStateToken() const
     HashTokenValue(&hash, static_cast<unsigned long long>(m_pressedUpgradeSkillId));
     HashTokenValue(&hash, static_cast<unsigned long long>(m_isDraggingScrollThumb));
     HashTokenValue(&hash, static_cast<unsigned long long>(g_session.GetPlayerSkillPointCount()));
+    if (const CGameMode* gameMode = g_modeMgr.GetCurrentGameMode()) {
+        HashTokenValue(&hash, static_cast<unsigned long long>(gameMode->m_dragType));
+        HashTokenValue(&hash, static_cast<unsigned long long>(gameMode->m_dragInfo.skillId));
+        HashTokenValue(&hash, static_cast<unsigned long long>(gameMode->m_dragInfo.skillLevel));
+    }
 
     const std::list<PLAYER_SKILL_INFO>& skillItems = g_session.GetSkillItems();
     HashTokenValue(&hash, static_cast<unsigned long long>(skillItems.size()));
