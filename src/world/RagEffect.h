@@ -88,6 +88,8 @@ public:
     float m_alpha;
     float m_alphaSpeed;
     float m_maxAlpha;
+    float m_alphaDelta;
+    float m_minAlpha;
     float m_size;
     float m_sizeSpeed;
     float m_sizeAccel;
@@ -130,6 +132,7 @@ public:
     float m_spriteScale;
     bool m_spriteRepeat;
     bool m_repeatAnim;
+    bool m_isDisappear;
     int m_bandController;
     std::array<EffectBandState, 4> m_bands;
     int m_numSegments;
@@ -146,6 +149,8 @@ public:
     CEffectPrim* LaunchEffectPrim(EFFECTPRIMID effectPrimId, const vector3d& deltaPos);
     void DetachFromMaster();
     int GetEffectType() const { return m_type; }
+    int GetStateCount() const { return m_stateCnt; }
+    int GetDuration() const { return m_duration; }
 
     u8 OnProcess() override;
     void Render(matrix* viewMatrix) override;

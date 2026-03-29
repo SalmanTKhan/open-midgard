@@ -249,6 +249,10 @@ CTexture* CTexMgr::GetTexture(const char* name, bool b) {
         const size_t pixelCount = static_cast<size_t>(bitmap->m_width) * static_cast<size_t>(bitmap->m_height);
         blackKeyPixels.assign(textureData, textureData + pixelCount);
         for (unsigned int& pixel : blackKeyPixels) {
+            if ((pixel & 0x00FFFFFFu) == 0x00FF00FFu) {
+                pixel = 0x00000000u;
+                continue;
+            }
             const unsigned int red = (pixel >> 16) & 0xFFu;
             const unsigned int green = (pixel >> 8) & 0xFFu;
             const unsigned int blue = pixel & 0xFFu;

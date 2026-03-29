@@ -1402,11 +1402,27 @@ void UpdateAlphaFade(CEffectPrim* prim)
         return;
     }
 
-    prim->m_alpha = (std::min)(prim->m_maxAlpha, prim->m_alpha + prim->m_alphaSpeed);
-    if (prim->m_fadeOutCnt > 0 && prim->m_stateCnt >= prim->m_fadeOutCnt) {
-        const int fadeFrames = (std::max)(1, prim->m_duration - prim->m_fadeOutCnt + 1);
-        const float fadeStep = prim->m_maxAlpha / static_cast<float>(fadeFrames);
-        prim->m_alpha = (std::max)(0.0f, prim->m_alpha - fadeStep);
+    if (!prim->m_isDisappear && prim->m_master) {
+        const int masterRemaining = prim->m_master->GetDuration() - prim->m_master->GetStateCount();
+        const int primRemaining = prim->m_duration - prim->m_stateCnt;
+        if (masterRemaining > 0 && primRemaining > masterRemaining + 1) {
+            prim->m_pattern &= ~0x80;
+            prim->m_isDisappear = true;
+            prim->m_alphaSpeed = -prim->m_alpha / static_cast<float>(masterRemaining);
+        }
+    }
+
+    if (prim->m_fadeOutCnt > 0 && prim->m_stateCnt == prim->m_fadeOutCnt) {
+        const int fadeFrames = (std::max)(1, prim->m_duration - prim->m_stateCnt);
+        prim->m_pattern &= ~0x80;
+        prim->m_alphaSpeed = -(prim->m_alpha / static_cast<float>(fadeFrames) * prim->m_alphaDelta);
+    }
+
+    prim->m_alpha += prim->m_alphaSpeed;
+    if (prim->m_alpha < prim->m_minAlpha) {
+        prim->m_alpha = prim->m_minAlpha;
+    } else if (!prim->m_isDisappear && prim->m_alphaSpeed >= 0.0f && prim->m_alpha > prim->m_maxAlpha) {
+        prim->m_alpha = prim->m_maxAlpha;
     }
 }
 
@@ -1617,6 +1633,8 @@ CEffectPrim::CEffectPrim()
     , m_alpha(0.0f)
     , m_alphaSpeed(0.0f)
     , m_maxAlpha(255.0f)
+    , m_alphaDelta(1.0f)
+    , m_minAlpha(0.0f)
     , m_size(1.0f)
     , m_sizeSpeed(0.0f)
     , m_sizeAccel(0.0f)
@@ -1651,6 +1669,7 @@ CEffectPrim::CEffectPrim()
     , m_spriteScale(1.0f)
     , m_spriteRepeat(false)
     , m_repeatAnim(true)
+    , m_isDisappear(false)
     , m_bandController(0)
     , m_numSegments(0)
 {
@@ -1671,6 +1690,9 @@ void CEffectPrim::Init(CRagEffect* master, EFFECTPRIMID effectPrimId, const vect
     m_master = master;
     m_type = effectPrimId;
     m_deltaPos = deltaPos;
+    m_isDisappear = false;
+    m_alphaDelta = 1.0f;
+    m_minAlpha = 0.0f;
 }
 
 bool CEffectPrim::OnProcess()
@@ -1715,7 +1737,6 @@ bool CEffectPrim::OnProcess()
     }
 
     ++m_stateCnt;
-    m_alpha = (std::min)(m_maxAlpha, m_alpha + m_alphaSpeed);
     m_size += m_sizeSpeed;
     m_sizeSpeed += m_sizeAccel;
     m_radius += m_radiusSpeed;
@@ -1725,11 +1746,7 @@ bool CEffectPrim::OnProcess()
     m_longitude += m_longSpeed;
     m_gravSpeed += m_gravAccel;
 
-    if (m_fadeOutCnt > 0 && m_stateCnt >= m_fadeOutCnt) {
-        const int fadeFrames = (std::max)(1, m_duration - m_fadeOutCnt + 1);
-        const float fadeStep = m_maxAlpha / static_cast<float>(fadeFrames);
-        m_alpha = (std::max)(0.0f, m_alpha - fadeStep);
-    }
+    UpdateAlphaFade(this);
 
     return m_stateCnt <= m_duration || m_alpha > 0.0f;
 }
