@@ -145,6 +145,7 @@ public:
     ~CRagEffect() override;
 
     void Init(CRenderObject* master, int effectId, const vector3d& deltaPos);
+    void InitAtWorldPosition(int effectId, const vector3d& position);
     void InitWorld(const C3dWorldRes::effectSrcInfo& source);
     CEffectPrim* LaunchEffectPrim(EFFECTPRIMID effectPrimId, const vector3d& deltaPos);
     void DetachFromMaster();
@@ -154,7 +155,7 @@ public:
 
     u8 OnProcess() override;
     void Render(matrix* viewMatrix) override;
-    void SendMsg(CGameObject*, int, msgparam_t, msgparam_t, msgparam_t) override {}
+    void SendMsg(CGameObject*, int, msgparam_t, msgparam_t, msgparam_t) override;
 
     vector3d ResolveBasePosition() const;
     float ResolveBaseRotation() const;
@@ -174,6 +175,8 @@ private:
         MapMagicZone,
         MapParticle,
         SuperAngel,
+        SightAura,
+        FireBoltRain,
     };
 
     class CWorldAnchor : public CRenderObject {
@@ -200,6 +203,8 @@ private:
     void SpawnSuperAngelVariant(int variant, int birthFrame);
     void SpawnSuperAngelBurst(int startAngle);
     void UpdateSuperAngel();
+    void SpawnSightAura();
+    void SpawnFireBoltRain();
 
     std::list<CEffectPrim*> m_primList;
     CRenderObject* m_master;
@@ -219,6 +224,7 @@ private:
     float m_tickCarryMs;
     vector3d m_cachedPos;
     vector3d m_deltaPos;
+    vector3d m_targetPos;
     float m_param[4];
     float m_emitSpeed;
     float m_longitude;
@@ -235,6 +241,7 @@ private:
     std::array<int, 128> m_activeAniKeyFrame;
     std::array<int, 128> m_activeAniKeyAppliedState;
     std::array<u8, 128> m_activeAniKeyZeroBlend;
+    bool m_hasTargetPos;
 };
 
 CRagEffect* CreateWorldRagEffect(const C3dWorldRes::effectSrcInfo& source);

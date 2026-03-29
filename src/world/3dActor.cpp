@@ -386,12 +386,12 @@ u32 MakeLitColor(const vector3d& light, float alpha, bool dimmed)
 
 vector3d ComputeLightColor(const vector3d& normal, const vector3d& lightDir, const vector3d& diffuseCol, const vector3d& ambientCol)
 {
-    const vector3d normalizedLight = NormalizeVec3(vector3d{ lightDir.x, lightDir.y, lightDir.z });
-    const float diffuse = (std::max)(0.0f, DotVec3(normal, normalizedLight));
+    (void)normal;
+    (void)lightDir;
     return vector3d{
-        ClampFloat(ambientCol.x + diffuseCol.x * diffuse, 0.0f, 1.0f),
-        ClampFloat(ambientCol.y + diffuseCol.y * diffuse, 0.0f, 1.0f),
-        ClampFloat(ambientCol.z + diffuseCol.z * diffuse, 0.0f, 1.0f)
+        ClampFloat(ambientCol.x + diffuseCol.x, 0.0f, 1.0f),
+        ClampFloat(ambientCol.y + diffuseCol.y, 0.0f, 1.0f),
+        ClampFloat(ambientCol.z + diffuseCol.z, 0.0f, 1.0f)
     };
 }
 

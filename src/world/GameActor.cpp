@@ -2250,6 +2250,24 @@ u8 CGameActor::ProcessState() {
             m_attackMotion = -1.0f;
         }
         break;
+    case kGameActorSkillStateId:
+        m_isCounter = 0;
+        m_isMotionFreezed = 0;
+        ProcessMotion();
+        if (m_isMotionFinished) {
+            SetState(0);
+        }
+        break;
+    case kGameActorCastingStateId:
+        m_isCounter = 0;
+        m_isMotionFreezed = 0;
+        ProcessMotion();
+        if (m_skillRechargeEndTick != 0 && timeGetTime() > m_skillRechargeEndTick) {
+            m_skillRechargeStartTick = 0;
+            m_skillRechargeEndTick = 0;
+            SetState(0);
+        }
+        break;
     case kDeathStateId:
         m_isMotionFreezed = 0;
         m_isForceState = 0;
@@ -2291,6 +2309,45 @@ void CGameActor::SendMsg(CGameObject* src, int msg, msgparam_t par1, msgparam_t 
     case 28:
         SetState(kDeathStateId);
         return;
+    case 81:
+        m_targetGid = static_cast<u32>(par1);
+        return;
+    case 82: {
+        const u32 now = timeGetTime();
+        m_skillRechargeStartTick = now;
+        m_skillRechargeEndTick = now + static_cast<u32>((std::max)(0, static_cast<int>(par1)));
+        return;
+    }
+    case 83:
+        m_skillRechargeStartTick = 0;
+        m_skillRechargeEndTick = 0;
+        return;
+    case 85:
+        if (m_beginSpellEffect && static_cast<int>(par1) > 0) {
+            m_beginSpellEffect->DetachFromMaster();
+            m_beginSpellEffect = nullptr;
+        }
+        if (!m_beginSpellEffect && static_cast<int>(par1) > 0) {
+            m_beginSpellEffect = LaunchEffect(static_cast<int>(par1), vector3d{}, 0.0f);
+        }
+        if (m_beginSpellEffect) {
+            m_beginSpellEffect->SendMsg(m_beginSpellEffect, 80, par2, 0, 0);
+        }
+        return;
+    case 86:
+        if (!m_magicTargetEffect && static_cast<int>(par1) > 0) {
+            m_magicTargetEffect = LaunchEffect(static_cast<int>(par1), vector3d{}, 0.0f);
+        }
+        if (m_magicTargetEffect) {
+            m_magicTargetEffect->SendMsg(m_magicTargetEffect, 80, par2, 0, 0);
+        }
+        return;
+    case 87:
+        if (m_magicTargetEffect) {
+            m_magicTargetEffect->DetachFromMaster();
+            m_magicTargetEffect = nullptr;
+        }
+        return;
     case 98:
         m_willBeDead = 0;
         m_vanishTime = 0;
@@ -2327,6 +2384,20 @@ void CGameActor::SetState(int state) {
     switch (state) {
     case 0:
         m_attackMotion = -1.0f;
+        m_isMotionFreezed = 0;
+        return;
+    case kGameActorSkillStateId:
+        m_isMoving = 0;
+        m_path.Reset();
+        m_isMotionFinished = 0;
+        m_isMotionFreezed = 0;
+        SetAction(80, 3, 1);
+        m_attackMotion = static_cast<float>(GetAttackMotion());
+        return;
+    case kGameActorCastingStateId:
+        m_isMoving = 0;
+        m_path.Reset();
+        m_isMotionFinished = 0;
         m_isMotionFreezed = 0;
         return;
     case kHitReactionStateId:

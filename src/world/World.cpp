@@ -2864,6 +2864,11 @@ float DotVec3(const vector3d& a, const vector3d& b)
     return a.x * b.x + a.y * b.y + a.z * b.z;
 }
 
+float ClampUnitFloat(float value)
+{
+    return (std::max)(0.0f, (std::min)(1.0f, value));
+}
+
 vector3d CrossVec3(const vector3d& a, const vector3d& b)
 {
     return vector3d{
@@ -3048,6 +3053,38 @@ u32 PackColor(u8 a, u8 r, u8 g, u8 b)
         | (static_cast<u32>(r) << 16)
         | (static_cast<u32>(g) << 8)
         | static_cast<u32>(b);
+}
+
+vector3d UnpackSurfaceColor(u32 color)
+{
+    if (color == 0u) {
+        return vector3d{ 1.0f, 1.0f, 1.0f };
+    }
+
+    return vector3d{
+        static_cast<float>((color >> 16) & 0xFFu) / 255.0f,
+        static_cast<float>((color >> 8) & 0xFFu) / 255.0f,
+        static_cast<float>(color & 0xFFu) / 255.0f
+    };
+}
+
+u32 MakeGroundLitColor(const vector3d& normal,
+    const vector3d& lightDir,
+    const vector3d& diffuseCol,
+    const vector3d& ambientCol,
+    u32 surfaceColor)
+{
+    (void)normal;
+    (void)lightDir;
+    const vector3d baseColor = UnpackSurfaceColor(surfaceColor);
+    const float litR = ClampUnitFloat((ambientCol.x + diffuseCol.x) * baseColor.x);
+    const float litG = ClampUnitFloat((ambientCol.y + diffuseCol.y) * baseColor.y);
+    const float litB = ClampUnitFloat((ambientCol.z + diffuseCol.z) * baseColor.z);
+    return PackColor(
+        255,
+        static_cast<u8>(litR * 255.0f + 0.5f),
+        static_cast<u8>(litG * 255.0f + 0.5f),
+        static_cast<u8>(litB * 255.0f + 0.5f));
 }
 
 u32 SampleLmIntensity(const CLMInfo& lminfo, int y, int x)
@@ -3910,6 +3947,15 @@ void C3dGround::FlushGround(const matrix& viewMatrix)
             verts = g_renderer.BorrowVerts(4);
         }
         bool visible = true;
+        const vector3d surfaceNormal = NormalizeVec3(CrossVec3(
+            SubtractVec3(worldVerts[1], worldVerts[0]),
+            SubtractVec3(worldVerts[2], worldVerts[0])));
+        const u32 litColor = MakeGroundLitColor(
+            surfaceNormal,
+            m_lightDir,
+            m_diffuseCol,
+            m_ambientCol,
+            surface->color);
         for (int i = 0; i < 4; ++i) {
             tlvertex3d projected{};
             if (!ProjectPoint(g_renderer, viewMatrix, worldVerts[i], &projected)) {
@@ -3923,7 +3969,7 @@ void C3dGround::FlushGround(const matrix& viewMatrix)
             if (kDebugGroundFlatColors) {
                 dstVert->color = DebugGroundColor(surface->textureId);
             } else {
-                dstVert->color = 0xFFFFFFFFu;
+                dstVert->color = litColor;
             }
             if (kDebugGroundCanonicalUvs || kDebugGroundTestTexture) {
                 static const float kCanonicalU[4] = { 0.0f, 1.0f, 0.0f, 1.0f };
@@ -4481,6 +4527,9 @@ bool CWorld::BuildGroundFromGnd(const CGndRes& gnd,
     float waveHeight)
 {
     ClearGround();
+    m_bgLightDir = lightDir;
+    m_bgDiffuseCol = diffuseCol;
+    m_bgAmbientCol = ambientCol;
 
     C3dGround* ground = new C3dGround();
     if (!ground) {
@@ -4495,6 +4544,18 @@ bool CWorld::BuildGroundFromGnd(const CGndRes& gnd,
     ground->m_attr = m_attr;
     ground->SetWaterInfo(waterLevel, waterType, waterAnimSpeed, wavePitch, waveSpeed, waveHeight);
     m_ground = ground;
+    DbgLog("[World] applied map lighting dir=(%.3f,%.3f,%.3f) diffuse=(%.3f,%.3f,%.3f) ambient=(%.3f,%.3f,%.3f) waterLevel=%.2f waterType=%d\n",
+        lightDir.x,
+        lightDir.y,
+        lightDir.z,
+        diffuseCol.x,
+        diffuseCol.y,
+        diffuseCol.z,
+        ambientCol.x,
+        ambientCol.y,
+        ambientCol.z,
+        waterLevel,
+        waterType);
 
     RebuildSceneGraph();
     return true;

@@ -65,6 +65,8 @@ struct PROCEEDTYPE { int type; };
 
 constexpr int kGameActorAttackStateId = 2;
 constexpr int kGameActorDeathStateId = 3;
+constexpr int kGameActorSkillStateId = 7;
+constexpr int kGameActorCastingStateId = 8;
 
 //===========================================================================
 // Actor Hierarchy

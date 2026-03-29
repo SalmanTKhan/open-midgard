@@ -242,6 +242,12 @@ public:
     int m_attackChaseSourceCellY;
     int m_attackChaseRange;
     int m_hasAttackChaseHint;
+    u32 m_skillChaseTargetGid;
+    u32 m_lastSkillChaseRequestTick;
+    int m_skillChaseSkillId;
+    int m_skillChaseSkillLevel;
+    int m_skillChaseRange;
+    int m_hasSkillChase;
     int m_mapLoadingStage;
     u32 m_mapLoadingStartTick;
     u32 m_mapLoadingAckTick;

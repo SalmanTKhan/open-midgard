@@ -22,6 +22,7 @@
 #include "ui/UIStatusWnd.h"
 #include "ui/UIWindowMgr.h"
 #include "world/GameActor.h"
+#include "world/RagEffect.h"
 #include "world/World.h"
 
 #include <algorithm>
@@ -124,8 +125,10 @@ u16 ReadLE16(const u8* data);
 u32 ReadLE32(const u8* data);
 float TileToWorldCoordX(const CWorld* world, int tileX);
 float TileToWorldCoordZ(const CWorld* world, int tileY);
+float ResolveActorHeight(const CWorld* world, float worldX, float worldZ);
 float PacketDirToRotationDegrees(int dir);
 bool ApplySelfStatusUpdate(CGameMode& mode, u32 statusType, u32 value);
+void ClearAttachedSkillEffects(CGameActor* actor);
 
 std::string ToLowerAsciiStatus(std::string value)
 {
@@ -369,6 +372,13 @@ void HandleSkillCastCancel(CGameMode& mode, const PacketView& packet)
         return;
     }
 
+    ClearAttachedSkillEffects(actor);
+    actor->m_isMotionFreezed = 0;
+    actor->m_freezeEndTick = 0;
+    actor->m_attackMotion = -1.0f;
+    if (actor->m_stateId == kGameActorAttackStateId) {
+        actor->m_stateId = 0;
+    }
     actor->SendMsg(actor, 84, 0, 0, 0);
     actor->SendMsg(actor, 87, 0, 0, 0);
     actor->SendMsg(actor, 83, 0, 0, 0);
@@ -376,6 +386,32 @@ void HandleSkillCastCancel(CGameMode& mode, const PacketView& packet)
 
 void HandleIgnorePacket(CGameMode&, const PacketView&)
 {
+}
+
+void HandlePacket043F(CGameMode&, const PacketView& packet)
+{
+    if (!packet.data || packet.packetLength <= 0) {
+        return;
+    }
+
+    char hexBytes[3 * 32 + 1]{};
+    const int bytesToDump = (std::min)(static_cast<int>(packet.packetLength), 32);
+    int writeOffset = 0;
+    for (int index = 0; index < bytesToDump && writeOffset + 4 < static_cast<int>(sizeof(hexBytes)); ++index) {
+        const int written = std::snprintf(
+            hexBytes + writeOffset,
+            sizeof(hexBytes) - static_cast<size_t>(writeOffset),
+            index == 0 ? "%02X" : " %02X",
+            static_cast<unsigned int>(packet.data[index]));
+        if (written <= 0) {
+            break;
+        }
+        writeOffset += written;
+    }
+
+    DbgLog("[GameMode] pkt043F len=%u bytes=%s\n",
+        static_cast<unsigned int>(packet.packetLength),
+        hexBytes);
 }
 
 int ResolvePotionEffectId(unsigned int itemId)
@@ -2426,6 +2462,67 @@ void EmitCombatNumber(CGameActor* sourceActor, CGameActor* targetActor, int dama
         ResolveCombatNumberKind(damage, actionType));
 }
 
+u16 ResolveDisplayedSkillHitCount(u16 skillId, u16 level, u16 div)
+{
+    if (div > 1) {
+        return div;
+    }
+
+    switch (skillId) {
+    case 17: // MG_FIREBOLT
+    case 19: // MG_COLDBOLT
+    case 20: // MG_LIGHTNINGBOLT
+        return level > 1 ? level : 1;
+    default:
+        return div > 0 ? div : 1;
+    }
+}
+
+void EmitCombatNumbers(CGameActor* sourceActor, CGameActor* targetActor, int damage, u8 actionType, u16 hitCountRaw)
+{
+    const int hitCount = (std::max)(1, static_cast<int>(hitCountRaw));
+    if (hitCount <= 1 || damage == 0) {
+        EmitCombatNumber(sourceActor, targetActor, damage, actionType);
+        return;
+    }
+
+    const int absDamage = damage < 0 ? -damage : damage;
+    const int sign = damage < 0 ? -1 : 1;
+    const int basePerHit = absDamage / hitCount;
+    int remainder = absDamage % hitCount;
+    for (int hitIndex = 0; hitIndex < hitCount; ++hitIndex) {
+        int perHit = basePerHit;
+        if (remainder > 0) {
+            ++perHit;
+            --remainder;
+        }
+        EmitCombatNumber(sourceActor, targetActor, perHit * sign, actionType);
+    }
+}
+
+void EmitSkillImpactEffect(CGameActor* targetActor, u16 skillId)
+{
+    if (!targetActor) {
+        return;
+    }
+
+    switch (skillId) {
+    case 17: // MG_FIREBOLT
+        targetActor->LaunchEffect(49, vector3d{}, 0.0f);
+        break;
+    default:
+        break;
+    }
+}
+
+void EmitSkillImpactEffects(CGameActor* targetActor, u16 skillId, u16 hitCountRaw)
+{
+    const int hitCount = (std::max)(1, static_cast<int>(hitCountRaw));
+    for (int hitIndex = 0; hitIndex < hitCount; ++hitIndex) {
+        EmitSkillImpactEffect(targetActor, skillId);
+    }
+}
+
 void QueueCombatHitReaction(CGameActor* sourceActor, CGameActor* targetActor, int attackedMT, int damage, u8 actionType)
 {
     if (!targetActor || damage == 0 || actionType == kNotifyActLuckyDodge) {
@@ -2951,12 +3048,466 @@ float TileToWorldCoordZ(const CWorld* world, int tileY)
     return (static_cast<float>(tileY) - static_cast<float>(height) * 0.5f) * zoom + zoom * 0.5f;
 }
 
+constexpr int kDefaultSkillCastBeginEffectId = 16;
+
+int ResolveSkillBeginEffectId(u16 skillId, u32 property)
+{
+    int effectId = kDefaultSkillCastBeginEffectId;
+
+    switch (skillId) {
+    // Priest/Acolyte self-buff family follows the reference GetSkillActionInfo2 mapping.
+    case 22: // AL_DP
+    case 23: // AL_DEMONBANE
+    case 24: // AL_RUWACH
+    case 28: // AL_HEAL
+    case 29: // AL_INCAGI
+    case 30: // AL_DECAGI
+    case 32: // AL_CRUCIS
+    case 33: // AL_ANGELUS
+    case 34: // AL_BLESSING
+    case 35: // AL_CURE
+        effectId = 12;
+        break;
+    case 45:
+        effectId = 43;
+        break;
+    case 57:
+        effectId = 144;
+        break;
+    case 59:
+        return -1;
+    default:
+        break;
+    }
+
+    if (effectId == 12) {
+        switch (property) {
+        case 1: return 54;
+        case 2: return 56;
+        case 3: return 55;
+        case 4: return 57;
+        case 5: return 59;
+        case 6: return 58;
+        default:
+            break;
+        }
+    }
+
+    return effectId;
+}
+
+int ResolveSkillMotionType(u16 skillId)
+{
+    switch (skillId) {
+    case 24: // AL_RUWACH
+    case 34: // AL_BLESSING
+        return kGameActorSkillStateId;
+    case 29: // AL_INCAGI
+    case 151:
+    case 304:
+        return 0;
+    default:
+        return kGameActorSkillStateId;
+    }
+}
+
+int ResolveSkillCastMotionType(u16 skillId)
+{
+    switch (skillId) {
+    case 29: // AL_INCAGI
+        return kGameActorSkillStateId;
+    case 33: // AL_ANGELUS
+        return kGameActorCastingStateId;
+    case 34: // AL_BLESSING
+        return 0;
+    default:
+        return kGameActorCastingStateId;
+    }
+}
+
+int ResolveGroundSkillEffectId(u16 skillId, u16 level);
+
+int ResolveSkillVisibleEffectId(u16 skillId, u16 levelOrAmount)
+{
+    switch (skillId) {
+    case 24: // AL_RUWACH
+        return 24;
+    case 33: // AL_ANGELUS
+        return 41;
+    case 35: // AL_CURE
+        return 66;
+    default: {
+        const int beginEffectId = ResolveSkillBeginEffectId(skillId, 0);
+        return beginEffectId >= 0 ? beginEffectId : ResolveGroundSkillEffectId(skillId, levelOrAmount);
+    }
+    }
+}
+
+void InvalidateActorBillboard(CGameActor* actor)
+{
+    if (CPc* pcActor = dynamic_cast<CPc*>(actor)) {
+        pcActor->InvalidateBillboard();
+    }
+}
+
+void ClearAttachedSkillEffects(CGameActor* actor)
+{
+    if (!actor) {
+        return;
+    }
+
+    if (actor->m_beginSpellEffect) {
+        actor->m_beginSpellEffect->DetachFromMaster();
+        actor->m_beginSpellEffect = nullptr;
+    }
+    if (actor->m_magicTargetEffect) {
+        actor->m_magicTargetEffect->DetachFromMaster();
+        actor->m_magicTargetEffect = nullptr;
+    }
+}
+
+void StartSkillSourceAnimation(CGameActor* actor, const vector3d* targetPos, int attackMotionMs)
+{
+    if (!actor) {
+        return;
+    }
+
+    actor->m_isSitting = 0;
+    actor->m_targetGid = 0;
+    StopActorMovementForAction(actor);
+    if (targetPos) {
+        FaceActorTowardPosition(actor, *targetPos);
+    }
+    actor->m_stateStartTick = timeGetTime();
+    actor->SetModifyFactorOfmotionSpeed(attackMotionMs > 0 ? attackMotionMs : kDefaultAttackMotionTime);
+    actor->SetAction(actor->m_isPc ? 80 : 16, 4, 1);
+    actor->m_stateId = kGameActorAttackStateId;
+    actor->ProcessMotion();
+    actor->m_attackMotion = static_cast<float>(actor->GetAttackMotion());
+    InvalidateActorBillboard(actor);
+}
+
+void StartSkillStateAnimation(CGameActor* actor, int stateId, u32 targetGid, const vector3d* targetPos)
+{
+    if (!actor) {
+        return;
+    }
+
+    actor->m_isSitting = 0;
+    actor->m_targetGid = targetGid;
+    StopActorMovementForAction(actor);
+    if (targetPos) {
+        FaceActorTowardPosition(actor, *targetPos);
+    }
+    actor->SetState(stateId);
+    InvalidateActorBillboard(actor);
+}
+
+vector3d ResolveSkillCellWorldPosition(const CWorld* world, int cellX, int cellY)
+{
+    const float worldX = TileToWorldCoordX(world, cellX);
+    const float worldZ = TileToWorldCoordZ(world, cellY);
+    return vector3d{
+        worldX,
+        ResolveActorHeight(world, worldX, worldZ),
+        worldZ
+    };
+}
+
+int ResolveGroundSkillEffectId(u16 skillId, u16 level)
+{
+    switch (skillId) {
+    case 21: return 30;
+    case 25: return 141;
+    case 69: return 91;
+    case 70: return 83;
+    case 79: return 113;
+    case 83: return 92;
+    case 85: return 90;
+    case 87: return 74;
+    case 89: return 89;
+    case 91: return 142;
+    case 92: return 95;
+    case 110: return 102;
+    case 111: return 98;
+    case 286: return 236;
+    case 287: return 237;
+    case 288: return 238;
+    case 478:
+        if (level >= 10) {
+            return 499;
+        }
+        if (level >= 6) {
+            return 498;
+        }
+        return 497;
+    case 694: return 91;
+    default:
+        return static_cast<int>(skillId);
+    }
+}
+
+CRagEffect* SpawnWorldSkillEffect(CGameMode& mode, int effectId, const vector3d& position)
+{
+    if (effectId < 0 || !mode.m_world) {
+        return nullptr;
+    }
+
+    CRagEffect* effect = new CRagEffect();
+    if (!effect) {
+        return nullptr;
+    }
+
+    effect->InitAtWorldPosition(effectId, position);
+    mode.m_world->m_gameObjectList.push_back(effect);
+    return effect;
+}
+
 float ResolveActorHeight(const CWorld* world, float worldX, float worldZ)
 {
     if (world && world->m_attr) {
         return world->m_attr->GetHeight(worldX, worldZ);
     }
     return 0.0f;
+}
+
+void HandleSkillCastAck(CGameMode& mode, const PacketView& packet)
+{
+    if (!packet.data || packet.packetLength < 24) {
+        return;
+    }
+
+    const u32 srcGid = ReadLE32(packet.data + 2);
+    const u32 dstGid = ReadLE32(packet.data + 6);
+    const int cellX = static_cast<int>(ReadLE16(packet.data + 10));
+    const int cellY = static_cast<int>(ReadLE16(packet.data + 12));
+    const u16 skillId = ReadLE16(packet.data + 14);
+    const PLAYER_SKILL_INFO* castSkillInfo = g_session.GetSkillItemBySkillId(static_cast<int>(skillId));
+    const u16 castLevel = static_cast<u16>(castSkillInfo && castSkillInfo->level > 0 ? castSkillInfo->level : 1);
+    const u32 property = ReadLE32(packet.data + 16);
+    const int castTimeMs = static_cast<int>(ReadLE32(packet.data + 20));
+
+    CGameActor* sourceActor = ResolveCombatActor(mode, srcGid, true);
+    CGameActor* targetActor = dstGid != 0 ? ResolveCombatActor(mode, dstGid, true) : nullptr;
+    if (!sourceActor) {
+        DbgLog("[GameMode] skill cast ack unresolved src=%u dst=%u skill=%u\n",
+            srcGid,
+            dstGid,
+            static_cast<unsigned int>(skillId));
+        return;
+    }
+
+    const vector3d targetPos = targetActor
+        ? targetActor->m_pos
+        : ResolveSkillCellWorldPosition(mode.m_world, cellX, cellY);
+    ClearAttachedSkillEffects(sourceActor);
+    StartSkillStateAnimation(sourceActor, ResolveSkillCastMotionType(skillId), dstGid, &targetPos);
+    const int beginEffectId = ResolveSkillBeginEffectId(skillId, property);
+    if (beginEffectId >= 0) {
+        sourceActor->SendMsg(sourceActor, 85, beginEffectId, castTimeMs >> 4, 0);
+    }
+    if (skillId == 17 && targetActor && targetActor != sourceActor) { // MG_FIREBOLT
+        if (CRagEffect* effect = sourceActor->LaunchEffect(24, vector3d{}, 0.0f)) {
+            effect->SendMsg(effect, 44, castLevel > 0 ? castLevel : 1, 0, 0);
+            effect->SendMsg(effect, 14, reinterpret_cast<msgparam_t>(&targetActor->m_pos), 0, 0);
+        }
+    }
+    if (targetActor && targetActor != sourceActor) {
+        targetActor->SendMsg(targetActor, 86, 60, castTimeMs >> 4, 0);
+    }
+    sourceActor->SendMsg(sourceActor, 82, castTimeMs, 0, 0);
+
+    DbgLog("[GameMode] skill cast ack src=%u dst=%u skill=%u property=%u castMs=%d cell=(%d,%d)\n",
+        srcGid,
+        dstGid,
+        static_cast<unsigned int>(skillId),
+        static_cast<unsigned int>(property),
+        castTimeMs,
+        cellX,
+        cellY);
+}
+
+void HandleSkillDamageNotify(CGameMode& mode, const PacketView& packet)
+{
+    if (!packet.data || (packet.packetId == 0x0114 && packet.packetLength < 31) || (packet.packetId == 0x01DE && packet.packetLength < 33)) {
+        return;
+    }
+
+    const bool isLongDamage = packet.packetId == 0x01DE;
+    const u16 skillId = ReadLE16(packet.data + 2);
+    const u32 srcGid = ReadLE32(packet.data + 4);
+    const u32 dstGid = ReadLE32(packet.data + 8);
+    const int attackMT = static_cast<int>(ReadLE32(packet.data + 16));
+    const int attackedMT = static_cast<int>(ReadLE32(packet.data + 20));
+    const int damage = isLongDamage
+        ? static_cast<int>(ReadLE32(packet.data + 24))
+        : static_cast<int>(static_cast<int16_t>(ReadLE16(packet.data + 24)));
+    const u16 level = ReadLE16(packet.data + (isLongDamage ? 28 : 26));
+    const u16 div = ReadLE16(packet.data + (isLongDamage ? 30 : 28));
+    const u16 displayHitCount = ResolveDisplayedSkillHitCount(skillId, level, div);
+    const u8 actionType = packet.data[isLongDamage ? 32 : 30];
+
+    CGameActor* sourceActor = ResolveCombatActor(mode, srcGid, true);
+    CGameActor* targetActor = ResolveCombatActor(mode, dstGid, true);
+    if (!sourceActor || !targetActor) {
+        DbgLog("[GameMode] skill damage unresolved src=%u dst=%u skill=%u opcode=0x%04X\n",
+            srcGid,
+            dstGid,
+            static_cast<unsigned int>(skillId),
+            packet.packetId);
+        return;
+    }
+
+    ClearAttachedSkillEffects(sourceActor);
+    StartSkillSourceAnimation(sourceActor, &targetActor->m_pos, attackMT);
+    QueueCombatHitReaction(sourceActor, targetActor, attackedMT, damage, actionType);
+    EmitSkillImpactEffects(targetActor, skillId, displayHitCount);
+    EmitCombatNumbers(sourceActor, targetActor, damage, actionType, displayHitCount);
+
+    DbgLog("[GameMode] skill damage opcode=0x%04X src=%u dst=%u skill=%u level=%u damage=%d div=%u type=%u\n",
+        packet.packetId,
+        srcGid,
+        dstGid,
+        static_cast<unsigned int>(skillId),
+        static_cast<unsigned int>(level),
+        damage,
+        static_cast<unsigned int>(div),
+        static_cast<unsigned int>(actionType));
+}
+
+void HandleSkillDamagePositionNotify(CGameMode& mode, const PacketView& packet)
+{
+    if (!packet.data || packet.packetLength < 35) {
+        return;
+    }
+
+    const u16 skillId = ReadLE16(packet.data + 2);
+    const u32 srcGid = ReadLE32(packet.data + 4);
+    const u32 dstGid = ReadLE32(packet.data + 8);
+    const int attackMT = static_cast<int>(ReadLE32(packet.data + 16));
+    const int attackedMT = static_cast<int>(ReadLE32(packet.data + 20));
+    const int cellX = static_cast<int>(ReadLE16(packet.data + 24));
+    const int cellY = static_cast<int>(ReadLE16(packet.data + 26));
+    const int damage = static_cast<int>(static_cast<int16_t>(ReadLE16(packet.data + 28)));
+    const u16 level = ReadLE16(packet.data + 30);
+    const u16 div = ReadLE16(packet.data + 32);
+    const u16 displayHitCount = ResolveDisplayedSkillHitCount(skillId, level, div);
+    const u8 actionType = packet.data[34];
+
+    CGameActor* sourceActor = ResolveCombatActor(mode, srcGid, true);
+    CGameActor* targetActor = ResolveCombatActor(mode, dstGid, true);
+    const vector3d impactPos = ResolveSkillCellWorldPosition(mode.m_world, cellX, cellY);
+
+    if (sourceActor) {
+        ClearAttachedSkillEffects(sourceActor);
+        StartSkillSourceAnimation(sourceActor, &impactPos, attackMT);
+    }
+    if (targetActor) {
+        QueueCombatHitReaction(sourceActor, targetActor, attackedMT, damage, actionType);
+        EmitSkillImpactEffects(targetActor, skillId, displayHitCount);
+        EmitCombatNumbers(sourceActor, targetActor, damage, actionType, displayHitCount);
+    }
+
+    SpawnWorldSkillEffect(mode, ResolveGroundSkillEffectId(skillId, level), impactPos);
+    DbgLog("[GameMode] skill damage pos src=%u dst=%u skill=%u level=%u damage=%d div=%u cell=(%d,%d)\n",
+        srcGid,
+        dstGid,
+        static_cast<unsigned int>(skillId),
+        static_cast<unsigned int>(level),
+        damage,
+        static_cast<unsigned int>(div),
+        cellX,
+        cellY);
+}
+
+void HandleGroundSkillNotify(CGameMode& mode, const PacketView& packet)
+{
+    if (!packet.data || packet.packetLength < 18 || !mode.m_world) {
+        return;
+    }
+
+    const u16 skillId = ReadLE16(packet.data + 2);
+    const u32 srcGid = ReadLE32(packet.data + 4);
+    const u16 level = ReadLE16(packet.data + 8);
+    const int cellX = static_cast<int>(ReadLE16(packet.data + 10));
+    const int cellY = static_cast<int>(ReadLE16(packet.data + 12));
+
+    CGameActor* sourceActor = ResolveCombatActor(mode, srcGid, true);
+    const vector3d worldPos = ResolveSkillCellWorldPosition(mode.m_world, cellX, cellY);
+    if (sourceActor) {
+        StartSkillSourceAnimation(sourceActor, &worldPos, kDefaultAttackMotionTime);
+    }
+    SpawnWorldSkillEffect(mode, ResolveGroundSkillEffectId(skillId, level), worldPos);
+
+    DbgLog("[GameMode] ground skill src=%u skill=%u level=%u cell=(%d,%d)\n",
+        srcGid,
+        static_cast<unsigned int>(skillId),
+        static_cast<unsigned int>(level),
+        cellX,
+        cellY);
+}
+
+void HandleSkillNoDamageNotify(CGameMode& mode, const PacketView& packet)
+{
+    if (!packet.data || packet.packetLength < 15) {
+        return;
+    }
+
+    const u16 skillId = ReadLE16(packet.data + 2);
+    const u16 levelOrAmount = ReadLE16(packet.data + 4);
+    const u32 dstGid = ReadLE32(packet.data + 6);
+    const u32 srcGid = ReadLE32(packet.data + 10);
+    const u8 result = packet.data[14];
+
+    CGameActor* sourceActor = srcGid != 0 ? ResolveCombatActor(mode, srcGid, true) : nullptr;
+    CGameActor* targetActor = ResolveCombatActor(mode, dstGid, true);
+    if (sourceActor && targetActor) {
+        ClearAttachedSkillEffects(sourceActor);
+        StartSkillStateAnimation(sourceActor, ResolveSkillMotionType(skillId), dstGid, &targetActor->m_pos);
+    }
+    if (targetActor && result != 0) {
+        const int effectId = ResolveSkillVisibleEffectId(skillId, levelOrAmount);
+        if (sourceActor == targetActor && effectId >= 0) {
+            targetActor->SendMsg(targetActor, 85, effectId, 0, 0);
+        } else {
+            ClearAttachedSkillEffects(targetActor);
+            targetActor->SendMsg(targetActor, 86,
+                effectId >= 0 ? effectId : ResolveGroundSkillEffectId(skillId, levelOrAmount),
+                0,
+                0);
+        }
+    }
+
+    DbgLog("[GameMode] skill nodamage src=%u dst=%u skill=%u value=%u result=%u\n",
+        srcGid,
+        dstGid,
+        static_cast<unsigned int>(skillId),
+        static_cast<unsigned int>(levelOrAmount),
+        static_cast<unsigned int>(result));
+}
+
+void HandleSkillUnitSet(CGameMode& mode, const PacketView& packet)
+{
+    if (!packet.data || packet.packetLength < 16 || !mode.m_world) {
+        return;
+    }
+
+    const u32 unitAid = ReadLE32(packet.data + 2);
+    const u32 srcGid = ReadLE32(packet.data + 6);
+    const int cellX = static_cast<int>(ReadLE16(packet.data + 10));
+    const int cellY = static_cast<int>(ReadLE16(packet.data + 12));
+    const u8 unitId = packet.data[14];
+
+    const vector3d worldPos = ResolveSkillCellWorldPosition(mode.m_world, cellX, cellY);
+    SpawnWorldSkillEffect(mode, static_cast<int>(unitId), worldPos);
+
+    DbgLog("[GameMode] skill unit opcode=0x%04X unitAid=%u src=%u unitId=%u cell=(%d,%d)\n",
+        packet.packetId,
+        unitAid,
+        srcGid,
+        static_cast<unsigned int>(unitId),
+        cellX,
+        cellY);
 }
 
 void DecodePosDir(const u8* src, int& posX, int& posY, int& dir)
@@ -5352,8 +5903,11 @@ void RegisterDefaultGameModePacketHandlers(CGameModePacketRouter& router)
     router.Register(0x0239, HandlePlayerSkillUpdate);
     router.Register(0x029D, HandlePlayerSkillList);
     router.Register(0x029E, HandlePlayerSkillUpdate);
+    router.Register(0x0114, HandleSkillDamageNotify);
+    router.Register(0x0115, HandleSkillDamagePositionNotify);
+    router.Register(0x0117, HandleGroundSkillNotify);
     router.Register(0x0119, HandleActorStateChange);
-    router.Register(0x011A, HandleIgnorePacket);
+    router.Register(0x011A, HandleSkillNoDamageNotify);
     router.Register(0x0139, HandleAttackFailureForDistance);
     router.Register(0x013A, HandleAttackRange);
     router.Register(0x0229, HandleActorStateChange);
@@ -5398,6 +5952,7 @@ void RegisterDefaultGameModePacketHandlers(CGameModePacketRouter& router)
     router.Register(0x02D0, HandleEquipInventoryList);
     router.Register(0x02E8, HandleNormalInventoryList);
     router.Register(0x07FA, HandleItemRemove);
+    router.Register(0x0100, HandleIgnorePacket);
 
     // Quit/return-to-login transitions.
     router.Register(0x0081, HandleBanDisconnect);
@@ -5412,11 +5967,11 @@ void RegisterDefaultGameModePacketHandlers(CGameModePacketRouter& router)
     router.Register(0x00BE, HandleStatusPointCostUpdate);
     router.Register(0x00C0, HandleIgnorePacket);
     router.Register(0x013D, HandleRecovery);
-    router.Register(0x013E, HandleIgnorePacket);
+    router.Register(0x013E, HandleSkillCastAck);
     router.Register(0x01B0, HandleIgnorePacket);
     router.Register(0x0106, HandleIgnorePacket);
     router.Register(0x0104, HandleIgnorePacket);
-    router.Register(0x011F, HandleIgnorePacket);
+    router.Register(0x011F, HandleSkillUnitSet);
     router.Register(0x0120, HandleIgnorePacket);
     router.Register(0x0131, HandleIgnorePacket);
     router.Register(0x0132, HandleIgnorePacket);
@@ -5425,11 +5980,11 @@ void RegisterDefaultGameModePacketHandlers(CGameModePacketRouter& router)
     router.Register(0x019B, HandleNotifyEffect);
     router.Register(0x01B9, HandleSkillCastCancel);
     router.Register(0x0192, HandleIgnorePacket);
-    router.Register(0x01C9, HandleIgnorePacket);
+    router.Register(0x01C9, HandleSkillUnitSet);
     router.Register(0x01CF, HandleIgnorePacket);
     router.Register(0x01D0, HandleIgnorePacket);
     router.Register(0x01D7, HandleActorSpriteChange);
-    router.Register(0x01DE, HandleIgnorePacket);
+    router.Register(0x01DE, HandleSkillDamageNotify);
     router.Register(0x01E1, HandleIgnorePacket);
     router.Register(0x01F3, HandleNotifyEffect2);
     router.Register(0x0201, HandleIgnorePacket);
@@ -5446,6 +6001,7 @@ void RegisterDefaultGameModePacketHandlers(CGameModePacketRouter& router)
     router.Register(0x02D7, HandleIgnorePacket);
     router.Register(0x02DA, HandleIgnorePacket);
     router.Register(0x02E1, HandleActorActionNotify);
+    router.Register(0x043F, HandlePacket043F);
     router.Register(0x0814, HandleIgnorePacket);
     router.Register(0x0816, HandleIgnorePacket);
 

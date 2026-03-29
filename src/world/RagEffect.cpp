@@ -1290,6 +1290,12 @@ void AddXformDelta(KAC_XFORMDATA* target, const KAC_XFORMDATA& delta)
 
 std::string ResolveStrName(int effectId)
 {
+    if (effectId == 49) {
+        char buffer[64]{};
+        std::snprintf(buffer, sizeof(buffer), "FireHit%d.str", 1 + (rand() % 3));
+        return ResolveWorldStrName(buffer);
+    }
+
     const RagEffectCatalogEntry* entry = FindRagEffectCatalogEntry(effectId);
     if (!entry) {
         return std::string();
@@ -2683,6 +2689,8 @@ void CRagEffect::Init(CRenderObject* master, int effectId, const vector3d& delta
     m_stateCnt = 0;
     m_lastProcessTick = timeGetTime();
     m_tickCarryMs = kEffectTickMs;
+    m_targetPos = vector3d{};
+    m_hasTargetPos = false;
 
     switch (effectId) {
     case 158:
@@ -2713,6 +2721,14 @@ void CRagEffect::Init(CRenderObject* master, int effectId, const vector3d& delta
     case 582:
         m_handler = Handler::SuperAngel;
         m_duration = effectId == 582 ? 124 : 112;
+        break;
+    case 12:
+        m_handler = Handler::SightAura;
+        m_duration = 48;
+        break;
+    case 24:
+        m_handler = Handler::SightAura;
+        m_duration = 72;
         break;
     case 316:
         m_handler = Handler::ReadyPortal2;
@@ -2761,6 +2777,13 @@ void CRagEffect::Init(CRenderObject* master, int effectId, const vector3d& delta
         break;
     }
     }
+}
+
+void CRagEffect::InitAtWorldPosition(int effectId, const vector3d& position)
+{
+    Init(new CWorldAnchor(position), effectId, vector3d{});
+    m_ownsMaster = true;
+    m_cachedPos = position;
 }
 
 void CRagEffect::InitWorld(const C3dWorldRes::effectSrcInfo& source)
@@ -3422,6 +3445,118 @@ void CRagEffect::UpdateSuperAngel()
     }
 }
 
+void CRagEffect::SpawnSightAura()
+{
+    const vector3d base = ResolveBasePosition();
+    CTexture* ringBlue = ResolveEffectTextureCandidates({
+        "effect\\ring_blue.tga",
+        "effect\\ring_blue.bmp",
+        "effect\\ring_b.bmp",
+    }, false);
+    CTexture* glow = ResolveEffectTextureCandidates({
+        "effect\\magic_blue.tga",
+        "effect\\magic_sky.tga",
+        "effect\\cloud11.tga",
+        "effect\\cloud11.bmp",
+    }, true);
+
+    if (m_stateCnt == 0) {
+        TryPlayEffectWaveAt(base, {
+            "effect\\ef_ruwach.wav",
+            "effect\\ef_sight.wav",
+            "effect\\ef_incagi.wav",
+        });
+    }
+
+    if ((m_stateCnt % 8) == 0) {
+        if (CEffectPrim* prim = LaunchEffectPrim(PP_3DCIRCLE, vector3d{})) {
+            prim->m_duration = 20;
+            prim->m_deltaPos2.y = -1.0f;
+            prim->m_innerSize = 7.0f;
+            prim->m_latitude = 90.0f;
+            prim->m_numSegments = 3;
+            prim->m_pattern |= 1;
+            prim->m_radius = 0.0f;
+            prim->m_radiusSpeed = 0.85f;
+            prim->m_radiusAccel = prim->m_radiusSpeed / static_cast<float>(prim->m_duration) * -0.5f;
+            prim->m_alpha = 150.0f;
+            prim->m_maxAlpha = 150.0f;
+            prim->m_fadeOutCnt = prim->m_duration - 10;
+            prim->m_texture.push_back(ringBlue);
+            prim->m_tintColor = RGB(255, 210, 96);
+        }
+    }
+
+    if ((m_stateCnt % 3) == 0) {
+        const float angle = static_cast<float>(m_stateCnt) * 24.0f * (kPi / 180.0f);
+        const float offsets[2] = { 0.0f, kPi };
+        for (float phase : offsets) {
+            if (CEffectPrim* prim = LaunchEffectPrim(PP_3DPARTICLE, vector3d{})) {
+                const float orbit = angle + phase;
+                prim->m_duration = 18;
+                prim->m_deltaPos2.x = std::sin(orbit) * 15.0f;
+                prim->m_deltaPos2.y = -10.0f + std::cos(orbit * 0.5f) * 2.0f;
+                prim->m_deltaPos2.z = -std::cos(orbit) * 15.0f;
+                prim->m_size = 2.6f;
+                prim->m_sizeSpeed = -0.08f;
+                prim->m_alpha = 220.0f;
+                prim->m_alphaSpeed = -8.0f;
+                prim->m_fadeOutCnt = 10;
+                prim->m_texture.push_back(glow);
+                prim->m_tintColor = RGB(255, 220, 120);
+            }
+        }
+    }
+}
+
+void CRagEffect::SpawnFireBoltRain()
+{
+    const vector3d target = m_hasTargetPos ? m_targetPos : ResolveBasePosition();
+    CTexture* glow = ResolveEffectTextureCandidates({
+        "effect\\magic_violet.tga",
+        "effect\\magic_violet.bmp",
+        "effect\\magic_red.tga",
+        "effect\\magic_red.bmp",
+        "effect\\cloud11.tga",
+        "effect\\cloud11.bmp",
+    }, true);
+
+    if (m_stateCnt == 0) {
+        TryPlayEffectWaveAt(target, {
+            "effect\\ef_firebolt.wav",
+            "effect\\ef_firehit.wav",
+            "effect\\ef_fireball.wav",
+            "effect\\ef_firehit1.wav",
+        });
+    }
+
+    const int hitCount = (std::max)(1, m_level > 0 ? m_level : 1);
+    const int spawnInterval = (std::max)(1, 18 / hitCount);
+    if ((m_stateCnt % spawnInterval) != 0 || (m_stateCnt / spawnInterval) >= hitCount) {
+        return;
+    }
+
+    if (CEffectPrim* prim = LaunchEffectPrim(PP_3DPARTICLEGRAVITY, vector3d{})) {
+        const float lateralX = static_cast<float>((rand() % 9) - 4);
+        const float lateralZ = static_cast<float>((rand() % 9) - 4);
+        prim->m_duration = 10;
+        prim->m_deltaPos2.x = target.x - ResolveBasePosition().x + lateralX;
+        prim->m_deltaPos2.y = 42.0f + static_cast<float>(rand() % 10);
+        prim->m_deltaPos2.z = target.z - ResolveBasePosition().z + lateralZ;
+        prim->m_latitude = 180.0f;
+        prim->m_speed = 4.5f + static_cast<float>(rand() % 3);
+        prim->m_gravSpeed = -1.4f;
+        prim->m_gravAccel = -0.85f;
+        prim->m_size = 5.0f;
+        prim->m_sizeSpeed = -0.18f;
+        prim->m_alpha = 245.0f;
+        prim->m_alphaSpeed = -18.0f;
+        prim->m_fadeOutCnt = 6;
+        prim->m_texture.push_back(glow);
+        prim->m_tintColor = RGB(255, 168, 80);
+    }
+}
+
 u8 CRagEffect::OnProcess()
 {
     const u32 now = timeGetTime();
@@ -3507,6 +3642,12 @@ u8 CRagEffect::OnProcess()
         case Handler::SuperAngel:
             UpdateSuperAngel();
             break;
+        case Handler::SightAura:
+            SpawnSightAura();
+            break;
+        case Handler::FireBoltRain:
+            SpawnFireBoltRain();
+            break;
         case Handler::None:
         default:
             break;
@@ -3542,6 +3683,33 @@ u8 CRagEffect::OnProcess()
     }
 
     return alive ? 1 : 0;
+}
+
+void CRagEffect::SendMsg(CGameObject*, int msg, msgparam_t par1, msgparam_t, msgparam_t)
+{
+    switch (msg) {
+    case 14:
+        if (m_type == 24 && par1 != 0) {
+            const vector3d* targetPos = reinterpret_cast<const vector3d*>(par1);
+            m_targetPos = *targetPos;
+            m_hasTargetPos = true;
+            if (m_handler != Handler::FireBoltRain) {
+                ClearPrims();
+                m_handler = Handler::FireBoltRain;
+                m_duration = 18;
+                m_stateCnt = 0;
+            }
+        }
+        return;
+    case 44:
+        m_level = static_cast<int>(par1);
+        return;
+    case 80:
+        m_duration = static_cast<int>(par1);
+        return;
+    default:
+        return;
+    }
 }
 
 void CRagEffect::Render(matrix* viewMatrix)

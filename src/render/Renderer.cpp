@@ -155,6 +155,19 @@ vector3d NormalizeVec3(const vector3d& value)
     return vector3d{ value.x * invLength, value.y * invLength, value.z * invLength };
 }
 
+DWORD PackRenderColor(const vector3d& color)
+{
+    const auto toByte = [](float value) -> DWORD {
+        const float clamped = (std::max)(0.0f, (std::min)(1.0f, value));
+        return static_cast<DWORD>(clamped * 255.0f + 0.5f);
+    };
+
+    const DWORD r = toByte(color.x);
+    const DWORD g = toByte(color.y);
+    const DWORD b = toByte(color.z);
+    return 0xFF000000u | (r << 16) | (g << 8) | b;
+}
+
 void BuildLookAtMatrix(const vector3d& eye, const vector3d& at, const vector3d& up, D3DMATRIX* outMatrix)
 {
     if (!outMatrix) {
@@ -911,9 +924,33 @@ void CRenderer::SetLookAt(vector3d& eye, vector3d& at, vector3d& up) {
 }
 
 void CRenderer::SetLight(vector3d* dir, vector3d* diffuse, vector3d* ambient) {
-    (void)dir;
-    (void)diffuse;
-    (void)ambient;
+    if (!dir || !diffuse || !ambient || !m_renderDevice) {
+        return;
+    }
+
+    m_renderDevice->SetRenderState(D3DRENDERSTATE_AMBIENT, PackRenderColor(*ambient));
+    m_renderDevice->SetRenderState(D3DRENDERSTATE_LIGHTING, TRUE);
+
+    IDirect3DDevice7* legacyDevice = m_renderDevice->GetLegacyDevice();
+    if (!legacyDevice) {
+        return;
+    }
+
+    D3DLIGHT7 light{};
+    light.dltType = D3DLIGHT_DIRECTIONAL;
+    light.dcvDiffuse.a = 255.0f;
+    light.dcvAmbient.a = 255.0f;
+    light.dvDirection.x = -dir->x;
+    light.dvDirection.y = -dir->y;
+    light.dvDirection.z = -dir->z;
+    light.dcvDiffuse.r = diffuse->x;
+    light.dcvDiffuse.g = diffuse->y;
+    light.dcvDiffuse.b = diffuse->z;
+    light.dcvAmbient.r = ambient->x;
+    light.dcvAmbient.g = ambient->y;
+    light.dcvAmbient.b = ambient->z;
+    legacyDevice->SetLight(0, &light);
+    legacyDevice->LightEnable(0, TRUE);
 }
 
 tlvertex3d* CRenderer::BorrowVerts(unsigned int vertCount) {

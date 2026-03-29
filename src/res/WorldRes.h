@@ -68,6 +68,7 @@ public:
     vector3d m_lightDir;
     vector3d m_diffuseCol;
     vector3d m_ambientCol;
+    bool m_lightFromFile;
     u8 m_verMajor;
     u8 m_verMinor;
     int m_groundTop;

@@ -3,6 +3,7 @@
 #include "DebugLog.h"
 #include "render/Prim.h"
 
+#include <algorithm>
 #include <cstring>
 
 namespace {
@@ -22,6 +23,14 @@ static_assert(sizeof(LegacySoundSrcInfo) == 188, "LegacySoundSrcInfo size mismat
 constexpr size_t kActorTailSize = sizeof(C3dWorldRes::actorInfo::modelName)
     + sizeof(C3dWorldRes::actorInfo::nodeName)
     + sizeof(vector3d) * 3;
+constexpr int kDefaultWorldLightLongitude = 45;
+constexpr int kDefaultWorldLightLatitude = 45;
+constexpr vector3d kDefaultWorldLightDir{ 0.5f, 0.70710677f, 0.5f };
+constexpr vector3d kDefaultWorldDiffuseCol{ 1.0f, 1.0f, 1.0f };
+constexpr vector3d kDefaultWorldAmbientCol{ 0.3f, 0.3f, 0.3f };
+// The rebuilt ground path always uses GND lightmaps, so keep the raw RSW
+// ambient color instead of applying the reference client's non-lightmap boost.
+constexpr bool kBoostAmbientWithoutLightmaps = false;
 
 bool WorldVersionAtLeast(u8 major, u8 minor, u8 requiredMajor, u8 requiredMinor)
 {
@@ -122,6 +131,54 @@ vector3d ComputeLightDirection(int lightLatitude, int lightLongitude)
     return lightDir;
 }
 
+float ClampUnit(float value)
+{
+    return (std::max)(0.0f, (std::min)(1.0f, value));
+}
+
+void ApplyDefaultWorldLighting(C3dWorldRes* worldRes)
+{
+    if (!worldRes) {
+        return;
+    }
+
+    worldRes->m_lightLongitude = kDefaultWorldLightLongitude;
+    worldRes->m_lightLatitude = kDefaultWorldLightLatitude;
+    worldRes->m_lightDir = kDefaultWorldLightDir;
+    worldRes->m_diffuseCol = kDefaultWorldDiffuseCol;
+    worldRes->m_ambientCol = kDefaultWorldAmbientCol;
+    worldRes->m_lightFromFile = false;
+}
+
+void FinalizeWorldLighting(C3dWorldRes* worldRes, const char* fName)
+{
+    if (!worldRes) {
+        return;
+    }
+
+    worldRes->m_lightDir = ComputeLightDirection(worldRes->m_lightLatitude, worldRes->m_lightLongitude);
+    if constexpr (kBoostAmbientWithoutLightmaps) {
+        worldRes->m_ambientCol.x = ClampUnit(worldRes->m_ambientCol.x * 1.5f);
+        worldRes->m_ambientCol.y = ClampUnit(worldRes->m_ambientCol.y * 1.5f);
+        worldRes->m_ambientCol.z = ClampUnit(worldRes->m_ambientCol.z * 1.5f);
+    }
+
+    if (!worldRes->m_lightFromFile) {
+        DbgLog("[WorldRes] using default world lighting file='%s' ver=%u.%u lon=%d lat=%d diffuse=(%.3f,%.3f,%.3f) ambient=(%.3f,%.3f,%.3f)\n",
+            fName ? fName : "(null)",
+            static_cast<unsigned>(worldRes->m_verMajor),
+            static_cast<unsigned>(worldRes->m_verMinor),
+            worldRes->m_lightLongitude,
+            worldRes->m_lightLatitude,
+            worldRes->m_diffuseCol.x,
+            worldRes->m_diffuseCol.y,
+            worldRes->m_diffuseCol.z,
+            worldRes->m_ambientCol.x,
+            worldRes->m_ambientCol.y,
+            worldRes->m_ambientCol.z);
+    }
+}
+
 } // namespace
 
 C3dWorldRes::C3dWorldRes()
@@ -206,9 +263,10 @@ bool C3dWorldRes::LoadFromBuffer(const char* fName, const unsigned char* buffer,
             || !ReadVec3(buffer, static_cast<size_t>(size), &offset, &m_ambientCol)) {
             return FailWorldLoad(fName, "light", offset, size, m_verMajor, m_verMinor);
         }
+        m_lightFromFile = true;
     }
 
-    m_lightDir = ComputeLightDirection(m_lightLatitude, m_lightLongitude);
+    FinalizeWorldLighting(this, fName);
 
     if (WorldVersionAtLeast(m_verMajor, m_verMinor, 1, 7)) {
         float ignored = 0.0f;
@@ -370,11 +428,7 @@ void C3dWorldRes::Reset()
     m_waveSpeed = 2.0f;
     m_wavePitch = 50.0f;
     m_waterAnimSpeed = 3;
-    m_lightLongitude = 45;
-    m_lightLatitude = 45;
-    m_lightDir = vector3d{ 0.5f, 0.70710677f, 0.5f };
-    m_diffuseCol = vector3d{ 1.0f, 1.0f, 1.0f };
-    m_ambientCol = vector3d{ 0.3f, 0.3f, 0.3f };
+    ApplyDefaultWorldLighting(this);
     m_verMajor = 0;
     m_verMinor = 0;
     m_groundTop = -500;

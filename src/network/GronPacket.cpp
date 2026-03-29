@@ -155,6 +155,9 @@ void FillPacketSizeTable()
     SetPacketSize(0x010F, kVariablePacketSize);
     SetPacketSize(0x0110, 10);
     SetPacketSize(0x0111, 39);
+    SetPacketSize(0x0114, 31);
+    SetPacketSize(0x0115, 35);
+    SetPacketSize(0x0117, 18);
     SetPacketSize(0x0119, 13);
     SetPacketSize(0x011A, 15);
     SetPacketSize(0x011F, 16);
@@ -293,6 +296,7 @@ void FillPacketSizeTable()
     SetPacketSize(0x0470, 12);
     SetPacketSize(0x0471, 10);
     SetPacketSize(0x0477, 8);
+    SetPacketSize(0x043F, 25);
     SetPacketSize(0x05EA, 10);
     SetPacketSize(0x06B3, 14);
     SetPacketSize(0x06B4, 14);
