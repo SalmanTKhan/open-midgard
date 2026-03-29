@@ -2056,14 +2056,10 @@ bool RenderCachedBillboard(const CWorld::BillboardScreenEntry& entry)
         verts[index].specular = 0xFF000000u;
     }
 
-    verts[0].tu = 0.0f;
-    verts[0].tv = 0.0f;
-    verts[1].tu = 1.0f;
-    verts[1].tv = 0.0f;
-    verts[2].tu = 0.0f;
-    verts[2].tv = 1.0f;
-    verts[3].tu = 1.0f;
-    verts[3].tv = 1.0f;
+    for (int index = 0; index < 4; ++index) {
+        verts[index].tu = entry.renderU[index];
+        verts[index].tv = entry.renderV[index];
+    }
 
     face->alphaSortKey = entry.depthKey;
 
@@ -2210,9 +2206,14 @@ bool BuildBillboardRenderEntry(CPc* actor,
         }
     }
 
+    const float u0 = leftPixels / textureWidth;
+    const float v0 = topPixels / textureHeight;
+    const float u1 = rightPixels / textureWidth;
+    const float v1 = bottomPixels / textureHeight;
+
     float minRenderOow = (std::min)(projectedDepthTop.oow, projectedDepthBottom.oow);
     for (int index = 0; index < 4; ++index) {
-        const vector3d& renderVert = fullRenderVerts[index];
+        const vector3d& renderVert = renderVerts[index];
         tlvertex3d projected{};
         if (!ProjectPoint(g_renderer, viewMatrix, renderVert, &projected)) {
             return false;
@@ -2223,6 +2224,14 @@ bool BuildBillboardRenderEntry(CPc* actor,
         outEntry->renderZ[index] = projectedDepth.z;
         outEntry->renderOow[index] = projectedDepth.oow;
     }
+    outEntry->renderU[0] = u0;
+    outEntry->renderV[0] = v0;
+    outEntry->renderU[1] = u1;
+    outEntry->renderV[1] = v0;
+    outEntry->renderU[2] = u0;
+    outEntry->renderV[2] = v1;
+    outEntry->renderU[3] = u1;
+    outEntry->renderV[3] = v1;
 
     outEntry->actor = actor;
     outEntry->screenY = projectedBase.y;

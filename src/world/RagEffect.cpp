@@ -29,6 +29,7 @@ constexpr float kNearPlane = 10.0f;
 constexpr float kSubmitNearPlane = 80.0f;
 constexpr float kPi = 3.14159265f;
 constexpr float kEffectTickMs = 24.0f;
+constexpr float kStrEffectTickMs = 24.0f;
 constexpr float kEffectPixelRatioScale = 0.14285715f;
 
 struct RagEffectCatalogEntry {
@@ -127,6 +128,28 @@ std::string ResolveCatalogStrName(const RagEffectCatalogEntry& entry)
         ToLowerAscii(entry.variantPrefix).c_str(),
         entry.variantFirst + offset);
     return buffer;
+}
+
+D3DBLEND ResolveAniClipBlendMode(u32 blendMode)
+{
+    switch (static_cast<D3DBLEND>(blendMode)) {
+    case D3DBLEND_DESTALPHA:
+        return D3DBLEND_ONE;
+    case D3DBLEND_INVDESTALPHA:
+        return D3DBLEND_ZERO;
+    default:
+        return static_cast<D3DBLEND>(blendMode);
+    }
+}
+
+int ResolveEffectRenderFlags(u32 renderFlag, int fallbackFlags)
+{
+    return renderFlag != 0 ? static_cast<int>(renderFlag) : fallbackFlags;
+}
+
+D3DBLEND ResolveEffectDestBlend(u32 renderFlag, D3DBLEND additiveBlend = D3DBLEND_ONE)
+{
+    return (renderFlag & (2u | 4u)) != 0 ? additiveBlend : D3DBLEND_INVSRCALPHA;
 }
 
 unsigned int PackColor(unsigned int alpha, COLORREF color)
@@ -506,6 +529,8 @@ void RenderBandRibbon(const CEffectPrim& prim,
         return;
     }
 
+    const int renderFlags = ResolveEffectRenderFlags(prim.m_renderFlag, 1 | 2);
+    const D3DBLEND destBlend = ResolveEffectDestBlend(prim.m_renderFlag);
     const int sampleCount = static_cast<int>(band.heights.size());
     const vector3d center = prim.m_master ? prim.m_pos : base;
     const float groundY = ResolveGroundHeight(center) + prim.m_deltaPos2.y;
@@ -538,7 +563,7 @@ void RenderBandRibbon(const CEffectPrim& prim,
         };
         const unsigned int colors[4] = { bottomColor, bottomColor, topColor, topColor };
         const float uvs[4][2] = { { 0.0f, 1.0f }, { 1.0f, 1.0f }, { 0.0f, 0.0f }, { 1.0f, 0.0f } };
-        SubmitWorldQuad(quad, viewMatrix, texture, colors, uvs, D3DBLEND_ONE, 0.0f, static_cast<int>(prim.m_renderFlag));
+        SubmitWorldQuad(quad, viewMatrix, texture, colors, uvs, destBlend, 0.0f, renderFlags);
     }
 }
 
@@ -552,6 +577,8 @@ void RenderCastingBandLowPolygon(const CEffectPrim& prim,
         return;
     }
 
+    const int renderFlags = ResolveEffectRenderFlags(prim.m_renderFlag, 1 | 2);
+    const D3DBLEND destBlend = ResolveEffectDestBlend(prim.m_renderFlag);
     constexpr int kTexParts = 21;
     constexpr int kSegments = 10;
     constexpr int kFullDisplayAngle = 360;
@@ -601,7 +628,7 @@ void RenderCastingBandLowPolygon(const CEffectPrim& prim,
 
         const float tv0 = static_cast<float>(segmentIndex) / static_cast<float>(kTexParts);
         const float tv1 = static_cast<float>(segmentIndex + 1) / static_cast<float>(kTexParts);
-        SubmitWorldTeiRect(base0, base1, top1, top0, viewMatrix, texture, color, tv0, tv1, D3DBLEND_ONE, 0.0f, static_cast<int>(prim.m_renderFlag));
+        SubmitWorldTeiRect(base0, base1, top1, top0, viewMatrix, texture, color, tv0, tv1, destBlend, 0.0f, renderFlags);
     }
 }
 
@@ -1760,6 +1787,8 @@ void CEffectPrim::Render(matrix* viewMatrix)
     }
     case PP_3DCYLINDER: {
         CTexture* texture = !m_texture.empty() ? m_texture[(std::min)(m_curMotion, static_cast<int>(m_texture.size()) - 1)] : nullptr;
+        const int renderFlags = ResolveEffectRenderFlags(m_renderFlag, 1 | 2);
+        const D3DBLEND destBlend = ResolveEffectDestBlend(m_renderFlag);
         const int stepDegrees = (std::max)(1, static_cast<int>(m_arcAngle));
         float uInc = 0.0f;
         for (int degrees = 0; degrees <= 360 - stepDegrees; degrees += stepDegrees) {
@@ -1814,7 +1843,7 @@ void CEffectPrim::Render(matrix* viewMatrix)
             const unsigned int colors[4] = { quadColor, quadColor, quadColor, quadColor };
             const float nextU = uInc + 0.25f;
             const float uvs[4][2] = { { uInc, 1.0f }, { nextU, 1.0f }, { uInc, 0.0f }, { nextU, 0.0f } };
-            SubmitWorldQuad(quad, *viewMatrix, texture, colors, uvs, D3DBLEND_ONE, 0.0f, static_cast<int>(m_renderFlag));
+            SubmitWorldQuad(quad, *viewMatrix, texture, colors, uvs, destBlend, 0.0f, renderFlags);
             uInc = nextU >= 1.0f ? 0.0f : nextU;
         }
         break;
@@ -1835,6 +1864,8 @@ void CEffectPrim::Render(matrix* viewMatrix)
     }
     case PP_WIND: {
         CTexture* texture = !m_texture.empty() ? m_texture[0] : GetSoftGlowTexture(true);
+        const int renderFlags = ResolveEffectRenderFlags(m_renderFlag, 1 | 2);
+        const D3DBLEND destBlend = ResolveEffectDestBlend(m_renderFlag);
         for (const EffectBandState& band : m_bands) {
             if (!band.active || band.alpha <= 0.0f) {
                 continue;
@@ -1851,9 +1882,9 @@ void CEffectPrim::Render(matrix* viewMatrix)
                 (m_size + band.distance) * 18.0f,
                 (m_size + band.distance * 0.7f) * 18.0f,
                 PackColor(static_cast<unsigned int>((std::min)(255.0f, band.alpha)), m_tintColor),
-                D3DBLEND_ONE,
+                destBlend,
                 0.0f,
-                1 | 2);
+                renderFlags);
         }
         break;
     }
@@ -1861,15 +1892,17 @@ void CEffectPrim::Render(matrix* viewMatrix)
         CTexture* texture = GetSoftDiscTexture();
         const vector3d pos = m_pos;
         const float size = (std::max)(0.6f, m_size);
+        const int renderFlags = ResolveEffectRenderFlags(m_renderFlag, 1 | 2);
+        const D3DBLEND destBlend = ResolveEffectDestBlend(m_renderFlag);
         SubmitBillboard(pos,
             *viewMatrix,
             texture,
             size * 18.0f,
             size * 18.0f,
             PackColor(static_cast<unsigned int>(normalizedAlpha), m_tintColor),
-            D3DBLEND_ONE,
+            destBlend,
             0.0f,
-            1 | 2);
+            renderFlags);
         break;
     }
     case PP_3DPARTICLE:
@@ -1880,15 +1913,17 @@ void CEffectPrim::Render(matrix* viewMatrix)
             : GetSoftDiscTexture();
         const vector3d pos = m_pos;
         const float size = (std::max)(0.8f, m_size);
+        const int renderFlags = ResolveEffectRenderFlags(m_renderFlag, 1 | 2);
+        const D3DBLEND destBlend = ResolveEffectDestBlend(m_renderFlag);
         SubmitBillboard(pos,
             *viewMatrix,
             texture,
             size * 20.0f,
             size * 20.0f,
             PackColor(static_cast<unsigned int>(normalizedAlpha), m_tintColor),
-            D3DBLEND_ONE,
+            destBlend,
             0.0f,
-            1 | 2);
+            renderFlags);
         break;
     }
     case PP_3DTEXTURE:
@@ -1900,15 +1935,17 @@ void CEffectPrim::Render(matrix* viewMatrix)
         const vector3d pos = AddVec3(base, m_deltaPos2);
         const float width = (std::max)(8.0f, m_outerSize > 0.0f ? m_outerSize * 12.0f : m_size * 32.0f);
         const float height = (std::max)(8.0f, m_heightSize > 0.0f ? m_heightSize * 12.0f : width);
+        const int renderFlags = ResolveEffectRenderFlags(m_renderFlag, 1 | 2);
+        const D3DBLEND destBlend = ResolveEffectDestBlend(m_renderFlag);
         SubmitBillboard(pos,
             *viewMatrix,
             texture,
             width,
             height,
             PackColor(static_cast<unsigned int>(normalizedAlpha), m_tintColor),
-            D3DBLEND_ONE,
+            destBlend,
             0.0f,
-            1 | 2);
+            renderFlags);
         break;
     }
     case PP_3DCROSSTEXTURE:
@@ -1919,29 +1956,33 @@ void CEffectPrim::Render(matrix* viewMatrix)
         const vector3d pos = AddVec3(base, m_deltaPos2);
         const float width = (std::max)(10.0f, m_size * 34.0f + m_outerSize * 8.0f);
         const float height = (std::max)(10.0f, m_heightSize > 0.0f ? m_heightSize * 12.0f : width * 1.6f);
+        const int renderFlags = ResolveEffectRenderFlags(m_renderFlag, 1 | 2);
+        const D3DBLEND destBlend = ResolveEffectDestBlend(m_renderFlag);
         SubmitBillboard(pos,
             *viewMatrix,
             texture,
             width,
             height,
             PackColor(static_cast<unsigned int>(normalizedAlpha), m_tintColor),
-            D3DBLEND_ONE,
+            destBlend,
             0.0f,
-            1 | 2);
+            renderFlags);
         SubmitBillboard(pos,
             *viewMatrix,
             texture,
             height,
             width,
             PackColor(static_cast<unsigned int>(normalizedAlpha * 0.75f), m_tintColor),
-            D3DBLEND_ONE,
+            destBlend,
             0.0f,
-            1 | 2);
+            renderFlags);
         break;
     }
     case PP_MAPPARTICLE: {
         const int particles = (std::max)(4, m_spawnCount);
         CTexture* texture = !m_texture.empty() ? m_texture[0] : GetSoftGlowTexture(true);
+        const int renderFlags = ResolveEffectRenderFlags(m_renderFlag, 1 | 2);
+        const D3DBLEND destBlend = ResolveEffectDestBlend(m_renderFlag);
         for (int index = 0; index < particles; ++index) {
             const float seed = (static_cast<float>(index) + 0.5f) / static_cast<float>(particles);
             const float life = WrapUnit(timeSeconds / (std::max)(0.3f, m_emitSpeed) + seed);
@@ -1960,9 +2001,9 @@ void CEffectPrim::Render(matrix* viewMatrix)
                 size * 18.0f,
                 size * 18.0f,
                 PackColor(static_cast<unsigned int>(normalizedAlpha * (std::max)(0.0f, alphaScale)), m_tintColor),
-                D3DBLEND_ONE,
+                destBlend,
                 0.0f,
-                1 | 2);
+                renderFlags);
         }
         break;
     }
@@ -1984,6 +2025,8 @@ void CEffectPrim::Render(matrix* viewMatrix)
             : GetSoftGlowTexture(m_type == PP_2DFLASH);
         const float width = (std::max)(16.0f, (m_outerSize > 0.0f ? m_outerSize * 12.0f : m_size * 38.0f)) * pixelRatio;
         const float height = (std::max)(16.0f, (m_heightSize > 0.0f ? m_heightSize * 12.0f : m_size * 38.0f)) * pixelRatio;
+        const int renderFlags = ResolveEffectRenderFlags(m_renderFlag, 1 | 2);
+        const D3DBLEND destBlend = ResolveEffectDestBlend(m_renderFlag);
         SubmitScreenQuad(anchor,
             texture,
             m_deltaPos2.x * pixelRatio,
@@ -1991,9 +2034,9 @@ void CEffectPrim::Render(matrix* viewMatrix)
             width,
             height,
             PackColor(static_cast<unsigned int>(normalizedAlpha), m_tintColor),
-            D3DBLEND_ONE,
+            destBlend,
             0.0f,
-            1 | 2);
+            renderFlags);
         break;
     }
     case PP_SUPERANGEL: {
@@ -2039,6 +2082,8 @@ void CEffectPrim::Render(matrix* viewMatrix)
         CTexture* wingTexture = m_texture.size() > 0 ? m_texture[0] : GetSoftGlowTexture(false);
         CTexture* ringTexture = m_texture.size() > 1 ? m_texture[1] : GetSoftGlowTexture(false);
         CTexture* accentTexture = m_texture.size() > 2 ? m_texture[2] : GetSoftGlowTexture(true);
+        const int renderFlags = ResolveEffectRenderFlags(m_renderFlag, 1 | 2);
+        const D3DBLEND destBlend = ResolveEffectDestBlend(m_renderFlag);
         SubmitScreenQuad(anchor,
             wingTexture,
             sway - 26.0f,
@@ -2046,9 +2091,9 @@ void CEffectPrim::Render(matrix* viewMatrix)
             (72.0f + m_size * 18.0f) * pixelRatio,
             (128.0f + m_size * 22.0f) * pixelRatio,
             PackColor(static_cast<unsigned int>((std::max)(0.0f, (std::min)(255.0f, visualAlpha))), m_tintColor),
-            D3DBLEND_ONE,
+            destBlend,
             0.0f,
-            1 | 2);
+            renderFlags);
         SubmitScreenQuad(anchor,
             wingTexture,
             -sway + 26.0f,
@@ -2056,9 +2101,9 @@ void CEffectPrim::Render(matrix* viewMatrix)
             (72.0f + m_size * 18.0f) * pixelRatio,
             (128.0f + m_size * 22.0f) * pixelRatio,
             PackColor(static_cast<unsigned int>((std::max)(0.0f, (std::min)(255.0f, visualAlpha))), m_tintColor),
-            D3DBLEND_ONE,
+            destBlend,
             0.0f,
-            1 | 2);
+            renderFlags);
         SubmitScreenQuad(anchor,
             ringTexture,
             0.0f,
@@ -2066,9 +2111,9 @@ void CEffectPrim::Render(matrix* viewMatrix)
             (78.0f + m_size * 18.0f) * pixelRatio,
             (78.0f + m_size * 18.0f) * pixelRatio,
             PackColor(static_cast<unsigned int>(visualAlpha * 0.8f), RGB(220, 240, 255)),
-            D3DBLEND_ONE,
+            destBlend,
             0.0f,
-            1 | 2);
+            renderFlags);
         SubmitScreenQuad(anchor,
             accentTexture,
             std::sin(timeSeconds * 3.0f + m_param[0]) * 18.0f,
@@ -2076,9 +2121,9 @@ void CEffectPrim::Render(matrix* viewMatrix)
             (40.0f + m_size * 12.0f) * pixelRatio,
             (40.0f + m_size * 12.0f) * pixelRatio,
             PackColor(static_cast<unsigned int>(visualAlpha * 0.7f), RGB(255, 244, 196)),
-            D3DBLEND_ONE,
+            destBlend,
             0.0f,
-            1 | 2);
+            renderFlags);
         break;
     }
     case PP_RADIALSLASH: {
@@ -2089,6 +2134,8 @@ void CEffectPrim::Render(matrix* viewMatrix)
             : 1.0f;
         const float radialBase = m_radius + progress * (m_radiusSpeed * static_cast<float>(m_duration) + m_param[1]);
         const float heightBase = m_heightSize + progress * m_param[2];
+        const int renderFlags = ResolveEffectRenderFlags(m_renderFlag, 1 | 2);
+        const D3DBLEND destBlend = ResolveEffectDestBlend(m_renderFlag);
         for (int index = 0; index < particles; ++index) {
             const float step = 360.0f / static_cast<float>(particles);
             const float angleDeg = m_param[0] + step * static_cast<float>(index);
@@ -2105,9 +2152,9 @@ void CEffectPrim::Render(matrix* viewMatrix)
                 (32.0f + m_size * 18.0f) * scale,
                 (88.0f + m_size * 28.0f) * scale,
                 PackColor(static_cast<unsigned int>(normalizedAlpha * (1.0f - progress * 0.45f)), m_tintColor),
-                D3DBLEND_ONE,
+                destBlend,
                 0.0f,
-                1 | 2);
+                renderFlags);
         }
         break;
     }
@@ -2118,6 +2165,8 @@ void CEffectPrim::Render(matrix* viewMatrix)
         const float riseSpeed = m_param[2] != 0.0f ? m_param[2] : 0.5f;
         const int delayStep = m_param[1] != 0.0f ? static_cast<int>(m_param[1]) : 10;
         const int cycleTicks = 28;
+        const int renderFlags = ResolveEffectRenderFlags(m_renderFlag, 1 | 2);
+        const D3DBLEND destBlend = ResolveEffectDestBlend(m_renderFlag);
         for (int ringIndex = 0; ringIndex < rings; ++ringIndex) {
             int localTick = m_stateCnt - ringIndex * delayStep;
             if (localTick < 0) {
@@ -2141,9 +2190,9 @@ void CEffectPrim::Render(matrix* viewMatrix)
                 width,
                 height,
                 PackColor(static_cast<unsigned int>(alpha), m_tintColor),
-                D3DBLEND_ONE,
+                destBlend,
                 0.0f,
-                1 | 2);
+                renderFlags);
         }
         break;
     }
@@ -2166,6 +2215,8 @@ void CEffectPrim::Render(matrix* viewMatrix)
         if (alpha <= 0.0f) {
             break;
         }
+        const int renderFlags = ResolveEffectRenderFlags(m_renderFlag, 1 | 2);
+        const D3DBLEND destBlend = ResolveEffectDestBlend(m_renderFlag);
         for (int arm = 0; arm < arms; ++arm) {
             const float baseAngle = m_param[0] + static_cast<float>(arm) * (kPi * 0.5f);
             const float angle = baseAngle + timeSeconds * (0.8f + m_param[1] * 0.05f);
@@ -2182,9 +2233,9 @@ void CEffectPrim::Render(matrix* viewMatrix)
                 size,
                 size,
                 PackColor(static_cast<unsigned int>(alpha), m_tintColor),
-                D3DBLEND_ONE,
+                destBlend,
                 0.0f,
-                1 | 2);
+                renderFlags);
         }
         break;
     }
@@ -2238,6 +2289,8 @@ void CEffectPrim::Render(matrix* viewMatrix)
         const float height = static_cast<float>(frame->height) * pixelRatio * scale;
         const float pivotX = frame->pivotX * pixelRatio * scale;
         const float pivotY = frame->pivotY * pixelRatio * scale;
+        const int renderFlags = ResolveEffectRenderFlags(m_renderFlag, 1 | 2);
+        const D3DBLEND destBlend = ResolveEffectDestBlend(m_renderFlag);
         SubmitScreenQuadPivot(anchor,
             frame->texture,
             pivotX,
@@ -2245,9 +2298,9 @@ void CEffectPrim::Render(matrix* viewMatrix)
             width,
             height,
             color,
-            D3DBLEND_ONE,
+            destBlend,
             0.0f,
-            1 | 2);
+            renderFlags);
         break;
     }
     default:
@@ -2319,6 +2372,17 @@ CRagEffect::~CRagEffect()
     }
 }
 
+bool CRagEffect::IsStrTimedHandler(Handler handler)
+{
+    return handler == Handler::EzStr
+        || handler == Handler::JobLevelUp50;
+}
+
+float CRagEffect::ResolveEffectStepMs(Handler handler)
+{
+    return IsStrTimedHandler(handler) ? kStrEffectTickMs : kEffectTickMs;
+}
+
 void CRagEffect::ClearPrims()
 {
     for (CEffectPrim* prim : m_primList) {
@@ -2357,6 +2421,9 @@ void CRagEffect::InitEZ2STRFrame()
     m_actXformData.fill(KAC_XFORMDATA{});
     m_aiCurAniKey.fill(0);
     m_isLayerDrawn.fill(0);
+    m_activeAniKeyFrame.fill(-1);
+    m_activeAniKeyAppliedState.fill(-1);
+    m_activeAniKeyZeroBlend.fill(0);
 }
 
 bool CRagEffect::ProcessEZ2STR()
@@ -2366,6 +2433,9 @@ bool CRagEffect::ProcessEZ2STR()
     }
 
     m_isLayerDrawn.fill(0);
+    m_activeAniKeyFrame.fill(-1);
+    m_activeAniKeyAppliedState.fill(-1);
+    m_activeAniKeyZeroBlend.fill(0);
     for (int layerIndex = 0; layerIndex < m_aniClips->cLayer && layerIndex < static_cast<int>(m_actXformData.size()); ++layerIndex) {
         const KAC_LAYER& layer = m_aniClips->aLayer[static_cast<size_t>(layerIndex)];
         if (layer.cAniKey <= 0 || !layer.aAniKey) {
@@ -2450,12 +2520,16 @@ bool CRagEffect::ProcessEZ2STR()
         }
 
         m_isLayerDrawn[static_cast<size_t>(layerIndex)] = 1;
+        m_activeAniKeyFrame[static_cast<size_t>(layerIndex)] = key->iFrame;
+        m_activeAniKeyAppliedState[static_cast<size_t>(layerIndex)] = m_stateCnt;
+        m_activeAniKeyZeroBlend[static_cast<size_t>(layerIndex)] =
+            (key->XformData.srcalpha == 0u && key->XformData.destalpha == 0u) ? 1u : 0u;
     }
 
     return true;
 }
 
-void CRagEffect::RenderAniClip(const KAC_LAYER& layer, const KAC_XFORMDATA& xform, matrix* viewMatrix)
+void CRagEffect::RenderAniClip(int layerIndex, const KAC_LAYER& layer, const KAC_XFORMDATA& xform, matrix* viewMatrix)
 {
     if (!viewMatrix) {
         return;
@@ -2463,6 +2537,18 @@ void CRagEffect::RenderAniClip(const KAC_LAYER& layer, const KAC_XFORMDATA& xfor
 
     if (layer.cTex <= 0) {
         return;
+    }
+
+    if (layerIndex >= 0 && layerIndex < static_cast<int>(m_activeAniKeyZeroBlend.size())
+        && m_activeAniKeyZeroBlend[static_cast<size_t>(layerIndex)] != 0) {
+        const int keyFrame = m_activeAniKeyFrame[static_cast<size_t>(layerIndex)];
+        const int appliedState = m_activeAniKeyAppliedState[static_cast<size_t>(layerIndex)];
+        if (keyFrame >= 0 && appliedState >= 0) {
+            const int keyAgeTicks = appliedState - keyFrame;
+            if (keyAgeTicks <= 1) {
+                return;
+            }
+        }
     }
 
     const int aniFrame = (std::max)(0, (std::min)(layer.cTex - 1, static_cast<int>(xform.aniframe)));
@@ -2497,8 +2583,8 @@ void CRagEffect::RenderAniClip(const KAC_LAYER& layer, const KAC_XFORMDATA& xfor
     face->tex = texture;
     face->mtPreset = static_cast<int>(xform.mtpreset);
     face->cullMode = D3DCULL_NONE;
-    face->srcAlphaMode = static_cast<D3DBLEND>(xform.srcalpha);
-    face->destAlphaMode = static_cast<D3DBLEND>(xform.destalpha);
+    face->srcAlphaMode = ResolveAniClipBlendMode(xform.srcalpha);
+    face->destAlphaMode = ResolveAniClipBlendMode(xform.destalpha);
     face->alphaSortKey = 0.0f;
 
     const float uScale = texture->m_w > 0 ? static_cast<float>(texture->m_updateWidth) / static_cast<float>(texture->m_w) : 1.0f;
@@ -2534,7 +2620,7 @@ void CRagEffect::RenderAniClip(const KAC_LAYER& layer, const KAC_XFORMDATA& xfor
         vert.tv = vs[index] * vScale;
     }
 
-    g_renderer.AddRP(face, 1 | 2);
+    g_renderer.AddRP(face, 1 | 4);
 }
 
 void CRagEffect::Init(CRenderObject* master, int effectId, const vector3d& deltaPos)
@@ -2629,6 +2715,8 @@ void CRagEffect::Init(CRenderObject* master, int effectId, const vector3d& delta
         break;
     }
     }
+
+    m_tickCarryMs = ResolveEffectStepMs(m_handler);
 }
 
 void CRagEffect::InitWorld(const C3dWorldRes::effectSrcInfo& source)
@@ -2671,6 +2759,8 @@ void CRagEffect::InitWorld(const C3dWorldRes::effectSrcInfo& source)
     } else {
         m_handler = Handler::MapParticle;
     }
+
+    m_tickCarryMs = ResolveEffectStepMs(m_handler);
 }
 
 CEffectPrim* CRagEffect::LaunchEffectPrim(EFFECTPRIMID effectPrimId, const vector3d& deltaPos)
@@ -3297,9 +3387,25 @@ u8 CRagEffect::OnProcess()
     m_lastProcessTick = now;
     m_tickCarryMs += static_cast<float>(elapsedMs);
 
-    int steps = static_cast<int>(m_tickCarryMs / kEffectTickMs);
+    const float stepMs = ResolveEffectStepMs(m_handler);
+    const bool strTimedHandler = IsStrTimedHandler(m_handler);
+
+    int steps = static_cast<int>(m_tickCarryMs / stepMs);
+    const bool burstSensitiveHandler =
+        m_handler == Handler::Portal
+        || m_handler == Handler::ReadyPortal
+        || m_handler == Handler::WarpZone
+        || m_handler == Handler::Portal2
+        || m_handler == Handler::ReadyPortal2
+        || m_handler == Handler::WarpZone2
+        || m_handler == Handler::MapMagicZone
+        || m_handler == Handler::MapParticle
+        || m_handler == Handler::SuperAngel;
+    if (steps > 1 && burstSensitiveHandler) {
+        steps = 1;
+    }
     if (steps > 0) {
-        m_tickCarryMs -= static_cast<float>(steps) * kEffectTickMs;
+        m_tickCarryMs -= static_cast<float>(steps) * stepMs;
     }
 
     bool alive = true;
@@ -3307,7 +3413,7 @@ u8 CRagEffect::OnProcess()
         if (m_loop) {
             return 1;
         }
-        const bool ezActive = (m_handler == Handler::EzStr || m_handler == Handler::JobLevelUp50)
+        const bool ezActive = strTimedHandler
             && m_aniClips
             && m_stateCnt <= (m_aniClips->cFrame + 8);
         return (ezActive || !m_primList.empty() || m_stateCnt <= m_duration) ? 1 : 0;
@@ -3378,7 +3484,7 @@ u8 CRagEffect::OnProcess()
             continue;
         }
 
-        const bool ezActive = (m_handler == Handler::EzStr || m_handler == Handler::JobLevelUp50)
+        const bool ezActive = strTimedHandler
             && m_aniClips
             && m_stateCnt <= (m_aniClips->cFrame + 8);
         const bool primActive = !m_primList.empty();
@@ -3411,7 +3517,8 @@ void CRagEffect::Render(matrix* viewMatrix)
             if (!m_isLayerDrawn[static_cast<size_t>(layerIndex)]) {
                 continue;
             }
-            RenderAniClip(m_aniClips->aLayer[static_cast<size_t>(layerIndex)],
+            RenderAniClip(layerIndex,
+                m_aniClips->aLayer[static_cast<size_t>(layerIndex)],
                 m_actXformData[static_cast<size_t>(layerIndex)],
                 viewMatrix);
         }

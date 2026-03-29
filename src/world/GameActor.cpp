@@ -1259,7 +1259,7 @@ POINT GetPlayerLayerPoint(int layerPriority,
     return point;
 }
 
-bool DrawAttachedAccessoryMotion(HDC hdc,
+bool DrawAttachedAccessoryMotion(CDCBitmap& bitmap,
     int drawX,
     int drawY,
     int curAction,
@@ -1295,10 +1295,11 @@ bool DrawAttachedAccessoryMotion(HDC hdc,
     POINT point{};
     ApplyAttachPointDelta(bodyMotion, headMotion, &point);
     ApplyAttachPointDelta(headMotion, accessoryMotion, &point);
-    return DrawActMotionToHdc(hdc, drawX + point.x, drawY + point.y, accessorySprRes, accessoryMotion, accessorySprRes->m_pal);
+    bitmap.BltSprite(drawX + point.x, drawY + point.y, accessorySprRes, const_cast<CMotion*>(accessoryMotion), accessorySprRes->m_pal);
+    return true;
 }
 
-bool DrawPlayerLayer(HDC hdc,
+bool DrawPlayerLayer(CDCBitmap& bitmap,
     int drawX,
     int drawY,
     int layerIndex,
@@ -1375,7 +1376,8 @@ bool DrawPlayerLayer(HDC hdc,
 
     CMotion singleLayerMotion{};
     singleLayerMotion.sprClips.push_back(motion->sprClips[resolvedLayer]);
-    return DrawActMotionToHdc(hdc, drawX + point.x, drawY + point.y, sprRes, &singleLayerMotion, palette);
+    bitmap.BltSprite(drawX + point.x, drawY + point.y, sprRes, &singleLayerMotion, palette);
+    return true;
 }
 
 bool DrawPcBillboard(CDCBitmap& bitmap,
@@ -1428,23 +1430,17 @@ bool DrawPcBillboard(CDCBitmap& bitmap,
         ? g_session.GetHeadPaletteName(head, displayJob, sex, actor.m_headPalette, headPalette)
         : std::string();
 
-    HDC hdc = nullptr;
-    if (!bitmap.GetDC(&hdc) || !hdc) {
-        return false;
-    }
-
-    const bool bodyOk = DrawPlayerLayer(hdc, drawX, drawY, 0, curAction, curMotion, bodyActName, bodySprName, imfPath, bodyActName, headActName, curMotion, headMotion, bodyPaletteName);
-    const bool headOk = DrawPlayerLayer(hdc, drawX, drawY, 1, curAction, headMotion, headActName, headSprName, imfPath, bodyActName, headActName, curMotion, headMotion, headPaletteName);
+    const bool bodyOk = DrawPlayerLayer(bitmap, drawX, drawY, 0, curAction, curMotion, bodyActName, bodySprName, imfPath, bodyActName, headActName, curMotion, headMotion, bodyPaletteName);
+    const bool headOk = DrawPlayerLayer(bitmap, drawX, drawY, 1, curAction, headMotion, headActName, headSprName, imfPath, bodyActName, headActName, curMotion, headMotion, headPaletteName);
     const bool accessoryBottomOk = !accessoryBottomActName.empty() && !accessoryBottomSprName.empty()
-        ? DrawAttachedAccessoryMotion(hdc, drawX, drawY, curAction, curMotion, headMotion, bodyActName, headActName, accessoryBottomActName, accessoryBottomSprName)
+        ? DrawAttachedAccessoryMotion(bitmap, drawX, drawY, curAction, curMotion, headMotion, bodyActName, headActName, accessoryBottomActName, accessoryBottomSprName)
         : false;
     const bool accessoryMidOk = !accessoryMidActName.empty() && !accessoryMidSprName.empty()
-        ? DrawAttachedAccessoryMotion(hdc, drawX, drawY, curAction, curMotion, headMotion, bodyActName, headActName, accessoryMidActName, accessoryMidSprName)
+        ? DrawAttachedAccessoryMotion(bitmap, drawX, drawY, curAction, curMotion, headMotion, bodyActName, headActName, accessoryMidActName, accessoryMidSprName)
         : false;
     const bool accessoryTopOk = !accessoryTopActName.empty() && !accessoryTopSprName.empty()
-        ? DrawAttachedAccessoryMotion(hdc, drawX, drawY, curAction, curMotion, headMotion, bodyActName, headActName, accessoryTopActName, accessoryTopSprName)
+        ? DrawAttachedAccessoryMotion(bitmap, drawX, drawY, curAction, curMotion, headMotion, bodyActName, headActName, accessoryTopActName, accessoryTopSprName)
         : false;
-    bitmap.ReleaseDC(hdc);
 
     if (!bodyOk && !headOk && !accessoryBottomOk && !accessoryMidOk && !accessoryTopOk) {
         static std::map<int, bool> loggedBillboardFailures;
@@ -1608,13 +1604,8 @@ bool DrawNonPcBillboard(CDCBitmap& bitmap,
         return false;
     }
 
-    HDC hdc = nullptr;
-    if (!bitmap.GetDC(&hdc) || !hdc) {
-        return false;
-    }
-
-    const bool drawOk = DrawActMotionToHdc(hdc, drawX, drawY, sprRes, spriteMotion, sprRes->m_pal);
-    bitmap.ReleaseDC(hdc);
+    bitmap.BltSprite(drawX, drawY, sprRes, const_cast<CMotion*>(spriteMotion), sprRes->m_pal);
+    const bool drawOk = true;
 
     if (outJob) {
         *outJob = ResolveDisplayJob(actor);

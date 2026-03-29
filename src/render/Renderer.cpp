@@ -18,6 +18,7 @@ namespace {
 
 constexpr DWORD kLmFvf = D3DFVF_XYZRHW | D3DFVF_DIFFUSE | D3DFVF_SPECULAR | D3DFVF_TEX2;
 constexpr bool kLogTexture = false;
+constexpr unsigned int kEffectBlackKeyThreshold = 9u;
 
 bool ShouldLogGroundTextureName(const char* name)
 {
@@ -206,8 +207,9 @@ void CTexMgr::DestroyAllTexture() {
 }
 
 CTexture* CTexMgr::GetTexture(const char* name, bool b) {
-    (void)b;
-    auto it = m_texTable.find(name);
+    const std::string baseName = name ? name : "";
+    const std::string cacheKey = (b ? "@bk:" : "@ck:") + baseName;
+    auto it = m_texTable.find(cacheKey.c_str());
     if (it != m_texTable.end()) {
         it->second->m_timeStamp = GetTickCount();
         return it->second;
@@ -219,7 +221,7 @@ CTexture* CTexMgr::GetTexture(const char* name, bool b) {
         if (missingTextureLogCount < 16) {
             ++missingTextureLogCount;
             if constexpr (kLogTexture) {
-                DbgLog("[Texture] missing '%s'\n", name ? name : "(null)");
+                DbgLog("[Texture] missing '%s' mode=%s\n", name ? name : "(null)", b ? "blackkey" : "colorkey");
             }
         }
         return &s_dummy_texture;
@@ -231,24 +233,53 @@ CTexture* CTexMgr::GetTexture(const char* name, bool b) {
         if (failedTextureLoadLogCount < 16) {
             ++failedTextureLoadLogCount;
             if constexpr (kLogTexture) {
-                DbgLog("[Texture] load failed name='%s' resolved='%s'\n", name ? name : "(null)", texturePath.c_str());
+                DbgLog("[Texture] load failed name='%s' resolved='%s' mode=%s\n",
+                    name ? name : "(null)",
+                    texturePath.c_str(),
+                    b ? "blackkey" : "colorkey");
             }
         }
         return &s_dummy_texture;
     }
 
+    const unsigned int* textureData = reinterpret_cast<const unsigned int*>(bitmap->m_data);
+    std::vector<unsigned int> blackKeyPixels;
+    bool skipColorKey = false;
+    if (b) {
+        const size_t pixelCount = static_cast<size_t>(bitmap->m_width) * static_cast<size_t>(bitmap->m_height);
+        blackKeyPixels.assign(textureData, textureData + pixelCount);
+        for (unsigned int& pixel : blackKeyPixels) {
+            const unsigned int red = (pixel >> 16) & 0xFFu;
+            const unsigned int green = (pixel >> 8) & 0xFFu;
+            const unsigned int blue = pixel & 0xFFu;
+            if (bitmap->m_isAlpha == 0) {
+                const unsigned int alpha = (std::max)(red, (std::max)(green, blue));
+                if (alpha <= kEffectBlackKeyThreshold) {
+                    pixel = 0x00000000u;
+                } else {
+                    pixel = (alpha << 24) | (pixel & 0x00FFFFFFu);
+                }
+            } else if ((pixel & 0x00FFFFFFu) == 0x00000000u) {
+                pixel = 0x00000000u;
+            }
+        }
+        textureData = blackKeyPixels.data();
+        skipColorKey = true;
+    }
+
     CTexture* tex = CreateTexture(bitmap->m_width, bitmap->m_height,
-        reinterpret_cast<unsigned long*>(bitmap->m_data), PF_A8R8G8B8, false);
+        const_cast<unsigned long*>(reinterpret_cast<const unsigned long*>(textureData)), PF_A8R8G8B8, skipColorKey);
     if (!tex) {
         static int failedTextureCreateLogCount = 0;
         if (failedTextureCreateLogCount < 16) {
             ++failedTextureCreateLogCount;
             if constexpr (kLogTexture) {
-                DbgLog("[Texture] create failed name='%s' resolved='%s' size=%dx%d\n",
+                DbgLog("[Texture] create failed name='%s' resolved='%s' size=%dx%d mode=%s\n",
                     name ? name : "(null)",
                     texturePath.c_str(),
                     bitmap->m_width,
-                    bitmap->m_height);
+                    bitmap->m_height,
+                    b ? "blackkey" : "colorkey");
             }
         }
         return &s_dummy_texture;
@@ -258,11 +289,12 @@ CTexture* CTexMgr::GetTexture(const char* name, bool b) {
     if (loadedTextureLogCount < 16) {
         ++loadedTextureLogCount;
         if constexpr (kLogTexture) {
-            DbgLog("[Texture] loaded name='%s' resolved='%s' size=%dx%d surface=%p\n",
+            DbgLog("[Texture] loaded name='%s' resolved='%s' size=%dx%d mode=%s surface=%p\n",
                 name ? name : "(null)",
                 texturePath.c_str(),
                 bitmap->m_width,
                 bitmap->m_height,
+                b ? "blackkey" : "colorkey",
                 static_cast<void*>(tex->m_pddsSurface));
         }
     }
@@ -271,7 +303,7 @@ CTexture* CTexMgr::GetTexture(const char* name, bool b) {
         LogUploadedTerrainSurfaceSamples(tex, name);
     }
 
-    std::strncpy(tex->m_texName, name, sizeof(tex->m_texName) - 1);
+    std::strncpy(tex->m_texName, cacheKey.c_str(), sizeof(tex->m_texName) - 1);
     tex->m_texName[sizeof(tex->m_texName) - 1] = '\0';
     tex->m_timeStamp = GetTickCount();
     m_texTable[tex->m_texName] = tex;
@@ -499,8 +531,8 @@ void CRenderer::SetMultiTextureMode(int nMode) {
         m_renderDevice->SetTextureStageState(0, D3DTSS_COLOROP, D3DTOP_MODULATE);
         m_renderDevice->SetTextureStageState(0, D3DTSS_COLORARG2, D3DTA_DIFFUSE);
         m_renderDevice->SetTextureStageState(0, D3DTSS_ALPHAARG1, D3DTA_TEXTURE);
-        m_renderDevice->SetTextureStageState(0, D3DTSS_ALPHAOP, D3DTOP_MODULATE);
         m_renderDevice->SetTextureStageState(0, D3DTSS_ALPHAARG2, D3DTA_DIFFUSE);
+        m_renderDevice->SetTextureStageState(0, D3DTSS_ALPHAOP, D3DTOP_MODULATE);
         m_renderDevice->SetTextureStageState(0, D3DTSS_MINFILTER, D3DTFN_POINT);
         m_renderDevice->SetTextureStageState(0, D3DTSS_MAGFILTER, D3DTFG_POINT);
         m_renderDevice->SetTextureStageState(1, D3DTSS_COLOROP, D3DTOP_DISABLE);
@@ -701,6 +733,10 @@ void CRenderer::FlushRenderList() {
         m_renderDevice->SetRenderState(D3DRENDERSTATE_DESTBLEND, D3DBLEND_INVSRCALPHA);
     }
 
+    // STR AlphaOP layers still need colorkeying here, but alpha test can
+    // reject the whole layer for textures that do not carry usable alpha.
+    m_renderDevice->SetRenderState(D3DRENDERSTATE_COLORKEYENABLE, TRUE);
+
     // Reference parity: AlphaOP faces are submitted in insertion order rather than
     // being depth-sorted together with the generic alpha/emissive lists.
     int activeAlphaOpMtPreset = 0;
@@ -723,6 +759,7 @@ void CRenderer::FlushRenderList() {
         }
         RPFace::DrawPri(face, *m_renderDevice);
     }
+    SetMultiTextureMode(0);
 
     // Reference parity: no-depth alpha draws run with the standard alpha blend
     // state, not whatever blend the last AlphaOP face happened to use.
@@ -755,16 +792,23 @@ void CRenderer::FlushRenderList() {
 
     m_renderDevice->SetRenderState(D3DRENDERSTATE_ZENABLE, D3DZB_FALSE);
     if (!m_rpAlphaOPNoDepthList.empty()) {
+        m_renderDevice->SetRenderState(D3DRENDERSTATE_COLORKEYENABLE, TRUE);
         std::stable_sort(m_rpAlphaOPNoDepthList.begin(), m_rpAlphaOPNoDepthList.end(), [](const std::pair<float, RPFace*>& a, const std::pair<float, RPFace*>& b) {
             return a.first < b.first;
         });
 
         D3DBLEND activeSrcBlend = D3DBLEND_SRCALPHA;
         D3DBLEND activeDestBlend = D3DBLEND_INVSRCALPHA;
+        int activeAlphaOpMtPreset = 0;
         for (auto& pair : m_rpAlphaOPNoDepthList) {
             RPFace* face = pair.second;
             if (!face) {
                 continue;
+            }
+
+            if (face->mtPreset != activeAlphaOpMtPreset) {
+                SetMultiTextureMode(face->mtPreset);
+                activeAlphaOpMtPreset = face->mtPreset;
             }
 
             if (face->srcAlphaMode != activeSrcBlend) {
@@ -785,7 +829,10 @@ void CRenderer::FlushRenderList() {
         if (activeDestBlend != D3DBLEND_INVSRCALPHA) {
             m_renderDevice->SetRenderState(D3DRENDERSTATE_DESTBLEND, D3DBLEND_INVSRCALPHA);
         }
+        SetMultiTextureMode(0);
     }
+
+    m_renderDevice->SetRenderState(D3DRENDERSTATE_COLORKEYENABLE, FALSE);
 
     for (auto& pair : m_rpAlphaNoDepthList) {
         SetTexture(pair.second->tex);

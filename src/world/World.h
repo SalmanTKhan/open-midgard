@@ -176,6 +176,8 @@ public:
         float renderY[4];
         float renderZ[4];
         float renderOow[4];
+        float renderU[4];
+        float renderV[4];
         float left;
         float top;
         float right;

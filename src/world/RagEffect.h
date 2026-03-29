@@ -176,11 +176,14 @@ private:
         explicit CWorldAnchor(const vector3d& position);
     };
 
+    static bool IsStrTimedHandler(Handler handler);
+    static float ResolveEffectStepMs(Handler handler);
+
     void ClearPrims();
     void LoadEzEffect(const char* fName);
     void InitEZ2STRFrame();
     bool ProcessEZ2STR();
-    void RenderAniClip(const KAC_LAYER& layer, const KAC_XFORMDATA& xform, matrix* viewMatrix);
+    void RenderAniClip(int layerIndex, const KAC_LAYER& layer, const KAC_XFORMDATA& xform, matrix* viewMatrix);
 
     void SpawnEntry2();
     void SpawnJobLevelUp50();
@@ -227,6 +230,9 @@ private:
     std::array<KAC_XFORMDATA, 128> m_actXformData;
     std::array<u8, 128> m_isLayerDrawn;
     std::array<int, 128> m_aiCurAniKey;
+    std::array<int, 128> m_activeAniKeyFrame;
+    std::array<int, 128> m_activeAniKeyAppliedState;
+    std::array<u8, 128> m_activeAniKeyZeroBlend;
 };
 
 CRagEffect* CreateWorldRagEffect(const C3dWorldRes::effectSrcInfo& source);
