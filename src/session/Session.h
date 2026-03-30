@@ -135,6 +135,7 @@ public:
     std::vector<NPC_SHOP_DEAL_ROW> m_shopDealRows;
     int m_shortcutPage = 0;
     std::array<SHORTCUT_SLOT, kShortcutSlotCount> m_shortcutSlots{};
+    int m_GaugePacket = 0;
     
     void SetServerTime(u32 time);
     u32 GetServerTime() const;
@@ -151,9 +152,13 @@ public:
     void ClearInventoryItems();
     void ClearEquipmentInventoryItems();
     void ClearSkillItems();
+    void ClearHomunSkillItems();
+    void ClearMercSkillItems();
     void SetInventoryItem(const ITEM_INFO& itemInfo);
     void AddInventoryItem(const ITEM_INFO& itemInfo);
     void SetSkillItem(const PLAYER_SKILL_INFO& skillInfo);
+    void SetHomunSkillItem(const PLAYER_SKILL_INFO& skillInfo);
+    void SetMercSkillItem(const PLAYER_SKILL_INFO& skillInfo);
     void RemoveInventoryItem(unsigned int itemIndex, int amount);
     bool SetInventoryItemWearLocation(unsigned int itemIndex, int wearLocation);
     void ClearInventoryWearLocationMask(int wearMask, unsigned int exceptItemIndex = 0);
@@ -162,7 +167,11 @@ public:
     const ITEM_INFO* GetInventoryItemByIndex(unsigned int itemIndex) const;
     const ITEM_INFO* GetInventoryItemByItemId(unsigned int itemId) const;
     const std::list<PLAYER_SKILL_INFO>& GetSkillItems() const;
+    const std::list<PLAYER_SKILL_INFO>& GetHomunSkillItems() const;
+    const std::list<PLAYER_SKILL_INFO>& GetMercSkillItems() const;
     const PLAYER_SKILL_INFO* GetSkillItemBySkillId(int skillId) const;
+    const PLAYER_SKILL_INFO* GetHomunSkillItemBySkillId(int skillId) const;
+    const PLAYER_SKILL_INFO* GetMercSkillItemBySkillId(int skillId) const;
     void ClearNpcShopState();
     void SetNpcShopChoice(u32 npcId);
     void SetNpcShopRows(u32 npcId, NpcShopMode mode, const std::vector<NPC_SHOP_ROW>& rows);
@@ -182,6 +191,9 @@ public:
     int FindShortcutSlotByItemId(unsigned int itemId) const;
     int FindShortcutSlotBySkillId(int skillId) const;
     int GetPlayerSkillPointCount() const;
+    int GetWeaponTypeByItemId(int itemId) const;
+    bool IsSecondAttack(int job, int sex, int weaponItemId) const;
+    unsigned int GetEquippedRightHandWeaponItemId() const;
     const char* GetPlayerName() const;
     const char* GetJobName(int job) const;
     const char* GetAttrWaveName(int attr) const;
@@ -216,6 +228,8 @@ private:
     bool m_hasNextJobExpValue;
     std::list<ITEM_INFO> m_inventoryItems;
     std::list<PLAYER_SKILL_INFO> m_skillItems;
+    std::list<PLAYER_SKILL_INFO> m_homunSkillItems;
+    std::list<PLAYER_SKILL_INFO> m_mercSkillItems;
     bool m_accessoryNameTableLoaded;
     std::vector<std::string> m_accessoryNameTable;
     std::vector<std::string> m_jobHitWaveNameTable;

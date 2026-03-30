@@ -256,3 +256,5 @@ public:
     float m_worldProcessCarryMs;
     std::string m_loadingWallpaperName;
 };
+
+bool ArmPendingSkillUseFromSkillList(int skillId);

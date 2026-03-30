@@ -263,6 +263,7 @@ public:
     void RenderGameObjects(const matrix& viewMatrix) const;
     void UpdateBackgroundObjects(const matrix* viewMatrix);
     void UpdateActors();
+    void ProcessActorSkillRechargeGages(const matrix& viewMatrix, float cameraLongitude);
     void RenderActors(const matrix& viewMatrix, float cameraLongitude);
     bool GetPlayerScreenLabel(const matrix& viewMatrix,
         float cameraLongitude,

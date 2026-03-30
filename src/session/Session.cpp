@@ -249,7 +249,7 @@ CSession::CSession() : m_aid(0), m_authCode(0), m_sex(0), m_isEffectOn(true), m_
     m_playerAccessory3(0), m_serverTime(0), m_hasSelectedCharacterInfo(false), m_baseExpValue(0),
     m_nextBaseExpValue(0), m_jobExpValue(0), m_nextJobExpValue(0), m_hasBaseExpValue(false),
     m_hasNextBaseExpValue(false), m_hasJobExpValue(false), m_hasNextJobExpValue(false),
-    m_accessoryNameTableLoaded(false)
+    m_accessoryNameTableLoaded(false), m_GaugePacket(0)
 {
     std::memset(m_userId, 0, sizeof(m_userId));
     std::memset(m_userPassword, 0, sizeof(m_userPassword));
@@ -461,6 +461,16 @@ void CSession::ClearSkillItems()
     m_skillItems.clear();
 }
 
+void CSession::ClearHomunSkillItems()
+{
+    m_homunSkillItems.clear();
+}
+
+void CSession::ClearMercSkillItems()
+{
+    m_mercSkillItems.clear();
+}
+
 void CSession::SetInventoryItem(const ITEM_INFO& itemInfo)
 {
     auto it = std::find_if(m_inventoryItems.begin(), m_inventoryItems.end(), [&](const ITEM_INFO& existing) {
@@ -507,6 +517,34 @@ void CSession::SetSkillItem(const PLAYER_SKILL_INFO& skillInfo)
     }
 
     m_skillItems.push_back(skillInfo);
+}
+
+void CSession::SetHomunSkillItem(const PLAYER_SKILL_INFO& skillInfo)
+{
+    auto it = std::find_if(m_homunSkillItems.begin(), m_homunSkillItems.end(), [&](const PLAYER_SKILL_INFO& existing) {
+        return existing.SKID == skillInfo.SKID;
+    });
+
+    if (it != m_homunSkillItems.end()) {
+        *it = skillInfo;
+        return;
+    }
+
+    m_homunSkillItems.push_back(skillInfo);
+}
+
+void CSession::SetMercSkillItem(const PLAYER_SKILL_INFO& skillInfo)
+{
+    auto it = std::find_if(m_mercSkillItems.begin(), m_mercSkillItems.end(), [&](const PLAYER_SKILL_INFO& existing) {
+        return existing.SKID == skillInfo.SKID;
+    });
+
+    if (it != m_mercSkillItems.end()) {
+        *it = skillInfo;
+        return;
+    }
+
+    m_mercSkillItems.push_back(skillInfo);
 }
 
 void CSession::RemoveInventoryItem(unsigned int itemIndex, int amount)
@@ -650,9 +688,39 @@ const std::list<PLAYER_SKILL_INFO>& CSession::GetSkillItems() const
     return m_skillItems;
 }
 
+const std::list<PLAYER_SKILL_INFO>& CSession::GetHomunSkillItems() const
+{
+    return m_homunSkillItems;
+}
+
+const std::list<PLAYER_SKILL_INFO>& CSession::GetMercSkillItems() const
+{
+    return m_mercSkillItems;
+}
+
 const PLAYER_SKILL_INFO* CSession::GetSkillItemBySkillId(int skillId) const
 {
     for (const PLAYER_SKILL_INFO& skill : m_skillItems) {
+        if (skill.SKID == skillId) {
+            return &skill;
+        }
+    }
+    return nullptr;
+}
+
+const PLAYER_SKILL_INFO* CSession::GetHomunSkillItemBySkillId(int skillId) const
+{
+    for (const PLAYER_SKILL_INFO& skill : m_homunSkillItems) {
+        if (skill.SKID == skillId) {
+            return &skill;
+        }
+    }
+    return nullptr;
+}
+
+const PLAYER_SKILL_INFO* CSession::GetMercSkillItemBySkillId(int skillId) const
+{
+    for (const PLAYER_SKILL_INFO& skill : m_mercSkillItems) {
         if (skill.SKID == skillId) {
             return &skill;
         }
@@ -1141,4 +1209,228 @@ char* CSession::GetHeadPaletteName(int head, int job, int sex, int palNum, char*
     const char* sexToken = GetSexToken(sex);
     std::sprintf(buf, "%s\xB8\xD3\xB8\xAE%d_%s_%d.pal", kHeadPaletteRoot, resolvedHead, sexToken, palNum);
     return buf;
+}
+
+// Ref CSession::GetWeaponType — Ref/Session2.cpp
+int CSession::GetWeaponTypeByItemId(int itemId) const
+{
+    int result = itemId;
+    if (itemId == 0) {
+        return result;
+    }
+    if (itemId >= 1100 && itemId < 1150) {
+        return 2;
+    }
+    if (itemId >= 13400 && itemId < 13500) {
+        return 2;
+    }
+    if (itemId >= 1150) {
+        if (itemId < 1200) {
+            return 3;
+        }
+        if (itemId < 1250) {
+            return 1;
+        }
+        if (itemId < 1300) {
+            return 16;
+        }
+        if (itemId < 1350) {
+            return 6;
+        }
+        if (itemId < 1400) {
+            return 7;
+        }
+        if (itemId < 1450) {
+            return 4;
+        }
+        if (itemId < 1500) {
+            if (itemId != 1472 && itemId != 1473) {
+                return 5;
+            }
+            return 10;
+        }
+        if (itemId < 1550) {
+            return 8;
+        }
+        if (itemId < 1600) {
+            return 15;
+        }
+        if (itemId < 1700) {
+            return 10;
+        }
+        if (itemId < 1750) {
+            return 11;
+        }
+    }
+    if (itemId >= 1800) {
+        if (itemId < 1900) {
+            return 12;
+        }
+        if (itemId < 1950) {
+            return 13;
+        }
+        if (itemId < 2000) {
+            return 14;
+        }
+        if (itemId < 2100) {
+            return 23;
+        }
+    }
+    if (itemId >= 13150 && itemId < 13200) {
+        return 18;
+    }
+    if (itemId < 13000) {
+        if (itemId < 13300 || itemId >= 13400) {
+            return -1;
+        }
+        return 22;
+    }
+    if (itemId < 13100) {
+        return 1;
+    }
+    if (itemId >= 13150) {
+        if (itemId < 13300 || itemId >= 13400) {
+            return -1;
+        }
+        return 22;
+    }
+    return 17;
+}
+
+unsigned int CSession::GetEquippedRightHandWeaponItemId() const
+{
+    for (const ITEM_INFO& item : m_inventoryItems) {
+        if (item.m_wearLocation == 0) {
+            continue;
+        }
+        if ((item.m_wearLocation & 2) != 0) {
+            return item.GetItemId();
+        }
+    }
+    return 0;
+}
+
+bool CSession::IsSecondAttack(int job, int sex, int weaponItemId) const
+{
+    int v4 = weaponItemId;
+    const int v5 = job;
+    if (weaponItemId >= 31) {
+        v4 = GetWeaponTypeByItemId(weaponItemId);
+    }
+
+    if (v5 > 4001) {
+        return false;
+    }
+
+    if (v5 == 4001) {
+        if (sex) {
+            if (sex == 1) {
+                switch (v4) {
+                case 2:
+                case 3:
+                case 6:
+                case 7:
+                case 8:
+                case 9:
+                case 10:
+                case 23:
+                    return true;
+                default:
+                    return false;
+                }
+            }
+            return false;
+        }
+        return v4 == 1;
+    }
+
+    switch (v5) {
+    case 0:
+    case 23:
+        if (sex) {
+            if (sex == 1) {
+                switch (v4) {
+                case 2:
+                case 3:
+                case 6:
+                case 7:
+                case 8:
+                case 9:
+                case 10:
+                case 23:
+                    return true;
+                default:
+                    return false;
+                }
+            }
+            return false;
+        }
+        return v4 == 1;
+    case 1:
+    case 7:
+    case 13:
+    case 14:
+    case 21:
+        return v4 >= 4 && v4 <= 5;
+    case 2:
+    case 5:
+        return v4 == 1;
+    case 3:
+        return v4 != 11;
+    case 6:
+    case 11:
+    case 17:
+        return v4 == 11;
+    case 8:
+        return v4 == 15;
+    case 9: {
+        const int v12 = v4 - 1;
+        if (v12 == 0) {
+            return sex == 1;
+        }
+        const int v11 = v12 - 9;
+        if (v11 == 0) {
+            return sex == 0;
+        }
+        if (v11 == 13) {
+            return sex == 0;
+        }
+        return false;
+    }
+    case 10:
+    case 18:
+        if (v4 == 2) {
+            return true;
+        }
+        return v4 > 5 && v4 <= 8;
+    case 12:
+        if (v4 == 16) {
+            return true;
+        }
+        return v4 > 24 && v4 <= 30;
+    case 15:
+        if (v4 == 0) {
+            return true;
+        }
+        return v4 == 12;
+    case 16:
+        switch (v4) {
+        case 5:
+        case 10:
+        case 15:
+        case 23:
+            return true;
+        default:
+            return false;
+        }
+    case 19:
+    case 20:
+        return v4 == 11;
+    case 24:
+        return v4 >= 18 && v4 <= 21;
+    case 25:
+        return v4 == 22;
+    default:
+        return false;
+    }
 }

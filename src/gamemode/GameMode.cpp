@@ -6537,6 +6537,67 @@ void DrawBootstrapScene(HWND hwnd, const CGameMode& mode)
 }
 }
 
+bool ArmPendingSkillUseFromSkillList(int skillId)
+{
+    if (skillId <= 0) {
+        return false;
+    }
+
+    const PLAYER_SKILL_INFO* skill = g_session.GetSkillItemBySkillId(skillId);
+    if (!skill || skill->level <= 0) {
+        return false;
+    }
+
+    CGameMode* gameMode = g_modeMgr.GetCurrentGameMode();
+    if (!gameMode) {
+        return false;
+    }
+
+    constexpr int kSkillInfGroundSkill = 0x02;
+    constexpr int kSkillInfSelfSkill = 0x04;
+
+    const u16 skillIdU = static_cast<u16>(skillId & 0xFFFF);
+    const u16 skillLevel = static_cast<u16>(skill->level > 0 ? skill->level : 1);
+    const int skillInf = skill->type;
+
+    if ((skillInf & kSkillInfGroundSkill) != 0) {
+        ClearSkillChase(*gameMode);
+        gameMode->m_lastMonGid = 0;
+        gameMode->m_lastLockOnMonGid = 0;
+        ClearAttackChaseHint(*gameMode);
+        gameMode->m_skillUseInfo.id = skillId;
+        gameMode->m_skillUseInfo.level = static_cast<int>(skillLevel);
+        DbgLog("[GameMode] skill list armed ground skillId=%u level=%u\n",
+            static_cast<unsigned int>(skillIdU),
+            static_cast<unsigned int>(skillLevel));
+        return true;
+    }
+
+    if ((skillInf & kSkillInfSelfSkill) != 0) {
+        ClearSkillChase(*gameMode);
+        gameMode->m_lastMonGid = 0;
+        gameMode->m_lastLockOnMonGid = 0;
+        ClearAttackChaseHint(*gameMode);
+        const bool sent = SendUseSkillToIdPacket(skillIdU, skillLevel, ResolveSelfSkillTargetId());
+        DbgLog("[GameMode] skill list self skillId=%u level=%u sent=%d\n",
+            static_cast<unsigned int>(skillIdU),
+            static_cast<unsigned int>(skillLevel),
+            sent ? 1 : 0);
+        return sent;
+    }
+
+    ClearSkillChase(*gameMode);
+    gameMode->m_lastMonGid = 0;
+    gameMode->m_lastLockOnMonGid = 0;
+    ClearAttackChaseHint(*gameMode);
+    gameMode->m_skillUseInfo.id = skillId;
+    gameMode->m_skillUseInfo.level = static_cast<int>(skillLevel);
+    DbgLog("[GameMode] skill list armed actor-target skillId=%u level=%u\n",
+        static_cast<unsigned int>(skillIdU),
+        static_cast<unsigned int>(skillLevel));
+    return true;
+}
+
 CGameMode::CGameMode() 
     : m_areaLeft(0), m_areaRight(0), m_areaTop(0), m_areaBottom(0),
       m_world(nullptr), m_view(nullptr), m_mousePointer(nullptr),
@@ -6909,6 +6970,9 @@ void CGameMode::OnUpdate() {
                 m_world->UpdateActors();
                 CleanupPendingActorDespawns(*this);
             }
+            if (m_view && m_world) {
+                m_world->ProcessActorSkillRechargeGages(m_view->GetViewMatrix(), m_view->GetCameraLongitude());
+            }
             const matrix* viewMatrix = m_view ? &m_view->GetViewMatrix() : nullptr;
             m_world->UpdateBackgroundObjects(viewMatrix);
         }
@@ -6930,6 +6994,9 @@ void CGameMode::OnUpdate() {
         for (int step = 0; step < worldStepCount; ++step) {
             m_world->UpdateActors();
             CleanupPendingActorDespawns(*this);
+        }
+        if (m_view) {
+            m_world->ProcessActorSkillRechargeGages(m_view->GetViewMatrix(), m_view->GetCameraLongitude());
         }
         actorUpdateEnd = GetTickCount();
 

@@ -67,6 +67,7 @@ constexpr int kGameActorAttackStateId = 2;
 constexpr int kGameActorDeathStateId = 3;
 constexpr int kGameActorSkillStateId = 7;
 constexpr int kGameActorCastingStateId = 8;
+constexpr int kGameActorCastingLoopStateId = 13;
 
 //===========================================================================
 // Actor Hierarchy
@@ -210,8 +211,8 @@ public:
     UIBalloonText* m_balloon;
     UIChatRoomTitle* m_chatTitle;
     UIMerchantShopTitle* m_merchantShopTitle;
-    UIRechargeGage* m_skillRechargeGage;
-    u32 m_freezeEndTick, m_petEmotionStartTick, m_skillRechargeEndTick, m_skillRechargeStartTick;
+    UIRechargeGage* m_skillRechargeGage = nullptr;
+    u32 m_freezeEndTick, m_petEmotionStartTick, m_skillRechargeEndTick = 0, m_skillRechargeStartTick = 0;
     int m_chatWidth, m_chatHeight, m_nameWidth, m_xSize, m_ySize, m_headType;
     std::list<WBA> m_willBeAttackList, m_willBeAttackedList;
     int m_willBeDead, m_is99;
@@ -244,6 +245,8 @@ public:
     void QueueWillBeAttacked(const WBA& hitInfo);
     void DeleteMatchingEffect(CMsgEffect* effect);
     void DeleteTotalNumber(int kind);
+    void ProcessSkillRechargeGageOverlay(int screenCenterX, int screenTopY, int clientHeight);
+    void DestroySkillRechargeGage();
 };
 
 class CMsgEffect : public CGameObject {

@@ -111,6 +111,7 @@ public:
     bool ToggleWindow(int windowId);
     void RemoveAllWindows();
     void DeleteWindow(UIWindow* window);
+    void AddWindowFront(UIWindow* window);
 
     // Input routing
     void OnLBtnDown(int x, int y);

@@ -10,6 +10,8 @@
 
 namespace {
 
+#include "SkillEnumIdTable.inc"
+
 constexpr const char* kUiKorPrefix =
     "texture\\"
     "\xC0\xAF\xC0\xFA\xC0\xCE\xC5\xCD\xC6\xE4\xC0\xCC\xBD\xBA"
@@ -154,39 +156,18 @@ bool CSkillMgr::LoadSkillMetadata()
 
 bool CSkillMgr::BuildSkillIdMapFromNameTable()
 {
-    std::vector<std::string> lines;
-    if (!ReadLines(GetSkillDataRoot() / "skillnametable.txt", lines)) {
-        return false;
+    // Wire-format skill IDs match the server (eAthena `e_skill` / packet SKID), not
+    // skillnametable.txt line order. Ref resolves names by ID; we embed the same enum IDs.
+    m_byId.clear();
+    m_idBySkillName.clear();
+    for (size_t i = 0; i < kSkillEnumEntriesCount; ++i) {
+        const SkillEnumEntry& e = kSkillEnumEntries[i];
+        SkillMetadata metadata;
+        metadata.skillId = e.id;
+        metadata.skillIdName = e.name;
+        m_byId[e.id] = std::move(metadata);
+        m_idBySkillName[ToLowerAscii(std::string(e.name))] = e.id;
     }
-
-    int nextSkillId = 1;
-    for (const std::string& rawLine : lines) {
-        const std::string line = TrimAscii(rawLine);
-        if (line.empty()) {
-            continue;
-        }
-
-        const std::vector<std::string> tokens = SplitHashTokens(line);
-        if (tokens.empty()) {
-            continue;
-        }
-
-        const std::string skillIdName = TrimAscii(tokens[0]);
-        if (skillIdName.empty()) {
-            continue;
-        }
-
-        SkillMetadata& metadata = m_byId[nextSkillId];
-        metadata.skillId = nextSkillId;
-        metadata.skillIdName = skillIdName;
-        if (tokens.size() >= 2) {
-            metadata.displayName = tokens[1];
-            std::replace(metadata.displayName.begin(), metadata.displayName.end(), '_', ' ');
-        }
-        m_idBySkillName[ToLowerAscii(skillIdName)] = nextSkillId;
-        ++nextSkillId;
-    }
-
     return !m_byId.empty();
 }
 

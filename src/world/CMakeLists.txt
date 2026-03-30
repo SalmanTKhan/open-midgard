@@ -19,4 +19,5 @@ target_include_directories(ro_world PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(ro_world PUBLIC
     ro_core
     ro_res
+    ro_ui
 )

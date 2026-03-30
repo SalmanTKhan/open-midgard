@@ -65,6 +65,7 @@ HINSTANCE g_hInstance  = nullptr;
 bool      g_isAppActive = false;
 bool      g_multiSTOP   = false;
 int       g_soundMode   = 1;
+int       g_isSoundOn   = 1;
 int       g_frameskip   = 0;
 char      g_baseDir [MAX_PATH] = {};
 char      g_baseDir3[MAX_PATH] = {};

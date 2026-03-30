@@ -682,6 +682,10 @@ void UISkillListWnd::OnLBtnUp(int x, int y)
         }
         if (index == kBottomButtonClose) {
             SetShow(0);
+        } else if (index == kBottomButtonUse) {
+            if (m_selectedSkillId > 0) {
+                ArmPendingSkillUseFromSkillList(m_selectedSkillId);
+            }
         }
     }
 
@@ -985,6 +989,10 @@ std::vector<const PLAYER_SKILL_INFO*> UISkillListWnd::GetSortedSkills() const
 {
     std::vector<const PLAYER_SKILL_INFO*> out;
     for (const PLAYER_SKILL_INFO& skill : g_session.GetSkillItems()) {
+        // Match Ref UISkillListWnd refresh (message 23): show only learnable or learned skills.
+        if (skill.upgradable == 0 && skill.level <= 0) {
+            continue;
+        }
         out.push_back(&skill);
     }
 

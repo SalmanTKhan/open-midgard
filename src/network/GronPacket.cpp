@@ -155,6 +155,8 @@ void FillPacketSizeTable()
     SetPacketSize(0x010F, kVariablePacketSize);
     SetPacketSize(0x0110, 10);
     SetPacketSize(0x0111, 39);
+    SetPacketSize(0x0113, 22);              // CZ useskilltopos (packet_ver >= 22; client send)
+    SetPacketSize(0x0116, 10);              // dropitem / legacy useskilltopos size on older profiles
     SetPacketSize(0x0114, 31);
     SetPacketSize(0x0115, 35);
     SetPacketSize(0x0117, 18);

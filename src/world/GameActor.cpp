@@ -14,7 +14,10 @@
 #include "res/ImfRes.h"
 #include "res/PaletteRes.h"
 #include "item/Item.h"
+#include "main/WinMain.h"
 #include "session/Session.h"
+#include "ui/UIRechargeGage.h"
+#include "ui/UIWindowMgr.h"
 
 #include <array>
 #include <algorithm>
@@ -165,6 +168,32 @@ bool QueueActorHitWave(CGameActor& actor, const char* eventName)
     std::snprintf(actor.m_hitWaveName, sizeof(actor.m_hitWaveName), "%s", normalized.c_str());
     actor.m_isPlayHitWave = 1;
     return true;
+}
+
+CGameActor* ResolveActorByGidForCastRetarget(u32 gid)
+{
+    CGameMode* gameMode = g_modeMgr.GetCurrentGameMode();
+    if (!gameMode || !gameMode->m_world) {
+        return nullptr;
+    }
+
+    CWorld* world = gameMode->m_world;
+    if (gid != 0 && (gid == g_session.m_aid || gid == g_session.m_gid)) {
+        return world->m_player;
+    }
+
+    for (CGameActor* actor : world->m_actorList) {
+        if (actor && actor->m_gid == gid) {
+            return actor;
+        }
+    }
+
+    const auto it = gameMode->m_runtimeActors.find(gid);
+    if (it != gameMode->m_runtimeActors.end()) {
+        return it->second;
+    }
+
+    return nullptr;
 }
 
 bool TryPlayQueuedWaveAtActor(const CGameActor& actor, const char* waveName)
@@ -2144,6 +2173,7 @@ void CAbleToMakeEffect::DetachEffects()
 
 CGameActor::~CGameActor()
 {
+    DestroySkillRechargeGage();
     DetachEffects();
     for (CMsgEffect* effect : m_msgEffectList) {
         if (!effect) {
@@ -2242,14 +2272,24 @@ u8 CGameActor::ProcessState() {
     }
 
     switch (m_stateId) {
-    case kAttackStateId:
-        m_isMotionFreezed = 0;
+    case kAttackStateId: {
+        if (m_freezeEndTick != 0) {
+            if (timeGetTime() >= m_freezeEndTick) {
+                m_freezeEndTick = 0;
+                m_isMotionFreezed = 0;
+            } else {
+                m_isMotionFreezed = 1;
+            }
+        } else {
+            m_isMotionFreezed = 0;
+        }
         ProcessMotion();
-        if (m_isMotionFinished) {
+        if (m_isMotionFinished && m_freezeEndTick == 0) {
             m_stateId = 0;
             m_attackMotion = -1.0f;
         }
         break;
+    }
     case kGameActorSkillStateId:
         m_isCounter = 0;
         m_isMotionFreezed = 0;
@@ -2262,11 +2302,38 @@ u8 CGameActor::ProcessState() {
         m_isCounter = 0;
         m_isMotionFreezed = 0;
         ProcessMotion();
+        if (m_targetGid != 0) {
+            const u32 nCx = timeGetTime() - m_stateStartTick;
+            const int slice = static_cast<int>(static_cast<double>(nCx) * (1.0 / 24.0));
+            if (slice % 34 == 0) {
+                if (CGameActor* target = ResolveActorByGidForCastRetarget(m_targetGid)) {
+                    const float dx = target->m_pos.x - m_pos.x;
+                    const float dz = target->m_pos.z - m_pos.z;
+                    m_roty = std::atan2(dx, -dz) * (180.0f / 3.14159265f);
+                    if (m_roty >= 360.0f) {
+                        m_roty -= 360.0f;
+                    }
+                    if (m_roty < 0.0f) {
+                        m_roty += 360.0f;
+                    }
+                }
+            }
+        }
         if (m_skillRechargeEndTick != 0 && timeGetTime() > m_skillRechargeEndTick) {
             m_skillRechargeStartTick = 0;
             m_skillRechargeEndTick = 0;
+            SendMsg(this, 83, 0, 0, 0);
             SetState(0);
         }
+        break;
+    case kGameActorCastingLoopStateId:
+        if (m_skillRechargeEndTick != 0 && timeGetTime() >= m_skillRechargeEndTick) {
+            m_isCounter = 0;
+            m_isMotionFreezed = 0;
+            SetState(0);
+            SendMsg(this, 83, 0, 0, 0);
+        }
+        ProcessMotion();
         break;
     case kDeathStateId:
         m_isMotionFreezed = 0;
@@ -2316,24 +2383,44 @@ void CGameActor::SendMsg(CGameObject* src, int msg, msgparam_t par1, msgparam_t 
         const u32 now = timeGetTime();
         m_skillRechargeStartTick = now;
         m_skillRechargeEndTick = now + static_cast<u32>((std::max)(0, static_cast<int>(par1)));
+        if (!m_skillRechargeGage) {
+            auto* gage = new UIRechargeGage();
+            if (gage) {
+                gage->Create(60, 6);
+                g_windowMgr.AddWindowFront(gage);
+                m_skillRechargeGage = gage;
+            }
+        }
         return;
     }
     case 83:
-        m_skillRechargeStartTick = 0;
-        m_skillRechargeEndTick = 0;
+        DestroySkillRechargeGage();
         return;
-    case 85:
-        if (m_beginSpellEffect && static_cast<int>(par1) > 0) {
+    case 85: {
+        const int effectId = static_cast<int>(par1);
+        if (effectId <= 0) {
+            if (m_beginSpellEffect) {
+                m_beginSpellEffect->DetachFromMaster();
+                m_beginSpellEffect = nullptr;
+            }
+            return;
+        }
+        // Same begin-spell / buff ring STR as already showing: only refresh duration (msg 80). Re-launching
+        // would run CRagEffect::Init again and replay EzStr startup SFX (e.g. Angelus after level-up refresh).
+        if (m_beginSpellEffect && m_beginSpellEffect->GetEffectType() == effectId) {
+            m_beginSpellEffect->SendMsg(m_beginSpellEffect, 80, par2, 0, 0);
+            return;
+        }
+        if (m_beginSpellEffect) {
             m_beginSpellEffect->DetachFromMaster();
             m_beginSpellEffect = nullptr;
         }
-        if (!m_beginSpellEffect && static_cast<int>(par1) > 0) {
-            m_beginSpellEffect = LaunchEffect(static_cast<int>(par1), vector3d{}, 0.0f);
-        }
+        m_beginSpellEffect = LaunchEffect(effectId, vector3d{}, 0.0f);
         if (m_beginSpellEffect) {
             m_beginSpellEffect->SendMsg(m_beginSpellEffect, 80, par2, 0, 0);
         }
         return;
+    }
     case 86:
         if (!m_magicTargetEffect && static_cast<int>(par1) > 0) {
             m_magicTargetEffect = LaunchEffect(static_cast<int>(par1), vector3d{}, 0.0f);
@@ -2394,11 +2481,36 @@ void CGameActor::SetState(int state) {
         SetAction(80, 3, 1);
         m_attackMotion = static_cast<float>(GetAttackMotion());
         return;
+    case kGameActorAttackStateId:
+        m_isMoving = 0;
+        m_path.Reset();
+        m_isMotionFinished = 0;
+        SetAction(m_isPc != 0 ? 80 : 16, 4, 1);
+        SetModifyFactorOfmotionSpeed(1440);
+        m_attackMotion = static_cast<float>(GetAttackMotion());
+        return;
     case kGameActorCastingStateId:
         m_isMoving = 0;
         m_path.Reset();
         m_isMotionFinished = 0;
         m_isMotionFreezed = 0;
+        return;
+    case kGameActorCastingLoopStateId:
+        m_isMoving = 0;
+        m_path.Reset();
+        m_isMotionFinished = 0;
+        m_isCounter = 0;
+        if (m_isPc != 0) {
+            const int weaponId = g_session.GetEquippedRightHandWeaponItemId();
+            if (g_session.IsSecondAttack(m_job, m_sex, weaponId)) {
+                SetAction(88, 4, 1);
+            } else {
+                SetAction(80, 4, 1);
+            }
+        } else {
+            SetAction(16, 4, 1);
+        }
+        m_isMotionFreezed = 1;
         return;
     case kHitReactionStateId:
         if (m_isForceState || m_isForceState2 || m_isForceState3) {
@@ -2431,6 +2543,50 @@ void CGameActor::SetState(int state) {
         return;
     default:
         return;
+    }
+}
+
+void CGameActor::DestroySkillRechargeGage()
+{
+    if (m_skillRechargeGage) {
+        g_windowMgr.DeleteWindow(m_skillRechargeGage);
+        m_skillRechargeGage = nullptr;
+    }
+    m_skillRechargeStartTick = 0;
+    m_skillRechargeEndTick = 0;
+}
+
+void CGameActor::ProcessSkillRechargeGageOverlay(int screenCenterX, int screenTopY, int clientHeight)
+{
+    if (!m_skillRechargeGage || m_skillRechargeEndTick == 0 || m_skillRechargeStartTick == 0) {
+        return;
+    }
+
+    const u32 now = timeGetTime();
+    const int total = static_cast<int>(m_skillRechargeEndTick - m_skillRechargeStartTick);
+    if (total <= 0) {
+        return;
+    }
+
+    if (now <= m_skillRechargeEndTick) {
+        const float scale = (m_lastPixelRatio > 0.0f) ? m_lastPixelRatio : 1.0f;
+        const int yOff = static_cast<int>((81.0f * static_cast<float>(clientHeight) / 480.0f) * scale);
+        const int barX = screenCenterX - 30;
+        const int barY = screenTopY - yOff;
+        m_skillRechargeGage->Move(barX, barY);
+        int elapsed = static_cast<int>(now - m_skillRechargeStartTick);
+        if (elapsed < 0) {
+            elapsed = 0;
+        }
+        if (elapsed > total) {
+            elapsed = total;
+        }
+        m_skillRechargeGage->SetAmount(elapsed, total);
+    } else {
+        SendMsg(this, 83, 0, 0, 0);
+        if (m_stateId == kGameActorCastingStateId) {
+            SetState(0);
+        }
     }
 }
 

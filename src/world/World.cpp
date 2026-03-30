@@ -16,8 +16,10 @@
 #include "res/Texture.h"
 #include "res/WorldRes.h"
 #include "session/Session.h"
+#include "main/WinMain.h"
 
 #include <mmsystem.h>
+#include <windows.h>
 
 #include <algorithm>
 #include <array>
@@ -4831,6 +4833,41 @@ void CWorld::UpdateActors()
             continue;
         }
         actor->ProcessState();
+    }
+}
+
+void CWorld::ProcessActorSkillRechargeGages(const matrix& viewMatrix, float cameraLongitude)
+{
+    int clientHeight = 480;
+    if (g_hMainWnd) {
+        RECT clientRect{};
+        if (GetClientRect(g_hMainWnd, &clientRect)) {
+            clientHeight = clientRect.bottom - clientRect.top;
+            if (clientHeight <= 0) {
+                clientHeight = 480;
+            }
+        }
+    }
+
+    auto updateForActor = [&](CGameActor* actor) {
+        if (!actor || !actor->m_skillRechargeGage) {
+            return;
+        }
+        int centerX = 0;
+        int topY = 0;
+        int labelY = 0;
+        if (!GetActorScreenMarker(viewMatrix, cameraLongitude, actor->m_gid, &centerX, &topY, &labelY)) {
+            return;
+        }
+        (void)labelY;
+        actor->ProcessSkillRechargeGageOverlay(centerX, topY, clientHeight);
+    };
+
+    if (m_player) {
+        updateForActor(m_player);
+    }
+    for (CGameActor* actor : m_actorList) {
+        updateForActor(actor);
     }
 }
 

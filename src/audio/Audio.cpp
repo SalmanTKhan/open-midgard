@@ -86,7 +86,7 @@ void CAudio::Shutdown()
 
 bool CAudio::PlaySound(const char* fName, float vol)
 {
-    if (!fName || !*fName || !g_soundMode) {
+    if (!fName || !*fName || !g_soundMode || !g_isSoundOn) {
         return false;
     }
 

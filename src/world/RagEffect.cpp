@@ -22,6 +22,7 @@
 #include <cstring>
 #include <initializer_list>
 #include <map>
+#include <vector>
 
 namespace {
 
@@ -30,6 +31,9 @@ constexpr float kSubmitNearPlane = 80.0f;
 constexpr float kPi = 3.14159265f;
 constexpr float kEffectTickMs = 24.0f;
 constexpr float kEffectPixelRatioScale = 0.14285715f;
+// Ref/Wave.cpp PlayWave defaults used for skill / EzStr SFX.
+constexpr int kRefEffectWaveMaxDist = 250;
+constexpr int kRefEffectWaveMinDist = 40;
 
 struct RagEffectCatalogEntry {
     int effectId;
@@ -977,8 +981,55 @@ CTexture* ResolveEffectTextureCandidates(std::initializer_list<const char*> path
     return GetSoftGlowTexture(cloudFallback);
 }
 
-bool TryPlayEffectWaveAt(const vector3d& soundPos, std::initializer_list<const char*> paths)
+static std::string StrBasenameLowerNoExt(const char* strPath)
 {
+    if (!strPath || !*strPath) {
+        return std::string();
+    }
+
+    std::string path = CollapseUtf8Latin1ToBytes(strPath);
+    std::replace(path.begin(), path.end(), '/', '\\');
+    const size_t slash = path.find_last_of("\\/");
+    std::string file = slash == std::string::npos ? path : path.substr(slash + 1);
+    if (file.size() >= 4) {
+        std::string lower = ToLowerAscii(file);
+        if (lower.size() >= 4 && lower.compare(lower.size() - 4, 4, ".str") == 0) {
+            file = file.substr(0, file.size() - 4);
+        }
+    }
+    return ToLowerAscii(file);
+}
+
+// GRF: data\wav\effect\wizard_<compact>.wav where compact is STR display name with only [a-z0-9] (e.g. storm gust -> stormgust).
+static std::string CompactAlnumLowerAscii(std::string value)
+{
+    std::string out;
+    out.reserve(value.size());
+    for (unsigned char ch : value) {
+        if (std::isalnum(ch)) {
+            out.push_back(static_cast<char>(std::tolower(ch)));
+        }
+    }
+    return out;
+}
+
+static std::string UnderscoreFromSpacesLower(std::string value)
+{
+    value = ToLowerAscii(std::move(value));
+    for (char& ch : value) {
+        if (ch == ' ') {
+            ch = '_';
+        }
+    }
+    return value;
+}
+
+static bool TryPlaySingleEffectWave(const vector3d& soundPos, const std::string& relativePath)
+{
+    if (relativePath.empty() || !g_soundMode || !g_isSoundOn) {
+        return false;
+    }
+
     CAudio* audio = CAudio::GetInstance();
     CGameMode* gameMode = g_modeMgr.GetCurrentGameMode();
     if (!audio || !gameMode || !gameMode->m_world || !gameMode->m_world->m_player) {
@@ -986,24 +1037,82 @@ bool TryPlayEffectWaveAt(const vector3d& soundPos, std::initializer_list<const c
     }
 
     const vector3d listenerPos = gameMode->m_world->m_player->m_pos;
+    const std::array<std::string, 3> candidates = {
+        relativePath,
+        std::string("wav\\") + relativePath,
+        std::string("data\\wav\\") + relativePath,
+    };
+
+    for (const std::string& candidate : candidates) {
+        if (audio->PlaySound3D(candidate.c_str(),
+                soundPos,
+                listenerPos,
+                kRefEffectWaveMaxDist,
+                kRefEffectWaveMinDist,
+                1.0f)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// Ref RagEffect.cpp: most skill visuals use dedicated PlayWave paths; generic EzStr effects do not read
+// audio from STR keyframes. Match common data layout: effect\ef_<strstem>.wav (and a few fallbacks).
+static void PlayEzStrAssociatedStartupSound(const char* strResourcePath, int effectId, const vector3d& soundPos)
+{
+    if (!strResourcePath || !*strResourcePath || !g_soundMode || !g_isSoundOn) {
+        return;
+    }
+
+    std::vector<std::string> tryPaths;
+    if (effectId == 337) {
+        tryPaths.push_back("effect\\levelup.wav");
+        tryPaths.push_back("wav\\levelup.wav");
+    }
+
+    const std::string base = StrBasenameLowerNoExt(strResourcePath);
+    if (!base.empty()) {
+        const std::string compact = CompactAlnumLowerAscii(base);
+        if (!compact.empty()) {
+            tryPaths.push_back(std::string("effect\\wizard_") + compact + ".wav");
+            if (compact.size() > 1) {
+                std::string noTrailDigits = compact;
+                while (!noTrailDigits.empty() && std::isdigit(static_cast<unsigned char>(noTrailDigits.back()))) {
+                    noTrailDigits.pop_back();
+                }
+                if (!noTrailDigits.empty() && noTrailDigits != compact) {
+                    tryPaths.push_back(std::string("effect\\wizard_") + noTrailDigits + ".wav");
+                }
+            }
+            tryPaths.push_back(std::string("effect\\ef_") + compact + ".wav");
+        }
+        const std::string under = UnderscoreFromSpacesLower(base);
+        if (!under.empty() && under != base) {
+            tryPaths.push_back(std::string("effect\\ef_") + under + ".wav");
+        }
+        if (base.find(' ') == std::string::npos) {
+            tryPaths.push_back(std::string("effect\\ef_") + base + ".wav");
+        }
+        tryPaths.push_back(std::string("effect\\") + under + ".wav");
+    }
+
+    for (const std::string& rel : tryPaths) {
+        if (TryPlaySingleEffectWave(soundPos, rel)) {
+            return;
+        }
+    }
+}
+
+bool TryPlayEffectWaveAt(const vector3d& soundPos, std::initializer_list<const char*> paths)
+{
     for (const char* path : paths) {
         if (!path || !*path) {
             continue;
         }
-
-        std::array<std::string, 3> candidates = {
-            std::string(path),
-            std::string("wav\\") + path,
-            std::string("data\\wav\\") + path,
-        };
-
-        for (const std::string& candidate : candidates) {
-            if (audio->PlaySound3D(candidate.c_str(), soundPos, listenerPos)) {
-                return true;
-            }
+        if (TryPlaySingleEffectWave(soundPos, std::string(path))) {
+            return true;
         }
     }
-
     return false;
 }
 
@@ -2702,6 +2811,9 @@ void CRagEffect::Init(CRenderObject* master, int effectId, const vector3d& delta
         m_duration = 108;
         LoadEzEffect("joblvup.str");
         InitEZ2STRFrame();
+        if (m_ezEffectRes) {
+            PlayEzStrAssociatedStartupSound("joblvup.str", effectId, ResolveBasePosition());
+        }
         if (m_aniClips && m_aniClips->cFrame > 0) {
             m_duration = (std::max)(m_duration, m_aniClips->cFrame + 36);
         }
@@ -2712,6 +2824,8 @@ void CRagEffect::Init(CRenderObject* master, int effectId, const vector3d& delta
         const std::string strName = ResolveStrName(effectId);
         LoadEzEffect(strName.c_str());
         InitEZ2STRFrame();
+        // Base level-up: GameModePacket::PlayBaseLevelUpPresentation already plays levelup.wav. angel.str maps to
+        // wizard_angel / ef_angel SFX which reads as Angelus — skip duplicate startup audio here.
         if (m_aniClips && m_aniClips->cFrame > 0) {
             m_duration = m_aniClips->cFrame + 8;
         }
@@ -2770,6 +2884,9 @@ void CRagEffect::Init(CRenderObject* master, int effectId, const vector3d& delta
             m_handler = Handler::EzStr;
             LoadEzEffect(strName.c_str());
             InitEZ2STRFrame();
+            if (m_ezEffectRes) {
+                PlayEzStrAssociatedStartupSound(strName.c_str(), effectId, ResolveBasePosition());
+            }
             if (m_aniClips && m_aniClips->cFrame > 0) {
                 m_duration = (std::max)(m_duration, m_aniClips->cFrame + 8);
             }
@@ -2809,6 +2926,9 @@ void CRagEffect::InitWorld(const C3dWorldRes::effectSrcInfo& source)
         m_handler = Handler::EzStr;
         LoadEzEffect(worldStrName.c_str());
         InitEZ2STRFrame();
+        if (m_ezEffectRes) {
+            PlayEzStrAssociatedStartupSound(worldStrName.c_str(), m_type, ResolveBasePosition());
+        }
         if (m_aniClips && m_aniClips->cFrame > 0) {
             m_duration = (std::max)(m_duration, m_aniClips->cFrame + 12);
         }
@@ -3413,9 +3533,10 @@ void CRagEffect::SpawnSuperAngelBurst(int startAngle)
 void CRagEffect::UpdateSuperAngel()
 {
     if (m_stateCnt == 0) {
+        // Ref RagEffect OnProcess case 0x152 (effect 338): PlayWave(levelup) only at frame 0, not ef_angel.
         TryPlayEffectWaveAt(ResolveBasePosition(), {
-            "effect\\ef_angel.wav",
             "effect\\levelup.wav",
+            "wav\\levelup.wav",
         });
         if (m_type == 338) {
             SpawnSuperAngelVariant(0, m_stateCnt);

@@ -50,6 +50,8 @@ add_library(ro_ui STATIC
     UIFrameWnd.cpp
     UIWindowMgr.h
     UIWindowMgr.cpp
+    UIRechargeGage.h
+    UIRechargeGage.cpp
     UIWaitWnd.h
     UIWaitWnd.cpp
     UILoadingWnd.h

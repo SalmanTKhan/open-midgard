@@ -442,6 +442,7 @@ void ApplySavedAudioSettings()
     }
 
     g_soundMode = soundEnabled ? 1 : 0;
+    g_isSoundOn = soundEnabled ? 1 : 0;
     audio->SetVolume(static_cast<float>(soundVolume) / 127.0f);
     audio->SetBgmVolume(bgmVolume);
     audio->SetBgmPaused(bgmEnabled == 0);
@@ -757,6 +758,7 @@ void UIOptionWnd::ApplyAudioSettings() const
     }
 
     g_soundMode = m_soundEnabled ? 1 : 0;
+    g_isSoundOn = m_soundEnabled ? 1 : 0;
     audio->SetVolume(static_cast<float>(m_soundVolume) / 127.0f);
     audio->SetBgmVolume(m_bgmVolume);
     audio->SetBgmPaused(m_bgmEnabled == 0);

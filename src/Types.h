@@ -155,5 +155,6 @@ extern HWND  g_hMainWnd;
 extern HINSTANCE g_hInstance;
 extern bool  g_isAppActive;
 extern int   g_soundMode;
+extern int   g_isSoundOn;
 extern int   g_frameskip;
 extern char  g_baseDir[MAX_PATH];

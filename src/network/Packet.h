@@ -45,7 +45,9 @@ namespace PacketVer23MapServerSend {
 constexpr u16 kWantToConnection = 0x0436;
 constexpr u16 kActionRequest = 0x0437;
 constexpr u16 kUseSkillToId = 0x0438;
-constexpr u16 kUseSkillToPos = 0x0116;
+// Ground skill (CZ_USE_SKILL_TOGROUND): from packet_ver 22 onward this lives at 0x0113 with
+// padding; 0x0116 is repurposed (e.g. dropitem). See Ref/RunningServer/packet_db.txt.
+constexpr u16 kUseSkillToPos = 0x0113;
 constexpr u16 kUseSkillToPosInfo = 0x0190;
 constexpr u16 kUseSkillMap = 0x011B;
 constexpr u16 kUseItem = 0x0439;
@@ -209,11 +211,16 @@ struct PACKET_CZ_USESKILLTOID2 {
     u32 TargetGID;
 };
 
+// 22 bytes, field offsets 5:9:12:20 — skill lv, skill id, x, y (Ref clif_parse_UseSkillToPos).
 struct PACKET_CZ_USESKILLTOPOS {
-    u16 PacketType;    // 0x0116 for packet_ver 23
+    u16 PacketType;    // 0x0113 for packet_ver 22+ / 23 Sakexe chain
+    u8  padding0[3];
     u16 SkillLevel;
+    u8  padding1[2];
     u16 SkillId;
+    u8  padding2;
     u16 X;
+    u8  padding3[6];
     u16 Y;
 };
 
@@ -385,7 +392,7 @@ static_assert(sizeof(PACKET_CZ_CHANGE_DIRECTION2) == 11, "PACKET_CZ_CHANGE_DIREC
 static_assert(sizeof(PACKET_CZ_REQNAME2) == 11, "PACKET_CZ_REQNAME2 size mismatch");
 static_assert(sizeof(PACKET_CZ_ACTION_REQUEST2) == 7, "PACKET_CZ_ACTION_REQUEST2 size mismatch");
 static_assert(sizeof(PACKET_CZ_USESKILLTOID2) == 10, "PACKET_CZ_USESKILLTOID2 size mismatch");
-static_assert(sizeof(PACKET_CZ_USESKILLTOPOS) == 10, "PACKET_CZ_USESKILLTOPOS size mismatch");
+static_assert(sizeof(PACKET_CZ_USESKILLTOPOS) == 22, "PACKET_CZ_USESKILLTOPOS size mismatch");
 static_assert(sizeof(PACKET_CZ_USESKILLTOPOSINFO) == 90, "PACKET_CZ_USESKILLTOPOSINFO size mismatch");
 static_assert(sizeof(PACKET_CZ_USESKILLMAP) == 20, "PACKET_CZ_USESKILLMAP size mismatch");
 static_assert(sizeof(PACKET_CZ_USEITEM2) == 8, "PACKET_CZ_USEITEM2 size mismatch");

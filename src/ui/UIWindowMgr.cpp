@@ -712,6 +712,17 @@ bool UIWindowMgr::ToggleWindow(int windowId)
     return MakeWindow(windowId) != nullptr;
 }
 
+void UIWindowMgr::AddWindowFront(UIWindow* window)
+{
+    if (!window) {
+        return;
+    }
+
+    m_children.remove(window);
+    m_children.push_front(window);
+    window->SetShow(1);
+}
+
 void UIWindowMgr::DeleteWindow(UIWindow* window)
 {
     if (!window) {

@@ -4,9 +4,12 @@
 #include "network/Packet.h"
 #include "GameMode.h"
 #include "core/Globals.h"
+#include "Types.h"
 #include "core/File.h"
 #include "pathfinder/PathFinder.h"
 #include "session/Session.h"
+#include "session/SkillActionInfo2.h"
+#include "skill/Skill.h"
 #include "item/Item.h"
 #include "Mode.h"
 #include "DebugLog.h"
@@ -30,6 +33,7 @@
 #include <cctype>
 #include <cstring>
 #include <cstdio>
+#include <initializer_list>
 #include <map>
 #include <string>
 #include <vector>
@@ -195,14 +199,21 @@ void RecordLocalLevelUpEffect(u32 effectId)
     g_lastLocalLevelUpEffectTick = GetTickCount();
 }
 
+// Deduplicate base/job level-up VFX+SFX when both ZC_NOTIFY_EFFECT and self status update spawn the same effect
+// (e.g. notify effect=371 then local base level-up effect=371 — second spawn replays angel.str startup audio).
+static bool ShouldSuppressDuplicateLevelUpEffect(u32 effectId)
+{
+    const u32 elapsed = GetTickCount() - g_lastLocalLevelUpEffectTick;
+    return g_lastLocalLevelUpEffectId == effectId && elapsed <= kLocalLevelUpNotifySuppressMs;
+}
+
 bool ShouldSuppressSelfNotifyEffect(u32 actorId, u32 effectId)
 {
     if (actorId != g_session.m_aid && actorId != g_session.m_gid) {
         return false;
     }
 
-    const u32 elapsed = GetTickCount() - g_lastLocalLevelUpEffectTick;
-    return g_lastLocalLevelUpEffectId == effectId && elapsed <= kLocalLevelUpNotifySuppressMs;
+    return ShouldSuppressDuplicateLevelUpEffect(effectId);
 }
 
 u32 ResolveLocalBaseLevelUpEffectId(const CGameMode& mode)
@@ -323,6 +334,9 @@ void HandleNotifyEffect(CGameMode& mode, const PacketView& packet)
         actor == (mode.m_world ? static_cast<CGameActor*>(mode.m_world->m_player) : nullptr));
     if (!actor->LaunchEffect(static_cast<int>(effectId), vector3d{ 0.0f, 0.0f, 0.0f }, 0.0f)) {
         LaunchLevelUpEffect(actor, effectId);
+    }
+    if (actorId == g_session.m_aid || actorId == g_session.m_gid) {
+        RecordLocalLevelUpEffect(effectId);
     }
 }
 
@@ -1017,6 +1031,81 @@ bool BuildPlayerSkillListEntry(const u8* entry, PLAYER_SKILL_INFO& outSkill)
     return outSkill.SKID != 0;
 }
 
+// Matches Ref Zc_Skillinfo_List filtering for ZC_SKILLINFO_LIST (0x010F) player skills.
+static bool IsPlayerSkillTreeSkid(int skid)
+{
+    return skid > 0 && skid < 0x40F;
+}
+
+static bool IsHomunSkillTreeSkid(int skid)
+{
+    return skid >= 0x1F40 && skid < 0x1F51;
+}
+
+static bool IsMercSkillTreeSkid(int skid)
+{
+    return skid >= 0x2008 && skid < 0x202E;
+}
+
+enum class SkillInfoListTarget {
+    Player,
+    Homun,
+    Merc,
+};
+
+static void HandleSkillInfoListByTarget(CGameMode&, const PacketView& packet, SkillInfoListTarget target)
+{
+    if (!packet.data || packet.packetLength < 4) {
+        return;
+    }
+
+    DbgLog("[GameMode] skill list pkt=0x%04X len=%u target=%d\n",
+        static_cast<unsigned int>(packet.packetId),
+        static_cast<unsigned int>(packet.packetLength),
+        static_cast<int>(target));
+
+    switch (target) {
+    case SkillInfoListTarget::Player:
+        g_session.ClearSkillItems();
+        break;
+    case SkillInfoListTarget::Homun:
+        g_session.ClearHomunSkillItems();
+        break;
+    case SkillInfoListTarget::Merc:
+        g_session.ClearMercSkillItems();
+        break;
+    }
+
+    for (size_t offset = 4; offset + 37 <= static_cast<size_t>(packet.packetLength); offset += 37) {
+        PLAYER_SKILL_INFO skillInfo;
+        if (!BuildPlayerSkillListEntry(packet.data + offset, skillInfo)) {
+            continue;
+        }
+        const int skid = skillInfo.SKID;
+        if (target == SkillInfoListTarget::Player) {
+            if (!IsPlayerSkillTreeSkid(skid)) {
+                continue;
+            }
+            g_session.SetSkillItem(skillInfo);
+        } else if (target == SkillInfoListTarget::Homun) {
+            if (!IsHomunSkillTreeSkid(skid)) {
+                continue;
+            }
+            g_session.SetHomunSkillItem(skillInfo);
+        } else {
+            if (!IsMercSkillTreeSkid(skid)) {
+                continue;
+            }
+            g_session.SetMercSkillItem(skillInfo);
+        }
+        DbgLog("[GameMode] skill list entry skid=%d level=%d sp=%d upgradable=%d\n",
+            skillInfo.SKID,
+            skillInfo.level,
+            skillInfo.spcost,
+            skillInfo.upgradable);
+    }
+}
+
 bool TryGetExistingPlayerSkillInfo(int skillId, PLAYER_SKILL_INFO& outSkill)
 {
     for (const PLAYER_SKILL_INFO& skillInfo : g_session.GetSkillItems()) {
@@ -1028,28 +1117,51 @@ bool TryGetExistingPlayerSkillInfo(int skillId, PLAYER_SKILL_INFO& outSkill)
     return false;
 }
 
-void HandlePlayerSkillList(CGameMode&, const PacketView& packet)
+static bool TryGetExistingHomunSkillInfo(int skillId, PLAYER_SKILL_INFO& outSkill)
 {
-    if (!packet.data || packet.packetLength < 4) {
-        return;
-    }
-
-    DbgLog("[GameMode] skill list pkt=0x%04X len=%u\n",
-        static_cast<unsigned int>(packet.packetId),
-        static_cast<unsigned int>(packet.packetLength));
-    g_session.ClearSkillItems();
-    for (size_t offset = 4; offset + 37 <= static_cast<size_t>(packet.packetLength); offset += 37) {
-        PLAYER_SKILL_INFO skillInfo;
-        if (!BuildPlayerSkillListEntry(packet.data + offset, skillInfo)) {
-            continue;
+    for (const PLAYER_SKILL_INFO& skillInfo : g_session.GetHomunSkillItems()) {
+        if (skillInfo.SKID == skillId) {
+            outSkill = skillInfo;
+            return true;
         }
-        g_session.SetSkillItem(skillInfo);
-        DbgLog("[GameMode] skill list entry skid=%d level=%d sp=%d upgradable=%d\n",
-            skillInfo.SKID,
-            skillInfo.level,
-            skillInfo.spcost,
-            skillInfo.upgradable);
     }
+    return false;
+}
+
+static bool TryGetExistingMercSkillInfo(int skillId, PLAYER_SKILL_INFO& outSkill)
+{
+    for (const PLAYER_SKILL_INFO& skillInfo : g_session.GetMercSkillItems()) {
+        if (skillInfo.SKID == skillId) {
+            outSkill = skillInfo;
+            return true;
+        }
+    }
+    return false;
+}
+
+void HandlePlayerSkillList(CGameMode& mode, const PacketView& packet)
+{
+    HandleSkillInfoListByTarget(mode, packet, SkillInfoListTarget::Player);
+}
+
+void HandleHomunSkillList(CGameMode& mode, const PacketView& packet)
+{
+    HandleSkillInfoListByTarget(mode, packet, SkillInfoListTarget::Homun);
+}
+
+void HandleMercSkillList(CGameMode& mode, const PacketView& packet)
+{
+    HandleSkillInfoListByTarget(mode, packet, SkillInfoListTarget::Merc);
+}
+
+static void ApplySkillUpdatePayload(const u8* data, PLAYER_SKILL_INFO& skillInfo, void (CSession::*setItem)(const PLAYER_SKILL_INFO&))
+{
+    skillInfo.level = static_cast<int>(ReadLE16(data + 4));
+    skillInfo.spcost = static_cast<int>(ReadLE16(data + 6));
+    skillInfo.attackRange = static_cast<int>(ReadLE16(data + 8));
+    skillInfo.upgradable = static_cast<int>(data[10]);
+    ApplySkillMetadata(skillInfo);
+    (g_session.*setItem)(skillInfo);
 }
 
 void HandlePlayerSkillUpdate(CGameMode&, const PacketView& packet)
@@ -1078,12 +1190,57 @@ void HandlePlayerSkillUpdate(CGameMode&, const PacketView& packet)
         skillInfo.m_isValid = 1;
     }
 
-    skillInfo.level = static_cast<int>(ReadLE16(packet.data + 4));
-    skillInfo.spcost = static_cast<int>(ReadLE16(packet.data + 6));
-    skillInfo.attackRange = static_cast<int>(ReadLE16(packet.data + 8));
-    skillInfo.upgradable = static_cast<int>(packet.data[10]);
-    ApplySkillMetadata(skillInfo);
-    g_session.SetSkillItem(skillInfo);
+    ApplySkillUpdatePayload(packet.data, skillInfo, &CSession::SetSkillItem);
+}
+
+void HandleHomunSkillUpdate(CGameMode&, const PacketView& packet)
+{
+    if (!packet.data || packet.packetLength < 11) {
+        return;
+    }
+
+    if (CGameMode* gameMode = g_modeMgr.GetCurrentGameMode()) {
+        gameMode->m_isReqUpgradeSkillLevel = 0;
+    }
+
+    DbgLog("[GameMode] homun skill update pkt=0x%04X skid=%u level=%u\n",
+        static_cast<unsigned int>(packet.packetId),
+        static_cast<unsigned int>(ReadLE16(packet.data + 2)),
+        static_cast<unsigned int>(ReadLE16(packet.data + 4)));
+    PLAYER_SKILL_INFO skillInfo;
+    skillInfo.SKID = static_cast<int>(ReadLE16(packet.data + 2));
+    if (!TryGetExistingHomunSkillInfo(skillInfo.SKID, skillInfo)) {
+        skillInfo = {};
+        skillInfo.SKID = static_cast<int>(ReadLE16(packet.data + 2));
+        skillInfo.m_isValid = 1;
+    }
+
+    ApplySkillUpdatePayload(packet.data, skillInfo, &CSession::SetHomunSkillItem);
+}
+
+void HandleMercSkillUpdate(CGameMode&, const PacketView& packet)
+{
+    if (!packet.data || packet.packetLength < 11) {
+        return;
+    }
+
+    if (CGameMode* gameMode = g_modeMgr.GetCurrentGameMode()) {
+        gameMode->m_isReqUpgradeSkillLevel = 0;
+    }
+
+    DbgLog("[GameMode] merc skill update pkt=0x%04X skid=%u level=%u\n",
+        static_cast<unsigned int>(packet.packetId),
+        static_cast<unsigned int>(ReadLE16(packet.data + 2)),
+        static_cast<unsigned int>(ReadLE16(packet.data + 4)));
+    PLAYER_SKILL_INFO skillInfo;
+    skillInfo.SKID = static_cast<int>(ReadLE16(packet.data + 2));
+    if (!TryGetExistingMercSkillInfo(skillInfo.SKID, skillInfo)) {
+        skillInfo = {};
+        skillInfo.SKID = static_cast<int>(ReadLE16(packet.data + 2));
+        skillInfo.m_isValid = 1;
+    }
+
+    ApplySkillUpdatePayload(packet.data, skillInfo, &CSession::SetMercSkillItem);
 }
 
 void HandlePlayerSkillAdd(CGameMode&, const PacketView& packet)
@@ -1702,8 +1859,13 @@ void HandleSelfStatusParam(CGameMode& mode, const PacketView& packet)
                         static_cast<unsigned int>(previousValue),
                         static_cast<unsigned int>(value),
                         static_cast<unsigned int>(effectId));
-                    LaunchLevelUpEffect(mode.m_world->m_player, effectId);
-                    RecordLocalLevelUpEffect(effectId);
+                    if (!ShouldSuppressDuplicateLevelUpEffect(effectId)) {
+                        LaunchLevelUpEffect(mode.m_world->m_player, effectId);
+                        RecordLocalLevelUpEffect(effectId);
+                    } else {
+                        DbgLog("[GameMode] local base level-up VFX skipped (duplicate of recent notify effect=%u)\n",
+                            static_cast<unsigned int>(effectId));
+                    }
                 }
             } else if (statusType == kStatusJobLevel) {
                 g_lastSelfLevelUpStatusTick = GetTickCount();
@@ -1715,8 +1877,13 @@ void HandleSelfStatusParam(CGameMode& mode, const PacketView& packet)
                         static_cast<unsigned int>(previousValue),
                         static_cast<unsigned int>(value),
                         static_cast<unsigned int>(effectId));
-                    LaunchLevelUpEffect(mode.m_world->m_player, effectId);
-                    RecordLocalLevelUpEffect(effectId);
+                    if (!ShouldSuppressDuplicateLevelUpEffect(effectId)) {
+                        LaunchLevelUpEffect(mode.m_world->m_player, effectId);
+                        RecordLocalLevelUpEffect(effectId);
+                    } else {
+                        DbgLog("[GameMode] local job level-up VFX skipped (duplicate of recent notify effect=%u)\n",
+                            static_cast<unsigned int>(effectId));
+                    }
                 }
             }
         }
@@ -3111,20 +3278,6 @@ int ResolveSkillMotionType(u16 skillId)
     }
 }
 
-int ResolveSkillCastMotionType(u16 skillId)
-{
-    switch (skillId) {
-    case 29: // AL_INCAGI
-        return kGameActorSkillStateId;
-    case 33: // AL_ANGELUS
-        return kGameActorCastingStateId;
-    case 34: // AL_BLESSING
-        return 0;
-    default:
-        return kGameActorCastingStateId;
-    }
-}
-
 int ResolveGroundSkillEffectId(u16 skillId, u16 level);
 
 int ResolveSkillVisibleEffectId(u16 skillId, u16 levelOrAmount)
@@ -3247,6 +3400,207 @@ int ResolveGroundSkillEffectId(u16 skillId, u16 level)
     }
 }
 
+static std::string LowercaseAsciiSkillIdName(std::string value)
+{
+    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char ch) {
+        if (ch >= 'A' && ch <= 'Z') {
+            return static_cast<char>(ch - 'A' + 'a');
+        }
+        return static_cast<char>(ch);
+    });
+    return value;
+}
+
+// GRF layout: data\wav\effect\wizard_<stem>.wav (Ref RagEffect Lord/MeteorStorm/StormGust use aEffectWizard* / HunterBl).
+static std::string CompactAlnumLower(std::string value)
+{
+    std::string out;
+    out.reserve(value.size());
+    for (unsigned char ch : value) {
+        if (std::isalnum(ch)) {
+            out.push_back(static_cast<char>(std::tolower(ch)));
+        }
+    }
+    return out;
+}
+
+static std::string WizardWaveStemFromSkillIdName(std::string idName)
+{
+    idName = LowercaseAsciiSkillIdName(std::move(idName));
+    static constexpr const char* kStripPrefixes[] = {
+        "mg_", "wz_", "pr_", "am_", "mo_", "npc_", "tk_", "sl_", "gs_", "cr_", "cg_", "nj_", "lk_", "rms_",
+        "st_", "sa_", "pf_", "we_", "bs_", "mc_", "all_", "ba_", "nc_", "sr_", "al_", "ht_", "kn_", "tf_",
+    };
+    for (const char* pre : kStripPrefixes) {
+        const size_t len = std::strlen(pre);
+        if (idName.size() > len && idName.compare(0, len, pre) == 0) {
+            idName = idName.substr(len);
+            break;
+        }
+    }
+    return CompactAlnumLower(idName);
+}
+
+static bool TryPlayEffectWaveAtPosition(const vector3d& soundPos, const std::string& relativePath)
+{
+    if (relativePath.empty()) {
+        return false;
+    }
+
+    CAudio* audio = CAudio::GetInstance();
+    CGameMode* gameMode = g_modeMgr.GetCurrentGameMode();
+    if (!audio || !gameMode || !gameMode->m_world || !gameMode->m_world->m_player) {
+        return false;
+    }
+
+    const vector3d listenerPos = gameMode->m_world->m_player->m_pos;
+    const std::array<std::string, 3> candidates = {
+        relativePath,
+        std::string("wav\\") + relativePath,
+        std::string("data\\wav\\") + relativePath,
+    };
+
+    for (const std::string& candidate : candidates) {
+        if (audio->PlaySound3D(candidate.c_str(), soundPos, listenerPos, 250, 40, 1.0f)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool TryPlayFirstMatchingEffectWave(const vector3d& pos, std::initializer_list<const char*> paths)
+{
+    for (const char* path : paths) {
+        if (path && TryPlayEffectWaveAtPosition(pos, path)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// EzStr world effects do not emit audio from keyframes; timed casts no longer attach begin-spell STR (which
+// often carried cast SFX). Play impact SFX when server-driven packets spawn the ground/cell effect.
+static void PlayGroundSkillImpactSound(u16 skillId, const vector3d& worldPos)
+{
+    if (!g_soundMode || !g_isSoundOn) {
+        return;
+    }
+
+    switch (skillId) {
+    case 21: // MG_THUNDERSTORM — client ground effect id 30 (thunderstorm.str)
+        if (TryPlayFirstMatchingEffectWave(worldPos, {
+                "effect\\wizard_thunderstorm.wav",
+                "effect\\ef_thunderstorm.wav",
+                "effect\\ef_thunder.wav",
+            })) {
+            return;
+        }
+        break;
+    case 83: // WZ_METEOR — client ground effect id 92 (Meteor*.str); Ref PlayWave aEffectWizardMe
+        if (TryPlayFirstMatchingEffectWave(worldPos, {
+                "effect\\wizard_meteor.wav",
+                "effect\\wizard_meteorstorm.wav",
+                "effect\\ef_meteorstorm.wav",
+                "effect\\ef_meteor.wav",
+            })) {
+            return;
+        }
+        break;
+    case 85: // WZ_VERMILION — client ground effect id 90 (lord.str); Ref Lord() uses aEffectWizardMe_0 + aEffectHunterBl
+        if (TryPlayFirstMatchingEffectWave(worldPos, {
+                "effect\\wizard_vermilion.wav",
+                "effect\\wizard_lord.wav",
+                "effect\\wizard_meteor.wav",
+                "effect\\hunter_blitz.wav",
+                "effect\\ef_vermillion.wav",
+                "effect\\ef_lord.wav",
+                "effect\\ef_lov.wav",
+            })) {
+            return;
+        }
+        break;
+    case 89: // WZ_STORMGUST — client ground effect id 89 (storm gust.str); Ref PlayWave aEffectWizardSt
+        if (TryPlayFirstMatchingEffectWave(worldPos, {
+                "effect\\wizard_stormgust.wav",
+                "effect\\ef_stormgust.wav",
+                "effect\\ef_storm.wav",
+                "effect\\ef_wz_stormgust.wav",
+            })) {
+            return;
+        }
+        break;
+    default:
+        break;
+    }
+
+    g_skillMgr.EnsureLoaded();
+    const SkillMetadata* md = g_skillMgr.GetSkillMetadata(static_cast<int>(skillId));
+    if (!md || md->skillIdName.empty()) {
+        return;
+    }
+
+    const std::string n = LowercaseAsciiSkillIdName(md->skillIdName);
+    const std::string wizardStem = WizardWaveStemFromSkillIdName(md->skillIdName);
+    if (!wizardStem.empty() && TryPlayEffectWaveAtPosition(worldPos, std::string("effect\\wizard_") + wizardStem + ".wav")) {
+        return;
+    }
+
+    const std::string compactUnderscore = CompactAlnumLower(n);
+    if (!compactUnderscore.empty()
+        && TryPlayEffectWaveAtPosition(worldPos, std::string("effect\\wizard_") + compactUnderscore + ".wav")) {
+        return;
+    }
+
+    if (TryPlayEffectWaveAtPosition(worldPos, std::string("effect\\ef_") + n + ".wav")) {
+        return;
+    }
+
+    if (!compactUnderscore.empty()
+        && TryPlayEffectWaveAtPosition(worldPos, std::string("effect\\ef_") + compactUnderscore + ".wav")) {
+        return;
+    }
+
+    static constexpr const char* kStripPrefixes[] = {
+        "mg_",
+        "wz_",
+        "pr_",
+        "am_",
+        "mo_",
+        "npc_",
+        "tk_",
+        "sl_",
+        "gs_",
+        "cr_",
+        "cg_",
+        "nj_",
+        "lk_",
+        "rms_",
+        "st_",
+        "sa_",
+        "pf_",
+        "we_",
+        "bs_",
+        "mc_",
+        "all_",
+        "ba_",
+        "nc_",
+        "sr_",
+    };
+
+    for (const char* pre : kStripPrefixes) {
+        const size_t len = std::strlen(pre);
+        if (n.size() > len && n.compare(0, len, pre) == 0) {
+            const std::string tail = n.substr(len);
+            if (TryPlayEffectWaveAtPosition(worldPos, std::string("effect\\wizard_") + CompactAlnumLower(tail) + ".wav")) {
+                return;
+            }
+            if (TryPlayEffectWaveAtPosition(worldPos, std::string("effect\\ef_") + tail + ".wav")) {
+                return;
+            }
+        }
+    }
+}
+
 CRagEffect* SpawnWorldSkillEffect(CGameMode& mode, int effectId, const vector3d& position)
 {
     if (effectId < 0 || !mode.m_world) {
@@ -3300,22 +3654,71 @@ void HandleSkillCastAck(CGameMode& mode, const PacketView& packet)
     const vector3d targetPos = targetActor
         ? targetActor->m_pos
         : ResolveSkillCellWorldPosition(mode.m_world, cellX, cellY);
-    ClearAttachedSkillEffects(sourceActor);
-    StartSkillStateAnimation(sourceActor, ResolveSkillCastMotionType(skillId), dstGid, &targetPos);
-    const int beginEffectId = ResolveSkillBeginEffectId(skillId, property);
-    if (beginEffectId >= 0) {
-        sourceActor->SendMsg(sourceActor, 85, beginEffectId, castTimeMs >> 4, 0);
+
+    int beginEffectId = 16;
+    int motionType = kGameActorCastingStateId;
+    GetSkillActionInfo2(static_cast<int>(skillId), beginEffectId, motionType, static_cast<int>(property), sourceActor->m_job);
+
+    int motion = motionType;
+    if (motion == 0 && castTimeMs > 0) {
+        motion = kGameActorCastingStateId;
+    } else if ((motion == 5 || motion == 11 || motion == 12) && castTimeMs > 0) {
+        motion = kGameActorCastingStateId;
     }
+
+    const bool frozenCast = (skillId == 57 || skillId == 62);
+
+    sourceActor->m_isSitting = 0;
+    StopActorMovementForAction(sourceActor);
+    FaceActorTowardPosition(sourceActor, targetPos);
+
+    if (frozenCast) {
+        ClearAttachedSkillEffects(sourceActor);
+        sourceActor->SetState(kGameActorAttackStateId);
+        sourceActor->SetModifyFactorOfmotionSpeed(castTimeMs > 0 ? castTimeMs : kDefaultAttackMotionTime);
+        sourceActor->m_isMotionFreezed = 1;
+        sourceActor->m_freezeEndTick = timeGetTime() + static_cast<u32>((std::max)(0, castTimeMs));
+    } else {
+        ClearAttachedSkillEffects(sourceActor);
+        if (motion == kGameActorAttackStateId && castTimeMs > 0) {
+            StartSkillSourceAnimation(sourceActor, &targetPos, castTimeMs);
+        } else {
+            sourceActor->m_targetGid = dstGid;
+            int motionToApply = motion;
+            // State 8 never calls SetAction; timed casts need the loop pose (13) so motion/granny state matches Ref.
+            if (castTimeMs > 0 && motionToApply == kGameActorCastingStateId) {
+                motionToApply = kGameActorCastingLoopStateId;
+            }
+            sourceActor->SetState(motionToApply);
+        }
+        // Timed casts: no begin-spell VFX here — completion packets (damage / ground notify / unit) play the skill effect.
+        if (beginEffectId >= 0 && castTimeMs <= 0) {
+            sourceActor->SendMsg(sourceActor, 85, beginEffectId, 0, 0);
+        }
+        if (castTimeMs > 0) {
+            sourceActor->SendMsg(sourceActor, 82, castTimeMs, 0, 0);
+        }
+    }
+
+    if (dstGid != 0 && targetActor && targetActor != sourceActor) {
+        sourceActor->SendMsg(sourceActor, 81, dstGid, 0, 0);
+        targetActor->SendMsg(targetActor, 86, 60, castTimeMs >> 4, 0);
+    }
+
+    // Ground timed casts: defer cell effect until server sends damage / ZC_SKILL_ENTRY / etc., not cast-start ack.
+    if (dstGid == 0 && castTimeMs <= 0) {
+        const int groundFx = ResolveGroundSkillEffectId(skillId, castLevel);
+        if (groundFx > 0) {
+            SpawnWorldSkillEffect(mode, groundFx, targetPos);
+        }
+    }
+
     if (skillId == 17 && targetActor && targetActor != sourceActor) { // MG_FIREBOLT
         if (CRagEffect* effect = sourceActor->LaunchEffect(24, vector3d{}, 0.0f)) {
             effect->SendMsg(effect, 44, castLevel > 0 ? castLevel : 1, 0, 0);
             effect->SendMsg(effect, 14, reinterpret_cast<msgparam_t>(&targetActor->m_pos), 0, 0);
         }
     }
-    if (targetActor && targetActor != sourceActor) {
-        targetActor->SendMsg(targetActor, 86, 60, castTimeMs >> 4, 0);
-    }
-    sourceActor->SendMsg(sourceActor, 82, castTimeMs, 0, 0);
 
     DbgLog("[GameMode] skill cast ack src=%u dst=%u skill=%u property=%u castMs=%d cell=(%d,%d)\n",
         srcGid,
@@ -3409,6 +3812,7 @@ void HandleSkillDamagePositionNotify(CGameMode& mode, const PacketView& packet)
     }
 
     SpawnWorldSkillEffect(mode, ResolveGroundSkillEffectId(skillId, level), impactPos);
+    PlayGroundSkillImpactSound(skillId, impactPos);
     DbgLog("[GameMode] skill damage pos src=%u dst=%u skill=%u level=%u damage=%d div=%u cell=(%d,%d)\n",
         srcGid,
         dstGid,
@@ -3438,6 +3842,7 @@ void HandleGroundSkillNotify(CGameMode& mode, const PacketView& packet)
         StartSkillSourceAnimation(sourceActor, &worldPos, kDefaultAttackMotionTime);
     }
     SpawnWorldSkillEffect(mode, ResolveGroundSkillEffectId(skillId, level), worldPos);
+    PlayGroundSkillImpactSound(skillId, worldPos);
 
     DbgLog("[GameMode] ground skill src=%u skill=%u level=%u cell=(%d,%d)\n",
         srcGid,
@@ -5899,10 +6304,10 @@ void RegisterDefaultGameModePacketHandlers(CGameModePacketRouter& router)
     router.Register(0x010F, HandlePlayerSkillList);
     router.Register(0x0110, HandleSkillFailAck);
     router.Register(0x0111, HandlePlayerSkillAdd);
-    router.Register(0x0235, HandlePlayerSkillList);
-    router.Register(0x0239, HandlePlayerSkillUpdate);
-    router.Register(0x029D, HandlePlayerSkillList);
-    router.Register(0x029E, HandlePlayerSkillUpdate);
+    router.Register(0x0235, HandleHomunSkillList);
+    router.Register(0x0239, HandleHomunSkillUpdate);
+    router.Register(0x029D, HandleMercSkillList);
+    router.Register(0x029E, HandleMercSkillUpdate);
     router.Register(0x0114, HandleSkillDamageNotify);
     router.Register(0x0115, HandleSkillDamagePositionNotify);
     router.Register(0x0117, HandleGroundSkillNotify);
