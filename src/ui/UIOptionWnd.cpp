@@ -3,6 +3,7 @@
 #include "audio/Audio.h"
 #include "core/File.h"
 #include "main/WinMain.h"
+#include "qtui/QtUiRuntime.h"
 #include "res/Bitmap.h"
 #include "ui/UIWindowMgr.h"
 
@@ -1163,6 +1164,11 @@ void UIOptionWnd::OnDraw()
         OnCreate(clientW, clientH);
     }
 
+    if (IsQtUiRuntimeEnabled()) {
+        m_isDirty = 0;
+        return;
+    }
+
     const RECT titleRect = GetTitleBarRect();
     const RECT bodyRect = GetBodyRect();
     RECT windowRect = { m_x, m_y, m_x + m_w, m_y + m_h };
@@ -1459,4 +1465,174 @@ void UIOptionWnd::OnKeyDown(int virtualKey)
         SetShow(0);
         SaveSettings();
     }
+}
+
+bool UIOptionWnd::GetDisplayDataForQt(DisplayData* outData) const
+{
+    if (!outData) {
+        return false;
+    }
+
+    DisplayData data{};
+    data.collapsed = m_collapsed != 0;
+    data.activeTab = m_activeTab;
+
+    const RECT contentRect = GetContentRect();
+    data.contentX = contentRect.left;
+    data.contentY = contentRect.top;
+    data.contentWidth = contentRect.right - contentRect.left;
+    data.contentHeight = contentRect.bottom - contentRect.top;
+
+    const RECT miniRect = GetMiniButtonRect();
+    data.miniButtonX = miniRect.left;
+    data.miniButtonY = miniRect.top;
+    data.miniButtonWidth = miniRect.right - miniRect.left;
+    data.miniButtonHeight = miniRect.bottom - miniRect.top;
+
+    const RECT closeRect = GetCloseButtonRect();
+    data.closeButtonX = closeRect.left;
+    data.closeButtonY = closeRect.top;
+    data.closeButtonWidth = closeRect.right - closeRect.left;
+    data.closeButtonHeight = closeRect.bottom - closeRect.top;
+
+    data.tabs.reserve(TabId_Count);
+    static const char* const kTabLabels[TabId_Count] = { "Game", "Graphics", "Audio" };
+    for (int tabIndex = 0; tabIndex < TabId_Count; ++tabIndex) {
+        const RECT tabRect = GetTabRect(tabIndex);
+        DisplayTab tab{};
+        tab.x = tabRect.left;
+        tab.y = tabRect.top;
+        tab.width = tabRect.right - tabRect.left;
+        tab.height = tabRect.bottom - tabRect.top;
+        tab.active = m_activeTab == tabIndex;
+        tab.label = kTabLabels[tabIndex];
+        data.tabs.push_back(std::move(tab));
+    }
+
+    if (HasPendingGraphicsRestart()) {
+        const RECT restartRect = GetRestartButtonRect();
+        data.restartVisible = true;
+        data.restartX = restartRect.left;
+        data.restartY = restartRect.top;
+        data.restartWidth = restartRect.right - restartRect.left;
+        data.restartHeight = restartRect.bottom - restartRect.top;
+    }
+
+    if (!data.collapsed) {
+        if (m_activeTab == TabId_Audio) {
+            const RECT bgmRect = GetBgmSliderRect();
+            DisplaySlider bgm{};
+            bgm.x = bgmRect.left;
+            bgm.y = bgmRect.top;
+            bgm.width = bgmRect.right - bgmRect.left;
+            bgm.height = bgmRect.bottom - bgmRect.top;
+            bgm.value = m_bgmVolume;
+            bgm.label = "BGM";
+            data.sliders.push_back(std::move(bgm));
+
+            const RECT soundRect = GetSoundSliderRect();
+            DisplaySlider sound{};
+            sound.x = soundRect.left;
+            sound.y = soundRect.top;
+            sound.width = soundRect.right - soundRect.left;
+            sound.height = soundRect.bottom - soundRect.top;
+            sound.value = m_soundVolume;
+            sound.label = "Sound";
+            data.sliders.push_back(std::move(sound));
+
+            if (m_bgmOnCheckBox) {
+                DisplayToggle toggle{};
+                toggle.x = m_bgmOnCheckBox->m_x;
+                toggle.y = m_bgmOnCheckBox->m_y;
+                toggle.width = m_bgmOnCheckBox->m_w;
+                toggle.height = m_bgmOnCheckBox->m_h;
+                toggle.checked = m_bgmEnabled == 0;
+                toggle.label = "Mute";
+                data.toggles.push_back(std::move(toggle));
+            }
+            if (m_soundOnCheckBox) {
+                DisplayToggle toggle{};
+                toggle.x = m_soundOnCheckBox->m_x;
+                toggle.y = m_soundOnCheckBox->m_y;
+                toggle.width = m_soundOnCheckBox->m_w;
+                toggle.height = m_soundOnCheckBox->m_h;
+                toggle.checked = m_soundEnabled == 0;
+                toggle.label = "Mute";
+                data.toggles.push_back(std::move(toggle));
+            }
+        } else if (m_activeTab == TabId_Game) {
+            struct ToggleDef {
+                const UICheckBox* box;
+                bool checked;
+                const char* label;
+            };
+            const ToggleDef toggleDefs[] = {
+                { m_noCtrlCheckBox, m_noCtrl != 0, "Disable Ctrl+Click movement" },
+                { m_attackSnapCheckBox, m_attackSnap != 0, "Attack target snap" },
+                { m_skillSnapCheckBox, m_skillSnap != 0, "Skill target snap" },
+                { m_itemSnapCheckBox, m_itemSnap != 0, "Item target snap" },
+            };
+            for (const ToggleDef& def : toggleDefs) {
+                if (!def.box) {
+                    continue;
+                }
+                DisplayToggle toggle{};
+                toggle.x = def.box->m_x;
+                toggle.y = def.box->m_y;
+                toggle.width = def.box->m_w;
+                toggle.height = def.box->m_h;
+                toggle.checked = def.checked;
+                toggle.label = def.label;
+                data.toggles.push_back(std::move(toggle));
+            }
+        } else if (m_activeTab == TabId_Graphics) {
+            const std::vector<GraphicsRowId> rows = GetVisibleGraphicsRows();
+            data.graphicsRows.reserve(rows.size());
+            for (size_t index = 0; index < rows.size(); ++index) {
+                DisplayGraphicsRow row{};
+                const RECT rowRect = GetRowRect(static_cast<int>(index));
+                const RECT prevRect = GetRowPrevButtonRect(static_cast<int>(index));
+                const RECT nextRect = GetRowNextButtonRect(static_cast<int>(index));
+                row.x = rowRect.left;
+                row.y = rowRect.top;
+                row.width = rowRect.right - rowRect.left;
+                row.height = rowRect.bottom - rowRect.top;
+                row.prevX = prevRect.left;
+                row.prevY = prevRect.top;
+                row.prevWidth = prevRect.right - prevRect.left;
+                row.prevHeight = prevRect.bottom - prevRect.top;
+                row.nextX = nextRect.left;
+                row.nextY = nextRect.top;
+                row.nextWidth = nextRect.right - nextRect.left;
+                row.nextHeight = nextRect.bottom - nextRect.top;
+                switch (rows[index]) {
+                case GraphicsRow_Resolution:
+                    row.label = "Resolution";
+                    break;
+                case GraphicsRow_Renderer:
+                    row.label = "Renderer";
+                    break;
+                case GraphicsRow_WindowMode:
+                    row.label = "Window mode";
+                    break;
+                case GraphicsRow_AntiAliasing:
+                    row.label = "3D AA";
+                    break;
+                case GraphicsRow_TextureUpscale:
+                    row.label = "Texture upscale";
+                    break;
+                case GraphicsRow_AnisotropicFiltering:
+                    row.label = "Anisotropic";
+                    break;
+                default:
+                    break;
+                }
+                row.value = GetGraphicsRowValue(rows[index]);
+                data.graphicsRows.push_back(std::move(row));
+            }
+        }
+    }
+
+    *outData = std::move(data);
+    return true;
 }

@@ -4,11 +4,39 @@
 
 #include <array>
 #include <string>
+#include <vector>
 
 class UIBitmapButton;
+class QImage;
 
 class UIRoMapWnd : public UIFrameWnd {
 public:
+    struct DisplayMarker {
+        int x = 0;
+        int y = 0;
+        int radius = 0;
+        unsigned int color = 0;
+    };
+
+    struct DisplayData {
+        int mapX = 0;
+        int mapY = 0;
+        int mapWidth = 0;
+        int mapHeight = 0;
+        int closeX = 0;
+        int closeY = 0;
+        int closeWidth = 0;
+        int closeHeight = 0;
+        int coordsX = 0;
+        int coordsY = 0;
+        int coordsWidth = 0;
+        int coordsHeight = 0;
+        int imageRevision = 0;
+        std::string mapName;
+        std::string coordsText;
+        std::vector<DisplayMarker> markers;
+    };
+
     UIRoMapWnd();
     ~UIRoMapWnd() override;
 
@@ -22,6 +50,8 @@ public:
     void OnWheel(int delta) override;
     void StoreInfo() override;
     void DrawToHdc(HDC hdc, int drawX, int drawY);
+    bool GetDisplayDataForQt(DisplayData* outData) const;
+    bool BuildQtMinimapImage(QImage* outImage) const;
 
 private:
     void EnsureCreated();

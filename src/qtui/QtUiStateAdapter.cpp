@@ -21,14 +21,17 @@
 #include "ui/UIItemPurchaseWnd.h"
 #include "ui/UIItemSellWnd.h"
 #include "ui/UIItemShopWnd.h"
+#include "ui/UIMinimapWnd.h"
 #include "ui/UINewChatWnd.h"
 #include "ui/UINpcMenuWnd.h"
 #include "ui/UINpcInputWnd.h"
 #include "ui/UINotifyLevelUpWnd.h"
+#include "ui/UIOptionWnd.h"
 #include "ui/UIRechargeGage.h"
 #include "ui/UISelectCharWnd.h"
 #include "ui/UISelectServerWnd.h"
 #include "ui/UISayDialogWnd.h"
+#include "ui/UISkillListWnd.h"
 #include "ui/UIShortCutWnd.h"
 #include "ui/UIStatusWnd.h"
 #include "ui/UIShopCommon.h"
@@ -1050,6 +1053,238 @@ void PopulateEquipState(QtUiState* state)
     state->setEquipData(data);
 }
 
+void PopulateSkillListState(QtUiState* state)
+{
+    if (!state) {
+        return;
+    }
+
+    const UISkillListWnd* const skillWnd = g_windowMgr.m_skillListWnd;
+    const bool visible = skillWnd && skillWnd->m_show != 0;
+    state->setSkillListVisible(visible);
+    if (!visible) {
+        state->setSkillListGeometry(0, 0, 0, 0);
+        state->setSkillListData(QVariantMap{});
+        return;
+    }
+
+    state->setSkillListGeometry(skillWnd->m_x, skillWnd->m_y, skillWnd->m_w, skillWnd->m_h);
+
+    UISkillListWnd::DisplayData display{};
+    QVariantMap data;
+    if (skillWnd->GetDisplayDataForQt(&display)) {
+        data.insert(QStringLiteral("skillPointCount"), display.skillPointCount);
+        data.insert(QStringLiteral("viewOffset"), display.viewOffset);
+        data.insert(QStringLiteral("maxViewOffset"), display.maxViewOffset);
+        data.insert(QStringLiteral("scrollBarVisible"), display.scrollBarVisible);
+        data.insert(QStringLiteral("scrollTrackX"), display.scrollTrackX);
+        data.insert(QStringLiteral("scrollTrackY"), display.scrollTrackY);
+        data.insert(QStringLiteral("scrollTrackWidth"), display.scrollTrackWidth);
+        data.insert(QStringLiteral("scrollTrackHeight"), display.scrollTrackHeight);
+        data.insert(QStringLiteral("scrollThumbX"), display.scrollThumbX);
+        data.insert(QStringLiteral("scrollThumbY"), display.scrollThumbY);
+        data.insert(QStringLiteral("scrollThumbWidth"), display.scrollThumbWidth);
+        data.insert(QStringLiteral("scrollThumbHeight"), display.scrollThumbHeight);
+
+        QVariantList rows;
+        rows.reserve(static_cast<qsizetype>(display.rows.size()));
+        for (const UISkillListWnd::DisplayRow& row : display.rows) {
+            QVariantMap entry;
+            entry.insert(QStringLiteral("x"), row.x);
+            entry.insert(QStringLiteral("y"), row.y);
+            entry.insert(QStringLiteral("width"), row.width);
+            entry.insert(QStringLiteral("height"), row.height);
+            entry.insert(QStringLiteral("selected"), row.selected);
+            entry.insert(QStringLiteral("hovered"), row.hovered);
+            entry.insert(QStringLiteral("upgradeVisible"), row.upgradeVisible);
+            entry.insert(QStringLiteral("upgradePressed"), row.upgradePressed);
+            entry.insert(QStringLiteral("upgradeX"), row.upgradeX);
+            entry.insert(QStringLiteral("upgradeY"), row.upgradeY);
+            entry.insert(QStringLiteral("upgradeWidth"), row.upgradeWidth);
+            entry.insert(QStringLiteral("upgradeHeight"), row.upgradeHeight);
+            entry.insert(QStringLiteral("name"), ToQString(row.name));
+            entry.insert(QStringLiteral("levelText"), ToQString(row.levelText));
+            entry.insert(QStringLiteral("rightText"), ToQString(row.rightText));
+            rows.push_back(entry);
+        }
+        data.insert(QStringLiteral("rows"), rows);
+
+        QVariantList buttons;
+        buttons.reserve(static_cast<qsizetype>(display.bottomButtons.size()));
+        for (const UISkillListWnd::DisplayButton& button : display.bottomButtons) {
+            QVariantMap entry;
+            entry.insert(QStringLiteral("x"), button.x);
+            entry.insert(QStringLiteral("y"), button.y);
+            entry.insert(QStringLiteral("width"), button.width);
+            entry.insert(QStringLiteral("height"), button.height);
+            entry.insert(QStringLiteral("hovered"), button.hovered);
+            entry.insert(QStringLiteral("pressed"), button.pressed);
+            entry.insert(QStringLiteral("label"), ToQString(button.label));
+            buttons.push_back(entry);
+        }
+        data.insert(QStringLiteral("bottomButtons"), buttons);
+    }
+    state->setSkillListData(data);
+}
+
+void PopulateOptionState(QtUiState* state)
+{
+    if (!state) {
+        return;
+    }
+
+    const UIOptionWnd* const optionWnd = g_windowMgr.m_optionWnd;
+    const bool visible = optionWnd && optionWnd->m_show != 0;
+    state->setOptionVisible(visible);
+    if (!visible) {
+        state->setOptionGeometry(0, 0, 0, 0);
+        state->setOptionData(QVariantMap{});
+        return;
+    }
+
+    state->setOptionGeometry(optionWnd->m_x, optionWnd->m_y, optionWnd->m_w, optionWnd->m_h);
+
+    UIOptionWnd::DisplayData display{};
+    QVariantMap data;
+    if (optionWnd->GetDisplayDataForQt(&display)) {
+        data.insert(QStringLiteral("collapsed"), display.collapsed);
+        data.insert(QStringLiteral("activeTab"), display.activeTab);
+        data.insert(QStringLiteral("contentX"), display.contentX);
+        data.insert(QStringLiteral("contentY"), display.contentY);
+        data.insert(QStringLiteral("contentWidth"), display.contentWidth);
+        data.insert(QStringLiteral("contentHeight"), display.contentHeight);
+        data.insert(QStringLiteral("miniButtonX"), display.miniButtonX);
+        data.insert(QStringLiteral("miniButtonY"), display.miniButtonY);
+        data.insert(QStringLiteral("miniButtonWidth"), display.miniButtonWidth);
+        data.insert(QStringLiteral("miniButtonHeight"), display.miniButtonHeight);
+        data.insert(QStringLiteral("closeButtonX"), display.closeButtonX);
+        data.insert(QStringLiteral("closeButtonY"), display.closeButtonY);
+        data.insert(QStringLiteral("closeButtonWidth"), display.closeButtonWidth);
+        data.insert(QStringLiteral("closeButtonHeight"), display.closeButtonHeight);
+        data.insert(QStringLiteral("restartVisible"), display.restartVisible);
+        data.insert(QStringLiteral("restartX"), display.restartX);
+        data.insert(QStringLiteral("restartY"), display.restartY);
+        data.insert(QStringLiteral("restartWidth"), display.restartWidth);
+        data.insert(QStringLiteral("restartHeight"), display.restartHeight);
+
+        QVariantList tabs;
+        tabs.reserve(static_cast<qsizetype>(display.tabs.size()));
+        for (const UIOptionWnd::DisplayTab& tab : display.tabs) {
+            QVariantMap entry;
+            entry.insert(QStringLiteral("x"), tab.x);
+            entry.insert(QStringLiteral("y"), tab.y);
+            entry.insert(QStringLiteral("width"), tab.width);
+            entry.insert(QStringLiteral("height"), tab.height);
+            entry.insert(QStringLiteral("active"), tab.active);
+            entry.insert(QStringLiteral("label"), ToQString(tab.label));
+            tabs.push_back(entry);
+        }
+        data.insert(QStringLiteral("tabs"), tabs);
+
+        QVariantList toggles;
+        toggles.reserve(static_cast<qsizetype>(display.toggles.size()));
+        for (const UIOptionWnd::DisplayToggle& toggle : display.toggles) {
+            QVariantMap entry;
+            entry.insert(QStringLiteral("x"), toggle.x);
+            entry.insert(QStringLiteral("y"), toggle.y);
+            entry.insert(QStringLiteral("width"), toggle.width);
+            entry.insert(QStringLiteral("height"), toggle.height);
+            entry.insert(QStringLiteral("checked"), toggle.checked);
+            entry.insert(QStringLiteral("label"), ToQString(toggle.label));
+            toggles.push_back(entry);
+        }
+        data.insert(QStringLiteral("toggles"), toggles);
+
+        QVariantList sliders;
+        sliders.reserve(static_cast<qsizetype>(display.sliders.size()));
+        for (const UIOptionWnd::DisplaySlider& slider : display.sliders) {
+            QVariantMap entry;
+            entry.insert(QStringLiteral("x"), slider.x);
+            entry.insert(QStringLiteral("y"), slider.y);
+            entry.insert(QStringLiteral("width"), slider.width);
+            entry.insert(QStringLiteral("height"), slider.height);
+            entry.insert(QStringLiteral("value"), slider.value);
+            entry.insert(QStringLiteral("label"), ToQString(slider.label));
+            sliders.push_back(entry);
+        }
+        data.insert(QStringLiteral("sliders"), sliders);
+
+        QVariantList graphicsRows;
+        graphicsRows.reserve(static_cast<qsizetype>(display.graphicsRows.size()));
+        for (const UIOptionWnd::DisplayGraphicsRow& row : display.graphicsRows) {
+            QVariantMap entry;
+            entry.insert(QStringLiteral("x"), row.x);
+            entry.insert(QStringLiteral("y"), row.y);
+            entry.insert(QStringLiteral("width"), row.width);
+            entry.insert(QStringLiteral("height"), row.height);
+            entry.insert(QStringLiteral("prevX"), row.prevX);
+            entry.insert(QStringLiteral("prevY"), row.prevY);
+            entry.insert(QStringLiteral("prevWidth"), row.prevWidth);
+            entry.insert(QStringLiteral("prevHeight"), row.prevHeight);
+            entry.insert(QStringLiteral("nextX"), row.nextX);
+            entry.insert(QStringLiteral("nextY"), row.nextY);
+            entry.insert(QStringLiteral("nextWidth"), row.nextWidth);
+            entry.insert(QStringLiteral("nextHeight"), row.nextHeight);
+            entry.insert(QStringLiteral("label"), ToQString(row.label));
+            entry.insert(QStringLiteral("value"), ToQString(row.value));
+            graphicsRows.push_back(entry);
+        }
+        data.insert(QStringLiteral("graphicsRows"), graphicsRows);
+    }
+    state->setOptionData(data);
+}
+
+void PopulateMinimapState(QtUiState* state)
+{
+    if (!state) {
+        return;
+    }
+
+    const UIRoMapWnd* const minimapWnd = g_windowMgr.m_roMapWnd;
+    const bool visible = minimapWnd && minimapWnd->m_show != 0;
+    state->setMinimapVisible(visible);
+    if (!visible) {
+        state->setMinimapGeometry(0, 0, 0, 0);
+        state->setMinimapData(QVariantMap{});
+        return;
+    }
+
+    state->setMinimapGeometry(minimapWnd->m_x, minimapWnd->m_y, minimapWnd->m_w, minimapWnd->m_h);
+
+    UIRoMapWnd::DisplayData display{};
+    QVariantMap data;
+    if (minimapWnd->GetDisplayDataForQt(&display)) {
+        data.insert(QStringLiteral("mapX"), display.mapX);
+        data.insert(QStringLiteral("mapY"), display.mapY);
+        data.insert(QStringLiteral("mapWidth"), display.mapWidth);
+        data.insert(QStringLiteral("mapHeight"), display.mapHeight);
+        data.insert(QStringLiteral("closeX"), display.closeX);
+        data.insert(QStringLiteral("closeY"), display.closeY);
+        data.insert(QStringLiteral("closeWidth"), display.closeWidth);
+        data.insert(QStringLiteral("closeHeight"), display.closeHeight);
+        data.insert(QStringLiteral("coordsX"), display.coordsX);
+        data.insert(QStringLiteral("coordsY"), display.coordsY);
+        data.insert(QStringLiteral("coordsWidth"), display.coordsWidth);
+        data.insert(QStringLiteral("coordsHeight"), display.coordsHeight);
+        data.insert(QStringLiteral("imageRevision"), display.imageRevision);
+        data.insert(QStringLiteral("mapName"), ToQString(display.mapName));
+        data.insert(QStringLiteral("coordsText"), ToQString(display.coordsText));
+
+        QVariantList markers;
+        markers.reserve(static_cast<qsizetype>(display.markers.size()));
+        for (const UIRoMapWnd::DisplayMarker& marker : display.markers) {
+            QVariantMap entry;
+            entry.insert(QStringLiteral("x"), marker.x);
+            entry.insert(QStringLiteral("y"), marker.y);
+            entry.insert(QStringLiteral("radius"), marker.radius);
+            entry.insert(QStringLiteral("color"), QStringLiteral("#%1").arg(marker.color & 0x00FFFFFFu, 6, 16, QLatin1Char('0')));
+            markers.push_back(entry);
+        }
+        data.insert(QStringLiteral("markers"), markers);
+    }
+    state->setMinimapData(data);
+}
+
 bool IsMonsterLikeHoverActor(const CGameActor* actor)
 {
     if (!actor) {
@@ -1313,6 +1548,9 @@ bool QtUiStateAdapter::syncGameplay(CGameMode& mode,
     PopulateRechargeGaugeState(m_state);
     PopulateInventoryState(m_state);
     PopulateEquipState(m_state);
+    PopulateSkillListState(m_state);
+    PopulateOptionState(m_state);
+    PopulateMinimapState(m_state);
     PopulateShopChoiceState(m_state);
     PopulateNotificationState(m_state);
 

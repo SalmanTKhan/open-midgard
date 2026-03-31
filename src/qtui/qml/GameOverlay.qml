@@ -1536,6 +1536,113 @@ Item {
     }
 
     Rectangle {
+        x: uiState.minimapX
+        y: uiState.minimapY
+        width: uiState.minimapWidth
+        height: uiState.minimapHeight
+        radius: 9
+        color: "#d1d8e4"
+        border.width: 1
+        border.color: "#394256"
+        visible: uiState.minimapVisible
+
+        readonly property var minimapData: uiState.minimapData || ({})
+
+        Rectangle {
+            x: 1
+            y: 1
+            width: parent.width - 2
+            height: 16
+            radius: 8
+            color: "#62729e"
+        }
+
+        Rectangle {
+            x: minimapData.mapX - parent.x
+            y: minimapData.mapY - parent.y
+            width: minimapData.mapWidth || 0
+            height: minimapData.mapHeight || 0
+            color: "#12161d"
+            border.width: 1
+            border.color: "#485060"
+            clip: true
+
+            Image {
+                anchors.fill: parent
+                fillMode: Image.Stretch
+                smooth: false
+                cache: false
+                source: parent.visible ? ("image://openmidgard/minimap?rev=" + (minimapData.imageRevision || 0)) : ""
+            }
+        }
+
+        Text {
+            x: 18
+            y: 2
+            text: "Mini Map"
+            color: "#ffffff"
+            font.pixelSize: 12
+            font.bold: true
+        }
+
+        Text {
+            x: (minimapData.coordsX || 0) - parent.x
+            y: (minimapData.coordsY || 0) - parent.y
+            width: 76
+            text: minimapData.mapName || ""
+            color: "#101010"
+            font.pixelSize: 11
+            elide: Text.ElideRight
+        }
+
+        Text {
+            x: (minimapData.coordsX || 0) - parent.x + 78
+            y: (minimapData.coordsY || 0) - parent.y
+            width: Math.max(0, (minimapData.coordsWidth || 0) - 78)
+            horizontalAlignment: Text.AlignRight
+            text: minimapData.coordsText || ""
+            color: "#101010"
+            font.pixelSize: 11
+            elide: Text.ElideRight
+        }
+
+        Repeater {
+            model: minimapData.markers || []
+
+            delegate: Rectangle {
+                required property var modelData
+                x: modelData.x - parent.x - modelData.radius
+                y: modelData.y - parent.y - modelData.radius
+                width: modelData.radius * 2 + 1
+                height: modelData.radius * 2 + 1
+                radius: width / 2
+                color: modelData.color
+                border.width: 1
+                border.color: "#181818"
+            }
+        }
+
+        Rectangle {
+            x: (minimapData.closeX || 0) - parent.x
+            y: (minimapData.closeY || 0) - parent.y
+            width: Math.max(10, minimapData.closeWidth || 0)
+            height: Math.max(10, minimapData.closeHeight || 0)
+            radius: 2
+            color: "#dde4ef"
+            border.width: 1
+            border.color: "#4d5662"
+
+            Text {
+                anchors.centerIn: parent
+                text: "x"
+                color: "#18202a"
+                font.pixelSize: 10
+                font.bold: true
+            }
+        }
+    }
+
+    Rectangle {
         x: uiState.inventoryX
         y: uiState.inventoryY
         width: uiState.inventoryWidth
@@ -1864,6 +1971,485 @@ Item {
                         elide: Text.ElideRight
                     }
                 }
+            }
+        }
+    }
+
+    Rectangle {
+        x: uiState.skillListX
+        y: uiState.skillListY
+        width: uiState.skillListWidth
+        height: uiState.skillListHeight
+        radius: 4
+        color: "#ede9df"
+        border.width: 1
+        border.color: "#6b675f"
+        visible: uiState.skillListVisible
+
+        Rectangle {
+            x: 1
+            y: 1
+            width: parent.width - 2
+            height: 16
+            radius: 3
+            color: "#6e8194"
+            border.width: 1
+            border.color: "#4e5d6c"
+        }
+
+        Text {
+            x: 10
+            y: 3
+            text: "Skill Tree"
+            color: "#000000"
+            font.pixelSize: 12
+            font.bold: true
+        }
+
+        Rectangle {
+            x: 41
+            y: 17
+            width: parent.width - 41
+            height: parent.height - 67
+            color: "#ffffff"
+            border.width: 1
+            border.color: "#c4c0b5"
+        }
+
+        Rectangle {
+            x: 0
+            y: 17
+            width: 41
+            height: parent.height - 67
+            color: "#ddd7ca"
+        }
+
+        Repeater {
+            model: uiState.skillListData.rows || []
+
+            delegate: Item {
+                required property var modelData
+                x: modelData.x - uiState.skillListX
+                y: modelData.y - uiState.skillListY
+                width: modelData.width
+                height: modelData.height
+
+                Rectangle {
+                    anchors.fill: parent
+                    color: modelData.selected ? "#d7dff0" : (modelData.hovered ? "#ece8de" : "transparent")
+                    border.width: 1
+                    border.color: modelData.selected ? "#7e95bf" : (modelData.hovered ? "#b8b1a3" : "transparent")
+                }
+
+                Rectangle {
+                    x: 4
+                    y: 1
+                    width: 32
+                    height: 32
+                    color: "#f5f2ea"
+                    border.width: 1
+                    border.color: "#a69f91"
+                }
+
+                Text {
+                    x: 48
+                    y: 3
+                    width: parent.width - 88
+                    text: modelData.name
+                    color: "#000000"
+                    font.pixelSize: 11
+                    elide: Text.ElideRight
+                }
+
+                Text {
+                    x: 48
+                    y: 18
+                    width: 80
+                    text: modelData.levelText
+                    color: "#000000"
+                    font.pixelSize: 10
+                }
+
+                Text {
+                    x: 165
+                    y: 18
+                    width: parent.width - 198
+                    text: modelData.rightText
+                    color: "#000000"
+                    font.pixelSize: 10
+                    elide: Text.ElideRight
+                }
+
+                Rectangle {
+                    x: modelData.upgradeX - modelData.x
+                    y: modelData.upgradeY - modelData.y
+                    width: modelData.upgradeWidth
+                    height: modelData.upgradeHeight
+                    visible: modelData.upgradeVisible
+                    color: modelData.upgradePressed ? "#b9c7de" : "#d7dff0"
+                    border.width: 1
+                    border.color: "#7e95bf"
+
+                    Text {
+                        anchors.centerIn: parent
+                        text: "+"
+                        color: "#000000"
+                        font.pixelSize: 12
+                        font.bold: true
+                    }
+                }
+            }
+        }
+
+        Rectangle {
+            x: uiState.skillListData.scrollTrackX - uiState.skillListX
+            y: uiState.skillListData.scrollTrackY - uiState.skillListY
+            width: uiState.skillListData.scrollTrackWidth || 0
+            height: uiState.skillListData.scrollTrackHeight || 0
+            visible: uiState.skillListData.scrollBarVisible
+            color: "#e3e7ee"
+            border.width: 1
+            border.color: "#a4adbd"
+
+            Rectangle {
+                x: (uiState.skillListData.scrollThumbX || 0) - (uiState.skillListData.scrollTrackX || 0)
+                y: (uiState.skillListData.scrollThumbY || 0) - (uiState.skillListData.scrollTrackY || 0)
+                width: uiState.skillListData.scrollThumbWidth || 0
+                height: uiState.skillListData.scrollThumbHeight || 0
+                color: "#b4bccd"
+                border.width: 1
+                border.color: "#788296"
+            }
+        }
+
+        Rectangle {
+            x: 0
+            y: parent.height - 50
+            width: parent.width
+            height: 50
+            color: "#ddd7ca"
+            border.width: 1
+            border.color: "#bcb4a7"
+        }
+
+        Text {
+            x: 13
+            y: parent.height - 18
+            text: "Skill Point : " + (uiState.skillListData.skillPointCount || 0)
+            color: "#b09130"
+            font.pixelSize: 11
+            font.bold: true
+        }
+
+        Repeater {
+            model: uiState.skillListData.bottomButtons || []
+
+            delegate: Rectangle {
+                required property var modelData
+                x: modelData.x - uiState.skillListX
+                y: modelData.y - uiState.skillListY
+                width: modelData.width
+                height: modelData.height
+                radius: 3
+                color: modelData.pressed ? "#b9c7de" : (modelData.hovered ? "#d7dff0" : "#e9e4d8")
+                border.width: 1
+                border.color: "#8c8578"
+
+                Text {
+                    anchors.centerIn: parent
+                    text: modelData.label
+                    color: "#000000"
+                    font.pixelSize: 10
+                }
+            }
+        }
+    }
+
+    Rectangle {
+        x: uiState.optionX
+        y: uiState.optionY
+        width: uiState.optionWidth
+        height: uiState.optionHeight
+        radius: 8
+        color: "#f4f7fc"
+        border.width: 1
+        border.color: "#394256"
+        visible: uiState.optionVisible
+
+        Rectangle {
+            x: 0
+            y: 0
+            width: parent.width
+            height: 17
+            radius: 8
+            color: "#62729e"
+            border.width: 0
+        }
+
+        Rectangle {
+            x: 0
+            y: 8
+            width: parent.width
+            height: 9
+            color: "#62729e"
+        }
+
+        Text {
+            x: 17
+            y: 2
+            text: "Options"
+            color: "#ffffff"
+            font.pixelSize: 12
+            font.bold: true
+        }
+
+        Rectangle {
+            x: (uiState.optionData.miniButtonX || 0) - uiState.optionX
+            y: (uiState.optionData.miniButtonY || 0) - uiState.optionY
+            width: uiState.optionData.miniButtonWidth || 0
+            height: uiState.optionData.miniButtonHeight || 0
+            radius: 4
+            color: "#f8faff"
+            border.width: 1
+            border.color: "#607096"
+
+            Text {
+                anchors.centerIn: parent
+                text: "_"
+                color: "#28375c"
+                font.pixelSize: 9
+                font.bold: true
+            }
+        }
+
+        Rectangle {
+            x: (uiState.optionData.closeButtonX || 0) - uiState.optionX
+            y: (uiState.optionData.closeButtonY || 0) - uiState.optionY
+            width: uiState.optionData.closeButtonWidth || 0
+            height: uiState.optionData.closeButtonHeight || 0
+            radius: 4
+            color: "#f8faff"
+            border.width: 1
+            border.color: "#607096"
+
+            Text {
+                anchors.centerIn: parent
+                text: "X"
+                color: "#28375c"
+                font.pixelSize: 9
+                font.bold: true
+            }
+        }
+
+        Rectangle {
+            x: (uiState.optionData.contentX || 0) - uiState.optionX
+            y: (uiState.optionData.contentY || 0) - uiState.optionY
+            width: uiState.optionData.contentWidth || 0
+            height: uiState.optionData.contentHeight || 0
+            color: "#ffffff"
+            border.width: 1
+            border.color: "#a0abc2"
+            visible: !(uiState.optionData.collapsed || false)
+        }
+
+        Repeater {
+            model: uiState.optionData.tabs || []
+
+            delegate: Rectangle {
+                required property var modelData
+                x: modelData.x - uiState.optionX
+                y: modelData.y - uiState.optionY
+                width: modelData.width
+                height: modelData.height
+                radius: 6
+                visible: !(uiState.optionData.collapsed || false)
+                color: modelData.active ? "#ffffff" : "#dce4f1"
+                border.width: 1
+                border.color: modelData.active ? "#5f7096" : "#7a88a7"
+
+                Text {
+                    anchors.centerIn: parent
+                    text: modelData.label
+                    color: "#000000"
+                    font.pixelSize: 11
+                }
+            }
+        }
+
+        Repeater {
+            model: uiState.optionData.toggles || []
+
+            delegate: Item {
+                required property var modelData
+                x: modelData.x - uiState.optionX
+                y: modelData.y - uiState.optionY
+                width: (uiState.optionData.contentWidth || 0) - 24
+                height: Math.max(modelData.height, 16)
+                visible: !(uiState.optionData.collapsed || false)
+
+                Rectangle {
+                    id: optionToggleBox
+                    x: 0
+                    y: 0
+                    width: modelData.width
+                    height: modelData.height
+                    color: modelData.checked ? "#cfdaf0" : "#ffffff"
+                    border.width: 1
+                    border.color: "#7a88a7"
+                }
+
+                Text {
+                    anchors.left: parent.left
+                    anchors.leftMargin: modelData.width + 8
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: modelData.label
+                    color: "#000000"
+                    font.pixelSize: 11
+                }
+
+                Text {
+                    anchors.centerIn: optionToggleBox
+                    text: modelData.checked ? "X" : ""
+                    color: "#28375c"
+                    font.pixelSize: 10
+                    font.bold: true
+                }
+            }
+        }
+
+        Repeater {
+            model: uiState.optionData.sliders || []
+
+            delegate: Item {
+                required property var modelData
+                x: modelData.x - uiState.optionX
+                y: modelData.y - uiState.optionY
+                width: modelData.width
+                height: modelData.height
+                visible: !(uiState.optionData.collapsed || false)
+
+                Text {
+                    x: -44
+                    y: -1
+                    width: 40
+                    text: modelData.label
+                    color: "#000000"
+                    font.pixelSize: 11
+                    horizontalAlignment: Text.AlignRight
+                }
+
+                Rectangle {
+                    x: 0
+                    y: 4
+                    width: parent.width
+                    height: Math.max(1, parent.height - 8)
+                    color: "#b6c2db"
+                    border.width: 1
+                    border.color: "#6f7da0"
+                }
+
+                Rectangle {
+                    x: 4 + ((Math.max(0, parent.width - 8) * (modelData.value || 0)) / 127) - 4
+                    y: -2
+                    width: 8
+                    height: parent.height + 4
+                    radius: 4
+                    color: "#ffffff"
+                    border.width: 1
+                    border.color: "#576588"
+                }
+            }
+        }
+
+        Repeater {
+            model: uiState.optionData.graphicsRows || []
+
+            delegate: Rectangle {
+                required property var modelData
+                x: modelData.x - uiState.optionX
+                y: modelData.y - uiState.optionY
+                width: modelData.width
+                height: modelData.height
+                radius: 6
+                visible: !(uiState.optionData.collapsed || false)
+                color: "#f7faff"
+                border.width: 1
+                border.color: "#b0bad0"
+
+                Text {
+                    x: 8
+                    y: 4
+                    text: modelData.label
+                    color: "#000000"
+                    font.pixelSize: 11
+                }
+
+                Text {
+                    x: 110
+                    y: 4
+                    width: Math.max(0, parent.width - 170)
+                    text: modelData.value
+                    color: "#000000"
+                    font.pixelSize: 11
+                    elide: Text.ElideRight
+                }
+
+                Rectangle {
+                    x: modelData.prevX - modelData.x
+                    y: modelData.prevY - modelData.y
+                    width: modelData.prevWidth
+                    height: modelData.prevHeight
+                    radius: 4
+                    color: "#f8faff"
+                    border.width: 1
+                    border.color: "#607096"
+
+                    Text {
+                        anchors.centerIn: parent
+                        text: "<"
+                        color: "#28375c"
+                        font.pixelSize: 10
+                        font.bold: true
+                    }
+                }
+
+                Rectangle {
+                    x: modelData.nextX - modelData.x
+                    y: modelData.nextY - modelData.y
+                    width: modelData.nextWidth
+                    height: modelData.nextHeight
+                    radius: 4
+                    color: "#f8faff"
+                    border.width: 1
+                    border.color: "#607096"
+
+                    Text {
+                        anchors.centerIn: parent
+                        text: ">"
+                        color: "#28375c"
+                        font.pixelSize: 10
+                        font.bold: true
+                    }
+                }
+            }
+        }
+
+        Rectangle {
+            x: (uiState.optionData.restartX || 0) - uiState.optionX
+            y: (uiState.optionData.restartY || 0) - uiState.optionY
+            width: uiState.optionData.restartWidth || 0
+            height: uiState.optionData.restartHeight || 0
+            radius: 4
+            visible: uiState.optionData.restartVisible || false
+            color: "#f8faff"
+            border.width: 1
+            border.color: "#607096"
+
+            Text {
+                anchors.centerIn: parent
+                text: "Restart"
+                color: "#28375c"
+                font.pixelSize: 10
             }
         }
     }

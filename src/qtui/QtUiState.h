@@ -163,6 +163,24 @@ class QtUiState : public QObject {
     Q_PROPERTY(int equipHeight READ equipHeight NOTIFY equipGeometryChanged)
     Q_PROPERTY(bool equipMini READ equipMini NOTIFY equipMiniChanged)
     Q_PROPERTY(QVariantMap equipData READ equipData NOTIFY equipDataChanged)
+    Q_PROPERTY(bool skillListVisible READ skillListVisible NOTIFY skillListVisibleChanged)
+    Q_PROPERTY(int skillListX READ skillListX NOTIFY skillListGeometryChanged)
+    Q_PROPERTY(int skillListY READ skillListY NOTIFY skillListGeometryChanged)
+    Q_PROPERTY(int skillListWidth READ skillListWidth NOTIFY skillListGeometryChanged)
+    Q_PROPERTY(int skillListHeight READ skillListHeight NOTIFY skillListGeometryChanged)
+    Q_PROPERTY(QVariantMap skillListData READ skillListData NOTIFY skillListDataChanged)
+    Q_PROPERTY(bool optionVisible READ optionVisible NOTIFY optionVisibleChanged)
+    Q_PROPERTY(int optionX READ optionX NOTIFY optionGeometryChanged)
+    Q_PROPERTY(int optionY READ optionY NOTIFY optionGeometryChanged)
+    Q_PROPERTY(int optionWidth READ optionWidth NOTIFY optionGeometryChanged)
+    Q_PROPERTY(int optionHeight READ optionHeight NOTIFY optionGeometryChanged)
+    Q_PROPERTY(QVariantMap optionData READ optionData NOTIFY optionDataChanged)
+    Q_PROPERTY(bool minimapVisible READ minimapVisible NOTIFY minimapVisibleChanged)
+    Q_PROPERTY(int minimapX READ minimapX NOTIFY minimapGeometryChanged)
+    Q_PROPERTY(int minimapY READ minimapY NOTIFY minimapGeometryChanged)
+    Q_PROPERTY(int minimapWidth READ minimapWidth NOTIFY minimapGeometryChanged)
+    Q_PROPERTY(int minimapHeight READ minimapHeight NOTIFY minimapGeometryChanged)
+    Q_PROPERTY(QVariantMap minimapData READ minimapData NOTIFY minimapDataChanged)
     Q_PROPERTY(bool shopChoiceVisible READ shopChoiceVisible NOTIFY shopChoiceVisibleChanged)
     Q_PROPERTY(int shopChoiceX READ shopChoiceX NOTIFY shopChoiceGeometryChanged)
     Q_PROPERTY(int shopChoiceY READ shopChoiceY NOTIFY shopChoiceGeometryChanged)
@@ -335,6 +353,24 @@ public:
     int equipHeight() const { return m_equipHeight; }
     bool equipMini() const { return m_equipMini; }
     const QVariantMap& equipData() const { return m_equipData; }
+    bool skillListVisible() const { return m_skillListVisible; }
+    int skillListX() const { return m_skillListX; }
+    int skillListY() const { return m_skillListY; }
+    int skillListWidth() const { return m_skillListWidth; }
+    int skillListHeight() const { return m_skillListHeight; }
+    const QVariantMap& skillListData() const { return m_skillListData; }
+    bool optionVisible() const { return m_optionVisible; }
+    int optionX() const { return m_optionX; }
+    int optionY() const { return m_optionY; }
+    int optionWidth() const { return m_optionWidth; }
+    int optionHeight() const { return m_optionHeight; }
+    const QVariantMap& optionData() const { return m_optionData; }
+    bool minimapVisible() const { return m_minimapVisible; }
+    int minimapX() const { return m_minimapX; }
+    int minimapY() const { return m_minimapY; }
+    int minimapWidth() const { return m_minimapWidth; }
+    int minimapHeight() const { return m_minimapHeight; }
+    const QVariantMap& minimapData() const { return m_minimapData; }
     bool shopChoiceVisible() const { return m_shopChoiceVisible; }
     int shopChoiceX() const { return m_shopChoiceX; }
     int shopChoiceY() const { return m_shopChoiceY; }
@@ -1113,6 +1149,81 @@ public:
         emit equipDataChanged();
     }
 
+    void setSkillListVisible(bool value) {
+        if (m_skillListVisible == value) {
+            return;
+        }
+        m_skillListVisible = value;
+        emit skillListVisibleChanged();
+    }
+
+    void setSkillListGeometry(int x, int y, int width, int height) {
+        if (m_skillListX == x && m_skillListY == y
+            && m_skillListWidth == width && m_skillListHeight == height) {
+            return;
+        }
+        m_skillListX = x;
+        m_skillListY = y;
+        m_skillListWidth = width;
+        m_skillListHeight = height;
+        emit skillListGeometryChanged();
+    }
+
+    void setSkillListData(const QVariantMap& value) {
+        m_skillListData = value;
+        emit skillListDataChanged();
+    }
+
+    void setOptionVisible(bool value) {
+        if (m_optionVisible == value) {
+            return;
+        }
+        m_optionVisible = value;
+        emit optionVisibleChanged();
+    }
+
+    void setOptionGeometry(int x, int y, int width, int height) {
+        if (m_optionX == x && m_optionY == y
+            && m_optionWidth == width && m_optionHeight == height) {
+            return;
+        }
+        m_optionX = x;
+        m_optionY = y;
+        m_optionWidth = width;
+        m_optionHeight = height;
+        emit optionGeometryChanged();
+    }
+
+    void setOptionData(const QVariantMap& value) {
+        m_optionData = value;
+        emit optionDataChanged();
+    }
+
+    void setMinimapVisible(bool value) {
+        if (m_minimapVisible == value) {
+            return;
+        }
+        m_minimapVisible = value;
+        emit minimapVisibleChanged();
+    }
+
+    void setMinimapGeometry(int x, int y, int width, int height) {
+        if (m_minimapX == x && m_minimapY == y
+            && m_minimapWidth == width && m_minimapHeight == height) {
+            return;
+        }
+        m_minimapX = x;
+        m_minimapY = y;
+        m_minimapWidth = width;
+        m_minimapHeight = height;
+        emit minimapGeometryChanged();
+    }
+
+    void setMinimapData(const QVariantMap& value) {
+        m_minimapData = value;
+        emit minimapDataChanged();
+    }
+
     void setShopChoiceVisible(bool value) {
         if (m_shopChoiceVisible == value) {
             return;
@@ -1237,6 +1348,15 @@ signals:
     void equipGeometryChanged();
     void equipMiniChanged();
     void equipDataChanged();
+    void skillListVisibleChanged();
+    void skillListGeometryChanged();
+    void skillListDataChanged();
+    void optionVisibleChanged();
+    void optionGeometryChanged();
+    void optionDataChanged();
+    void minimapVisibleChanged();
+    void minimapGeometryChanged();
+    void minimapDataChanged();
     void shopChoiceVisibleChanged();
     void shopChoiceGeometryChanged();
     void shopChoiceButtonsChanged();
@@ -1401,6 +1521,24 @@ private:
     int m_equipHeight = 0;
     bool m_equipMini = false;
     QVariantMap m_equipData;
+    bool m_skillListVisible = false;
+    int m_skillListX = 0;
+    int m_skillListY = 0;
+    int m_skillListWidth = 0;
+    int m_skillListHeight = 0;
+    QVariantMap m_skillListData;
+    bool m_optionVisible = false;
+    int m_optionX = 0;
+    int m_optionY = 0;
+    int m_optionWidth = 0;
+    int m_optionHeight = 0;
+    QVariantMap m_optionData;
+    bool m_minimapVisible = false;
+    int m_minimapX = 0;
+    int m_minimapY = 0;
+    int m_minimapWidth = 0;
+    int m_minimapHeight = 0;
+    QVariantMap m_minimapData;
     bool m_shopChoiceVisible = false;
     int m_shopChoiceX = 0;
     int m_shopChoiceY = 0;

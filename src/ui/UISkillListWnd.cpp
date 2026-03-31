@@ -6,6 +6,7 @@
 #include "UIWindowMgr.h"
 #include "core/File.h"
 #include "main/WinMain.h"
+#include "qtui/QtUiRuntime.h"
 #include "res/Bitmap.h"
 #include "session/Session.h"
 #include "skill/Skill.h"
@@ -278,6 +279,11 @@ std::string BuildSkillRightText(const PLAYER_SKILL_INFO& skill)
     return "Passive";
 }
 
+std::string BuildSkillDisplayName(const PLAYER_SKILL_INFO& skill)
+{
+    return skill.skillName.empty() ? skill.skillIdName : skill.skillName;
+}
+
 HFONT GetUiFont()
 {
     static HFONT s_font = CreateFontA(
@@ -449,14 +455,16 @@ void UISkillListWnd::OnDraw()
     }
 
     EnsureCreated();
-    const std::vector<const PLAYER_SKILL_INFO*> skills = GetSortedSkills();
-    if (m_selectedSkillId == 0 && !skills.empty()) {
-        m_selectedSkillId = skills.front()->SKID;
-    }
+    RefreshVisibleSkillsForInteractionState();
 
-    const int visibleRows = std::max(1, (m_h - kTitleBarHeight - kBottomBarHeight - kListTop - kListBottomMargin) / kRowHeight);
-    m_viewOffset = std::max(0, std::min(m_viewOffset, GetMaxViewOffset(static_cast<int>(skills.size()))));
-    m_visibleSkills.clear();
+    const std::vector<const PLAYER_SKILL_INFO*> skills = GetSortedSkills();
+
+    if (IsQtUiRuntimeEnabled()) {
+        m_lastVisualStateToken = BuildVisualStateToken();
+        m_hasVisualStateToken = true;
+        m_isDirty = 0;
+        return;
+    }
 
     bool useShared = false;
     HDC hdc = AcquireDrawTarget(&useShared);
@@ -476,20 +484,15 @@ void UISkillListWnd::OnDraw()
 
     const int rowLeft = m_x + kLeftGutterWidth + 4;
     const int rowRight = m_x + m_w - kListRightMargin - 4;
-    const int firstIndex = m_viewOffset;
-    const int lastIndex = std::min(static_cast<int>(skills.size()), firstIndex + visibleRows);
     const CGameMode* gameMode = g_modeMgr.GetCurrentGameMode();
     const bool hideDraggedSkill = gameMode
         && gameMode->m_dragType == static_cast<int>(DragType::ShortcutSkill)
         && gameMode->m_dragInfo.skillId != 0;
-    for (int drawIndex = firstIndex; drawIndex < lastIndex; ++drawIndex) {
-        const int rowIndex = drawIndex - firstIndex;
-        const int rowTop = m_y + kListTop + rowIndex * kRowHeight;
-        RECT rowRect{ rowLeft, rowTop, rowRight, rowTop + kRowHeight };
-        RECT upgradeRect{ rowRect.right - 28, rowRect.top + 4, rowRect.right - 4, rowRect.top + 28 };
-        const PLAYER_SKILL_INFO* skill = skills[drawIndex];
-        m_visibleSkills.push_back({ skill, rowRect, upgradeRect });
-
+    for (size_t rowIndex = 0; rowIndex < m_visibleSkills.size(); ++rowIndex) {
+        const VisibleSkill& visible = m_visibleSkills[rowIndex];
+        const RECT& rowRect = visible.rowRect;
+        const RECT& upgradeRect = visible.upgradeRect;
+        const PLAYER_SKILL_INFO* skill = visible.skill;
         const bool isSelected = skill && skill->SKID == m_selectedSkillId;
         RECT iconCellRect{ rowRect.left + 4, rowRect.top + 1, rowRect.left + 4 + kIconCellSize, rowRect.top + 1 + kIconCellSize };
         RECT iconInvertRect{ iconCellRect.left + 2, iconCellRect.top + 8, iconCellRect.left + 2 + 28, iconCellRect.top + 8 + 15 };
@@ -703,6 +706,85 @@ void UISkillListWnd::StoreInfo()
     SaveUiWindowPlacement("SkillListWnd", m_x, m_y);
 }
 
+bool UISkillListWnd::GetDisplayDataForQt(DisplayData* outData) const
+{
+    if (!outData) {
+        return false;
+    }
+
+    DisplayData data{};
+    const std::vector<const PLAYER_SKILL_INFO*> skills = GetSortedSkills();
+    data.skillPointCount = g_session.GetPlayerSkillPointCount();
+    data.viewOffset = m_viewOffset;
+    data.maxViewOffset = GetMaxViewOffset(static_cast<int>(skills.size()));
+    data.scrollBarVisible = IsScrollBarVisible(static_cast<int>(skills.size()));
+
+    if (data.scrollBarVisible) {
+        const RECT trackRect = GetScrollTrackRect();
+        const RECT thumbRect = GetScrollThumbRect(static_cast<int>(skills.size()));
+        data.scrollTrackX = trackRect.left;
+        data.scrollTrackY = trackRect.top;
+        data.scrollTrackWidth = trackRect.right - trackRect.left;
+        data.scrollTrackHeight = trackRect.bottom - trackRect.top;
+        data.scrollThumbX = thumbRect.left;
+        data.scrollThumbY = thumbRect.top;
+        data.scrollThumbWidth = thumbRect.right - thumbRect.left;
+        data.scrollThumbHeight = thumbRect.bottom - thumbRect.top;
+    }
+
+    const int visibleRows = std::max(1, (m_h - kTitleBarHeight - kBottomBarHeight - kListTop - kListBottomMargin) / kRowHeight);
+    const int rowLeft = m_x + kLeftGutterWidth + 4;
+    const int rowRight = m_x + m_w - kListRightMargin - 4;
+    const int firstIndex = data.viewOffset;
+    const int lastIndex = std::min(static_cast<int>(skills.size()), firstIndex + visibleRows);
+    data.rows.reserve(static_cast<size_t>(std::max(0, lastIndex - firstIndex)));
+    for (int drawIndex = firstIndex; drawIndex < lastIndex; ++drawIndex) {
+        const PLAYER_SKILL_INFO* const skill = skills[drawIndex];
+        if (!skill) {
+            continue;
+        }
+
+        const int rowIndex = drawIndex - firstIndex;
+        const int rowTop = m_y + kListTop + rowIndex * kRowHeight;
+        RECT rowRect{ rowLeft, rowTop, rowRight, rowTop + kRowHeight };
+        RECT upgradeRect{ rowRect.right - 28, rowRect.top + 4, rowRect.right - 4, rowRect.top + 28 };
+
+        DisplayRow row{};
+        row.x = rowRect.left;
+        row.y = rowRect.top;
+        row.width = rowRect.right - rowRect.left;
+        row.height = rowRect.bottom - rowRect.top;
+        row.selected = skill->SKID == m_selectedSkillId;
+        row.hovered = drawIndex == (m_viewOffset + m_hoveredRow);
+        row.upgradeVisible = skill->upgradable != 0 && g_session.GetPlayerSkillPointCount() > 0;
+        row.upgradePressed = skill->SKID == m_pressedUpgradeSkillId;
+        row.upgradeX = upgradeRect.left;
+        row.upgradeY = upgradeRect.top;
+        row.upgradeWidth = upgradeRect.right - upgradeRect.left;
+        row.upgradeHeight = upgradeRect.bottom - upgradeRect.top;
+        row.name = BuildSkillDisplayName(*skill);
+        row.levelText = "Lv : " + std::to_string(skill->level);
+        row.rightText = BuildSkillRightText(*skill);
+        data.rows.push_back(std::move(row));
+    }
+
+    data.bottomButtons.reserve(m_bottomButtons.size());
+    for (const TextButton& button : m_bottomButtons) {
+        DisplayButton displayButton{};
+        displayButton.x = button.rect.left;
+        displayButton.y = button.rect.top;
+        displayButton.width = button.rect.right - button.rect.left;
+        displayButton.height = button.rect.bottom - button.rect.top;
+        displayButton.hovered = button.hovered;
+        displayButton.pressed = button.pressed;
+        displayButton.label = button.label;
+        data.bottomButtons.push_back(std::move(displayButton));
+    }
+
+    *outData = std::move(data);
+    return true;
+}
+
 void UISkillListWnd::EnsureCreated()
 {
     if (m_controlsCreated) {
@@ -786,6 +868,30 @@ void UISkillListWnd::ReleaseAssets()
         }
     }
     m_iconCache.clear();
+}
+
+void UISkillListWnd::RefreshVisibleSkillsForInteractionState()
+{
+    const std::vector<const PLAYER_SKILL_INFO*> skills = GetSortedSkills();
+    if (m_selectedSkillId == 0 && !skills.empty()) {
+        m_selectedSkillId = skills.front()->SKID;
+    }
+
+    const int visibleRows = std::max(1, (m_h - kTitleBarHeight - kBottomBarHeight - kListTop - kListBottomMargin) / kRowHeight);
+    m_viewOffset = std::max(0, std::min(m_viewOffset, GetMaxViewOffset(static_cast<int>(skills.size()))));
+    m_visibleSkills.clear();
+
+    const int rowLeft = m_x + kLeftGutterWidth + 4;
+    const int rowRight = m_x + m_w - kListRightMargin - 4;
+    const int firstIndex = m_viewOffset;
+    const int lastIndex = std::min(static_cast<int>(skills.size()), firstIndex + visibleRows);
+    for (int drawIndex = firstIndex; drawIndex < lastIndex; ++drawIndex) {
+        const int rowIndex = drawIndex - firstIndex;
+        const int rowTop = m_y + kListTop + rowIndex * kRowHeight;
+        RECT rowRect{ rowLeft, rowTop, rowRight, rowTop + kRowHeight };
+        RECT upgradeRect{ rowRect.right - 28, rowRect.top + 4, rowRect.right - 4, rowRect.top + 28 };
+        m_visibleSkills.push_back({ skills[drawIndex], rowRect, upgradeRect });
+    }
 }
 
 void UISkillListWnd::UpdateHover(int globalX, int globalY)

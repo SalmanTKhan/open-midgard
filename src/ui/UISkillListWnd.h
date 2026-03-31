@@ -12,6 +12,51 @@ struct PLAYER_SKILL_INFO;
 
 class UISkillListWnd : public UIFrameWnd {
 public:
+    struct DisplayRow {
+        int x = 0;
+        int y = 0;
+        int width = 0;
+        int height = 0;
+        bool selected = false;
+        bool hovered = false;
+        bool upgradeVisible = false;
+        bool upgradePressed = false;
+        int upgradeX = 0;
+        int upgradeY = 0;
+        int upgradeWidth = 0;
+        int upgradeHeight = 0;
+        std::string name;
+        std::string levelText;
+        std::string rightText;
+    };
+
+    struct DisplayButton {
+        int x = 0;
+        int y = 0;
+        int width = 0;
+        int height = 0;
+        bool hovered = false;
+        bool pressed = false;
+        std::string label;
+    };
+
+    struct DisplayData {
+        int skillPointCount = 0;
+        int viewOffset = 0;
+        int maxViewOffset = 0;
+        bool scrollBarVisible = false;
+        int scrollTrackX = 0;
+        int scrollTrackY = 0;
+        int scrollTrackWidth = 0;
+        int scrollTrackHeight = 0;
+        int scrollThumbX = 0;
+        int scrollThumbY = 0;
+        int scrollThumbWidth = 0;
+        int scrollThumbHeight = 0;
+        std::vector<DisplayRow> rows;
+        std::vector<DisplayButton> bottomButtons;
+    };
+
     UISkillListWnd();
     ~UISkillListWnd() override;
 
@@ -27,6 +72,7 @@ public:
     void OnMouseMove(int x, int y) override;
     void OnWheel(int delta) override;
     void StoreInfo() override;
+    bool GetDisplayDataForQt(DisplayData* outData) const;
 
 private:
     struct TextButton {
@@ -46,6 +92,7 @@ private:
     void LayoutChildren();
     void LoadAssets();
     void ReleaseAssets();
+    void RefreshVisibleSkillsForInteractionState();
     void UpdateHover(int globalX, int globalY);
     void DrawWindowChrome(HDC hdc) const;
     void DrawBottomButton(HDC hdc, const TextButton& button) const;

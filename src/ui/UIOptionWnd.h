@@ -14,6 +14,76 @@ void ApplySavedAudioSettings();
 
 class UIOptionWnd : public UIFrameWnd {
 public:
+    struct DisplayToggle {
+        int x = 0;
+        int y = 0;
+        int width = 0;
+        int height = 0;
+        bool checked = false;
+        std::string label;
+    };
+
+    struct DisplaySlider {
+        int x = 0;
+        int y = 0;
+        int width = 0;
+        int height = 0;
+        int value = 0;
+        std::string label;
+    };
+
+    struct DisplayGraphicsRow {
+        int x = 0;
+        int y = 0;
+        int width = 0;
+        int height = 0;
+        int prevX = 0;
+        int prevY = 0;
+        int prevWidth = 0;
+        int prevHeight = 0;
+        int nextX = 0;
+        int nextY = 0;
+        int nextWidth = 0;
+        int nextHeight = 0;
+        std::string label;
+        std::string value;
+    };
+
+    struct DisplayTab {
+        int x = 0;
+        int y = 0;
+        int width = 0;
+        int height = 0;
+        bool active = false;
+        std::string label;
+    };
+
+    struct DisplayData {
+        bool collapsed = false;
+        int activeTab = 0;
+        int contentX = 0;
+        int contentY = 0;
+        int contentWidth = 0;
+        int contentHeight = 0;
+        int miniButtonX = 0;
+        int miniButtonY = 0;
+        int miniButtonWidth = 0;
+        int miniButtonHeight = 0;
+        int closeButtonX = 0;
+        int closeButtonY = 0;
+        int closeButtonWidth = 0;
+        int closeButtonHeight = 0;
+        bool restartVisible = false;
+        int restartX = 0;
+        int restartY = 0;
+        int restartWidth = 0;
+        int restartHeight = 0;
+        std::vector<DisplayTab> tabs;
+        std::vector<DisplayToggle> toggles;
+        std::vector<DisplaySlider> sliders;
+        std::vector<DisplayGraphicsRow> graphicsRows;
+    };
+
     UIOptionWnd();
     ~UIOptionWnd() override;
 
@@ -25,6 +95,7 @@ public:
     void OnLBtnDblClk(int x, int y) override;
     msgresult_t SendMsg(UIWindow* sender, int msg, msgparam_t wparam, msgparam_t lparam, msgparam_t extra) override;
     void OnKeyDown(int virtualKey);
+    bool GetDisplayDataForQt(DisplayData* outData) const;
 
 private:
     enum TabId {

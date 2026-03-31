@@ -5,6 +5,7 @@
 #include "gamemode/GameMode.h"
 #include "gamemode/Mode.h"
 #include "main/WinMain.h"
+#include "qtui/QtUiRuntime.h"
 #include "res/Bitmap.h"
 #include "session/Session.h"
 #include "world/World.h"
@@ -18,6 +19,11 @@
 #include <limits>
 #include <string>
 #include <vector>
+
+#if RO_ENABLE_QT6_UI
+#include <QImage>
+#include <QPainter>
+#endif
 
 #pragma comment(lib, "msimg32.lib")
 
@@ -377,6 +383,53 @@ void DrawSmallMarker(HDC hdc, const POINT& pt, COLORREF fillColor, COLORREF outl
     DeleteObject(brush);
 }
 
+#if RO_ENABLE_QT6_UI
+bool CopyBitmapToQImage(HBITMAP bitmap, QImage* outImage)
+{
+    if (!bitmap || !outImage) {
+        return false;
+    }
+
+    BITMAP bm{};
+    if (!GetObjectA(bitmap, sizeof(bm), &bm) || bm.bmWidth <= 0 || bm.bmHeight <= 0) {
+        return false;
+    }
+
+    BITMAPINFO bmi{};
+    bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    bmi.bmiHeader.biWidth = bm.bmWidth;
+    bmi.bmiHeader.biHeight = -bm.bmHeight;
+    bmi.bmiHeader.biPlanes = 1;
+    bmi.bmiHeader.biBitCount = 32;
+    bmi.bmiHeader.biCompression = BI_RGB;
+
+    QImage image(bm.bmWidth, bm.bmHeight, QImage::Format_ARGB32);
+    if (image.isNull()) {
+        return false;
+    }
+
+    HDC screenDC = GetDC(nullptr);
+    if (!screenDC) {
+        return false;
+    }
+
+    const int scanLines = GetDIBits(screenDC,
+        bitmap,
+        0,
+        static_cast<UINT>(bm.bmHeight),
+        image.bits(),
+        &bmi,
+        DIB_RGB_COLORS);
+    ReleaseDC(nullptr, screenDC);
+    if (scanLines != bm.bmHeight) {
+        return false;
+    }
+
+    *outImage = image;
+    return true;
+}
+#endif
+
 std::string StripExtension(const std::string& value)
 {
     std::string out = value;
@@ -716,6 +769,14 @@ void UIRoMapWnd::OnDraw()
         return;
     }
 
+    if (IsQtUiRuntimeEnabled()) {
+        UpdateMinimapBitmap();
+        m_lastVisualStateToken = BuildVisualStateToken();
+        m_hasVisualStateToken = true;
+        m_isDirty = 0;
+        return;
+    }
+
     bool useShared = false;
     HDC hdc = AcquireDrawTarget(&useShared);
     if (!hdc) {
@@ -770,6 +831,211 @@ void UIRoMapWnd::OnWheel(int delta)
 void UIRoMapWnd::StoreInfo()
 {
     SaveUiWindowPlacement("RoMapWnd", m_x, m_y);
+}
+
+bool UIRoMapWnd::GetDisplayDataForQt(DisplayData* outData) const
+{
+    if (!outData) {
+        return false;
+    }
+
+    UIRoMapWnd* mutableThis = const_cast<UIRoMapWnd*>(this);
+    mutableThis->EnsureCreated();
+    mutableThis->UpdateMinimapBitmap();
+
+    DisplayData data{};
+    data.imageRevision = static_cast<int>(BuildVisualStateToken() & 0x7fffffff);
+
+    const RECT mapRect{ m_x + kBodyInset, m_y + kMapTop, m_x + kBodyInset + kMapSize, m_y + kMapTop + kMapSize };
+    data.mapX = mapRect.left;
+    data.mapY = mapRect.top;
+    data.mapWidth = mapRect.right - mapRect.left;
+    data.mapHeight = mapRect.bottom - mapRect.top;
+
+    const RECT coordsRect{ m_x + 8, m_y + kCoordsTop, m_x + m_w - 8, m_y + kCoordsTop + kCoordsHeight };
+    data.coordsX = coordsRect.left;
+    data.coordsY = coordsRect.top;
+    data.coordsWidth = coordsRect.right - coordsRect.left;
+    data.coordsHeight = coordsRect.bottom - coordsRect.top;
+
+    if (m_closeButton) {
+        data.closeX = m_closeButton->m_x;
+        data.closeY = m_closeButton->m_y;
+        data.closeWidth = m_closeButton->m_bitmapWidth;
+        data.closeHeight = m_closeButton->m_bitmapHeight;
+    }
+
+    data.mapName = StripExtension(GetCurrentMinimapBitmapName());
+    char coordsText[64] = {};
+    std::snprintf(coordsText, sizeof(coordsText), "X : %d    Y : %d", g_session.m_playerPosX, g_session.m_playerPosY);
+    data.coordsText = coordsText;
+
+    RECT drawRect = mapRect;
+    RECT srcRect{ 0, 0, m_mapBitmapWidth, m_mapBitmapHeight };
+    bool zoomedView = false;
+
+    const float zoom = (std::max)(kMinZoom, (std::min)(kMaxZoom, g_windowMgr.m_miniMapZoomFactor));
+    const CGameMode* gameMode = g_modeMgr.GetCurrentGameMode();
+    RECT attrArea{ 0, 0, 0, 0 };
+    if (gameMode && gameMode->m_world) {
+        attrArea = gameMode->m_world->m_rootNode.m_attrArea;
+    }
+
+    if (m_mapBitmap && m_mapBitmapWidth > 0 && m_mapBitmapHeight > 0) {
+        if (zoom > kMinZoom + 0.001f) {
+            zoomedView = true;
+            const float viewAspect = static_cast<float>(mapRect.right - mapRect.left) / static_cast<float>(mapRect.bottom - mapRect.top);
+            const float bitmapAspect = static_cast<float>(m_mapBitmapWidth) / static_cast<float>(m_mapBitmapHeight);
+
+            int srcWidth = 0;
+            int srcHeight = 0;
+            if (bitmapAspect > viewAspect) {
+                srcHeight = static_cast<int>(m_mapBitmapHeight / zoom);
+                srcWidth = static_cast<int>(srcHeight * viewAspect);
+            } else {
+                srcWidth = static_cast<int>(m_mapBitmapWidth / zoom);
+                srcHeight = static_cast<int>(srcWidth / viewAspect);
+            }
+
+            srcWidth = (std::max)(1, (std::min)(srcWidth, m_mapBitmapWidth));
+            srcHeight = (std::max)(1, (std::min)(srcHeight, m_mapBitmapHeight));
+
+            float centerNormX = 0.5f;
+            float centerNormY = 0.5f;
+            const int attrWidth = attrArea.right - attrArea.left;
+            const int attrHeight = attrArea.bottom - attrArea.top;
+            if (attrWidth > 0 && attrHeight > 0) {
+                centerNormX = static_cast<float>(g_session.m_playerPosX - attrArea.left) / static_cast<float>(attrWidth);
+                centerNormY = 1.0f - (static_cast<float>(g_session.m_playerPosY - attrArea.top) / static_cast<float>(attrHeight));
+                centerNormX = (std::max)(0.0f, (std::min)(1.0f, centerNormX));
+                centerNormY = (std::max)(0.0f, (std::min)(1.0f, centerNormY));
+            }
+
+            const int centerX = static_cast<int>(centerNormX * m_mapBitmapWidth);
+            const int centerY = static_cast<int>(centerNormY * m_mapBitmapHeight);
+            srcRect.left = centerX - srcWidth / 2;
+            srcRect.top = centerY - srcHeight / 2;
+            srcRect.left = (std::max)(0, (std::min)(static_cast<int>(srcRect.left), m_mapBitmapWidth - srcWidth));
+            srcRect.top = (std::max)(0, (std::min)(static_cast<int>(srcRect.top), m_mapBitmapHeight - srcHeight));
+            srcRect.right = srcRect.left + srcWidth;
+            srcRect.bottom = srcRect.top + srcHeight;
+        } else {
+            drawRect = FitRectPreservingAspect(mapRect, m_mapBitmapWidth, m_mapBitmapHeight);
+        }
+    }
+
+    auto appendMarker = [&](int cellX, int cellY, COLORREF fillColor, int radius) {
+        POINT pt{};
+        if (!BuildMarkerPoint(attrArea, drawRect, zoomedView, srcRect, m_mapBitmapWidth, m_mapBitmapHeight, cellX, cellY, &pt)) {
+            return;
+        }
+        DisplayMarker marker{};
+        marker.x = pt.x;
+        marker.y = pt.y;
+        marker.radius = radius;
+        marker.color = static_cast<unsigned int>(fillColor & 0x00FFFFFFu);
+        data.markers.push_back(marker);
+    };
+
+    if (gameMode) {
+        for (const auto& entry : gameMode->m_partyPosList) {
+            appendMarker(entry.second.x, entry.second.y, entry.second.color & 0x00FFFFFFu, 2);
+        }
+        for (const auto& entry : gameMode->m_guildPosList) {
+            appendMarker(entry.second.x, entry.second.y, entry.second.color & 0x00FFFFFFu, 2);
+        }
+        if (g_windowMgr.m_isDrawCompass != 0) {
+            for (const auto& entry : gameMode->m_compassPosList) {
+                appendMarker(entry.second.x, entry.second.y, entry.second.color & 0x00FFFFFFu, 3);
+            }
+        }
+    }
+
+    appendMarker(g_session.m_playerPosX, g_session.m_playerPosY, RGB(245, 224, 126), 4);
+
+    *outData = std::move(data);
+    return true;
+}
+
+bool UIRoMapWnd::BuildQtMinimapImage(QImage* outImage) const
+{
+#if !RO_ENABLE_QT6_UI
+    (void)outImage;
+    return false;
+#else
+    if (!outImage) {
+        return false;
+    }
+
+    UIRoMapWnd* mutableThis = const_cast<UIRoMapWnd*>(this);
+    mutableThis->EnsureCreated();
+    mutableThis->UpdateMinimapBitmap();
+
+    QImage sourceImage;
+    if (!CopyBitmapToQImage(m_mapBitmap, &sourceImage) || sourceImage.isNull()) {
+        return false;
+    }
+
+    QImage composed(kMapSize, kMapSize, QImage::Format_ARGB32_Premultiplied);
+    composed.fill(qRgba(18, 22, 29, 255));
+
+    QRect targetRect(0, 0, kMapSize, kMapSize);
+    QRect sourceRect(0, 0, sourceImage.width(), sourceImage.height());
+    const float zoom = (std::max)(kMinZoom, (std::min)(kMaxZoom, g_windowMgr.m_miniMapZoomFactor));
+    const CGameMode* gameMode = g_modeMgr.GetCurrentGameMode();
+    RECT attrArea{ 0, 0, 0, 0 };
+    if (gameMode && gameMode->m_world) {
+        attrArea = gameMode->m_world->m_rootNode.m_attrArea;
+    }
+
+    if (zoom > kMinZoom + 0.001f) {
+        const float viewAspect = static_cast<float>(kMapSize) / static_cast<float>(kMapSize);
+        const float bitmapAspect = static_cast<float>(sourceImage.width()) / static_cast<float>(sourceImage.height());
+        int srcWidth = 0;
+        int srcHeight = 0;
+        if (bitmapAspect > viewAspect) {
+            srcHeight = static_cast<int>(sourceImage.height() / zoom);
+            srcWidth = static_cast<int>(srcHeight * viewAspect);
+        } else {
+            srcWidth = static_cast<int>(sourceImage.width() / zoom);
+            srcHeight = static_cast<int>(srcWidth / viewAspect);
+        }
+
+        srcWidth = (std::max)(1, (std::min)(srcWidth, sourceImage.width()));
+        srcHeight = (std::max)(1, (std::min)(srcHeight, sourceImage.height()));
+
+        float centerNormX = 0.5f;
+        float centerNormY = 0.5f;
+        const int attrWidth = attrArea.right - attrArea.left;
+        const int attrHeight = attrArea.bottom - attrArea.top;
+        if (attrWidth > 0 && attrHeight > 0) {
+            centerNormX = static_cast<float>(g_session.m_playerPosX - attrArea.left) / static_cast<float>(attrWidth);
+            centerNormY = 1.0f - (static_cast<float>(g_session.m_playerPosY - attrArea.top) / static_cast<float>(attrHeight));
+            centerNormX = (std::max)(0.0f, (std::min)(1.0f, centerNormX));
+            centerNormY = (std::max)(0.0f, (std::min)(1.0f, centerNormY));
+        }
+
+        const int centerX = static_cast<int>(centerNormX * sourceImage.width());
+        const int centerY = static_cast<int>(centerNormY * sourceImage.height());
+        int srcLeft = centerX - srcWidth / 2;
+        int srcTop = centerY - srcHeight / 2;
+        srcLeft = (std::max)(0, (std::min)(srcLeft, sourceImage.width() - srcWidth));
+        srcTop = (std::max)(0, (std::min)(srcTop, sourceImage.height() - srcHeight));
+        sourceRect = QRect(srcLeft, srcTop, srcWidth, srcHeight);
+    } else {
+        RECT fitted = FitRectPreservingAspect(RECT{ 0, 0, kMapSize, kMapSize }, sourceImage.width(), sourceImage.height());
+        targetRect = QRect(fitted.left, fitted.top, fitted.right - fitted.left, fitted.bottom - fitted.top);
+    }
+
+    {
+        QPainter painter(&composed);
+        painter.setRenderHint(QPainter::SmoothPixmapTransform, false);
+        painter.drawImage(targetRect, sourceImage, sourceRect);
+    }
+
+    *outImage = composed;
+    return true;
+#endif
 }
 
 void UIRoMapWnd::EnsureCreated()

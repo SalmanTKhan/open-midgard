@@ -11,6 +11,7 @@
 #include "session/Session.h"
 #include "ui/UILoginWnd.h"
 #include "ui/UIMakeCharWnd.h"
+#include "ui/UIMinimapWnd.h"
 #include "ui/UINotifyLevelUpWnd.h"
 #include "ui/UISelectCharWnd.h"
 #include "ui/UISelectServerWnd.h"
@@ -34,6 +35,7 @@
 #include <QQmlEngine>
 #include <QQmlError>
 #include <QImage>
+#include <QQuickImageProvider>
 #include <QQuickGraphicsDevice>
 #include <QQuickItem>
 #include <QQuickRenderControl>
@@ -86,6 +88,40 @@ bool IsEnabledInEnvironment()
     }
     return value == "1" || value == "true" || value == "on" || value == "yes";
 }
+
+class QtUiImageProvider final : public QQuickImageProvider {
+public:
+    QtUiImageProvider()
+        : QQuickImageProvider(QQuickImageProvider::Image)
+    {
+    }
+
+    QImage requestImage(const QString& id, QSize* size, const QSize& requestedSize) override
+    {
+        QString baseId = id;
+        const int queryPos = baseId.indexOf(QLatin1Char('?'));
+        if (queryPos >= 0) {
+            baseId.truncate(queryPos);
+        }
+
+        QImage image;
+        if (baseId == QStringLiteral("minimap")) {
+            const UIRoMapWnd* const minimapWnd = g_windowMgr.m_roMapWnd;
+            if (minimapWnd && minimapWnd->m_show != 0) {
+                minimapWnd->BuildQtMinimapImage(&image);
+            }
+        }
+
+        if (!image.isNull() && requestedSize.isValid() && requestedSize.width() > 0 && requestedSize.height() > 0) {
+            image = image.scaled(requestedSize, Qt::IgnoreAspectRatio, Qt::FastTransformation);
+        }
+
+        if (size) {
+            *size = image.size();
+        }
+        return image;
+    }
+};
 
 void BlendQtImageOntoBgraBuffer(const QImage& source, void* bgraPixels, int width, int height, int pitch)
 {
@@ -586,6 +622,7 @@ private:
         m_quickWindow->setTitle(QStringLiteral("open-midgard-qt-ui"));
 
         m_engine = new QQmlEngine();
+        m_engine->addImageProvider(QStringLiteral("openmidgard"), new QtUiImageProvider());
         m_engine->rootContext()->setContextProperty(QStringLiteral("uiState"), m_stateAdapter->stateObject());
 
         QQmlComponent component(m_engine, QUrl(QStringLiteral("qrc:/qtui/qml/GameOverlay.qml")));
