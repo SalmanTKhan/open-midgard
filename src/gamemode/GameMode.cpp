@@ -1179,6 +1179,9 @@ void DrawGameplayOverlayToHdc(CGameMode& mode, HDC targetDc)
     if (!targetDc) {
         return;
     }
+    if (IsQtUiRuntimeEnabled()) {
+        return;
+    }
 
     DrawHoveredGroundItemName(mode, targetDc);
     DrawHoveredActorName(mode, targetDc);
