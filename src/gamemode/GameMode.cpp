@@ -6863,8 +6863,24 @@ int  CGameMode::OnRun() {
         return 1;
     }
     if (IsMapLoadingActive(*this)) {
-        g_windowMgr.OnDraw();
-        DrawModeCursor(m_cursorActNum, m_mouseAnimStartTick);
+        const bool hasLegacyLoadingDevice = GetRenderDevice().GetLegacyDevice() != nullptr;
+        if (!hasLegacyLoadingDevice && IsQtUiRuntimeEnabled()) {
+            g_renderer.ClearBackground();
+            g_renderer.Clear(0);
+            g_windowMgr.RenderWallPaper();
+            const bool queuedLoadingOverlay = QueueModernOverlayQuad(*this, m_cursorActNum, m_mouseAnimStartTick);
+            if (queuedLoadingOverlay) {
+                QueueCursorOverlayQuad(m_cursorActNum, m_mouseAnimStartTick);
+                g_renderer.DrawScene();
+                g_renderer.Flip(false);
+            } else {
+                g_windowMgr.OnDraw();
+                DrawModeCursor(m_cursorActNum, m_mouseAnimStartTick);
+            }
+        } else {
+            g_windowMgr.OnDraw();
+            DrawModeCursor(m_cursorActNum, m_mouseAnimStartTick);
+        }
         Sleep(1);
         return 1;
     }
