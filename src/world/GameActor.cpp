@@ -1004,6 +1004,34 @@ int ResolvePcBodyActionFromView(float cameraLongitude, float actorRotationDegree
     return static_cast<int>((longitude + 22.5f) / 45.0f) & 7;
 }
 
+float NormalizeSignedAngle180(float angle)
+{
+    angle = std::fmod(angle, 360.0f);
+    if (angle > 180.0f) {
+        angle -= 360.0f;
+    } else if (angle < -180.0f) {
+        angle += 360.0f;
+    }
+    return angle;
+}
+
+int ResolvePcBodyActionFromViewStable(float cameraLongitude, float actorRotationDegrees, int previousDir)
+{
+    const float longitude = NormalizeAngle360(-cameraLongitude - actorRotationDegrees);
+    const int resolvedDir = ResolvePcBodyActionFromView(cameraLongitude, actorRotationDegrees);
+    if (previousDir < 0 || previousDir > 7) {
+        return resolvedDir;
+    }
+
+    constexpr float kDirectionHysteresisDeg = 6.0f;
+    const float previousCenter = static_cast<float>(previousDir) * 45.0f;
+    const float deltaToPrevious = std::fabs(NormalizeSignedAngle180(longitude - previousCenter));
+    if (deltaToPrevious <= 22.5f + kDirectionHysteresisDeg) {
+        return previousDir;
+    }
+    return resolvedDir;
+}
+
 int ResolveActionDirFromView(float cameraLongitude, float actorRotationDegrees, bool useRoundedPlayerDirs)
 {
     const float longitude = NormalizeAngle360(-cameraLongitude - actorRotationDegrees);
@@ -3288,9 +3316,12 @@ bool CPc::EnsureBillboardTexture(float cameraLongitude)
     const bool usePlayerStyleBillboard = isPlayerStyleActor;
     const int displayJob = ResolveDisplayJob(*this);
     const int sex = m_sex != 0 ? 1 : 0;
-    int bodyAction = m_isSitting
-        ? 16 + ResolvePcBodyActionFromView(cameraLongitude, actorRotationDegrees)
-        : (m_isMoving ? 8 : 0) + ResolvePcBodyActionFromView(cameraLongitude, actorRotationDegrees);
+    const int baseBodyAction = m_isSitting ? 16 : (m_isMoving ? 8 : 0);
+    int previousDir = -1;
+    if (m_cachedBillboardBodyAction >= baseBodyAction && m_cachedBillboardBodyAction < baseBodyAction + 8) {
+        previousDir = m_cachedBillboardBodyAction - baseBodyAction;
+    }
+    int bodyAction = baseBodyAction + ResolvePcBodyActionFromViewStable(cameraLongitude, actorRotationDegrees, previousDir);
     int headMotion = 0;
     if (usePlayerStyleBillboard) {
         char bodyAct[260] = {};

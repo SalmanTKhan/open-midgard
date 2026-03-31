@@ -43,6 +43,7 @@ public:
     float GetCameraLongitude() const { return m_cur.longitude; }
     float GetTargetCameraLatitude() const { return m_dest.latitude; }
     float GetTargetCameraDistance() const { return m_dest.distance; }
+    u64 BillboardFrameCacheSnapTag() const;
 
 private:
     struct CameraState {
@@ -57,6 +58,7 @@ private:
     void ClampCameraState(CameraState* state) const;
     float ClampLongitude(float longitude) const;
     vector3d ResolveTargetPosition() const;
+    bool ScreenToAttrCellUncached(int screenX, int screenY, int* outAttrX, int* outAttrY) const;
     bool ScreenToAttrCell(int screenX, int screenY, int* outAttrX, int* outAttrY) const;
 
     CWorld* m_world;
@@ -68,7 +70,16 @@ private:
     matrix m_viewMatrix;
     matrix m_invViewMatrix;
     bool m_initialized;
-    int m_resetBlendFrames;
+    u64 m_viewRevision;
+    u64 m_viewSnapTag;
     int m_hoverAttrX;
     int m_hoverAttrY;
+    mutable u64 m_hoverCacheRevision;
+    mutable DWORD m_hoverCacheTick;
+    mutable int m_hoverCacheScreenX;
+    mutable int m_hoverCacheScreenY;
+    mutable int m_hoverCacheAttrX;
+    mutable int m_hoverCacheAttrY;
+    mutable bool m_hoverCacheResolved;
+    mutable bool m_hoverCacheHasCell;
 };

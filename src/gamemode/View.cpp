@@ -6,6 +6,7 @@
 #include "session/Session.h"
 #include "world/World.h"
 
+#include <windows.h>
 #include <algorithm>
 #include <cmath>
 #include <limits>
@@ -15,11 +16,15 @@ namespace {
 constexpr float kDragLongitudePerPixel = 0.4f;
 constexpr float kDragLatitudePerPixel = -0.3f;
 constexpr float kWheelDistancePerNotch = -60.0f;
-constexpr float kDefaultBlendFactor = 0.1f;
-constexpr float kResetBlendFactor = 0.18f;
-constexpr int kResetBlendFrameCount = 18;
+// Ref\View.cpp CView::InterpolateViewInfo (~0x5097f0): each sub-step,
+//   cur += (dest - cur) * 0.1
+// for longitude (shortest arc), latitude, and distance. The decompile copies
+// look-at from dest in one shot; we also damp m_cur.at with the same 0.1 so
+// the chase pivot eases when the player starts/stops (one damping constant).
+constexpr float kRefInterpolateViewFactor = 0.1f;
 constexpr float kNearPlane = 10.0f;
 constexpr float kGroundSubmitNearPlane = 80.0f;
+constexpr DWORD kHoverReuseMs = 33;
 constexpr u32 kPerfLogIntervalFrames = 120;
 
 struct ViewPerfStats {
@@ -31,6 +36,55 @@ struct ViewPerfStats {
 };
 
 ViewPerfStats g_viewPerfStats;
+
+struct ViewMovePerfStats {
+    u64 frames = 0;
+    u64 hoverCalls = 0;
+    double interpolateMs = 0.0;
+    double hoverResolveMs = 0.0;
+    double groundMs = 0.0;
+    double actorMs = 0.0;
+    double backgroundMs = 0.0;
+};
+
+ViewMovePerfStats g_viewMovePerfStats;
+
+double QpcNowMs()
+{
+    static LARGE_INTEGER freq = [] {
+        LARGE_INTEGER value{};
+        QueryPerformanceFrequency(&value);
+        return value;
+    }();
+    LARGE_INTEGER now{};
+    QueryPerformanceCounter(&now);
+    return static_cast<double>(now.QuadPart) * 1000.0 / static_cast<double>(freq.QuadPart);
+}
+
+bool IsMovePerfActive(const CWorld* world)
+{
+    return world && world->m_player && world->m_player->m_isMoving;
+}
+
+void LogViewMovePerfIfNeeded()
+{
+    if (g_viewMovePerfStats.frames == 0 || (g_viewMovePerfStats.frames % 30u) != 0) {
+        return;
+    }
+
+    const double frameCount = static_cast<double>(g_viewMovePerfStats.frames);
+    const double hoverCallCount = static_cast<double>((std::max)(1ull, g_viewMovePerfStats.hoverCalls));
+    DbgLog("[ViewPerfHiRes] moveFrames=%llu interp=%.3fms hoverFrame=%.3fms hoverCalls=%llu hoverCall=%.3fms ground=%.3fms actors=%.3fms background=%.3fms\n",
+        static_cast<unsigned long long>(g_viewMovePerfStats.frames),
+        g_viewMovePerfStats.interpolateMs / frameCount,
+        g_viewMovePerfStats.hoverResolveMs / frameCount,
+        static_cast<unsigned long long>(g_viewMovePerfStats.hoverCalls),
+        g_viewMovePerfStats.hoverResolveMs / hoverCallCount,
+        g_viewMovePerfStats.groundMs / frameCount,
+        g_viewMovePerfStats.actorMs / frameCount,
+        g_viewMovePerfStats.backgroundMs / frameCount);
+    g_viewMovePerfStats = ViewMovePerfStats{};
+}
 
 bool IsWalkableAttrCell(const C3dAttr* attr, int attrX, int attrY)
 {
@@ -124,6 +178,21 @@ float NormalizeLongitudeDelta(float delta)
         delta += 360.0f;
     }
     return delta;
+}
+
+void WrapLongitude0To360InPlace(float* longitude)
+{
+    if (!longitude) {
+        return;
+    }
+    float lon = *longitude;
+    while (lon >= 360.0f) {
+        lon -= 360.0f;
+    }
+    while (lon < 0.0f) {
+        lon += 360.0f;
+    }
+    *longitude = lon;
 }
 
 float TileToWorldCoordX(const CWorld* world, int tileX)
@@ -331,9 +400,18 @@ CView::CView()
       m_from{ 0.0f, 0.0f, 0.0f },
       m_up{ 0.0f, 1.0f, 0.0f },
       m_initialized(false),
-      m_resetBlendFrames(0),
+      m_viewRevision(0),
+      m_viewSnapTag(0),
       m_hoverAttrX(-1),
-      m_hoverAttrY(-1)
+      m_hoverAttrY(-1),
+      m_hoverCacheRevision(0),
+      m_hoverCacheTick(0),
+      m_hoverCacheScreenX(0),
+      m_hoverCacheScreenY(0),
+      m_hoverCacheAttrX(-1),
+      m_hoverCacheAttrY(-1),
+      m_hoverCacheResolved(false),
+      m_hoverCacheHasCell(false)
 {
     MatrixIdentity(m_viewMatrix);
     MatrixIdentity(m_invViewMatrix);
@@ -379,9 +457,16 @@ void CView::OnEnterFrame()
     m_dest.at = vector3d{ 0.0f, 0.0f, 0.0f };
     m_up = vector3d{ 0.0f, 1.0f, 0.0f };
     m_initialized = false;
-    m_resetBlendFrames = 0;
+    m_viewRevision = 0;
+    m_viewSnapTag = 0;
     m_hoverAttrX = -1;
     m_hoverAttrY = -1;
+    m_hoverCacheRevision = 0;
+    m_hoverCacheTick = 0;
+    m_hoverCacheAttrX = -1;
+    m_hoverCacheAttrY = -1;
+    m_hoverCacheResolved = false;
+    m_hoverCacheHasCell = false;
 }
 
 void CView::OnExitFrame()
@@ -423,7 +508,6 @@ void CView::ResetToDefaultOrientation()
 {
     m_dest.longitude = ClampLongitude(m_constraints.defaultLongitude);
     m_dest.latitude = ClampFloat(m_constraints.defaultLatitude, m_constraints.minLatitude, m_constraints.maxLatitude);
-    m_resetBlendFrames = kResetBlendFrameCount;
 }
 
 void CView::UpdateHoverCellFromScreen(int screenX, int screenY)
@@ -451,6 +535,46 @@ bool CView::ScreenToHoveredAttrCell(int screenX, int screenY, int* outAttrX, int
 
 bool CView::ScreenToAttrCell(int screenX, int screenY, int* outAttrX, int* outAttrY) const
 {
+    if (!outAttrX || !outAttrY) {
+        return false;
+    }
+
+    const DWORD now = GetTickCount();
+    if (m_hoverCacheResolved
+        && m_hoverCacheScreenX == screenX
+        && m_hoverCacheScreenY == screenY
+        && now - m_hoverCacheTick <= kHoverReuseMs) {
+        if (!m_hoverCacheHasCell) {
+            return false;
+        }
+        *outAttrX = m_hoverCacheAttrX;
+        *outAttrY = m_hoverCacheAttrY;
+        return true;
+    }
+
+    int attrX = -1;
+    int attrY = -1;
+    const bool found = ScreenToAttrCellUncached(screenX, screenY, &attrX, &attrY);
+    m_hoverCacheRevision = m_viewRevision;
+    m_hoverCacheTick = now;
+    m_hoverCacheScreenX = screenX;
+    m_hoverCacheScreenY = screenY;
+    m_hoverCacheAttrX = attrX;
+    m_hoverCacheAttrY = attrY;
+    m_hoverCacheResolved = true;
+    m_hoverCacheHasCell = found;
+    if (!found) {
+        return false;
+    }
+
+    *outAttrX = attrX;
+    *outAttrY = attrY;
+    return true;
+}
+
+bool CView::ScreenToAttrCellUncached(int screenX, int screenY, int* outAttrX, int* outAttrY) const
+{
+    const double perfStartMs = IsMovePerfActive(m_world) ? QpcNowMs() : 0.0;
     if (!m_world || !m_world->m_attr || !outAttrX || !outAttrY) {
         return false;
     }
@@ -517,11 +641,19 @@ bool CView::ScreenToAttrCell(int screenX, int screenY, int* outAttrX, int* outAt
     }
 
     if (!found) {
+        if (perfStartMs != 0.0) {
+            g_viewMovePerfStats.hoverCalls += 1;
+            g_viewMovePerfStats.hoverResolveMs += QpcNowMs() - perfStartMs;
+        }
         return false;
     }
 
     *outAttrX = bestX;
     *outAttrY = bestY;
+    if (perfStartMs != 0.0) {
+        g_viewMovePerfStats.hoverCalls += 1;
+        g_viewMovePerfStats.hoverResolveMs += QpcNowMs() - perfStartMs;
+    }
     return true;
 }
 
@@ -571,42 +703,49 @@ void CView::ClampCameraState(CameraState* state) const
 
 void CView::InterpolateViewInfo()
 {
+    const double perfStartMs = IsMovePerfActive(m_world) ? QpcNowMs() : 0.0;
+    const bool wrapLongitude = !m_constraints.lockLongitude
+        && (!m_constraints.constrainLongitude || (m_constraints.maxLongitude - m_constraints.minLongitude) >= 360.0f);
+
     if (!m_initialized) {
         ClampCameraState(&m_dest);
         m_cur = m_dest;
+        if (wrapLongitude) {
+            WrapLongitude0To360InPlace(&m_dest.longitude);
+            WrapLongitude0To360InPlace(&m_cur.longitude);
+        }
         m_initialized = true;
         return;
     }
 
     ClampCameraState(&m_dest);
 
+    if (wrapLongitude) {
+        WrapLongitude0To360InPlace(&m_dest.longitude);
+        WrapLongitude0To360InPlace(&m_cur.longitude);
+    }
+
     float deltaLongitude = m_dest.longitude - m_cur.longitude;
-    if (!m_constraints.lockLongitude
-        && (!m_constraints.constrainLongitude || (m_constraints.maxLongitude - m_constraints.minLongitude) >= 360.0f)) {
+    if (wrapLongitude) {
         deltaLongitude = NormalizeLongitudeDelta(deltaLongitude);
     }
 
-    const float blendFactor = m_resetBlendFrames > 0 ? kResetBlendFactor : kDefaultBlendFactor;
-    m_cur.longitude += deltaLongitude * blendFactor;
-    if (!m_constraints.lockLongitude
-        && (!m_constraints.constrainLongitude || (m_constraints.maxLongitude - m_constraints.minLongitude) >= 360.0f)) {
-        if (m_cur.longitude >= 360.0f) {
-            m_cur.longitude -= 360.0f;
-        }
-        if (m_cur.longitude < 0.0f) {
-            m_cur.longitude += 360.0f;
-        }
+    // Ref applies the same 0.1 factor to longitude delta, latitude, and distance.
+    m_cur.longitude += deltaLongitude * kRefInterpolateViewFactor;
+    if (wrapLongitude) {
+        WrapLongitude0To360InPlace(&m_cur.longitude);
     } else {
         m_cur.longitude = ClampLongitude(m_cur.longitude);
     }
 
-    m_cur.latitude += (m_dest.latitude - m_cur.latitude) * blendFactor;
-    m_cur.distance += (m_dest.distance - m_cur.distance) * blendFactor;
-    m_cur.at = m_dest.at;
+    m_cur.at.x += (m_dest.at.x - m_cur.at.x) * kRefInterpolateViewFactor;
+    m_cur.at.y += (m_dest.at.y - m_cur.at.y) * kRefInterpolateViewFactor;
+    m_cur.at.z += (m_dest.at.z - m_cur.at.z) * kRefInterpolateViewFactor;
+    m_cur.latitude += (m_dest.latitude - m_cur.latitude) * kRefInterpolateViewFactor;
+    m_cur.distance += (m_dest.distance - m_cur.distance) * kRefInterpolateViewFactor;
     ClampCameraState(&m_cur);
-
-    if (m_resetBlendFrames > 0) {
-        --m_resetBlendFrames;
+    if (perfStartMs != 0.0) {
+        g_viewMovePerfStats.interpolateMs += QpcNowMs() - perfStartMs;
     }
 }
 
@@ -634,11 +773,43 @@ void CView::BuildViewMatrix()
     g_renderer.SetLookAt(m_from, m_cur.at, m_up);
 }
 
+u64 CView::BillboardFrameCacheSnapTag() const
+{
+    // Coarse buckets so damped m_cur.at (0.1 toward dest) and smooth camera motion
+    // do not change the tag every frame — fine quantization caused a full billboard
+    // rebuild almost every tick while moving (huge FPS cost). Hover only needs
+    // roughly stable screen rects; BuildBillboardRenderEntry still uses the exact
+    // viewMatrix passed into EnsureBillboardFrameCache.
+    u64 h = 1469598103934665603ull;
+    auto mix = [&h](float v, float scale) {
+        const u64 q = static_cast<u64>(static_cast<u32>(std::lround(v * scale)));
+        h ^= q;
+        h *= 1099511628211ull;
+    };
+    constexpr float kAtBucketWorld = 0.5f; // lround(pos * 0.5) → ~2 world units per bucket
+    constexpr float kEyeYBucketWorld = 1.0f;
+    constexpr float kAngleBucketDeg = 1.0f; // ~1° lon/lat
+    constexpr float kDistBucketWorld = 0.2f; // ~5 units per bucket
+    mix(m_cur.at.x, kAtBucketWorld);
+    mix(m_cur.at.y, kAtBucketWorld);
+    mix(m_cur.at.z, kAtBucketWorld);
+    mix(m_from.y, kEyeYBucketWorld);
+    mix(m_cur.longitude, kAngleBucketDeg);
+    mix(m_cur.latitude, kAngleBucketDeg);
+    mix(m_cur.distance, kDistBucketWorld);
+    return h;
+}
+
 void CView::OnCalcViewInfo()
 {
     m_dest.at = ResolveTargetPosition();
     InterpolateViewInfo();
     BuildViewMatrix();
+    ++m_viewRevision;
+    m_viewSnapTag = BillboardFrameCacheSnapTag();
+    if (m_world) {
+        m_world->SyncBillboardFrameCacheKey(m_viewSnapTag);
+    }
 
     static bool loggedViewState = false;
     if (!loggedViewState) {
@@ -662,9 +833,18 @@ void CView::OnRender()
         return;
     }
 
+    const bool trackMovePerf = IsMovePerfActive(m_world);
+    if (trackMovePerf) {
+        g_viewMovePerfStats.frames += 1;
+    }
+
     const DWORD groundStart = GetTickCount();
+    const double groundStartMs = trackMovePerf ? QpcNowMs() : 0.0;
     m_world->m_ground->FlushGround(m_viewMatrix);
     const DWORD groundEnd = GetTickCount();
+    if (trackMovePerf) {
+        g_viewMovePerfStats.groundMs += QpcNowMs() - groundStartMs;
+    }
 
     const DWORD hoverStart = groundEnd;
     if (m_hoverAttrX >= 0 && m_hoverAttrY >= 0 && IsWalkableAttrCell(m_world->m_attr, m_hoverAttrX, m_hoverAttrY)) {
@@ -673,12 +853,20 @@ void CView::OnRender()
     const DWORD hoverEnd = GetTickCount();
 
     const DWORD actorStart = hoverEnd;
+    const double actorStartMs = trackMovePerf ? QpcNowMs() : 0.0;
     m_world->RenderActors(m_viewMatrix, m_cur.longitude);
     const DWORD actorEnd = GetTickCount();
+    if (trackMovePerf) {
+        g_viewMovePerfStats.actorMs += QpcNowMs() - actorStartMs;
+    }
 
     const DWORD backgroundStart = actorEnd;
+    const double backgroundStartMs = trackMovePerf ? QpcNowMs() : 0.0;
     m_world->RenderBackgroundObjects(m_viewMatrix);
     const DWORD backgroundEnd = GetTickCount();
+    if (trackMovePerf) {
+        g_viewMovePerfStats.backgroundMs += QpcNowMs() - backgroundStartMs;
+    }
 
     g_viewPerfStats.frames += 1;
     g_viewPerfStats.groundMs += static_cast<u64>(groundEnd - groundStart);
@@ -693,5 +881,9 @@ void CView::OnRender()
             static_cast<unsigned long>(hoverEnd - hoverStart),
             static_cast<unsigned long>(actorEnd - actorStart),
             static_cast<unsigned long>(backgroundEnd - backgroundStart));
+    }
+
+    if (trackMovePerf) {
+        LogViewMovePerfIfNeeded();
     }
 }

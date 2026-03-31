@@ -63,6 +63,7 @@ constexpr size_t kBootstrapTextureBatch = 2;
 constexpr size_t kBootstrapBackgroundActorBatch = 6;
 constexpr size_t kBootstrapFixedEffectBatch = 12;
 constexpr float kWorldProcessTickMs = 24.0f;
+constexpr u32 kMovingCameraHoverRefreshMs = 100;
 constexpr int kMaxWorldProcessStepsPerUpdate = 8;
 constexpr int kHoverNameFontHeight = 20;
 constexpr unsigned char kHoverNameFontBold = 1;
@@ -89,6 +90,7 @@ constexpr int kRoMapCornerEllipseSize = 10;
 constexpr float kLockedTargetArrowBouncePerMs = 0.0045f;
 constexpr float kLockedTargetArrowBouncePixels = 4.0f;
 constexpr u32 kHoverNameRequestCooldownMs = 1000;
+constexpr u32 kMovingOverlayRefreshMs = 200;
 constexpr int kEnemyCursorMagnetRadius = 36;
 constexpr int kEnemyCursorMagnetMaxStep = 5;
 constexpr int kEnemyCursorMagnetDeadzone = 4;
@@ -112,6 +114,28 @@ float g_savedIndoorCameraDistance = kRefIndoorCameraDistance;
 
 u32 g_packetTraceStartTick = 0;
 std::map<u16, bool> g_packetTraceLoggedIds;
+
+struct OverlayMovePerfStats {
+    u64 frames = 0;
+    u64 modernRefreshes = 0;
+    double queueModernMs = 0.0;
+    double queueRoMapMs = 0.0;
+    double queueLockedTargetMs = 0.0;
+    double queueMsgMs = 0.0;
+    double queueCursorMs = 0.0;
+    double modernOverlayDrawMs = 0.0;
+    double modernUiDrawMs = 0.0;
+    double modernConvertMs = 0.0;
+    double modernTextureUpdateMs = 0.0;
+    double fallbackOverlayDrawMs = 0.0;
+    double fallbackMsgMs = 0.0;
+    double fallbackUiDrawMs = 0.0;
+    double fallbackCursorHdcMs = 0.0;
+    double fallbackCursorMs = 0.0;
+    double flipMs = 0.0;
+};
+
+OverlayMovePerfStats g_overlayMovePerfStats;
 
 void UpdateMapAudio(CGameMode& mode)
 {
@@ -195,6 +219,7 @@ void DrawLockedTargetName(CGameMode& mode, HDC hdc);
 void DrawLockedTargetArrow(CGameMode& mode, HDC hdc);
 bool QueueLockedTargetOverlayQuad(CGameMode& mode);
 bool QueueMsgEffectsOverlayQuad();
+bool QueuePlayerVitalsOverlayQuad(CGameMode& mode);
 void ApplyEnemyCursorMagnet(CGameMode& mode, POINT* cursorPos);
 bool IsMonsterLikeHoverActor(const CGameActor* actor);
 bool IsWalkableAttrCell(const CGameMode& mode, int tileX, int tileY);
@@ -342,13 +367,6 @@ std::uint64_t ComputeGameplayOverlayStateToken(CGameMode& mode, int cursorActNum
     (void)mouseAnimStartTick;
 
     if (mode.m_world && mode.m_view && mode.m_world->m_player) {
-        int labelX = 0;
-        int labelY = 0;
-        if (mode.m_world->GetPlayerScreenLabel(mode.m_view->GetViewMatrix(), mode.m_view->GetCameraLongitude(), &labelX, &labelY)) {
-            HashTokenValue(&hash, static_cast<std::uint64_t>(static_cast<std::uint32_t>(labelX)));
-            HashTokenValue(&hash, static_cast<std::uint64_t>(static_cast<std::uint32_t>(labelY)));
-        }
-
         const CPlayer* player = mode.m_world->m_player;
         HashTokenValue(&hash, static_cast<std::uint64_t>(player->m_gid));
         HashTokenValue(&hash, static_cast<std::uint64_t>(static_cast<std::uint32_t>(player->m_Hp)));
@@ -398,6 +416,18 @@ std::uint64_t ComputeGameplayOverlayStateToken(CGameMode& mode, int cursorActNum
 
 bool QueueModernOverlayQuad(CGameMode& mode, int cursorActNum, u32 mouseAnimStartTick)
 {
+    const bool trackMovePerf = mode.m_world && mode.m_world->m_player && mode.m_world->m_player->m_isMoving;
+    const auto qpcNowMs = []() -> double {
+        static LARGE_INTEGER freq = [] {
+            LARGE_INTEGER value{};
+            QueryPerformanceFrequency(&value);
+            return value;
+        }();
+        LARGE_INTEGER now{};
+        QueryPerformanceCounter(&now);
+        return static_cast<double>(now.QuadPart) * 1000.0 / static_cast<double>(freq.QuadPart);
+    };
+
     if (!g_hMainWnd) {
         return false;
     }
@@ -422,6 +452,7 @@ bool QueueModernOverlayQuad(CGameMode& mode, int cursorActNum, u32 mouseAnimStar
     static int s_overlayComposeHeight = 0;
     static std::uint64_t s_overlayStateToken = 0ull;
     static bool s_overlayTextureValid = false;
+    static u32 s_lastMovingOverlayRefreshTick = 0;
     const bool composeReady = EnsureOverlayComposeSurface(windowDc, clientWidth, clientHeight,
         &s_overlayComposeDc, &s_overlayComposeBitmap, &s_overlayComposeBits, &s_overlayComposeWidth, &s_overlayComposeHeight);
     ReleaseDC(g_hMainWnd, windowDc);
@@ -451,21 +482,40 @@ bool QueueModernOverlayQuad(CGameMode& mode, int cursorActNum, u32 mouseAnimStar
     const bool overlayIsAnimated = false;
     const bool uiDirty = g_windowMgr.HasDirtyVisualStateExcludingRoMap();
     const std::uint64_t overlayStateToken = ComputeGameplayOverlayStateToken(mode, cursorActNum, mouseAnimStartTick, clientWidth, clientHeight);
+    const bool overlayStateChanged = overlayStateToken != s_overlayStateToken;
+    const u32 now = GetTickCount();
+    const bool allowMovingOverlayRefresh = !trackMovePerf
+        || s_lastMovingOverlayRefreshTick == 0
+        || now - s_lastMovingOverlayRefreshTick >= kMovingOverlayRefreshMs;
     const bool needOverlayRefresh = !s_overlayTextureValid
         || overlayIsAnimated
         || uiDirty
-        || overlayStateToken != s_overlayStateToken;
+        || (overlayStateChanged && allowMovingOverlayRefresh);
 
     if (needOverlayRefresh) {
+        const double refreshStartMs = trackMovePerf ? qpcNowMs() : 0.0;
         ClearOverlayComposeBits(s_overlayComposeBits, clientWidth, clientHeight);
+        const double overlayDrawStartMs = trackMovePerf ? qpcNowMs() : 0.0;
         DrawGameplayOverlayToHdc(mode, s_overlayComposeDc);
+        if (trackMovePerf) {
+            g_overlayMovePerfStats.modernOverlayDrawMs += qpcNowMs() - overlayDrawStartMs;
+        }
 
         HDC previousSharedDc = UIWindow::GetSharedDrawDC();
         UIWindow::SetSharedDrawDC(s_overlayComposeDc);
+        const double uiDrawStartMs = trackMovePerf ? qpcNowMs() : 0.0;
         g_windowMgr.OnDrawExcludingRoMap();
+        if (trackMovePerf) {
+            g_overlayMovePerfStats.modernUiDrawMs += qpcNowMs() - uiDrawStartMs;
+        }
         UIWindow::SetSharedDrawDC(previousSharedDc);
 
+        const double convertStartMs = trackMovePerf ? qpcNowMs() : 0.0;
         ConvertOverlayComposeBitsToAlpha(s_overlayComposeBits, clientWidth, clientHeight);
+        if (trackMovePerf) {
+            g_overlayMovePerfStats.modernConvertMs += qpcNowMs() - convertStartMs;
+        }
+        const double textureUpdateStartMs = trackMovePerf ? qpcNowMs() : 0.0;
         s_overlayTexture->Update(0,
             0,
             clientWidth,
@@ -473,8 +523,16 @@ bool QueueModernOverlayQuad(CGameMode& mode, int cursorActNum, u32 mouseAnimStar
             static_cast<unsigned int*>(s_overlayComposeBits),
             true,
             clientWidth * static_cast<int>(sizeof(unsigned int)));
+        if (trackMovePerf) {
+            g_overlayMovePerfStats.modernTextureUpdateMs += qpcNowMs() - textureUpdateStartMs;
+            g_overlayMovePerfStats.modernRefreshes += 1;
+            (void)refreshStartMs;
+        }
         s_overlayTextureValid = true;
         s_overlayStateToken = overlayStateToken;
+        if (overlayStateChanged) {
+            s_lastMovingOverlayRefreshTick = now;
+        }
     }
 
     RPFace* face = g_renderer.BorrowNullRP();
@@ -999,6 +1057,130 @@ bool QueueMsgEffectsOverlayQuad()
     return true;
 }
 
+bool QueuePlayerVitalsOverlayQuad(CGameMode& mode)
+{
+    if (!g_hMainWnd || !mode.m_world || !mode.m_view || !mode.m_world->m_player) {
+        return false;
+    }
+
+    int labelX = 0;
+    int labelY = 0;
+    if (!mode.m_world->GetPlayerScreenLabel(mode.m_view->GetViewMatrix(),
+        mode.m_view->GetCameraLongitude(),
+        &labelX,
+        &labelY)) {
+        return false;
+    }
+
+    CPlayer* player = mode.m_world->m_player;
+    const int maxHp = static_cast<int>(player->m_MaxHp);
+    const int maxSp = static_cast<int>(player->m_MaxSp);
+    if (maxHp <= 0 && maxSp <= 0) {
+        return false;
+    }
+
+    const int totalHeight = kPlayerVitalsBarHeight * 2 + kPlayerVitalsBorderThickness * 3;
+    const int outerLeft = labelX - ((kPlayerVitalsBarWidth + kPlayerVitalsBorderThickness * 2) / 2);
+    RECT vitalsRect{
+        outerLeft,
+        labelY,
+        outerLeft + kPlayerVitalsBarWidth + kPlayerVitalsBorderThickness * 2,
+        labelY + totalHeight,
+    };
+
+    RECT clientRect{};
+    GetClientRect(g_hMainWnd, &clientRect);
+    RECT clippedRect{};
+    IntersectRect(&clippedRect, &vitalsRect, &clientRect);
+    const int width = clippedRect.right - clippedRect.left;
+    const int height = clippedRect.bottom - clippedRect.top;
+    if (width <= 0 || height <= 0) {
+        return false;
+    }
+
+    HDC composeReferenceDc = GetDC(g_hMainWnd);
+    if (!composeReferenceDc) {
+        return false;
+    }
+
+    static HDC s_vitalsComposeDc = nullptr;
+    static HBITMAP s_vitalsComposeBitmap = nullptr;
+    static void* s_vitalsComposeBits = nullptr;
+    static int s_vitalsComposeWidth = 0;
+    static int s_vitalsComposeHeight = 0;
+    const bool composeReady = EnsureOverlayComposeSurface(composeReferenceDc, width, height,
+        &s_vitalsComposeDc, &s_vitalsComposeBitmap, &s_vitalsComposeBits, &s_vitalsComposeWidth, &s_vitalsComposeHeight);
+    ReleaseDC(g_hMainWnd, composeReferenceDc);
+    if (!composeReady) {
+        return false;
+    }
+
+    static CTexture* s_vitalsTexture = nullptr;
+    static int s_vitalsTextureWidth = 0;
+    static int s_vitalsTextureHeight = 0;
+    if (!s_vitalsTexture || s_vitalsTextureWidth != width || s_vitalsTextureHeight != height) {
+        delete s_vitalsTexture;
+        s_vitalsTexture = new CTexture();
+        if (!s_vitalsTexture || !s_vitalsTexture->Create(width, height, PF_A8R8G8B8, false)) {
+            delete s_vitalsTexture;
+            s_vitalsTexture = nullptr;
+            s_vitalsTextureWidth = 0;
+            s_vitalsTextureHeight = 0;
+            return false;
+        }
+        s_vitalsTextureWidth = width;
+        s_vitalsTextureHeight = height;
+    }
+
+    ClearOverlayComposeBits(s_vitalsComposeBits, width, height);
+    const int savedDc = SaveDC(s_vitalsComposeDc);
+    SetViewportOrgEx(s_vitalsComposeDc, -clippedRect.left, -clippedRect.top, nullptr);
+    DrawPlayerVitalsOverlay(mode, s_vitalsComposeDc);
+    RestoreDC(s_vitalsComposeDc, savedDc);
+
+    ConvertOverlayComposeBitsToAlpha(s_vitalsComposeBits, width, height);
+    s_vitalsTexture->Update(0,
+        0,
+        width,
+        height,
+        static_cast<unsigned int*>(s_vitalsComposeBits),
+        true,
+        width * static_cast<int>(sizeof(unsigned int)));
+
+    RPFace* face = g_renderer.BorrowNullRP();
+    if (!face) {
+        return false;
+    }
+
+    const float left = static_cast<float>(clippedRect.left) - 0.5f;
+    const float top = static_cast<float>(clippedRect.top) - 0.5f;
+    const float right = static_cast<float>(clippedRect.right) - 0.5f;
+    const float bottom = static_cast<float>(clippedRect.bottom) - 0.5f;
+    const unsigned int overlayContentWidth = s_vitalsTexture->m_surfaceUpdateWidth > 0 ? s_vitalsTexture->m_surfaceUpdateWidth : static_cast<unsigned int>(width);
+    const unsigned int overlayContentHeight = s_vitalsTexture->m_surfaceUpdateHeight > 0 ? s_vitalsTexture->m_surfaceUpdateHeight : static_cast<unsigned int>(height);
+    const float maxU = s_vitalsTexture->m_w != 0 ? static_cast<float>(overlayContentWidth) / static_cast<float>(s_vitalsTexture->m_w) : 1.0f;
+    const float maxV = s_vitalsTexture->m_h != 0 ? static_cast<float>(overlayContentHeight) / static_cast<float>(s_vitalsTexture->m_h) : 1.0f;
+
+    face->primType = D3DPT_TRIANGLESTRIP;
+    face->verts = face->m_verts;
+    face->numVerts = 4;
+    face->indices = nullptr;
+    face->numIndices = 0;
+    face->tex = s_vitalsTexture;
+    face->mtPreset = 0;
+    face->cullMode = D3DCULL_NONE;
+    face->srcAlphaMode = D3DBLEND_SRCALPHA;
+    face->destAlphaMode = D3DBLEND_INVSRCALPHA;
+    face->alphaSortKey = 1.6f;
+
+    face->m_verts[0] = { left, top, 0.0f, 1.0f, 0xFFFFFFFFu, 0xFF000000u, 0.0f, 0.0f };
+    face->m_verts[1] = { right, top, 0.0f, 1.0f, 0xFFFFFFFFu, 0xFF000000u, maxU, 0.0f };
+    face->m_verts[2] = { left, bottom, 0.0f, 1.0f, 0xFFFFFFFFu, 0xFF000000u, 0.0f, maxV };
+    face->m_verts[3] = { right, bottom, 0.0f, 1.0f, 0xFFFFFFFFu, 0xFF000000u, maxU, maxV };
+    g_renderer.AddRP(face, 1 | 8);
+    return true;
+}
+
 void ApplyEnemyCursorMagnet(CGameMode& mode, POINT* cursorPos)
 {
     if (!cursorPos || !mode.m_world || !mode.m_view || !g_hMainWnd) {
@@ -1063,7 +1245,6 @@ void DrawGameplayOverlayToHdc(CGameMode& mode, HDC targetDc)
         return;
     }
 
-    DrawPlayerVitalsOverlay(mode, targetDc);
     DrawHoveredGroundItemName(mode, targetDc);
     DrawHoveredActorName(mode, targetDc);
 }
@@ -1100,6 +1281,7 @@ bool ComposeModernOverlayFrame(CGameMode& mode, int cursorActNum, u32 mouseAnimS
 
     BitBlt(s_overlayComposeDc, 0, 0, clientWidth, clientHeight, sceneDc, 0, 0, SRCCOPY);
     DrawGameplayOverlayToHdc(mode, s_overlayComposeDc);
+    DrawPlayerVitalsOverlay(mode, s_overlayComposeDc);
     DrawQueuedMsgEffects(s_overlayComposeDc);
 
     HDC previousSharedDc = UIWindow::GetSharedDrawDC();
@@ -1556,6 +1738,53 @@ struct UpdatePerfStats {
 };
 
 UpdatePerfStats g_updatePerfStats;
+
+struct GameModeMovePerfStats {
+    u64 frames = 0;
+    u64 skillRechargeCalls = 0;
+    u64 cursorCalls = 0;
+    double skillRechargeMs = 0.0;
+    double cursorMs = 0.0;
+};
+
+GameModeMovePerfStats g_gameModeMovePerfStats;
+
+double QpcNowMs()
+{
+    static LARGE_INTEGER freq = [] {
+        LARGE_INTEGER value{};
+        QueryPerformanceFrequency(&value);
+        return value;
+    }();
+    LARGE_INTEGER now{};
+    QueryPerformanceCounter(&now);
+    return static_cast<double>(now.QuadPart) * 1000.0 / static_cast<double>(freq.QuadPart);
+}
+
+bool IsMovePerfActive(const CGameMode& mode)
+{
+    return mode.m_world && mode.m_world->m_player && mode.m_world->m_player->m_isMoving;
+}
+
+void LogGameModeMovePerfIfNeeded()
+{
+    if (g_gameModeMovePerfStats.frames == 0 || (g_gameModeMovePerfStats.frames % 30u) != 0) {
+        return;
+    }
+
+    const double frameCount = static_cast<double>(g_gameModeMovePerfStats.frames);
+    const double skillCalls = static_cast<double>((std::max)(1ull, g_gameModeMovePerfStats.skillRechargeCalls));
+    const double cursorCalls = static_cast<double>((std::max)(1ull, g_gameModeMovePerfStats.cursorCalls));
+    DbgLog("[GameModePerfHiRes] moveFrames=%llu skillRecharge=%.3fms skillCalls=%llu skillCall=%.3fms cursor=%.3fms cursorCalls=%llu cursorCall=%.3fms\n",
+        static_cast<unsigned long long>(g_gameModeMovePerfStats.frames),
+        g_gameModeMovePerfStats.skillRechargeMs / frameCount,
+        static_cast<unsigned long long>(g_gameModeMovePerfStats.skillRechargeCalls),
+        g_gameModeMovePerfStats.skillRechargeMs / skillCalls,
+        g_gameModeMovePerfStats.cursorMs / frameCount,
+        static_cast<unsigned long long>(g_gameModeMovePerfStats.cursorCalls),
+        g_gameModeMovePerfStats.cursorMs / cursorCalls);
+    g_gameModeMovePerfStats = GameModeMovePerfStats{};
+}
 
 void SendActorNameRequest(CGameMode& mode, u32 gid)
 {
@@ -6628,7 +6857,7 @@ CGameMode::CGameMode()
         m_attackChaseSourceCellX(-1), m_attackChaseSourceCellY(-1), m_attackChaseRange(1), m_hasAttackChaseHint(0),
         m_skillChaseTargetGid(0), m_lastSkillChaseRequestTick(0), m_skillChaseSkillId(0), m_skillChaseSkillLevel(0), m_skillChaseRange(1), m_hasSkillChase(0),
         m_mapLoadingStage(MapLoading_None), m_mapLoadingStartTick(0), m_mapLoadingAckTick(0), m_lastActorBootstrapPacketTick(0),
-        m_worldProcessTick(GetTickCount()), m_worldProcessCarryMs(kWorldProcessTickMs)
+        m_worldProcessTick(GetTickCount()), m_worldProcessCarryMs(kWorldProcessTickMs), m_lastHoverRefreshTick(0)
 {
     std::memset(m_rswName, 0, sizeof(m_rswName));
     std::memset(m_minimapBmpName, 0, sizeof(m_minimapBmpName));
@@ -6650,6 +6879,7 @@ void CGameMode::OnInit(const char* worldName) {
     m_playWaveList.clear();
     m_worldProcessTick = GetTickCount();
     m_worldProcessCarryMs = kWorldProcessTickMs;
+    m_lastHoverRefreshTick = 0;
     ClearPendingSkillUse(*this);
 
     DbgLog("[Build] marker=%s pkt0078=%d pkt0209=%d\n",
@@ -6771,6 +7001,16 @@ void CGameMode::OnExit() {
     m_loadingWallpaperName.clear();
 }
 int  CGameMode::OnRun() {
+    const auto qpcNowMs = []() -> double {
+        static LARGE_INTEGER freq = [] {
+            LARGE_INTEGER value{};
+            QueryPerformanceFrequency(&value);
+            return value;
+        }();
+        LARGE_INTEGER now{};
+        QueryPerformanceCounter(&now);
+        return static_cast<double>(now.QuadPart) * 1000.0 / static_cast<double>(freq.QuadPart);
+    };
     const bool mapLoadingWasActive = IsMapLoadingActive(*this);
     const DWORD updateStart = GetTickCount();
     OnUpdate();
@@ -6806,6 +7046,10 @@ int  CGameMode::OnRun() {
 
     const bool hasLegacyDevice = GetRenderDevice().GetLegacyDevice() != nullptr;
     const bool isVulkanBackend = GetRenderDevice().GetBackendType() == RenderBackendType::Vulkan;
+    const bool trackMovePerfFrame = m_world && m_world->m_player && m_world->m_player->m_isMoving;
+    if (trackMovePerfFrame) {
+        g_overlayMovePerfStats.frames += 1;
+    }
     g_renderer.ClearBackground();
     g_renderer.Clear(0);
     static u32 s_gameplayRenderFrame = 0;
@@ -6818,11 +7062,32 @@ int  CGameMode::OnRun() {
     bool queuedModernOverlayFrame = false;
     if (!hasLegacyDevice) {
         uiDrawStart = GetTickCount();
+        const double modernQueueStartMs = trackMovePerfFrame ? qpcNowMs() : 0.0;
         queuedModernOverlayFrame = QueueModernOverlayQuad(*this, m_cursorActNum, m_mouseAnimStartTick);
+        if (trackMovePerfFrame) {
+            g_overlayMovePerfStats.queueModernMs += qpcNowMs() - modernQueueStartMs;
+        }
+        const double roMapStartMs = trackMovePerfFrame ? qpcNowMs() : 0.0;
         QueueRoMapOverlayQuad();
+        if (trackMovePerfFrame) {
+            g_overlayMovePerfStats.queueRoMapMs += qpcNowMs() - roMapStartMs;
+        }
+        const double lockedTargetStartMs = trackMovePerfFrame ? qpcNowMs() : 0.0;
         QueueLockedTargetOverlayQuad(*this);
+        if (trackMovePerfFrame) {
+            g_overlayMovePerfStats.queueLockedTargetMs += qpcNowMs() - lockedTargetStartMs;
+        }
+        const double msgStartMs = trackMovePerfFrame ? qpcNowMs() : 0.0;
         QueueMsgEffectsOverlayQuad();
+        if (trackMovePerfFrame) {
+            g_overlayMovePerfStats.queueMsgMs += qpcNowMs() - msgStartMs;
+        }
+        QueuePlayerVitalsOverlayQuad(*this);
+        const double cursorQueueStartMs = trackMovePerfFrame ? qpcNowMs() : 0.0;
         QueueCursorOverlayQuad(m_cursorActNum, m_mouseAnimStartTick);
+        if (trackMovePerfFrame) {
+            g_overlayMovePerfStats.queueCursorMs += qpcNowMs() - cursorQueueStartMs;
+        }
         uiDrawEnd = GetTickCount();
     }
     const DWORD drawSceneStart = GetTickCount();
@@ -6832,27 +7097,52 @@ int  CGameMode::OnRun() {
         {
             HDC backBufferDc = nullptr;
             if (GetRenderDevice().AcquireBackBufferDC(&backBufferDc) && backBufferDc) {
+                const double overlayDrawStartMs = trackMovePerfFrame ? qpcNowMs() : 0.0;
                 DrawGameplayOverlayToHdc(*this, backBufferDc);
+                DrawPlayerVitalsOverlay(*this, backBufferDc);
+                if (trackMovePerfFrame) {
+                    g_overlayMovePerfStats.fallbackOverlayDrawMs += qpcNowMs() - overlayDrawStartMs;
+                }
+                const double queuedMsgStartMs = trackMovePerfFrame ? qpcNowMs() : 0.0;
                 DrawQueuedMsgEffects(backBufferDc);
+                if (trackMovePerfFrame) {
+                    g_overlayMovePerfStats.fallbackMsgMs += qpcNowMs() - queuedMsgStartMs;
+                }
                 GetRenderDevice().ReleaseBackBufferDC(backBufferDc);
             }
         }
         const DWORD uiDrawStart = GetTickCount();
+        const double uiDrawStartMs = trackMovePerfFrame ? qpcNowMs() : 0.0;
         g_windowMgr.OnDraw();
         const DWORD uiDrawEnd = GetTickCount();
+        if (trackMovePerfFrame) {
+            g_overlayMovePerfStats.fallbackUiDrawMs += qpcNowMs() - uiDrawStartMs;
+        }
         bool drewCursorOnBackBuffer = false;
         {
             HDC backBufferDc = nullptr;
             if (GetRenderDevice().AcquireBackBufferDC(&backBufferDc) && backBufferDc) {
+                const double cursorHdcStartMs = trackMovePerfFrame ? qpcNowMs() : 0.0;
                 drewCursorOnBackBuffer = DrawModeCursorToHdc(backBufferDc, m_cursorActNum, m_mouseAnimStartTick);
+                if (trackMovePerfFrame) {
+                    g_overlayMovePerfStats.fallbackCursorHdcMs += qpcNowMs() - cursorHdcStartMs;
+                }
                 GetRenderDevice().ReleaseBackBufferDC(backBufferDc);
             }
         }
         const DWORD flipStart = GetTickCount();
+        const double flipStartMs = trackMovePerfFrame ? qpcNowMs() : 0.0;
         g_renderer.Flip(false);
         const DWORD flipEnd = GetTickCount();
+        if (trackMovePerfFrame) {
+            g_overlayMovePerfStats.flipMs += qpcNowMs() - flipStartMs;
+        }
         if (!drewCursorOnBackBuffer) {
+            const double cursorStartMs = trackMovePerfFrame ? qpcNowMs() : 0.0;
             DrawModeCursor(m_cursorActNum, m_mouseAnimStartTick);
+            if (trackMovePerfFrame) {
+                g_overlayMovePerfStats.fallbackCursorMs += qpcNowMs() - cursorStartMs;
+            }
         }
 
         g_framePerfStats.frames += 1;
@@ -6876,21 +7166,46 @@ int  CGameMode::OnRun() {
     } else {
         bool composedModernOverlayFrame = queuedModernOverlayFrame;
         const DWORD flipStart = GetTickCount();
+        const double flipStartMs = trackMovePerfFrame ? qpcNowMs() : 0.0;
         g_renderer.Flip(false);
         const DWORD flipEnd = GetTickCount();
+        if (trackMovePerfFrame) {
+            g_overlayMovePerfStats.flipMs += qpcNowMs() - flipStartMs;
+        }
         if (!composedModernOverlayFrame) {
             HDC windowDc = GetDC(g_hMainWnd);
             if (windowDc) {
+                const double overlayDrawStartMs = trackMovePerfFrame ? qpcNowMs() : 0.0;
                 DrawGameplayOverlayToHdc(*this, windowDc);
+                DrawPlayerVitalsOverlay(*this, windowDc);
+                if (trackMovePerfFrame) {
+                    g_overlayMovePerfStats.fallbackOverlayDrawMs += qpcNowMs() - overlayDrawStartMs;
+                }
+                const double queuedMsgStartMs = trackMovePerfFrame ? qpcNowMs() : 0.0;
                 DrawQueuedMsgEffects(windowDc);
+                if (trackMovePerfFrame) {
+                    g_overlayMovePerfStats.fallbackMsgMs += qpcNowMs() - queuedMsgStartMs;
+                }
                 HDC previousSharedDc = UIWindow::GetSharedDrawDC();
                 UIWindow::SetSharedDrawDC(windowDc);
+                const double uiDrawStartMs = trackMovePerfFrame ? qpcNowMs() : 0.0;
                 g_windowMgr.OnDraw();
+                if (trackMovePerfFrame) {
+                    g_overlayMovePerfStats.fallbackUiDrawMs += qpcNowMs() - uiDrawStartMs;
+                }
                 UIWindow::SetSharedDrawDC(previousSharedDc);
+                const double cursorHdcStartMs = trackMovePerfFrame ? qpcNowMs() : 0.0;
                 DrawModeCursorToHdc(windowDc, m_cursorActNum, m_mouseAnimStartTick);
+                if (trackMovePerfFrame) {
+                    g_overlayMovePerfStats.fallbackCursorHdcMs += qpcNowMs() - cursorHdcStartMs;
+                }
                 ReleaseDC(g_hMainWnd, windowDc);
             } else if (!isVulkanBackend) {
+                const double cursorStartMs = trackMovePerfFrame ? qpcNowMs() : 0.0;
                 DrawModeCursor(m_cursorActNum, m_mouseAnimStartTick);
+                if (trackMovePerfFrame) {
+                    g_overlayMovePerfStats.fallbackCursorMs += qpcNowMs() - cursorStartMs;
+                }
             }
         }
         g_framePerfStats.frames += 1;
@@ -6914,6 +7229,30 @@ int  CGameMode::OnRun() {
         }
     }
 
+    if (trackMovePerfFrame && (g_overlayMovePerfStats.frames % 30u) == 0) {
+        const double frameCount = static_cast<double>(g_overlayMovePerfStats.frames);
+        const double refreshCount = static_cast<double>((std::max)(1ull, g_overlayMovePerfStats.modernRefreshes));
+        DbgLog("[OverlayPerfHiRes] moveFrames=%llu queueModern=%.3fms queueRoMap=%.3fms queueLocked=%.3fms queueMsg=%.3fms queueCursor=%.3fms refreshes=%llu overlayDraw=%.3fms uiDraw=%.3fms convert=%.3fms texUpdate=%.3fms fallbackOverlay=%.3fms fallbackMsg=%.3fms fallbackUi=%.3fms fallbackCursorHdc=%.3fms fallbackCursor=%.3fms flip=%.3fms\n",
+            static_cast<unsigned long long>(g_overlayMovePerfStats.frames),
+            g_overlayMovePerfStats.queueModernMs / frameCount,
+            g_overlayMovePerfStats.queueRoMapMs / frameCount,
+            g_overlayMovePerfStats.queueLockedTargetMs / frameCount,
+            g_overlayMovePerfStats.queueMsgMs / frameCount,
+            g_overlayMovePerfStats.queueCursorMs / frameCount,
+            static_cast<unsigned long long>(g_overlayMovePerfStats.modernRefreshes),
+            g_overlayMovePerfStats.modernOverlayDrawMs / refreshCount,
+            g_overlayMovePerfStats.modernUiDrawMs / refreshCount,
+            g_overlayMovePerfStats.modernConvertMs / refreshCount,
+            g_overlayMovePerfStats.modernTextureUpdateMs / refreshCount,
+            g_overlayMovePerfStats.fallbackOverlayDrawMs / frameCount,
+            g_overlayMovePerfStats.fallbackMsgMs / frameCount,
+            g_overlayMovePerfStats.fallbackUiDrawMs / frameCount,
+            g_overlayMovePerfStats.fallbackCursorHdcMs / frameCount,
+            g_overlayMovePerfStats.fallbackCursorMs / frameCount,
+            g_overlayMovePerfStats.flipMs / frameCount);
+        g_overlayMovePerfStats = OverlayMovePerfStats{};
+    }
+
     if (!isVulkanBackend) {
         Sleep(1);
     }
@@ -6922,6 +7261,10 @@ int  CGameMode::OnRun() {
 void CGameMode::OnUpdate() {
     EnsureBootstrapSelfActor(*this);
     SendTimeSyncRequest(*this, false);
+    const bool trackMovePerfFrame = IsMovePerfActive(*this);
+    if (trackMovePerfFrame) {
+        g_gameModeMovePerfStats.frames += 1;
+    }
 
     // Poll a bounded number of packets per frame to avoid starvation.
     CRagConnection* conn = CRagConnection::instance();
@@ -6995,8 +7338,12 @@ void CGameMode::OnUpdate() {
             m_world->UpdateActors();
             CleanupPendingActorDespawns(*this);
         }
-        if (m_view) {
-            m_world->ProcessActorSkillRechargeGages(m_view->GetViewMatrix(), m_view->GetCameraLongitude());
+        if (m_world->m_player) {
+            // Present the local player at the current frame time even when the
+            // wider world simulation remains budgeted on the coarser step. The
+            // self actor now bypasses the shared billboard helper cache, so this
+            // no longer drags cached UI/billboard data around with it.
+            m_world->m_player->ProcessState();
         }
         actorUpdateEnd = GetTickCount();
 
@@ -7009,22 +7356,6 @@ void CGameMode::OnUpdate() {
     const DWORD ensureViewStart = GetTickCount();
     EnsureRealView(*this);
     const DWORD ensureViewEnd = GetTickCount();
-
-    DWORD hoverUpdateEnd = ensureViewEnd;
-    if (m_view && !m_canRotateView && g_hMainWnd) {
-        const DWORD hoverUpdateStart = GetTickCount();
-        POINT cursorPos{};
-        if (GetCursorPos(&cursorPos) && ScreenToClient(g_hMainWnd, &cursorPos)) {
-            ApplyEnemyCursorMagnet(*this, &cursorPos);
-            m_oldMouseX = cursorPos.x;
-            m_oldMouseY = cursorPos.y;
-            m_view->UpdateHoverCellFromScreen(cursorPos.x, cursorPos.y);
-            if (m_isLeftButtonHeld) {
-                UpdateHeldMoveTargetFromScreenPoint(*this, cursorPos.x, cursorPos.y);
-            }
-        }
-        hoverUpdateEnd = GetTickCount();
-    }
 
     const DWORD heldMoveStart = GetTickCount();
     PumpSkillChaseRequest(*this);
@@ -7040,7 +7371,65 @@ void CGameMode::OnUpdate() {
         viewCalcEnd = GetTickCount();
     }
 
-    UpdateGameplayCursor(*this);
+    if (m_world && m_view) {
+        const double skillRechargeStartMs = trackMovePerfFrame ? QpcNowMs() : 0.0;
+        m_world->ProcessActorSkillRechargeGages(m_view->GetViewMatrix(), m_view->GetCameraLongitude());
+        if (trackMovePerfFrame) {
+            g_gameModeMovePerfStats.skillRechargeCalls += 1;
+            g_gameModeMovePerfStats.skillRechargeMs += QpcNowMs() - skillRechargeStartMs;
+        }
+    }
+
+    // Hover picking must run after OnCalcViewInfo: ScreenToAttrCell projects attr
+    // quads with m_viewMatrix. Using a one-frame-stale matrix while the camera
+    // moves makes the 9x9 region test miss and triggers the O(map) ray march every
+    // tick (catastrophic FPS). UpdateGameplayCursor already ran after view calc
+    // and was fine; this block was the outlier.
+    DWORD hoverUpdateEnd = viewCalcEnd;
+    bool refreshedHoverThisFrame = false;
+    bool playerMovingForHover = false;
+    bool needsPreciseHover = false;
+    if (m_view && !m_canRotateView && g_hMainWnd) {
+        POINT cursorPos{};
+        if (GetCursorPos(&cursorPos) && ScreenToClient(g_hMainWnd, &cursorPos)) {
+            ApplyEnemyCursorMagnet(*this, &cursorPos);
+            const int prevMouseX = m_oldMouseX;
+            const int prevMouseY = m_oldMouseY;
+            const bool cursorMoved = cursorPos.x != prevMouseX || cursorPos.y != prevMouseY;
+            playerMovingForHover = m_world && m_world->m_player && m_world->m_player->m_isMoving;
+            needsPreciseHover = m_isLeftButtonHeld || (m_skillUseInfo.id != 0 && m_skillUseInfo.level > 0);
+            const DWORD hoverNow = GetTickCount();
+            const bool shouldRefreshHover = !playerMovingForHover
+                || needsPreciseHover
+                || cursorMoved
+                || m_lastHoverRefreshTick == 0
+                || hoverNow - m_lastHoverRefreshTick >= kMovingCameraHoverRefreshMs;
+            m_oldMouseX = cursorPos.x;
+            m_oldMouseY = cursorPos.y;
+
+            if (shouldRefreshHover) {
+                m_view->UpdateHoverCellFromScreen(cursorPos.x, cursorPos.y);
+                m_lastHoverRefreshTick = hoverNow;
+                refreshedHoverThisFrame = true;
+            }
+            if (m_isLeftButtonHeld) {
+                UpdateHeldMoveTargetFromScreenPoint(*this, cursorPos.x, cursorPos.y);
+            }
+        }
+        hoverUpdateEnd = GetTickCount();
+    }
+
+    const bool shouldRefreshGameplayCursor = !playerMovingForHover
+        || needsPreciseHover
+        || refreshedHoverThisFrame;
+    if (shouldRefreshGameplayCursor) {
+        const double cursorStartMs = trackMovePerfFrame ? QpcNowMs() : 0.0;
+        UpdateGameplayCursor(*this);
+        if (trackMovePerfFrame) {
+            g_gameModeMovePerfStats.cursorCalls += 1;
+            g_gameModeMovePerfStats.cursorMs += QpcNowMs() - cursorStartMs;
+        }
+    }
 
     g_updatePerfStats.frames += 1;
     g_updatePerfStats.packetMs += static_cast<u64>(packetEnd - packetStart);
@@ -7049,7 +7438,7 @@ void CGameMode::OnUpdate() {
     g_updatePerfStats.actorUpdateMs += static_cast<u64>(actorUpdateEnd - bootstrapEnd);
     g_updatePerfStats.backgroundUpdateMs += static_cast<u64>(backgroundUpdateEnd - actorUpdateEnd);
     g_updatePerfStats.ensureViewMs += static_cast<u64>(ensureViewEnd - ensureViewStart);
-    g_updatePerfStats.hoverUpdateMs += static_cast<u64>(hoverUpdateEnd - ensureViewEnd);
+    g_updatePerfStats.hoverUpdateMs += static_cast<u64>(hoverUpdateEnd - viewCalcEnd);
     g_updatePerfStats.heldMoveMs += static_cast<u64>(heldMoveEnd - heldMoveStart);
     g_updatePerfStats.viewCalcMs += static_cast<u64>(viewCalcEnd - heldMoveEnd);
     g_updatePerfStats.packetsProcessed += static_cast<u64>(packetsProcessed);
@@ -7064,6 +7453,10 @@ void CGameMode::OnUpdate() {
         g_updatePerfStats.heldMoveMs = 0;
         g_updatePerfStats.viewCalcMs = 0;
         g_updatePerfStats.packetsProcessed = 0;
+    }
+
+    if (trackMovePerfFrame) {
+        LogGameModeMovePerfIfNeeded();
     }
 }
 msgresult_t CGameMode::SendMsg(int msg, msgparam_t wparam, msgparam_t lparam, msgparam_t extra)

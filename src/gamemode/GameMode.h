@@ -254,6 +254,7 @@ public:
     u32 m_lastActorBootstrapPacketTick;
     u32 m_worldProcessTick;
     float m_worldProcessCarryMs;
+    u32 m_lastHoverRefreshTick;
     std::string m_loadingWallpaperName;
 };
 

@@ -212,9 +212,10 @@ public:
     SceneGraphNode* m_Calculated;
     mutable std::vector<BillboardScreenEntry> m_billboardFrameEntries;
     mutable std::map<u32, size_t> m_billboardFrameEntryByGid;
-    mutable matrix m_billboardFrameViewMatrix;
-    mutable float m_billboardFrameCameraLongitude;
     mutable float m_billboardFrameZoom;
+    mutable u64 m_billboardActorFingerprint;
+    mutable u64 m_billboardFrameCombinedKey;
+    mutable u64 m_billboardCachedCombinedKey;
     mutable bool m_billboardFrameCacheValid;
     mutable bool m_billboardFrameCacheDirty;
 
@@ -224,6 +225,8 @@ public:
     void ResetSceneGraph();
     void RebuildSceneGraph();
     void InvalidateBillboardFrameCache();
+    void SyncBillboardFrameCacheKey(u64 viewSnapTag);
+    void UpdateBillboardActorFingerprint();
     void EnsureBillboardFrameCache(const matrix& viewMatrix, float cameraLongitude) const;
     const BillboardScreenEntry* FindBillboardFrameEntryByGid(u32 gid) const;
     void UpdateCalculatedNodeForTile(int tileX, int tileY);
