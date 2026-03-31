@@ -80,6 +80,7 @@ private:
     bool m_renderCacheDirty;
     int m_mapBitmapWidth;
     int m_mapBitmapHeight;
+    std::vector<u32> m_mapPixels;
     std::string m_loadedBitmapName;
     std::string m_loadedBitmapPath;
     unsigned long long m_lastVisualStateToken;

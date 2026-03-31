@@ -30,3 +30,4 @@ private:
 };
 
 bool LoadHBitmapFromGameData(const char* path, HBITMAP* outBitmap, int* outWidth = nullptr, int* outHeight = nullptr);
+bool LoadBgraPixelsFromGameData(const char* path, u32** outPixels, int* outWidth = nullptr, int* outHeight = nullptr);

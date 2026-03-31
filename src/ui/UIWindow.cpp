@@ -4,6 +4,7 @@
 #include "core/File.h"
 #include "DebugLog.h"
 #include "main/WinMain.h"
+#include "qtui/QtUiRuntime.h"
 #include "res/Bitmap.h"
 
 #include <windows.h>
@@ -636,6 +637,9 @@ void UIBitmapButton::OnDraw()
     if (!g_hMainWnd || m_show == 0) {
         return;
     }
+    if (IsQtUiRuntimeEnabled()) {
+        return;
+    }
 
     bool useShared = false;
     HDC hdc = AcquireDrawTarget(&useShared);
@@ -810,6 +814,9 @@ void UIEditCtrl::OnDraw()
     if (!g_hMainWnd || m_show == 0) {
         return;
     }
+    if (IsQtUiRuntimeEnabled()) {
+        return;
+    }
 
     bool useShared = false;
     HDC hdc = AcquireDrawTarget(&useShared);
@@ -899,6 +906,9 @@ void UICheckBox::SetCheck(int checked)
 void UICheckBox::OnDraw()
 {
     if (!g_hMainWnd || m_show == 0) {
+        return;
+    }
+    if (IsQtUiRuntimeEnabled()) {
         return;
     }
 

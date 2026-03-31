@@ -383,53 +383,6 @@ void DrawSmallMarker(HDC hdc, const POINT& pt, COLORREF fillColor, COLORREF outl
     DeleteObject(brush);
 }
 
-#if RO_ENABLE_QT6_UI
-bool CopyBitmapToQImage(HBITMAP bitmap, QImage* outImage)
-{
-    if (!bitmap || !outImage) {
-        return false;
-    }
-
-    BITMAP bm{};
-    if (!GetObjectA(bitmap, sizeof(bm), &bm) || bm.bmWidth <= 0 || bm.bmHeight <= 0) {
-        return false;
-    }
-
-    BITMAPINFO bmi{};
-    bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-    bmi.bmiHeader.biWidth = bm.bmWidth;
-    bmi.bmiHeader.biHeight = -bm.bmHeight;
-    bmi.bmiHeader.biPlanes = 1;
-    bmi.bmiHeader.biBitCount = 32;
-    bmi.bmiHeader.biCompression = BI_RGB;
-
-    QImage image(bm.bmWidth, bm.bmHeight, QImage::Format_ARGB32);
-    if (image.isNull()) {
-        return false;
-    }
-
-    HDC screenDC = GetDC(nullptr);
-    if (!screenDC) {
-        return false;
-    }
-
-    const int scanLines = GetDIBits(screenDC,
-        bitmap,
-        0,
-        static_cast<UINT>(bm.bmHeight),
-        image.bits(),
-        &bmi,
-        DIB_RGB_COLORS);
-    ReleaseDC(nullptr, screenDC);
-    if (scanLines != bm.bmHeight) {
-        return false;
-    }
-
-    *outImage = image;
-    return true;
-}
-#endif
-
 std::string StripExtension(const std::string& value)
 {
     std::string out = value;
@@ -639,7 +592,7 @@ void UIRoMapWnd::DrawWindowContents(HDC hdc, int baseX, int baseY)
         attrArea = gameMode->m_world->m_rootNode.m_attrArea;
     }
 
-    if (m_mapBitmap && m_mapBitmapWidth > 0 && m_mapBitmapHeight > 0) {
+    if (m_mapBitmapWidth > 0 && m_mapBitmapHeight > 0) {
         if (zoom > kMinZoom + 0.001f) {
             zoomedView = true;
             const float viewAspect = static_cast<float>(mapRect.right - mapRect.left) / static_cast<float>(mapRect.bottom - mapRect.top);
@@ -881,7 +834,7 @@ bool UIRoMapWnd::GetDisplayDataForQt(DisplayData* outData) const
         attrArea = gameMode->m_world->m_rootNode.m_attrArea;
     }
 
-    if (m_mapBitmap && m_mapBitmapWidth > 0 && m_mapBitmapHeight > 0) {
+    if (m_mapBitmapWidth > 0 && m_mapBitmapHeight > 0) {
         if (zoom > kMinZoom + 0.001f) {
             zoomedView = true;
             const float viewAspect = static_cast<float>(mapRect.right - mapRect.left) / static_cast<float>(mapRect.bottom - mapRect.top);
@@ -971,8 +924,17 @@ bool UIRoMapWnd::BuildQtMinimapImage(QImage* outImage) const
     mutableThis->EnsureCreated();
     mutableThis->UpdateMinimapBitmap();
 
-    QImage sourceImage;
-    if (!CopyBitmapToQImage(m_mapBitmap, &sourceImage) || sourceImage.isNull()) {
+    if (m_mapBitmapWidth <= 0 || m_mapBitmapHeight <= 0 || m_mapPixels.empty()) {
+        return false;
+    }
+
+    const QImage sourceImage(
+        reinterpret_cast<const uchar*>(m_mapPixels.data()),
+        m_mapBitmapWidth,
+        m_mapBitmapHeight,
+        m_mapBitmapWidth * static_cast<int>(sizeof(u32)),
+        QImage::Format_ARGB32);
+    if (sourceImage.isNull()) {
         return false;
     }
 
@@ -1122,6 +1084,9 @@ void UIRoMapWnd::ReleaseAssets()
     }
     m_mapBitmapWidth = 0;
     m_mapBitmapHeight = 0;
+    m_mapPixels.clear();
+    m_loadedBitmapName.clear();
+    m_loadedBitmapPath.clear();
 }
 
 void UIRoMapWnd::EnsureRenderCache()
@@ -1187,11 +1152,13 @@ void UIRoMapWnd::InvalidateRenderCache()
 void UIRoMapWnd::UpdateMinimapBitmap()
 {
     const std::string bitmapName = GetCurrentMinimapBitmapName();
+    const bool qtUiEnabled = IsQtUiRuntimeEnabled();
     if (bitmapName.empty()) {
         if (m_mapBitmap) {
             DeleteObject(m_mapBitmap);
             m_mapBitmap = nullptr;
         }
+        m_mapPixels.clear();
         m_mapBitmapWidth = 0;
         m_mapBitmapHeight = 0;
         m_loadedBitmapName.clear();
@@ -1200,7 +1167,8 @@ void UIRoMapWnd::UpdateMinimapBitmap()
         return;
     }
 
-    if (!m_loadedBitmapName.empty() && ToLowerAscii(m_loadedBitmapName) == ToLowerAscii(bitmapName) && m_mapBitmap) {
+    const bool hasCachedMinimap = qtUiEnabled ? !m_mapPixels.empty() : (m_mapBitmap != nullptr);
+    if (!m_loadedBitmapName.empty() && ToLowerAscii(m_loadedBitmapName) == ToLowerAscii(bitmapName) && hasCachedMinimap) {
         return;
     }
 
@@ -1209,12 +1177,22 @@ void UIRoMapWnd::UpdateMinimapBitmap()
         DeleteObject(m_mapBitmap);
         m_mapBitmap = nullptr;
     }
+    m_mapPixels.clear();
     m_mapBitmapWidth = 0;
     m_mapBitmapHeight = 0;
     m_loadedBitmapName = bitmapName;
     m_loadedBitmapPath = resolvedPath;
     if (!resolvedPath.empty()) {
-        m_mapBitmap = LoadBitmapFromGameData(resolvedPath, &m_mapBitmapWidth, &m_mapBitmapHeight);
+        if (qtUiEnabled) {
+            u32* pixels = nullptr;
+            if (LoadBgraPixelsFromGameData(resolvedPath.c_str(), &pixels, &m_mapBitmapWidth, &m_mapBitmapHeight) && pixels) {
+                const size_t pixelCount = static_cast<size_t>(m_mapBitmapWidth) * static_cast<size_t>(m_mapBitmapHeight);
+                m_mapPixels.assign(pixels, pixels + pixelCount);
+            }
+            delete[] pixels;
+        } else {
+            m_mapBitmap = LoadBitmapFromGameData(resolvedPath, &m_mapBitmapWidth, &m_mapBitmapHeight);
+        }
     }
     InvalidateRenderCache();
     Invalidate();

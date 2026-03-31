@@ -537,13 +537,13 @@ bool LoadTgaPixels(const unsigned char* src, int size, int offset, int imageType
 
 } // namespace
 
-bool LoadHBitmapFromGameData(const char* path, HBITMAP* outBitmap, int* outWidth, int* outHeight)
+bool LoadBgraPixelsFromGameData(const char* path, u32** outPixels, int* outWidth, int* outHeight)
 {
-    if (!outBitmap || !path || !*path) {
+    if (!outPixels || !path || !*path) {
         return false;
     }
 
-    *outBitmap = nullptr;
+    *outPixels = nullptr;
     if (outWidth) {
         *outWidth = 0;
     }
@@ -564,6 +564,38 @@ bool LoadHBitmapFromGameData(const char* path, HBITMAP* outBitmap, int* outWidth
     const bool decoded = DecodeImageWithWic(bytes, size, width, height, pixels);
     delete[] bytes;
     if (!decoded || !pixels || width <= 0 || height <= 0) {
+        delete[] pixels;
+        return false;
+    }
+
+    *outPixels = pixels;
+    if (outWidth) {
+        *outWidth = width;
+    }
+    if (outHeight) {
+        *outHeight = height;
+    }
+    return true;
+}
+
+bool LoadHBitmapFromGameData(const char* path, HBITMAP* outBitmap, int* outWidth, int* outHeight)
+{
+    if (!outBitmap || !path || !*path) {
+        return false;
+    }
+
+    *outBitmap = nullptr;
+    if (outWidth) {
+        *outWidth = 0;
+    }
+    if (outHeight) {
+        *outHeight = 0;
+    }
+
+    int width = 0;
+    int height = 0;
+    u32* pixels = nullptr;
+    if (!LoadBgraPixelsFromGameData(path, &pixels, &width, &height) || !pixels || width <= 0 || height <= 0) {
         delete[] pixels;
         return false;
     }
