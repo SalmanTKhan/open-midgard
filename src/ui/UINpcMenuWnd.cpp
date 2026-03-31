@@ -1,5 +1,6 @@
 #include "UINpcMenuWnd.h"
 
+#include "NpcDialogColoredText.h"
 #include "UIWindowMgr.h"
 #include "gamemode/GameMode.h"
 #include "gamemode/Mode.h"
@@ -198,8 +199,7 @@ void UINpcMenuWnd::OnDraw()
         RECT textRect = rowRect;
         textRect.left += 4;
         textRect.right -= 4;
-        SetTextColor(hdc, RGB(0, 0, 0));
-        DrawTextA(hdc, m_options[index].c_str(), -1, &textRect, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+        DrawNpcMenuOptionColoredText(hdc, textRect, m_options[index]);
     }
 
     const bool okPressed = m_pressedTarget == ClickTarget::Ok;

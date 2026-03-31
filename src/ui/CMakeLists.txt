@@ -15,6 +15,8 @@ add_library(ro_ui STATIC
     UIBasicInfoWnd.cpp
     UIStatusWnd.h
     UIStatusWnd.cpp
+    NpcDialogColoredText.h
+    NpcDialogColoredText.cpp
     UISayDialogWnd.h
     UISayDialogWnd.cpp
     UINpcMenuWnd.h

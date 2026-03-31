@@ -1,5 +1,6 @@
 #include "UISayDialogWnd.h"
 
+#include "NpcDialogColoredText.h"
 #include "UIWindowMgr.h"
 #include "gamemode/GameMode.h"
 #include "gamemode/Mode.h"
@@ -211,9 +212,7 @@ void UISayDialogWnd::OnDraw()
     HFONT oldFont = static_cast<HFONT>(SelectObject(hdc, GetNpcDialogFont()));
     RECT textRect = GetTextRect();
     SetBkMode(hdc, TRANSPARENT);
-    SetTextColor(hdc, RGB(0, 0, 0));
-    const std::string drawText = BuildDisplayText();
-    DrawTextA(hdc, drawText.c_str(), -1, &textRect, DT_LEFT | DT_TOP | DT_WORDBREAK | DT_EDITCONTROL | DT_NOPREFIX);
+    DrawNpcSayDialogColoredText(hdc, textRect, BuildDisplayText());
 
     if (m_actionButton != ActionButton::None) {
         DrawActionButton(hdc, GetActionRect());
