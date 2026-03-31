@@ -148,6 +148,21 @@ class QtUiState : public QObject {
     Q_PROPERTY(int rechargeGaugeHeight READ rechargeGaugeHeight NOTIFY rechargeGaugeGeometryChanged)
     Q_PROPERTY(int rechargeGaugeAmount READ rechargeGaugeAmount NOTIFY rechargeGaugeProgressChanged)
     Q_PROPERTY(int rechargeGaugeTotal READ rechargeGaugeTotal NOTIFY rechargeGaugeProgressChanged)
+    Q_PROPERTY(bool inventoryVisible READ inventoryVisible NOTIFY inventoryVisibleChanged)
+    Q_PROPERTY(int inventoryX READ inventoryX NOTIFY inventoryGeometryChanged)
+    Q_PROPERTY(int inventoryY READ inventoryY NOTIFY inventoryGeometryChanged)
+    Q_PROPERTY(int inventoryWidth READ inventoryWidth NOTIFY inventoryGeometryChanged)
+    Q_PROPERTY(int inventoryHeight READ inventoryHeight NOTIFY inventoryGeometryChanged)
+    Q_PROPERTY(bool inventoryMini READ inventoryMini NOTIFY inventoryMiniChanged)
+    Q_PROPERTY(int inventoryTab READ inventoryTab NOTIFY inventoryTabChanged)
+    Q_PROPERTY(QVariantMap inventoryData READ inventoryData NOTIFY inventoryDataChanged)
+    Q_PROPERTY(bool equipVisible READ equipVisible NOTIFY equipVisibleChanged)
+    Q_PROPERTY(int equipX READ equipX NOTIFY equipGeometryChanged)
+    Q_PROPERTY(int equipY READ equipY NOTIFY equipGeometryChanged)
+    Q_PROPERTY(int equipWidth READ equipWidth NOTIFY equipGeometryChanged)
+    Q_PROPERTY(int equipHeight READ equipHeight NOTIFY equipGeometryChanged)
+    Q_PROPERTY(bool equipMini READ equipMini NOTIFY equipMiniChanged)
+    Q_PROPERTY(QVariantMap equipData READ equipData NOTIFY equipDataChanged)
     Q_PROPERTY(bool shopChoiceVisible READ shopChoiceVisible NOTIFY shopChoiceVisibleChanged)
     Q_PROPERTY(int shopChoiceX READ shopChoiceX NOTIFY shopChoiceGeometryChanged)
     Q_PROPERTY(int shopChoiceY READ shopChoiceY NOTIFY shopChoiceGeometryChanged)
@@ -305,6 +320,21 @@ public:
     int rechargeGaugeHeight() const { return m_rechargeGaugeHeight; }
     int rechargeGaugeAmount() const { return m_rechargeGaugeAmount; }
     int rechargeGaugeTotal() const { return m_rechargeGaugeTotal; }
+    bool inventoryVisible() const { return m_inventoryVisible; }
+    int inventoryX() const { return m_inventoryX; }
+    int inventoryY() const { return m_inventoryY; }
+    int inventoryWidth() const { return m_inventoryWidth; }
+    int inventoryHeight() const { return m_inventoryHeight; }
+    bool inventoryMini() const { return m_inventoryMini; }
+    int inventoryTab() const { return m_inventoryTab; }
+    const QVariantMap& inventoryData() const { return m_inventoryData; }
+    bool equipVisible() const { return m_equipVisible; }
+    int equipX() const { return m_equipX; }
+    int equipY() const { return m_equipY; }
+    int equipWidth() const { return m_equipWidth; }
+    int equipHeight() const { return m_equipHeight; }
+    bool equipMini() const { return m_equipMini; }
+    const QVariantMap& equipData() const { return m_equipData; }
     bool shopChoiceVisible() const { return m_shopChoiceVisible; }
     int shopChoiceX() const { return m_shopChoiceX; }
     int shopChoiceY() const { return m_shopChoiceY; }
@@ -1009,6 +1039,80 @@ public:
         emit rechargeGaugeProgressChanged();
     }
 
+    void setInventoryVisible(bool value) {
+        if (m_inventoryVisible == value) {
+            return;
+        }
+        m_inventoryVisible = value;
+        emit inventoryVisibleChanged();
+    }
+
+    void setInventoryGeometry(int x, int y, int width, int height) {
+        if (m_inventoryX == x && m_inventoryY == y
+            && m_inventoryWidth == width && m_inventoryHeight == height) {
+            return;
+        }
+        m_inventoryX = x;
+        m_inventoryY = y;
+        m_inventoryWidth = width;
+        m_inventoryHeight = height;
+        emit inventoryGeometryChanged();
+    }
+
+    void setInventoryMini(bool value) {
+        if (m_inventoryMini == value) {
+            return;
+        }
+        m_inventoryMini = value;
+        emit inventoryMiniChanged();
+    }
+
+    void setInventoryTab(int value) {
+        if (m_inventoryTab == value) {
+            return;
+        }
+        m_inventoryTab = value;
+        emit inventoryTabChanged();
+    }
+
+    void setInventoryData(const QVariantMap& value) {
+        m_inventoryData = value;
+        emit inventoryDataChanged();
+    }
+
+    void setEquipVisible(bool value) {
+        if (m_equipVisible == value) {
+            return;
+        }
+        m_equipVisible = value;
+        emit equipVisibleChanged();
+    }
+
+    void setEquipGeometry(int x, int y, int width, int height) {
+        if (m_equipX == x && m_equipY == y
+            && m_equipWidth == width && m_equipHeight == height) {
+            return;
+        }
+        m_equipX = x;
+        m_equipY = y;
+        m_equipWidth = width;
+        m_equipHeight = height;
+        emit equipGeometryChanged();
+    }
+
+    void setEquipMini(bool value) {
+        if (m_equipMini == value) {
+            return;
+        }
+        m_equipMini = value;
+        emit equipMiniChanged();
+    }
+
+    void setEquipData(const QVariantMap& value) {
+        m_equipData = value;
+        emit equipDataChanged();
+    }
+
     void setShopChoiceVisible(bool value) {
         if (m_shopChoiceVisible == value) {
             return;
@@ -1124,6 +1228,15 @@ signals:
     void rechargeGaugeVisibleChanged();
     void rechargeGaugeGeometryChanged();
     void rechargeGaugeProgressChanged();
+    void inventoryVisibleChanged();
+    void inventoryGeometryChanged();
+    void inventoryMiniChanged();
+    void inventoryTabChanged();
+    void inventoryDataChanged();
+    void equipVisibleChanged();
+    void equipGeometryChanged();
+    void equipMiniChanged();
+    void equipDataChanged();
     void shopChoiceVisibleChanged();
     void shopChoiceGeometryChanged();
     void shopChoiceButtonsChanged();
@@ -1273,6 +1386,21 @@ private:
     int m_rechargeGaugeHeight = 0;
     int m_rechargeGaugeAmount = 0;
     int m_rechargeGaugeTotal = 0;
+    bool m_inventoryVisible = false;
+    int m_inventoryX = 0;
+    int m_inventoryY = 0;
+    int m_inventoryWidth = 0;
+    int m_inventoryHeight = 0;
+    bool m_inventoryMini = false;
+    int m_inventoryTab = 0;
+    QVariantMap m_inventoryData;
+    bool m_equipVisible = false;
+    int m_equipX = 0;
+    int m_equipY = 0;
+    int m_equipWidth = 0;
+    int m_equipHeight = 0;
+    bool m_equipMini = false;
+    QVariantMap m_equipData;
     bool m_shopChoiceVisible = false;
     int m_shopChoiceX = 0;
     int m_shopChoiceY = 0;

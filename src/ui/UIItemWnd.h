@@ -12,6 +12,26 @@ struct ITEM_INFO;
 
 class UIItemWnd : public UIFrameWnd {
 public:
+    struct DisplaySlot {
+        int x = 0;
+        int y = 0;
+        int width = 0;
+        int height = 0;
+        bool occupied = false;
+        bool hovered = false;
+        int count = 0;
+        std::string label;
+        std::string tooltip;
+    };
+
+    struct DisplayData {
+        std::string title;
+        int currentTab = 0;
+        int viewOffset = 0;
+        int maxViewOffset = 0;
+        std::vector<DisplaySlot> slots;
+    };
+
     UIItemWnd();
     ~UIItemWnd() override;
 
@@ -30,6 +50,8 @@ public:
     void DragAndDrop(int x, int y, const DRAG_INFO* const info) override;
     void StoreInfo() override;
     void DrawHoverOverlay(HDC hdc, const RECT& clientRect) const;
+    bool IsMiniMode() const;
+    bool GetDisplayDataForQt(DisplayData* outData) const;
 
 private:
     struct VisibleItem {
@@ -43,6 +65,7 @@ private:
     void ReleaseAssets();
     void SetMiniMode(bool miniMode);
     void SetCurrentTab(int tabIndex);
+    void RefreshVisibleItemsForInteractionState();
     void UpdateHoveredItem(int globalX, int globalY);
     int GetTabAtPoint(int globalX, int globalY) const;
     int GetItemColumns() const;

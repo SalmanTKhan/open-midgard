@@ -16,6 +16,8 @@
 #include "ui/UIChooseWnd.h"
 #include "ui/UIChooseSellBuyWnd.h"
 #include "ui/UIBasicInfoWnd.h"
+#include "ui/UIEquipWnd.h"
+#include "ui/UIItemWnd.h"
 #include "ui/UIItemPurchaseWnd.h"
 #include "ui/UIItemSellWnd.h"
 #include "ui/UIItemShopWnd.h"
@@ -952,6 +954,102 @@ void PopulateRechargeGaugeState(QtUiState* state)
     state->setRechargeGaugeProgress(rechargeGauge->GetAmount(), rechargeGauge->GetTotalAmount());
 }
 
+void PopulateInventoryState(QtUiState* state)
+{
+    if (!state) {
+        return;
+    }
+
+    const UIItemWnd* const itemWnd = g_windowMgr.m_itemWnd;
+    const bool visible = itemWnd && itemWnd->m_show != 0;
+    state->setInventoryVisible(visible);
+    if (!visible) {
+        state->setInventoryGeometry(0, 0, 0, 0);
+        state->setInventoryMini(false);
+        state->setInventoryTab(0);
+        state->setInventoryData(QVariantMap{});
+        return;
+    }
+
+    state->setInventoryGeometry(itemWnd->m_x, itemWnd->m_y, itemWnd->m_w, itemWnd->m_h);
+    state->setInventoryMini(itemWnd->IsMiniMode());
+
+    UIItemWnd::DisplayData display{};
+    QVariantMap data;
+    if (itemWnd->GetDisplayDataForQt(&display)) {
+        state->setInventoryTab(display.currentTab);
+        data.insert(QStringLiteral("title"), ToQString(display.title));
+        data.insert(QStringLiteral("viewOffset"), display.viewOffset);
+        data.insert(QStringLiteral("maxViewOffset"), display.maxViewOffset);
+
+        QVariantList slots;
+        slots.reserve(static_cast<qsizetype>(display.slots.size()));
+        QString hoveredTooltip;
+        for (const UIItemWnd::DisplaySlot& slot : display.slots) {
+            QVariantMap entry;
+            entry.insert(QStringLiteral("x"), slot.x);
+            entry.insert(QStringLiteral("y"), slot.y);
+            entry.insert(QStringLiteral("width"), slot.width);
+            entry.insert(QStringLiteral("height"), slot.height);
+            entry.insert(QStringLiteral("occupied"), slot.occupied);
+            entry.insert(QStringLiteral("hovered"), slot.hovered);
+            entry.insert(QStringLiteral("count"), slot.count);
+            entry.insert(QStringLiteral("label"), ToQString(slot.label));
+            entry.insert(QStringLiteral("tooltip"), ToQString(slot.tooltip));
+            if (slot.hovered && hoveredTooltip.isEmpty()) {
+                hoveredTooltip = ToQString(slot.tooltip);
+            }
+            slots.push_back(entry);
+        }
+
+        data.insert(QStringLiteral("slots"), slots);
+        data.insert(QStringLiteral("hoveredTooltip"), hoveredTooltip);
+    } else {
+        state->setInventoryTab(0);
+    }
+    state->setInventoryData(data);
+}
+
+void PopulateEquipState(QtUiState* state)
+{
+    if (!state) {
+        return;
+    }
+
+    const UIEquipWnd* const equipWnd = g_windowMgr.m_equipWnd;
+    const bool visible = equipWnd && equipWnd->m_show != 0;
+    state->setEquipVisible(visible);
+    if (!visible) {
+        state->setEquipGeometry(0, 0, 0, 0);
+        state->setEquipMini(false);
+        state->setEquipData(QVariantMap{});
+        return;
+    }
+
+    state->setEquipGeometry(equipWnd->m_x, equipWnd->m_y, equipWnd->m_w, equipWnd->m_h);
+    state->setEquipMini(equipWnd->IsMiniMode());
+
+    UIEquipWnd::DisplayData display{};
+    QVariantMap data;
+    if (equipWnd->GetDisplayDataForQt(&display)) {
+        QVariantList slots;
+        slots.reserve(static_cast<qsizetype>(display.slots.size()));
+        for (const UIEquipWnd::DisplaySlot& slot : display.slots) {
+            QVariantMap entry;
+            entry.insert(QStringLiteral("x"), slot.x);
+            entry.insert(QStringLiteral("y"), slot.y);
+            entry.insert(QStringLiteral("width"), slot.width);
+            entry.insert(QStringLiteral("height"), slot.height);
+            entry.insert(QStringLiteral("occupied"), slot.occupied);
+            entry.insert(QStringLiteral("leftColumn"), slot.leftColumn);
+            entry.insert(QStringLiteral("label"), ToQString(slot.label));
+            slots.push_back(entry);
+        }
+        data.insert(QStringLiteral("slots"), slots);
+    }
+    state->setEquipData(data);
+}
+
 bool IsMonsterLikeHoverActor(const CGameActor* actor)
 {
     if (!actor) {
@@ -1213,6 +1311,8 @@ bool QtUiStateAdapter::syncGameplay(CGameMode& mode,
     PopulateStatusState(m_state);
     PopulateChatWindowState(m_state);
     PopulateRechargeGaugeState(m_state);
+    PopulateInventoryState(m_state);
+    PopulateEquipState(m_state);
     PopulateShopChoiceState(m_state);
     PopulateNotificationState(m_state);
 

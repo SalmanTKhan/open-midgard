@@ -7,6 +7,7 @@
 #include "core/File.h"
 #include "item/Item.h"
 #include "main/WinMain.h"
+#include "qtui/QtUiRuntime.h"
 #include "res/Bitmap.h"
 #include "render/DrawUtil.h"
 #include "session/Session.h"
@@ -355,6 +356,15 @@ std::string BuildHoverTooltipText(const ITEM_INFO& item)
     return text;
 }
 
+std::string BuildShortItemLabel(const ITEM_INFO& item)
+{
+    std::string shortName = item.GetDisplayName();
+    if (shortName.size() > 6) {
+        shortName.resize(6);
+    }
+    return shortName;
+}
+
 void DrawItemSlot(HDC hdc,
     HBITMAP slotBitmap,
     HBITMAP hoverBitmap,
@@ -617,37 +627,20 @@ void UIItemWnd::OnDraw()
     }
 
     EnsureCreated();
-    const std::vector<const ITEM_INFO*> filteredItems = GetFilteredItems();
-    if (filteredItems.empty()) {
-        m_hoveredItemIndex = -1;
-    } else {
-        m_hoveredItemIndex = std::min(m_hoveredItemIndex, static_cast<int>(filteredItems.size()) - 1);
+    RefreshVisibleItemsForInteractionState();
+
+    if (IsQtUiRuntimeEnabled()) {
+        m_lastVisualStateToken = BuildVisualStateToken();
+        m_hasVisualStateToken = true;
+        m_isDirty = 0;
+        return;
     }
-    m_viewOffset = std::min(m_viewOffset, GetMaxViewOffset(static_cast<int>(filteredItems.size())));
-    m_viewOffset = std::max(m_viewOffset, 0);
-    m_visibleItems.clear();
-    m_hoverOverlayItem = nullptr;
-    m_hoverOverlayRect = RECT{};
 
     if (m_h > kMiniHeight) {
-        const CGameMode* gameMode = g_modeMgr.GetCurrentGameMode();
-        const bool hideDraggedItem = gameMode
-            && gameMode->m_dragType == static_cast<int>(DragType::ShortcutItem)
-            && gameMode->m_dragInfo.itemIndex != 0;
-        const int columns = GetItemColumns();
-        const int rows = GetItemRows();
-        const int firstIndex = m_viewOffset * columns;
-        const int slotCount = columns * rows;
-        for (int drawIndex = 0; drawIndex < slotCount; ++drawIndex) {
-            const int itemIndex = firstIndex + drawIndex;
-            if (itemIndex < 0 || itemIndex >= static_cast<int>(filteredItems.size())) {
-                continue;
+        for (const VisibleItem& visibleItem : m_visibleItems) {
+            if (visibleItem.item) {
+                GetItemIcon(*visibleItem.item);
             }
-            const ITEM_INFO* item = filteredItems[itemIndex];
-            if (!item) {
-                continue;
-            }
-            GetItemIcon(*item);
         }
     }
 
@@ -681,33 +674,12 @@ void UIItemWnd::OnDraw()
     DrawBitmapTransparent(hdc, m_tabBitmaps[m_currentTab], activeTabStrip);
 
     if (m_h > kMiniHeight) {
-        const CGameMode* gameMode = g_modeMgr.GetCurrentGameMode();
-        const bool hideDraggedItem = gameMode
-            && gameMode->m_dragType == static_cast<int>(DragType::ShortcutItem)
-            && gameMode->m_dragInfo.itemIndex != 0;
         const int columns = GetItemColumns();
-        const int rows = GetItemRows();
-        const int firstIndex = m_viewOffset * columns;
-        const int slotCount = columns * rows;
 
-        for (int drawIndex = 0; drawIndex < slotCount; ++drawIndex) {
-            const int itemIndex = firstIndex + drawIndex;
-            const int column = drawIndex % columns;
-            const int row = drawIndex / columns;
-            RECT cellRect{
-                m_x + kGridLeft + column * kGridCell,
-                m_y + kGridTop + row * kGridCell,
-                m_x + kGridLeft + (column + 1) * kGridCell,
-                m_y + kGridTop + (row + 1) * kGridCell,
-            };
-
-            const ITEM_INFO* item = itemIndex < static_cast<int>(filteredItems.size())
-                ? filteredItems[itemIndex]
-                : nullptr;
-            const bool isDraggedSource = item
-                && hideDraggedItem
-                && item->m_itemIndex == gameMode->m_dragInfo.itemIndex;
-            const ITEM_INFO* drawItem = isDraggedSource ? nullptr : item;
+        for (size_t drawIndex = 0; drawIndex < m_visibleItems.size(); ++drawIndex) {
+            const int itemIndex = m_viewOffset * columns + static_cast<int>(drawIndex);
+            const RECT& cellRect = m_visibleItems[drawIndex].rect;
+            const ITEM_INFO* const drawItem = m_visibleItems[drawIndex].item;
             const bool hovered = drawItem && itemIndex == m_hoveredItemIndex;
             DrawItemSlot(hdc,
                 m_backgroundMid,
@@ -721,10 +693,9 @@ void UIItemWnd::OnDraw()
                 m_hoverOverlayItem = drawItem;
                 m_hoverOverlayRect = cellRect;
             }
-
-            m_visibleItems.push_back({ drawItem, cellRect });
         }
 
+        const std::vector<const ITEM_INFO*> filteredItems = GetFilteredItems();
         RECT scrollbarRect{ m_x + m_w - 14, m_y + kGridTop, m_x + m_w - 4, m_y + m_h - kGridBottomMargin };
         FillRectColor(hdc, scrollbarRect, RGB(227, 231, 238));
         FrameRectColor(hdc, scrollbarRect, RGB(164, 173, 189));
@@ -748,6 +719,10 @@ void UIItemWnd::OnDraw()
 
 void UIItemWnd::DrawHoverOverlay(HDC hdc, const RECT& clientRect) const
 {
+    if (IsQtUiRuntimeEnabled()) {
+        return;
+    }
+
     if (!hdc || m_show == 0 || !m_hoverOverlayItem) {
         return;
     }
@@ -912,6 +887,69 @@ void UIItemWnd::StoreInfo()
     SaveUiWindowPlacement("ItemWnd", m_x, m_y);
 }
 
+bool UIItemWnd::IsMiniMode() const
+{
+    return m_h == kMiniHeight;
+}
+
+bool UIItemWnd::GetDisplayDataForQt(DisplayData* outData) const
+{
+    if (!outData) {
+        return false;
+    }
+
+    DisplayData data{};
+    data.title = GetTitleText();
+    data.currentTab = m_currentTab;
+    data.viewOffset = m_viewOffset;
+
+    const std::vector<const ITEM_INFO*> filteredItems = GetFilteredItems();
+    data.maxViewOffset = GetMaxViewOffset(static_cast<int>(filteredItems.size()));
+
+    if (m_h > kMiniHeight) {
+        const CGameMode* gameMode = g_modeMgr.GetCurrentGameMode();
+        const bool hideDraggedItem = gameMode
+            && gameMode->m_dragType == static_cast<int>(DragType::ShortcutItem)
+            && gameMode->m_dragInfo.itemIndex != 0;
+        const int columns = GetItemColumns();
+        const int rows = GetItemRows();
+        const int firstIndex = m_viewOffset * columns;
+        const int slotCount = columns * rows;
+
+        data.slots.reserve(static_cast<size_t>(slotCount));
+        for (int drawIndex = 0; drawIndex < slotCount; ++drawIndex) {
+            const int itemIndex = firstIndex + drawIndex;
+            const int column = drawIndex % columns;
+            const int row = drawIndex / columns;
+
+            DisplaySlot slot{};
+            slot.x = m_x + kGridLeft + column * kGridCell;
+            slot.y = m_y + kGridTop + row * kGridCell;
+            slot.width = kGridCell;
+            slot.height = kGridCell;
+
+            const ITEM_INFO* item = itemIndex < static_cast<int>(filteredItems.size())
+                ? filteredItems[itemIndex]
+                : nullptr;
+            const bool isDraggedSource = item
+                && hideDraggedItem
+                && item->m_itemIndex == gameMode->m_dragInfo.itemIndex;
+            const ITEM_INFO* drawItem = isDraggedSource ? nullptr : item;
+            if (drawItem) {
+                slot.occupied = true;
+                slot.hovered = itemIndex == m_hoveredItemIndex;
+                slot.count = drawItem->m_num;
+                slot.label = BuildShortItemLabel(*drawItem);
+                slot.tooltip = BuildHoverTooltipText(*drawItem);
+            }
+            data.slots.push_back(slot);
+        }
+    }
+
+    *outData = std::move(data);
+    return true;
+}
+
 void UIItemWnd::EnsureCreated()
 {
     if (!m_controlsCreated) {
@@ -1000,6 +1038,56 @@ void UIItemWnd::SetCurrentTab(int tabIndex)
         m_currentTab = clamped;
         m_viewOffset = 0;
         m_hoveredItemIndex = -1;
+    }
+}
+
+void UIItemWnd::RefreshVisibleItemsForInteractionState()
+{
+    const std::vector<const ITEM_INFO*> filteredItems = GetFilteredItems();
+    if (filteredItems.empty()) {
+        m_hoveredItemIndex = -1;
+    } else {
+        m_hoveredItemIndex = std::min(m_hoveredItemIndex, static_cast<int>(filteredItems.size()) - 1);
+    }
+    m_viewOffset = std::min(m_viewOffset, GetMaxViewOffset(static_cast<int>(filteredItems.size())));
+    m_viewOffset = std::max(m_viewOffset, 0);
+    m_visibleItems.clear();
+    m_hoverOverlayItem = nullptr;
+    m_hoverOverlayRect = RECT{};
+
+    if (m_h <= kMiniHeight) {
+        return;
+    }
+
+    const CGameMode* gameMode = g_modeMgr.GetCurrentGameMode();
+    const bool hideDraggedItem = gameMode
+        && gameMode->m_dragType == static_cast<int>(DragType::ShortcutItem)
+        && gameMode->m_dragInfo.itemIndex != 0;
+    const int columns = GetItemColumns();
+    const int rows = GetItemRows();
+    const int firstIndex = m_viewOffset * columns;
+    const int slotCount = columns * rows;
+    m_visibleItems.reserve(static_cast<size_t>(slotCount));
+
+    for (int drawIndex = 0; drawIndex < slotCount; ++drawIndex) {
+        const int itemIndex = firstIndex + drawIndex;
+        const int column = drawIndex % columns;
+        const int row = drawIndex / columns;
+        RECT cellRect{
+            m_x + kGridLeft + column * kGridCell,
+            m_y + kGridTop + row * kGridCell,
+            m_x + kGridLeft + (column + 1) * kGridCell,
+            m_y + kGridTop + (row + 1) * kGridCell,
+        };
+
+        const ITEM_INFO* item = itemIndex < static_cast<int>(filteredItems.size())
+            ? filteredItems[itemIndex]
+            : nullptr;
+        const bool isDraggedSource = item
+            && hideDraggedItem
+            && item->m_itemIndex == gameMode->m_dragInfo.itemIndex;
+        const ITEM_INFO* drawItem = isDraggedSource ? nullptr : item;
+        m_visibleItems.push_back({ drawItem, cellRect });
     }
 }
 

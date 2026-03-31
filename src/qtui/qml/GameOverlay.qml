@@ -1536,6 +1536,339 @@ Item {
     }
 
     Rectangle {
+        x: uiState.inventoryX
+        y: uiState.inventoryY
+        width: uiState.inventoryWidth
+        height: uiState.inventoryHeight
+        radius: 4
+        color: "#ede9df"
+        border.width: 1
+        border.color: "#6b675f"
+        visible: uiState.inventoryVisible
+
+        Rectangle {
+            x: 1
+            y: 1
+            width: parent.width - 2
+            height: 16
+            radius: 3
+            color: "#6e8194"
+            border.width: 1
+            border.color: "#4e5d6c"
+        }
+
+        Text {
+            x: 17
+            y: 3
+            text: uiState.inventoryData.title || "Inventory"
+            color: "#ffffff"
+            font.pixelSize: 12
+            font.bold: true
+        }
+
+        Rectangle {
+            x: 3
+            y: 3
+            width: 12
+            height: 11
+            radius: 2
+            color: "#d7d2c5"
+            border.width: 1
+            border.color: "#7f7a70"
+            visible: uiState.inventoryMini
+
+            Text {
+                anchors.centerIn: parent
+                text: "B"
+                color: "#000000"
+                font.pixelSize: 8
+                font.bold: true
+            }
+        }
+
+        Rectangle {
+            x: 247
+            y: 3
+            width: 12
+            height: 11
+            radius: 2
+            color: "#d7d2c5"
+            border.width: 1
+            border.color: "#7f7a70"
+            visible: !uiState.inventoryMini
+
+            Text {
+                anchors.centerIn: parent
+                text: "_"
+                color: "#000000"
+                font.pixelSize: 8
+                font.bold: true
+            }
+        }
+
+        Rectangle {
+            x: 265
+            y: 3
+            width: 12
+            height: 11
+            radius: 2
+            color: "#d7d2c5"
+            border.width: 1
+            border.color: "#7f7a70"
+
+            Text {
+                anchors.centerIn: parent
+                text: "X"
+                color: "#000000"
+                font.pixelSize: 8
+                font.bold: true
+            }
+        }
+
+        Rectangle {
+            x: 0
+            y: 17
+            width: parent.width
+            height: parent.height - 17
+            color: "#e7e2d6"
+            visible: !uiState.inventoryMini
+
+            Repeater {
+                model: 3
+
+                delegate: Rectangle {
+                    x: 0
+                    y: index * 27
+                    width: 20
+                    height: 27
+                    color: uiState.inventoryTab === index ? "#ebe7db" : "#c9c2b2"
+                    border.width: 1
+                    border.color: "#8c8578"
+
+                    Text {
+                        anchors.centerIn: parent
+                        text: index === 0 ? "Use" : (index === 1 ? "Eqp" : "Etc")
+                        color: "#000000"
+                        font.pixelSize: 9
+                        font.bold: uiState.inventoryTab === index
+                    }
+                }
+            }
+
+            Repeater {
+                model: uiState.inventoryData.slots || []
+
+                delegate: Rectangle {
+                    required property var modelData
+                    x: modelData.x - uiState.inventoryX
+                    y: modelData.y - uiState.inventoryY - 17
+                    width: modelData.width
+                    height: modelData.height
+                    color: modelData.hovered ? "#d7dff0" : "#f5f2ea"
+                    border.width: 1
+                    border.color: modelData.hovered ? "#7e95bf" : "#a69f91"
+
+                    Text {
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        y: 8
+                        width: parent.width - 4
+                        text: modelData.occupied ? modelData.label : ""
+                        color: "#000000"
+                        font.pixelSize: 9
+                        horizontalAlignment: Text.AlignHCenter
+                        elide: Text.ElideRight
+                    }
+
+                    Text {
+                        anchors.right: parent.right
+                        anchors.rightMargin: 3
+                        anchors.bottom: parent.bottom
+                        anchors.bottomMargin: 2
+                        text: (modelData.count || 0) > 1 ? modelData.count : ""
+                        color: "#222e50"
+                        font.pixelSize: 9
+                        font.bold: true
+                    }
+                }
+            }
+
+            Text {
+                x: width - 56
+                y: height - 18
+                text: (uiState.inventoryData.viewOffset || 0) + " / " + (uiState.inventoryData.maxViewOffset || 0)
+                color: "#4a4a4a"
+                font.pixelSize: 10
+            }
+
+            Rectangle {
+                x: 24
+                y: height - 22
+                width: parent.width - 48
+                height: 18
+                radius: 3
+                color: "#d9d3c6"
+                border.width: 1
+                border.color: "#8c8578"
+                visible: (uiState.inventoryData.hoveredTooltip || "").length > 0
+
+                Text {
+                    anchors.left: parent.left
+                    anchors.leftMargin: 6
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: parent.width - 12
+                    text: uiState.inventoryData.hoveredTooltip || ""
+                    color: "#000000"
+                    font.pixelSize: 10
+                    elide: Text.ElideRight
+                }
+            }
+        }
+    }
+
+    Rectangle {
+        x: uiState.equipX
+        y: uiState.equipY
+        width: uiState.equipWidth
+        height: uiState.equipHeight
+        radius: 4
+        color: "#ede9df"
+        border.width: 1
+        border.color: "#6b675f"
+        visible: uiState.equipVisible
+
+        Rectangle {
+            x: 1
+            y: 1
+            width: parent.width - 2
+            height: 16
+            radius: 3
+            color: "#6e8194"
+            border.width: 1
+            border.color: "#4e5d6c"
+        }
+
+        Text {
+            x: 17
+            y: 3
+            text: "Equipment"
+            color: "#ffffff"
+            font.pixelSize: 12
+            font.bold: true
+        }
+
+        Rectangle {
+            x: 3
+            y: 3
+            width: 12
+            height: 11
+            radius: 2
+            color: "#d7d2c5"
+            border.width: 1
+            border.color: "#7f7a70"
+            visible: uiState.equipMini
+
+            Text {
+                anchors.centerIn: parent
+                text: "B"
+                color: "#000000"
+                font.pixelSize: 8
+                font.bold: true
+            }
+        }
+
+        Rectangle {
+            x: 247
+            y: 3
+            width: 12
+            height: 11
+            radius: 2
+            color: "#d7d2c5"
+            border.width: 1
+            border.color: "#7f7a70"
+            visible: !uiState.equipMini
+
+            Text {
+                anchors.centerIn: parent
+                text: "_"
+                color: "#000000"
+                font.pixelSize: 8
+                font.bold: true
+            }
+        }
+
+        Rectangle {
+            x: 265
+            y: 3
+            width: 12
+            height: 11
+            radius: 2
+            color: "#d7d2c5"
+            border.width: 1
+            border.color: "#7f7a70"
+
+            Text {
+                anchors.centerIn: parent
+                text: "X"
+                color: "#000000"
+                font.pixelSize: 8
+                font.bold: true
+            }
+        }
+
+        Rectangle {
+            x: 0
+            y: 17
+            width: parent.width
+            height: parent.height - 17
+            color: "#e7e2d6"
+            visible: !uiState.equipMini
+
+            Rectangle {
+                x: 98
+                y: 15
+                width: Math.max(1, 182 - 98)
+                height: Math.max(1, 188 - 32)
+                color: "#d8d0c2"
+                border.width: 1
+                border.color: "#9d9488"
+            }
+
+            Repeater {
+                model: uiState.equipData.slots || []
+
+                delegate: Item {
+                    required property var modelData
+                    x: modelData.x - uiState.equipX
+                    y: modelData.y - uiState.equipY - 17
+                    width: modelData.leftColumn ? 114 : 84
+                    height: modelData.height
+
+                    Rectangle {
+                        x: modelData.leftColumn ? 0 : width - modelData.width
+                        y: 0
+                        width: modelData.width
+                        height: modelData.height
+                        color: modelData.occupied ? "#d7dff0" : "#f5f2ea"
+                        border.width: 1
+                        border.color: modelData.occupied ? "#7e95bf" : "#a69f91"
+                    }
+
+                    Text {
+                        x: modelData.leftColumn ? (modelData.width + 4) : 0
+                        y: 4
+                        width: modelData.leftColumn ? (width - modelData.width - 4) : (width - modelData.width - 4)
+                        text: modelData.occupied ? modelData.label : ""
+                        color: "#000000"
+                        font.pixelSize: 10
+                        horizontalAlignment: modelData.leftColumn ? Text.AlignLeft : Text.AlignRight
+                        elide: Text.ElideRight
+                    }
+                }
+            }
+        }
+    }
+
+    Rectangle {
         x: uiState.shopChoiceX
         y: uiState.shopChoiceY
         width: uiState.shopChoiceWidth

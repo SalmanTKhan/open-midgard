@@ -8,6 +8,7 @@
 #include "core/File.h"
 #include "item/Item.h"
 #include "main/WinMain.h"
+#include "qtui/QtUiRuntime.h"
 #include "render/DC.h"
 #include "render3d/Device.h"
 #include "res/ActRes.h"
@@ -907,6 +908,13 @@ void UIEquipWnd::OnDraw()
         }
     }
 
+    if (IsQtUiRuntimeEnabled()) {
+        m_lastVisualStateToken = BuildVisualStateToken();
+        m_hasVisualStateToken = true;
+        m_isDirty = 0;
+        return;
+    }
+
     bool useShared = false;
     HDC hdc = AcquireDrawTarget(&useShared);
     if (!hdc) {
@@ -1180,6 +1188,52 @@ void UIEquipWnd::DragAndDrop(int x, int y, const DRAG_INFO* const dragInfo)
 void UIEquipWnd::StoreInfo()
 {
     SaveUiWindowPlacement("EquipWnd", m_x, m_y);
+}
+
+bool UIEquipWnd::IsMiniMode() const
+{
+    return m_h == kMiniHeight;
+}
+
+bool UIEquipWnd::GetDisplayDataForQt(DisplayData* outData) const
+{
+    if (!outData) {
+        return false;
+    }
+
+    DisplayData data{};
+    if (m_h > kMiniHeight) {
+        const CGameMode* gameMode = g_modeMgr.GetCurrentGameMode();
+        const bool hideDraggedItem = gameMode
+            && gameMode->m_dragType == static_cast<int>(DragType::ShortcutItem)
+            && gameMode->m_dragInfo.source == static_cast<int>(DragSource::EquipmentWindow)
+            && gameMode->m_dragInfo.itemIndex != 0;
+        const std::vector<const ITEM_INFO*> slotItems = BuildSlotAssignments();
+        data.slots.reserve(kEquipSlots.size());
+        for (size_t i = 0; i < kEquipSlots.size(); ++i) {
+            DisplaySlot slot{};
+            slot.x = m_x + kEquipSlots[i].iconX;
+            slot.y = m_y + kEquipSlots[i].iconY;
+            slot.width = kSlotIconSize;
+            slot.height = kSlotIconSize;
+            slot.leftColumn = kEquipSlots[i].iconX < kCenterPanelLeft;
+
+            const ITEM_INFO* drawItem = slotItems[i];
+            if (drawItem
+                && hideDraggedItem
+                && drawItem->m_itemIndex == gameMode->m_dragInfo.itemIndex) {
+                drawItem = nullptr;
+            }
+            if (drawItem) {
+                slot.occupied = true;
+                slot.label = drawItem->GetEquipDisplayName();
+            }
+            data.slots.push_back(slot);
+        }
+    }
+
+    *outData = std::move(data);
+    return true;
 }
 
 void UIEquipWnd::EnsureCreated()

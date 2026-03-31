@@ -12,6 +12,20 @@ struct ITEM_INFO;
 
 class UIEquipWnd : public UIFrameWnd {
 public:
+    struct DisplaySlot {
+        int x = 0;
+        int y = 0;
+        int width = 0;
+        int height = 0;
+        bool occupied = false;
+        bool leftColumn = false;
+        std::string label;
+    };
+
+    struct DisplayData {
+        std::vector<DisplaySlot> slots;
+    };
+
     UIEquipWnd();
     ~UIEquipWnd() override;
 
@@ -28,6 +42,8 @@ public:
     void OnLBtnDblClk(int x, int y) override;
     void DragAndDrop(int x, int y, const DRAG_INFO* const info) override;
     void StoreInfo() override;
+    bool IsMiniMode() const;
+    bool GetDisplayDataForQt(DisplayData* outData) const;
 
 private:
     void EnsureCreated();
