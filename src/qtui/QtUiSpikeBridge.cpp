@@ -9,6 +9,11 @@
 #include "render3d/RenderBackend.h"
 #include "render3d/RenderDevice.h"
 #include "session/Session.h"
+#include "ui/UILoginWnd.h"
+#include "ui/UIMakeCharWnd.h"
+#include "ui/UINotifyLevelUpWnd.h"
+#include "ui/UISelectCharWnd.h"
+#include "ui/UISelectServerWnd.h"
 #include "ui/UIWindowMgr.h"
 #include "world/GameActor.h"
 #include "world/World.h"
@@ -51,6 +56,24 @@ void EnsureQtUiResourcesInitialized()
 }
 
 namespace {
+
+enum class MenuPointerCaptureTarget {
+    None,
+    Login,
+    ServerSelect,
+    CharSelect,
+    MakeChar,
+    NotifyLevelUp,
+    NotifyJobLevelUp,
+};
+
+bool HasFrontMenuUiVisible()
+{
+    return (g_windowMgr.m_loginWnd && g_windowMgr.m_loginWnd->m_show != 0)
+        || (g_windowMgr.m_selectServerWnd && g_windowMgr.m_selectServerWnd->m_show != 0)
+        || (g_windowMgr.m_selectCharWnd && g_windowMgr.m_selectCharWnd->m_show != 0)
+        || (g_windowMgr.m_makeCharWnd && g_windowMgr.m_makeCharWnd->m_show != 0);
+}
 
 bool IsEnabledInEnvironment()
 {
@@ -236,6 +259,141 @@ public:
         }
         if (m_stateAdapter && !m_lastInput.isEmpty()) {
             m_stateAdapter->setLastInput(m_lastInput);
+        }
+    }
+
+    bool handleWindowMessage(UINT msg, WPARAM wParam, LPARAM lParam)
+    {
+        notifyWindowMessage(msg, wParam, lParam);
+        if (!m_active) {
+            return false;
+        }
+
+        switch (msg) {
+        case WM_MOUSEMOVE:
+            if (g_windowMgr.m_selectServerWnd && g_windowMgr.m_selectServerWnd->m_show != 0) {
+                g_windowMgr.m_selectServerWnd->OnMouseMove(
+                    static_cast<int>(static_cast<short>(LOWORD(lParam))),
+                    static_cast<int>(static_cast<short>(HIWORD(lParam))));
+                return true;
+            }
+            return false;
+
+        case WM_LBUTTONDOWN:
+        case WM_LBUTTONDBLCLK:
+            if (g_windowMgr.m_makeCharWnd
+                && g_windowMgr.m_makeCharWnd->m_show != 0
+                && g_windowMgr.m_makeCharWnd->HandleQtMouseDown(
+                    static_cast<int>(static_cast<short>(LOWORD(lParam))),
+                    static_cast<int>(static_cast<short>(HIWORD(lParam))))) {
+                m_menuPointerCaptureTarget = MenuPointerCaptureTarget::MakeChar;
+                return true;
+            }
+            if (g_windowMgr.m_selectServerWnd
+                && g_windowMgr.m_selectServerWnd->m_show != 0
+                && g_windowMgr.m_selectServerWnd->HandleQtMouseDown(
+                    static_cast<int>(static_cast<short>(LOWORD(lParam))),
+                    static_cast<int>(static_cast<short>(HIWORD(lParam))))) {
+                m_menuPointerCaptureTarget = MenuPointerCaptureTarget::ServerSelect;
+                return true;
+            }
+            if (g_windowMgr.m_selectCharWnd
+                && g_windowMgr.m_selectCharWnd->m_show != 0
+                && g_windowMgr.m_selectCharWnd->HandleQtMouseDown(
+                    static_cast<int>(static_cast<short>(LOWORD(lParam))),
+                    static_cast<int>(static_cast<short>(HIWORD(lParam))))) {
+                m_menuPointerCaptureTarget = MenuPointerCaptureTarget::CharSelect;
+                return true;
+            }
+            if (g_windowMgr.m_loginWnd
+                && g_windowMgr.m_loginWnd->m_show != 0
+                && g_windowMgr.m_loginWnd->HandleQtMouseDown(
+                    static_cast<int>(static_cast<short>(LOWORD(lParam))),
+                    static_cast<int>(static_cast<short>(HIWORD(lParam))))) {
+                m_menuPointerCaptureTarget = MenuPointerCaptureTarget::Login;
+                return true;
+            }
+            if (g_windowMgr.m_notifyLevelUpWnd
+                && g_windowMgr.m_notifyLevelUpWnd->m_show != 0
+                && g_windowMgr.m_notifyLevelUpWnd->HandleQtMouseDown(
+                    static_cast<int>(static_cast<short>(LOWORD(lParam))),
+                    static_cast<int>(static_cast<short>(HIWORD(lParam))))) {
+                m_menuPointerCaptureTarget = MenuPointerCaptureTarget::NotifyLevelUp;
+                return true;
+            }
+            if (g_windowMgr.m_notifyJobLevelUpWnd
+                && g_windowMgr.m_notifyJobLevelUpWnd->m_show != 0
+                && g_windowMgr.m_notifyJobLevelUpWnd->HandleQtMouseDown(
+                    static_cast<int>(static_cast<short>(LOWORD(lParam))),
+                    static_cast<int>(static_cast<short>(HIWORD(lParam))))) {
+                m_menuPointerCaptureTarget = MenuPointerCaptureTarget::NotifyJobLevelUp;
+                return true;
+            }
+            return false;
+
+        case WM_LBUTTONUP:
+            if (m_menuPointerCaptureTarget == MenuPointerCaptureTarget::MakeChar) {
+                if (g_windowMgr.m_makeCharWnd
+                    && g_windowMgr.m_makeCharWnd->m_show != 0) {
+                    g_windowMgr.m_makeCharWnd->HandleQtMouseUp(
+                        static_cast<int>(static_cast<short>(LOWORD(lParam))),
+                        static_cast<int>(static_cast<short>(HIWORD(lParam))));
+                }
+                m_menuPointerCaptureTarget = MenuPointerCaptureTarget::None;
+                return true;
+            }
+            if (m_menuPointerCaptureTarget == MenuPointerCaptureTarget::CharSelect) {
+                if (g_windowMgr.m_selectCharWnd
+                    && g_windowMgr.m_selectCharWnd->m_show != 0
+                    && g_windowMgr.m_selectCharWnd->HandleQtMouseUp(
+                        static_cast<int>(static_cast<short>(LOWORD(lParam))),
+                        static_cast<int>(static_cast<short>(HIWORD(lParam))));
+                m_menuPointerCaptureTarget = MenuPointerCaptureTarget::None;
+                return true;
+            }
+            if (m_menuPointerCaptureTarget == MenuPointerCaptureTarget::NotifyLevelUp) {
+                if (g_windowMgr.m_notifyLevelUpWnd
+                    && g_windowMgr.m_notifyLevelUpWnd->m_show != 0) {
+                    g_windowMgr.m_notifyLevelUpWnd->HandleQtMouseUp(
+                        static_cast<int>(static_cast<short>(LOWORD(lParam))),
+                        static_cast<int>(static_cast<short>(HIWORD(lParam))));
+                }
+                m_menuPointerCaptureTarget = MenuPointerCaptureTarget::None;
+                return true;
+            }
+            if (m_menuPointerCaptureTarget == MenuPointerCaptureTarget::NotifyJobLevelUp) {
+                if (g_windowMgr.m_notifyJobLevelUpWnd
+                    && g_windowMgr.m_notifyJobLevelUpWnd->m_show != 0) {
+                    g_windowMgr.m_notifyJobLevelUpWnd->HandleQtMouseUp(
+                        static_cast<int>(static_cast<short>(LOWORD(lParam))),
+                        static_cast<int>(static_cast<short>(HIWORD(lParam))));
+                }
+                m_menuPointerCaptureTarget = MenuPointerCaptureTarget::None;
+                return true;
+            }
+            if (m_menuPointerCaptureTarget != MenuPointerCaptureTarget::None) {
+                m_menuPointerCaptureTarget = MenuPointerCaptureTarget::None;
+                return true;
+            }
+            return false;
+
+        case WM_CHAR:
+            if (HasFrontMenuUiVisible()) {
+                g_windowMgr.OnChar(static_cast<char>(wParam));
+                return true;
+            }
+            return false;
+
+        case WM_KEYDOWN:
+        case WM_SYSKEYDOWN:
+            if (HasFrontMenuUiVisible()) {
+                g_windowMgr.OnKeyDown(static_cast<int>(wParam));
+                return true;
+            }
+            return false;
+
+        default:
+            return false;
         }
     }
 
@@ -692,6 +850,7 @@ private:
     HWND m_mainWindow = nullptr;
     int m_mouseX = 0;
     int m_mouseY = 0;
+    MenuPointerCaptureTarget m_menuPointerCaptureTarget = MenuPointerCaptureTarget::None;
     QString m_lastInput;
 
     int m_argc = 1;
@@ -770,6 +929,18 @@ void NotifyQtUiRuntimeWindowMessage(UINT msg, WPARAM wParam, LPARAM lParam)
     (void)msg;
     (void)wParam;
     (void)lParam;
+#endif
+}
+
+bool HandleQtUiRuntimeWindowMessage(UINT msg, WPARAM wParam, LPARAM lParam)
+{
+#if RO_ENABLE_QT6_UI
+    return Runtime().handleWindowMessage(msg, wParam, lParam);
+#else
+    (void)msg;
+    (void)wParam;
+    (void)lParam;
+    return false;
 #endif
 }
 

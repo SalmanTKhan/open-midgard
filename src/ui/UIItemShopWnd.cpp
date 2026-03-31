@@ -5,6 +5,7 @@
 #include "gamemode/GameMode.h"
 #include "gamemode/Mode.h"
 #include "main/WinMain.h"
+#include "qtui/QtUiRuntime.h"
 #include "session/Session.h"
 
 #include <windows.h>
@@ -144,6 +145,12 @@ HBITMAP UIItemShopWnd::GetItemIcon(const ITEM_INFO& item)
 
 void UIItemShopWnd::OnDraw()
 {
+    if (IsQtUiRuntimeEnabled()) {
+        m_lastDrawStateToken = BuildDisplayStateToken();
+        m_hasDrawStateToken = true;
+        return;
+    }
+
     bool useShared = false;
     HDC hdc = AcquireDrawTarget(&useShared);
     if (!hdc || m_show == 0) {
@@ -276,6 +283,21 @@ void UIItemShopWnd::HandleKeyDown(int virtualKey)
         m_viewOffset = selectedRow - GetVisibleRowCount() + 1;
     }
     m_viewOffset = (std::max)(0, (std::min)(GetMaxViewOffset(), m_viewOffset));
+}
+
+int UIItemShopWnd::GetViewOffset() const
+{
+    return m_viewOffset;
+}
+
+int UIItemShopWnd::GetHoverRow() const
+{
+    return m_hoverRow;
+}
+
+int UIItemShopWnd::GetVisibleRowCountForQt() const
+{
+    return GetVisibleRowCount();
 }
 
 unsigned long long UIItemShopWnd::BuildDisplayStateToken() const

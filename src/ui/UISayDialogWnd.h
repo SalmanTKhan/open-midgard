@@ -25,6 +25,11 @@ public:
     void HideConversation();
     bool HandleKeyDown(int virtualKey);
     u32 GetNpcId() const;
+    std::string GetDisplayText() const;
+    bool HasActionButton() const;
+    bool IsNextAction() const;
+    bool IsHoveringAction() const;
+    bool IsPressingAction() const;
 
 private:
     enum class ActionButton {

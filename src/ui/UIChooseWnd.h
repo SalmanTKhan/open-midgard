@@ -17,6 +17,7 @@ public:
     void OnMouseMove(int x, int y) override;
     msgresult_t SendMsg(UIWindow* sender, int msg, msgparam_t wparam, msgparam_t lparam, msgparam_t extra) override;
     void OnKeyDown(int virtualKey);
+    int GetSelectedIndex() const;
 
 private:
     enum MenuEntry {

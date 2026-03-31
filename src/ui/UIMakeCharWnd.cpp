@@ -9,6 +9,7 @@
 #include "gamemode/LoginMode.h"
 #include "gamemode/Mode.h"
 #include "main/WinMain.h"
+#include "qtui/QtUiRuntime.h"
 #include "ui/UIWindowMgr.h"
 
 #include <windows.h>
@@ -21,6 +22,27 @@
 #include <vector>
 
 namespace {
+
+constexpr int kMakeCharNameLeft = 62;
+constexpr int kMakeCharNameTop = 244;
+constexpr int kMakeCharNameWidth = 100;
+constexpr int kMakeCharNameHeight = 18;
+constexpr int kMakeCharOkX = 483;
+constexpr int kMakeCharOkY = 318;
+constexpr int kMakeCharOkW = 44;
+constexpr int kMakeCharOkH = 22;
+constexpr int kMakeCharCancelX = 530;
+constexpr int kMakeCharCancelY = 318;
+constexpr int kMakeCharCancelW = 44;
+constexpr int kMakeCharCancelH = 22;
+constexpr int kMakeCharStatIds[6] = { 139, 142, 140, 144, 141, 143 };
+constexpr int kMakeCharStatX[6] = { 270, 270, 190, 349, 349, 190 };
+constexpr int kMakeCharStatY[6] = { 50, 244, 104, 190, 104, 190 };
+constexpr int kMakeCharHairIds[3] = { 161, 160, 213 };
+constexpr int kMakeCharHairX[3] = { 48, 130, 89 };
+constexpr int kMakeCharHairY[3] = { 135, 135, 101 };
+constexpr int kMakeCharSmallButtonW = 16;
+constexpr int kMakeCharSmallButtonH = 14;
 
 HBITMAP LoadBitmapFromGameData(const char* path)
 {
@@ -293,8 +315,94 @@ UIMakeCharWnd::UIMakeCharWnd()
 
 UIMakeCharWnd::~UIMakeCharWnd()
 {
+    if (m_nameEditCtrl && m_nameEditCtrl->m_parent != this) {
+        delete m_nameEditCtrl;
+        m_nameEditCtrl = nullptr;
+    }
     ReleaseComposeSurface();
     ClearAssets();
+}
+
+bool UIMakeCharWnd::HandleQtMouseDown(int x, int y)
+{
+    if (!g_hMainWnd || m_show == 0) {
+        return false;
+    }
+
+    RECT rcClient{};
+    GetClientRect(g_hMainWnd, &rcClient);
+    const int clientW = rcClient.right - rcClient.left;
+    const int clientH = rcClient.bottom - rcClient.top;
+    if (!m_controlsCreated && clientW > 0 && clientH > 0) {
+        OnCreate(clientW, clientH);
+    }
+
+    if (x < m_x || y < m_y || x >= m_x + m_w || y >= m_y + m_h) {
+        return false;
+    }
+
+    if (m_nameEditCtrl
+        && x >= m_x + kMakeCharNameLeft && x < m_x + kMakeCharNameLeft + kMakeCharNameWidth
+        && y >= m_y + kMakeCharNameTop && y < m_y + kMakeCharNameTop + kMakeCharNameHeight) {
+        m_nameEditCtrl->m_hasFocus = true;
+        m_nameEditCtrl->Invalidate();
+        g_windowMgr.m_editWindow = m_nameEditCtrl;
+    }
+
+    return true;
+}
+
+bool UIMakeCharWnd::HandleQtMouseUp(int x, int y)
+{
+    if (!HandleQtMouseDown(x, y)) {
+        return false;
+    }
+
+    const auto hitRect = [this, x, y](int left, int top, int width, int height) {
+        return x >= m_x + left && x < m_x + left + width
+            && y >= m_y + top && y < m_y + top + height;
+    };
+
+    if (hitRect(kMakeCharOkX, kMakeCharOkY, kMakeCharOkW, kMakeCharOkH)) {
+        SendMsg(nullptr, 6, 118, 0, 0);
+        return true;
+    }
+    if (hitRect(kMakeCharCancelX, kMakeCharCancelY, kMakeCharCancelW, kMakeCharCancelH)) {
+        SendMsg(nullptr, 6, 119, 0, 0);
+        return true;
+    }
+    for (int i = 0; i < 6; ++i) {
+        if (hitRect(kMakeCharStatX[i], kMakeCharStatY[i], kMakeCharSmallButtonW, kMakeCharSmallButtonH)) {
+            SendMsg(nullptr, 6, kMakeCharStatIds[i], 0, 0);
+            return true;
+        }
+    }
+    for (int i = 0; i < 3; ++i) {
+        if (hitRect(kMakeCharHairX[i], kMakeCharHairY[i], kMakeCharSmallButtonW, kMakeCharSmallButtonH)) {
+            SendMsg(nullptr, 6, kMakeCharHairIds[i], 0, 0);
+            return true;
+        }
+    }
+
+    return true;
+}
+
+bool UIMakeCharWnd::GetMakeCharDisplay(MakeCharDisplay* out) const
+{
+    if (!out) {
+        return false;
+    }
+
+    MakeCharDisplay display{};
+    display.name = m_nameEditCtrl && m_nameEditCtrl->GetText() ? m_nameEditCtrl->GetText() : "";
+    display.nameFocused = m_nameEditCtrl && m_nameEditCtrl->m_hasFocus;
+    for (int i = 0; i < 6; ++i) {
+        display.stats[i] = m_stats[i];
+    }
+    display.hairIndex = m_hairIdx;
+    display.hairColor = m_hairColor;
+    *out = display;
+    return true;
 }
 
 void UIMakeCharWnd::ClearAssets()
@@ -538,7 +646,9 @@ void UIMakeCharWnd::OnCreate(int cx, int cy)
     m_nameEditCtrl->m_maxchar = 24;
     m_nameEditCtrl->SetFrameColor(242, 242, 242);
     m_nameEditCtrl->m_hasFocus = true;
-    AddChild(m_nameEditCtrl);
+    if (!IsQtUiRuntimeEnabled()) {
+        AddChild(m_nameEditCtrl);
+    }
 
     const CLoginMode* loginMode = g_modeMgr.GetCurrentLoginMode();
     const char* savedName = loginMode ? loginMode->GetMakingCharName() : nullptr;
@@ -547,7 +657,9 @@ void UIMakeCharWnd::OnCreate(int cx, int cy)
     }
 
     g_windowMgr.m_editWindow = m_nameEditCtrl;
-    EnsureButtons();
+    if (!IsQtUiRuntimeEnabled()) {
+        EnsureButtons();
+    }
     RebuildPreview();
 }
 
@@ -636,6 +748,10 @@ void UIMakeCharWnd::OnDraw()
     const int clientH = rcClient.bottom - rcClient.top;
     if (!m_controlsCreated && clientW > 0 && clientH > 0) {
         OnCreate(clientW, clientH);
+    }
+
+    if (IsQtUiRuntimeEnabled()) {
+        return;
     }
 
     bool useShared = false;

@@ -10,6 +10,35 @@ class UIBitmapButton;
 
 class UISelectCharWnd : public UIFrameWnd {
 public:
+    struct VisibleSlotDisplay {
+        bool occupied = false;
+        bool selected = false;
+        int slotNumber = -1;
+        int x = 0;
+        int y = 0;
+        int width = 0;
+        int height = 0;
+        std::string name;
+        std::string job;
+        int level = 0;
+    };
+
+    struct SelectedCharacterDisplay {
+        bool valid = false;
+        std::string name;
+        std::string job;
+        int level = 0;
+        unsigned int exp = 0;
+        int hp = 0;
+        int sp = 0;
+        int str = 0;
+        int agi = 0;
+        int vit = 0;
+        int intStat = 0;
+        int dex = 0;
+        int luk = 0;
+    };
+
     UISelectCharWnd();
     ~UISelectCharWnd() override;
 
@@ -38,6 +67,13 @@ public:
     void OnLBtnUp(int x, int y) override;
     msgresult_t SendMsg(UIWindow* sender, int msg, msgparam_t wparam, msgparam_t lparam, msgparam_t extra) override;
     void OnKeyDown(int virtualKey);
+    bool HandleQtMouseDown(int x, int y);
+    bool HandleQtMouseUp(int x, int y);
+    int GetSelectedSlotNumber() const { return m_selectedSlot; }
+    int GetCurrentPage() const { return m_page; }
+    int GetCurrentPageCount() const;
+    bool GetVisibleSlotDisplay(int visibleIndex, VisibleSlotDisplay* out) const;
+    bool GetSelectedCharacterDisplay(SelectedCharacterDisplay* out) const;
 
 private:
     int GetCharacterCount() const;

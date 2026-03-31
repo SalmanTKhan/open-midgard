@@ -13,8 +13,16 @@
 #include "ui/UILoginWnd.h"
 #include "ui/UILoadingWnd.h"
 #include "ui/UIMakeCharWnd.h"
+#include "ui/UIChooseWnd.h"
+#include "ui/UIChooseSellBuyWnd.h"
+#include "ui/UIItemShopWnd.h"
+#include "ui/UINpcMenuWnd.h"
+#include "ui/UINpcInputWnd.h"
+#include "ui/UINotifyLevelUpWnd.h"
 #include "ui/UISelectCharWnd.h"
 #include "ui/UISelectServerWnd.h"
+#include "ui/UISayDialogWnd.h"
+#include "ui/UIShopCommon.h"
 #include "ui/UIWindowMgr.h"
 #include "world/GameActor.h"
 #include "world/World.h"
@@ -39,6 +47,37 @@ QString ToQString(const std::string& value)
 QString ToQString(const char* value)
 {
     return value ? QString::fromLocal8Bit(value) : QString();
+}
+
+bool IsNpcColorCodeAt(const std::string& value, size_t index)
+{
+    if (index + 7 > value.size() || value[index] != '^') {
+        return false;
+    }
+    for (size_t offset = 1; offset <= 6; ++offset) {
+        const char ch = value[index + offset];
+        const bool hex = (ch >= '0' && ch <= '9')
+            || (ch >= 'A' && ch <= 'F')
+            || (ch >= 'a' && ch <= 'f');
+        if (!hex) {
+            return false;
+        }
+    }
+    return true;
+}
+
+QString StripNpcColorCodes(const std::string& value)
+{
+    std::string stripped;
+    stripped.reserve(value.size());
+    for (size_t index = 0; index < value.size(); ++index) {
+        if (IsNpcColorCodeAt(value, index)) {
+            index += 6;
+            continue;
+        }
+        stripped.push_back(value[index]);
+    }
+    return ToQString(stripped);
 }
 
 QString ToCssColor(u8 red, u8 green, u8 blue)
@@ -205,6 +244,330 @@ void PopulateLoginPanelState(QtUiState* state)
         passwordMask,
         loginWnd->IsSaveAccountChecked(),
         loginWnd->IsPasswordFocused());
+}
+
+void PopulateCharSelectState(QtUiState* state)
+{
+    if (!state) {
+        return;
+    }
+
+    const UISelectCharWnd* const selectCharWnd = g_windowMgr.m_selectCharWnd;
+    const bool visible = selectCharWnd && selectCharWnd->m_show != 0;
+    state->setCharSelectVisible(visible);
+    if (!visible) {
+        state->setCharSelectPanelGeometry(0, 0, 0, 0);
+        state->setCharSelectPageState(0, 0);
+        state->setCharSelectSlots(QVariantList{});
+        state->setCharSelectSelectedDetails(QVariantMap{});
+        return;
+    }
+
+    state->setCharSelectPanelGeometry(
+        selectCharWnd->m_x,
+        selectCharWnd->m_y,
+        selectCharWnd->m_w,
+        selectCharWnd->m_h);
+    state->setCharSelectPageState(
+        selectCharWnd->GetCurrentPage(),
+        selectCharWnd->GetCurrentPageCount());
+
+    QVariantList slots;
+    for (int visibleIndex = 0; visibleIndex < 3; ++visibleIndex) {
+        UISelectCharWnd::VisibleSlotDisplay slotInfo{};
+        if (!selectCharWnd->GetVisibleSlotDisplay(visibleIndex, &slotInfo)) {
+            continue;
+        }
+
+        QVariantMap slot;
+        slot.insert(QStringLiteral("occupied"), slotInfo.occupied);
+        slot.insert(QStringLiteral("selected"), slotInfo.selected);
+        slot.insert(QStringLiteral("slotNumber"), slotInfo.slotNumber);
+        slot.insert(QStringLiteral("x"), slotInfo.x);
+        slot.insert(QStringLiteral("y"), slotInfo.y);
+        slot.insert(QStringLiteral("width"), slotInfo.width);
+        slot.insert(QStringLiteral("height"), slotInfo.height);
+        slot.insert(QStringLiteral("name"), ToQString(slotInfo.name));
+        slot.insert(QStringLiteral("job"), ToQString(slotInfo.job));
+        slot.insert(QStringLiteral("level"), slotInfo.level);
+        slots.push_back(slot);
+    }
+    state->setCharSelectSlots(slots);
+
+    UISelectCharWnd::SelectedCharacterDisplay selected{};
+    QVariantMap details;
+    if (selectCharWnd->GetSelectedCharacterDisplay(&selected) && selected.valid) {
+        details.insert(QStringLiteral("name"), ToQString(selected.name));
+        details.insert(QStringLiteral("job"), ToQString(selected.job));
+        details.insert(QStringLiteral("level"), selected.level);
+        details.insert(QStringLiteral("exp"), static_cast<qulonglong>(selected.exp));
+        details.insert(QStringLiteral("hp"), selected.hp);
+        details.insert(QStringLiteral("sp"), selected.sp);
+        details.insert(QStringLiteral("str"), selected.str);
+        details.insert(QStringLiteral("agi"), selected.agi);
+        details.insert(QStringLiteral("vit"), selected.vit);
+        details.insert(QStringLiteral("int"), selected.intStat);
+        details.insert(QStringLiteral("dex"), selected.dex);
+        details.insert(QStringLiteral("luk"), selected.luk);
+    }
+    state->setCharSelectSelectedDetails(details);
+}
+
+void PopulateMakeCharState(QtUiState* state)
+{
+    if (!state) {
+        return;
+    }
+
+    const UIMakeCharWnd* const makeCharWnd = g_windowMgr.m_makeCharWnd;
+    const bool visible = makeCharWnd && makeCharWnd->m_show != 0;
+    state->setMakeCharVisible(visible);
+    if (!visible) {
+        state->setMakeCharPanelGeometry(0, 0, 0, 0);
+        state->setMakeCharData(QString(), false, QVariantList{}, 0, 0);
+        return;
+    }
+
+    state->setMakeCharPanelGeometry(
+        makeCharWnd->m_x,
+        makeCharWnd->m_y,
+        makeCharWnd->m_w,
+        makeCharWnd->m_h);
+
+    UIMakeCharWnd::MakeCharDisplay display{};
+    QVariantList stats;
+    if (makeCharWnd->GetMakeCharDisplay(&display)) {
+        for (int i = 0; i < 6; ++i) {
+            stats.push_back(display.stats[i]);
+        }
+        state->setMakeCharData(
+            ToQString(display.name),
+            display.nameFocused,
+            stats,
+            display.hairIndex,
+            display.hairColor);
+        return;
+    }
+
+    state->setMakeCharData(QString(), false, QVariantList{}, 0, 0);
+}
+
+void PopulateNotificationState(QtUiState* state)
+{
+    if (!state) {
+        return;
+    }
+
+    QVariantList notifications;
+    const UINotifyLevelUpWnd* notices[] = {
+        g_windowMgr.m_notifyLevelUpWnd,
+        g_windowMgr.m_notifyJobLevelUpWnd,
+    };
+
+    for (const UINotifyLevelUpWnd* notice : notices) {
+        if (!notice || notice->m_show == 0) {
+            continue;
+        }
+
+        QVariantMap entry;
+        entry.insert(QStringLiteral("x"), notice->m_x);
+        entry.insert(QStringLiteral("y"), notice->m_y);
+        entry.insert(QStringLiteral("width"), notice->m_w);
+        entry.insert(QStringLiteral("height"), notice->m_h);
+        entry.insert(QStringLiteral("title"),
+            notice->IsJobLevelNotice() ? QStringLiteral("Job Level Up") : QStringLiteral("Level Up"));
+        entry.insert(QStringLiteral("accent"),
+            notice->IsJobLevelNotice() ? QStringLiteral("#4f8bd6") : QStringLiteral("#7ca93d"));
+        notifications.push_back(entry);
+    }
+
+    state->setNotifications(notifications);
+}
+
+void PopulateShopChoiceState(QtUiState* state)
+{
+    if (!state) {
+        return;
+    }
+
+    const UIChooseSellBuyWnd* const shopWnd = g_windowMgr.m_chooseSellBuyWnd;
+    const bool visible = shopWnd && shopWnd->m_show != 0;
+    state->setShopChoiceVisible(visible);
+    if (!visible) {
+        state->setShopChoiceGeometry(0, 0, 0, 0);
+        state->setShopChoiceButtons(QVariantList{});
+        return;
+    }
+
+    state->setShopChoiceGeometry(shopWnd->m_x, shopWnd->m_y, shopWnd->m_w, shopWnd->m_h);
+
+    QVariantList buttons;
+    struct ButtonSpec {
+        UIChooseSellBuyWnd::ButtonId id;
+        const char* label;
+        int offsetX;
+        int offsetY;
+        int width;
+        int height;
+    };
+    const ButtonSpec specs[] = {
+        { UIChooseSellBuyWnd::ButtonBuy, "Buy", 14, 46, 76, 22 },
+        { UIChooseSellBuyWnd::ButtonSell, "Sell", 90, 46, 76, 22 },
+        { UIChooseSellBuyWnd::ButtonCancel, "Cancel", 52, 74, 76, 22 },
+    };
+    for (const ButtonSpec& spec : specs) {
+        QVariantMap button;
+        button.insert(QStringLiteral("label"), ToQString(spec.label));
+        button.insert(QStringLiteral("x"), shopWnd->m_x + spec.offsetX);
+        button.insert(QStringLiteral("y"), shopWnd->m_y + spec.offsetY);
+        button.insert(QStringLiteral("width"), spec.width);
+        button.insert(QStringLiteral("height"), spec.height);
+        button.insert(QStringLiteral("hot"), shopWnd->GetHoverButton() == spec.id);
+        button.insert(QStringLiteral("pressed"), shopWnd->GetPressedButton() == spec.id);
+        buttons.push_back(button);
+    }
+    state->setShopChoiceButtons(buttons);
+}
+
+void PopulateNpcMenuState(QtUiState* state)
+{
+    if (!state) {
+        return;
+    }
+
+    const UINpcMenuWnd* const menuWnd = g_windowMgr.m_npcMenuWnd;
+    const bool visible = menuWnd && menuWnd->m_show != 0;
+    state->setNpcMenuVisible(visible);
+    if (!visible) {
+        state->setNpcMenuGeometry(0, 0, 0, 0);
+        state->setNpcMenuSelection(-1);
+        state->setNpcMenuHoverIndex(-1);
+        state->setNpcMenuButtons(false, false);
+        state->setNpcMenuOptions(QVariantList{});
+        return;
+    }
+
+    state->setNpcMenuGeometry(menuWnd->m_x, menuWnd->m_y, menuWnd->m_w, menuWnd->m_h);
+    state->setNpcMenuSelection(menuWnd->GetSelectedIndex());
+    state->setNpcMenuHoverIndex(menuWnd->GetHoverIndex());
+    state->setNpcMenuButtons(menuWnd->IsOkPressed(), menuWnd->IsCancelPressed());
+
+    QVariantList options;
+    const std::vector<std::string>& rawOptions = menuWnd->GetOptions();
+    options.reserve(static_cast<qsizetype>(rawOptions.size()));
+    for (const std::string& option : rawOptions) {
+        options.push_back(StripNpcColorCodes(option));
+    }
+    state->setNpcMenuOptions(options);
+}
+
+void PopulateSayDialogState(QtUiState* state)
+{
+    if (!state) {
+        return;
+    }
+
+    const UISayDialogWnd* const dialogWnd = g_windowMgr.m_sayDialogWnd;
+    const bool visible = dialogWnd && dialogWnd->m_show != 0;
+    state->setSayDialogVisible(visible);
+    if (!visible) {
+        state->setSayDialogGeometry(0, 0, 0, 0);
+        state->setSayDialogText(QString());
+        state->setSayDialogAction(false, QString(), false, false);
+        return;
+    }
+
+    state->setSayDialogGeometry(dialogWnd->m_x, dialogWnd->m_y, dialogWnd->m_w, dialogWnd->m_h);
+    state->setSayDialogText(StripNpcColorCodes(dialogWnd->GetDisplayText()));
+    state->setSayDialogAction(
+        dialogWnd->HasActionButton(),
+        dialogWnd->IsNextAction() ? QStringLiteral("Next") : QStringLiteral("Close"),
+        dialogWnd->IsHoveringAction(),
+        dialogWnd->IsPressingAction());
+}
+
+void PopulateNpcInputState(QtUiState* state)
+{
+    if (!state) {
+        return;
+    }
+
+    const UINpcInputWnd* const inputWnd = g_windowMgr.m_npcInputWnd;
+    const bool visible = inputWnd && inputWnd->m_show != 0;
+    state->setNpcInputVisible(visible);
+    if (!visible) {
+        state->setNpcInputGeometry(0, 0, 0, 0);
+        state->setNpcInputText(QString(), QString());
+        state->setNpcInputButtons(false, false);
+        return;
+    }
+
+    state->setNpcInputGeometry(inputWnd->m_x, inputWnd->m_y, inputWnd->m_w, inputWnd->m_h);
+    state->setNpcInputText(
+        inputWnd->GetInputMode() == UINpcInputWnd::InputMode::Number
+            ? QStringLiteral("Enter a number")
+            : QStringLiteral("Enter text"),
+        ToQString(inputWnd->GetInputText()));
+    state->setNpcInputButtons(inputWnd->IsOkPressed(), inputWnd->IsCancelPressed());
+}
+
+void PopulateChooseMenuState(QtUiState* state)
+{
+    if (!state) {
+        return;
+    }
+
+    const UIChooseWnd* const chooseWnd = g_windowMgr.m_chooseWnd;
+    const bool visible = chooseWnd && chooseWnd->m_show != 0;
+    state->setChooseMenuVisible(visible);
+    if (!visible) {
+        state->setChooseMenuGeometry(0, 0, 0, 0);
+        state->setChooseMenuSelectedIndex(-1);
+        return;
+    }
+
+    state->setChooseMenuGeometry(chooseWnd->m_x, chooseWnd->m_y, chooseWnd->m_w, chooseWnd->m_h);
+    state->setChooseMenuSelectedIndex(chooseWnd->GetSelectedIndex());
+}
+
+void PopulateItemShopState(QtUiState* state)
+{
+    if (!state) {
+        return;
+    }
+
+    const UIItemShopWnd* const shopWnd = g_windowMgr.m_itemShopWnd;
+    const bool visible = shopWnd && shopWnd->m_show != 0;
+    state->setItemShopVisible(visible);
+    if (!visible) {
+        state->setItemShopGeometry(0, 0, 0, 0);
+        state->setItemShopTitle(QString());
+        state->setItemShopRows(QVariantList{});
+        return;
+    }
+
+    state->setItemShopGeometry(shopWnd->m_x, shopWnd->m_y, shopWnd->m_w, shopWnd->m_h);
+    state->setItemShopTitle(g_session.m_shopMode == NpcShopMode::Sell
+            ? QStringLiteral("Sellable Items")
+            : QStringLiteral("Shop Items"));
+
+    QVariantList rows;
+    const int startRow = shopWnd->GetViewOffset();
+    const int endRow = (std::min)(
+        static_cast<int>(g_session.m_shopRows.size()),
+        startRow + shopWnd->GetVisibleRowCountForQt());
+    rows.reserve((std::max)(0, endRow - startRow));
+    for (int rowIndex = startRow; rowIndex < endRow; ++rowIndex) {
+        const NPC_SHOP_ROW& row = g_session.m_shopRows[static_cast<size_t>(rowIndex)];
+        QVariantMap entry;
+        entry.insert(QStringLiteral("name"), ToQString(shopui::GetItemDisplayName(row.itemInfo)));
+        entry.insert(QStringLiteral("quantity"), row.availableCount);
+        entry.insert(QStringLiteral("price"), g_session.GetNpcShopUnitPrice(row));
+        entry.insert(QStringLiteral("selected"), g_session.m_shopSelectedSourceRow == rowIndex);
+        entry.insert(QStringLiteral("hover"), shopWnd->GetHoverRow() == rowIndex);
+        rows.push_back(entry);
+    }
+    state->setItemShopRows(rows);
 }
 
 bool IsMonsterLikeHoverActor(const CGameActor* actor)
@@ -383,8 +746,35 @@ bool QtUiStateAdapter::syncMenu(RenderBackendType activeBackend,
     m_state->setLoginStatus(ToQString(g_windowMgr.GetLoginStatus()));
     m_state->setChatPreview(BuildChatPreviewText());
     PopulateLoginPanelState(m_state);
+    PopulateCharSelectState(m_state);
+    PopulateMakeCharState(m_state);
     PopulateServerSelectState(m_state);
     PopulateLoadingState(m_state);
+    m_state->setNpcMenuVisible(false);
+    m_state->setNpcMenuGeometry(0, 0, 0, 0);
+    m_state->setNpcMenuSelection(-1);
+    m_state->setNpcMenuHoverIndex(-1);
+    m_state->setNpcMenuButtons(false, false);
+    m_state->setNpcMenuOptions(QVariantList{});
+    m_state->setSayDialogVisible(false);
+    m_state->setSayDialogGeometry(0, 0, 0, 0);
+    m_state->setSayDialogText(QString());
+    m_state->setSayDialogAction(false, QString(), false, false);
+    m_state->setNpcInputVisible(false);
+    m_state->setNpcInputGeometry(0, 0, 0, 0);
+    m_state->setNpcInputText(QString(), QString());
+    m_state->setNpcInputButtons(false, false);
+    m_state->setChooseMenuVisible(false);
+    m_state->setChooseMenuGeometry(0, 0, 0, 0);
+    m_state->setChooseMenuSelectedIndex(-1);
+    m_state->setItemShopVisible(false);
+    m_state->setItemShopGeometry(0, 0, 0, 0);
+    m_state->setItemShopTitle(QString());
+    m_state->setItemShopRows(QVariantList{});
+    m_state->setShopChoiceVisible(false);
+    m_state->setShopChoiceGeometry(0, 0, 0, 0);
+    m_state->setShopChoiceButtons(QVariantList{});
+    m_state->setNotifications(QVariantList{});
     m_state->setAnchors(QVariantList{});
     return true;
 }
@@ -406,8 +796,17 @@ bool QtUiStateAdapter::syncGameplay(CGameMode& mode,
     m_state->setLoginStatus(ToQString(g_windowMgr.GetLoginStatus()));
     m_state->setChatPreview(BuildChatPreviewText());
     PopulateLoginPanelState(m_state);
+    PopulateCharSelectState(m_state);
+    PopulateMakeCharState(m_state);
     PopulateServerSelectState(m_state);
     PopulateLoadingState(m_state);
+    PopulateNpcMenuState(m_state);
+    PopulateSayDialogState(m_state);
+    PopulateNpcInputState(m_state);
+    PopulateChooseMenuState(m_state);
+    PopulateItemShopState(m_state);
+    PopulateShopChoiceState(m_state);
+    PopulateNotificationState(m_state);
 
     QVariantList anchors;
     if (mode.m_world && mode.m_view) {

@@ -258,7 +258,9 @@ int ReadRegistry()
 // ---------------------------------------------------------------------------
 LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
-    NotifyQtUiRuntimeWindowMessage(msg, wParam, lParam);
+    if (HandleQtUiRuntimeWindowMessage(msg, wParam, lParam)) {
+        return 0;
+    }
 
     switch (msg)
     {

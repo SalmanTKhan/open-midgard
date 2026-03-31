@@ -107,6 +107,27 @@ int UISelectServerWnd::HitTestEntry(int x, int y) const
     return -1;
 }
 
+bool UISelectServerWnd::HandleQtMouseDown(int x, int y)
+{
+    if (!g_hMainWnd || m_show == 0 || GetClientInfoConnectionCount() <= 1) {
+        return false;
+    }
+
+    EnsureCreated();
+    SyncGeometry();
+    RebuildEntryRects();
+    if (x < m_x || y < m_y || x >= m_x + m_w || y >= m_y + m_h) {
+        return false;
+    }
+
+    const int index = HitTestEntry(x, y);
+    if (index >= 0) {
+        PlayUiButtonSound();
+        g_modeMgr.SendMsg(CLoginMode::LoginMsg_SelectClientInfo, index, 0, 0);
+    }
+    return true;
+}
+
 void UISelectServerWnd::RebuildEntryRects()
 {
     m_entryRects.clear();

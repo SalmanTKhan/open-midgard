@@ -22,6 +22,8 @@ public:
     void OnLBtnUp(int x, int y) override;
     void OnMouseMove(int x, int y) override;
     void HandleKeyDown(int virtualKey);
+    ButtonId GetHoverButton() const;
+    ButtonId GetPressedButton() const;
 
 private:
     RECT GetButtonRect(ButtonId buttonId) const;

@@ -4,6 +4,7 @@
 #include "gamemode/GameMode.h"
 #include "gamemode/Mode.h"
 #include "main/WinMain.h"
+#include "qtui/QtUiRuntime.h"
 #include "ui/UIWindowMgr.h"
 
 #include <windows.h>
@@ -316,6 +317,9 @@ msgresult_t UIChooseWnd::ActivateSelection()
 void UIChooseWnd::OnDraw()
 {
     EnsureCreated();
+    if (IsQtUiRuntimeEnabled()) {
+        return;
+    }
     if (!g_hMainWnd || m_show == 0) {
         return;
     }
@@ -398,4 +402,9 @@ void UIChooseWnd::OnKeyDown(int virtualKey)
     default:
         break;
     }
+}
+
+int UIChooseWnd::GetSelectedIndex() const
+{
+    return m_selectedIndex;
 }

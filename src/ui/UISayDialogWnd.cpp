@@ -5,6 +5,7 @@
 #include "gamemode/GameMode.h"
 #include "gamemode/Mode.h"
 #include "main/WinMain.h"
+#include "qtui/QtUiRuntime.h"
 
 #include <windows.h>
 
@@ -136,6 +137,31 @@ u32 UISayDialogWnd::GetNpcId() const
     return m_npcId;
 }
 
+std::string UISayDialogWnd::GetDisplayText() const
+{
+    return BuildDisplayText();
+}
+
+bool UISayDialogWnd::HasActionButton() const
+{
+    return m_actionButton != ActionButton::None;
+}
+
+bool UISayDialogWnd::IsNextAction() const
+{
+    return m_actionButton == ActionButton::Next;
+}
+
+bool UISayDialogWnd::IsHoveringAction() const
+{
+    return m_hoverAction;
+}
+
+bool UISayDialogWnd::IsPressingAction() const
+{
+    return m_pressAction;
+}
+
 RECT UISayDialogWnd::GetActionRect() const
 {
     return MakeRect(m_x + m_w - kPadding - kButtonWidth,
@@ -191,6 +217,10 @@ void UISayDialogWnd::DrawActionButton(HDC hdc, const RECT& rect) const
 
 void UISayDialogWnd::OnDraw()
 {
+    if (IsQtUiRuntimeEnabled()) {
+        return;
+    }
+
     if (!g_hMainWnd || m_show == 0) {
         return;
     }

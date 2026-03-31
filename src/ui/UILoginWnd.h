@@ -15,6 +15,7 @@ public:
     msgresult_t SendMsg(UIWindow* sender, int msg, msgparam_t wparam, msgparam_t lparam, msgparam_t extra) override;
     void OnKeyDown(int virtualKey);
     void SetWallpaperName(const std::string& wallpaperName);
+    bool HandleQtMouseDown(int x, int y);
     const char* GetLoginText() const;
     int GetPasswordLength() const;
     bool IsSaveAccountChecked() const;
@@ -43,6 +44,7 @@ private:
     HBITMAP m_composeBitmap;
     int m_composeWidth;
     int m_composeHeight;
+    bool m_saveAccountChecked;
     UIEditCtrl* m_login;
     UIEditCtrl* m_password;
     UIBitmapButton* m_cancelButton;

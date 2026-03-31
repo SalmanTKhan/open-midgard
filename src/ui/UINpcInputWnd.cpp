@@ -5,6 +5,7 @@
 #include "gamemode/GameMode.h"
 #include "gamemode/Mode.h"
 #include "main/WinMain.h"
+#include "qtui/QtUiRuntime.h"
 
 #include <windows.h>
 
@@ -76,7 +77,9 @@ UINpcInputWnd::UINpcInputWnd()
     Create(kInputWidth, kInputHeight);
     m_editCtrl->Create(m_w - kPadding * 2, kEditHeight);
     m_editCtrl->m_id = 1;
-    AddChild(m_editCtrl);
+    if (!IsQtUiRuntimeEnabled()) {
+        AddChild(m_editCtrl);
+    }
 
     int defaultX = 195;
     int defaultY = 250;
@@ -87,7 +90,13 @@ UINpcInputWnd::UINpcInputWnd()
     UIWindow::SetShow(0);
 }
 
-UINpcInputWnd::~UINpcInputWnd() = default;
+UINpcInputWnd::~UINpcInputWnd()
+{
+    if (m_editCtrl && m_editCtrl->m_parent != this) {
+        delete m_editCtrl;
+        m_editCtrl = nullptr;
+    }
+}
 
 void UINpcInputWnd::SetShow(int show)
 {
@@ -119,6 +128,26 @@ UIEditCtrl* UINpcInputWnd::GetEditCtrl() const
 u32 UINpcInputWnd::GetNpcId() const
 {
     return m_npcId;
+}
+
+UINpcInputWnd::InputMode UINpcInputWnd::GetInputMode() const
+{
+    return m_mode;
+}
+
+const char* UINpcInputWnd::GetInputText() const
+{
+    return m_editCtrl ? m_editCtrl->GetText() : "";
+}
+
+bool UINpcInputWnd::IsOkPressed() const
+{
+    return m_pressedTarget == ClickTarget::Ok;
+}
+
+bool UINpcInputWnd::IsCancelPressed() const
+{
+    return m_pressedTarget == ClickTarget::Cancel;
 }
 
 void UINpcInputWnd::LayoutControls()
@@ -181,6 +210,10 @@ void UINpcInputWnd::DrawButton(HDC hdc, const RECT& rect, const char* label, boo
 
 void UINpcInputWnd::OnDraw()
 {
+    if (IsQtUiRuntimeEnabled()) {
+        return;
+    }
+
     if (!g_hMainWnd || m_show == 0) {
         return;
     }
@@ -312,6 +345,15 @@ void UINpcInputWnd::OnLBtnDown(int x, int y)
     if (IsPointInRect(GetCancelRect(), x, y)) {
         m_pressedTarget = ClickTarget::Cancel;
         Invalidate();
+        return;
+    }
+
+    const RECT editRect = MakeRect(m_x + kPadding, m_y + kPadding + 16, m_w - kPadding * 2, kEditHeight);
+    if (IsPointInRect(editRect, x, y)) {
+        if (m_editCtrl) {
+            m_editCtrl->m_hasFocus = true;
+            g_windowMgr.m_editWindow = m_editCtrl;
+        }
         return;
     }
 

@@ -15,6 +15,14 @@ class UIBitmapButton;
 
 class UIMakeCharWnd : public UIFrameWnd {
 public:
+    struct MakeCharDisplay {
+        std::string name;
+        bool nameFocused = false;
+        int stats[6]{};
+        int hairIndex = 1;
+        int hairColor = 0;
+    };
+
     struct PreviewState {
         int x = 0;
         int y = 0;
@@ -38,6 +46,9 @@ public:
     void OnProcess() override;
     msgresult_t SendMsg(UIWindow* sender, int msg, msgparam_t wparam, msgparam_t lparam, msgparam_t extra) override;
     void OnKeyDown(int virtualKey);
+    bool HandleQtMouseDown(int x, int y);
+    bool HandleQtMouseUp(int x, int y);
+    bool GetMakeCharDisplay(MakeCharDisplay* out) const;
 
 private:
     void EnsureResourceCache();

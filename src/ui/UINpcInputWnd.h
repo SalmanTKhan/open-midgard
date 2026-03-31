@@ -28,6 +28,10 @@ public:
     bool HandleKeyDown(int virtualKey);
     UIEditCtrl* GetEditCtrl() const;
     u32 GetNpcId() const;
+    InputMode GetInputMode() const;
+    const char* GetInputText() const;
+    bool IsOkPressed() const;
+    bool IsCancelPressed() const;
 
 private:
     enum class ClickTarget {

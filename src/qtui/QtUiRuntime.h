@@ -12,6 +12,7 @@ void InitializeQtUiRuntime(HWND mainWindow);
 void ShutdownQtUiRuntime();
 void ProcessQtUiRuntimeEvents();
 void NotifyQtUiRuntimeWindowMessage(UINT msg, WPARAM wParam, LPARAM lParam);
+bool HandleQtUiRuntimeWindowMessage(UINT msg, WPARAM wParam, LPARAM lParam);
 bool CompositeQtUiMenuOverlay(void* bgraPixels, int width, int height, int pitch);
 bool RenderQtUiMenuOverlayTexture(CTexture* texture, int width, int height);
 bool CompositeQtUiGameplayOverlay(CGameMode& mode, void* bgraPixels, int width, int height, int pitch);
@@ -23,6 +24,7 @@ inline void InitializeQtUiRuntime(HWND) {}
 inline void ShutdownQtUiRuntime() {}
 inline void ProcessQtUiRuntimeEvents() {}
 inline void NotifyQtUiRuntimeWindowMessage(UINT, WPARAM, LPARAM) {}
+inline bool HandleQtUiRuntimeWindowMessage(UINT, WPARAM, LPARAM) { return false; }
 inline bool CompositeQtUiMenuOverlay(void*, int, int, int) { return false; }
 inline bool RenderQtUiMenuOverlayTexture(CTexture*, int, int) { return false; }
 inline bool CompositeQtUiGameplayOverlay(CGameMode&, void*, int, int, int) { return false; }

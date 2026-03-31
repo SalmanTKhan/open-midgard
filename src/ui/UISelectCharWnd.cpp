@@ -4,6 +4,7 @@
 #include "gamemode/LoginMode.h"
 #include "gamemode/Mode.h"
 #include "main/WinMain.h"
+#include "qtui/QtUiRuntime.h"
 #include "render/DC.h"
 #include "render3d/Device.h"
 #include "res/ActRes.h"
@@ -40,6 +41,16 @@ constexpr int kPageButtonXNext = 520;
 constexpr int kPageButtonY = 110;
 constexpr int kPageButtonWidth = 12;
 constexpr int kPageButtonHeight = 48;
+constexpr int kSelectCharButtonY = 318;
+constexpr int kSelectCharButtonHeight = 24;
+constexpr int kSelectCharCancelX = 484;
+constexpr int kSelectCharCancelW = 90;
+constexpr int kSelectCharPrimaryX = 404;
+constexpr int kSelectCharPrimaryW = 80;
+constexpr int kSelectCharDeleteX = 5;
+constexpr int kSelectCharDeleteW = 80;
+constexpr int kSelectCharChargeX = 314;
+constexpr int kSelectCharChargeW = 85;
 constexpr char kRegPath[] = "Software\\Gravity Soft\\Ragnarok Online";
 constexpr char kCurSlotValue[] = "CURSLOT";
 
@@ -508,6 +519,129 @@ UISelectCharWnd::~UISelectCharWnd()
     ClearAssets();
 }
 
+int UISelectCharWnd::GetCurrentPageCount() const
+{
+    return GetPageCount();
+}
+
+bool UISelectCharWnd::GetVisibleSlotDisplay(int visibleIndex, VisibleSlotDisplay* out) const
+{
+    if (!out || visibleIndex < 0 || visibleIndex >= kVisibleSlotsPerPage) {
+        return false;
+    }
+
+    *out = VisibleSlotDisplay{};
+    const int slotNumber = GetVisibleSlotStart() + visibleIndex;
+    out->slotNumber = slotNumber;
+    out->selected = (slotNumber == m_selectedSlot);
+    out->x = m_x + kSlotLeft + visibleIndex * (kSlotWidth + kSlotGap);
+    out->y = m_y + kSlotTop;
+    out->width = kSlotWidth;
+    out->height = kSlotHeight;
+
+    const int charIndex = FindCharacterIndexForSlot(slotNumber);
+    CHARACTER_INFO* chars = GetCharacters();
+    if (charIndex < 0 || !chars) {
+        return true;
+    }
+
+    const CHARACTER_INFO& info = chars[charIndex];
+    char nameBuf[25]{};
+    CopyCharacterName(info, nameBuf);
+    out->occupied = true;
+    out->name = nameBuf;
+    out->job = ResolveJobName(info.job);
+    out->level = info.level;
+    return true;
+}
+
+bool UISelectCharWnd::GetSelectedCharacterDisplay(SelectedCharacterDisplay* out) const
+{
+    if (!out) {
+        return false;
+    }
+
+    *out = SelectedCharacterDisplay{};
+    CHARACTER_INFO* chars = GetCharacters();
+    const int selectedIndex = FindCharacterIndexForSlot(m_selectedSlot);
+    if (selectedIndex < 0 || !chars) {
+        return true;
+    }
+
+    const CHARACTER_INFO& info = chars[selectedIndex];
+    char nameBuf[25]{};
+    CopyCharacterName(info, nameBuf);
+    out->valid = true;
+    out->name = nameBuf;
+    out->job = ResolveJobName(info.job);
+    out->level = info.level;
+    out->exp = info.exp;
+    out->hp = info.hp;
+    out->sp = info.sp;
+    out->str = info.Str;
+    out->agi = info.Agi;
+    out->vit = info.Vit;
+    out->intStat = info.Int;
+    out->dex = info.Dex;
+    out->luk = info.Luk;
+    return true;
+}
+
+bool UISelectCharWnd::HandleQtMouseDown(int x, int y)
+{
+    if (!g_hMainWnd || m_show == 0) {
+        return false;
+    }
+
+    RECT rcClient{};
+    GetClientRect(g_hMainWnd, &rcClient);
+    const int clientW = rcClient.right - rcClient.left;
+    const int clientH = rcClient.bottom - rcClient.top;
+    if (clientW > 0 && clientH > 0) {
+        OnCreate(clientW, clientH);
+    }
+
+    ClampSelection();
+    UpdateActionButtons();
+    if (x < m_x || y < m_y || x >= m_x + m_w || y >= m_y + m_h) {
+        return false;
+    }
+    return true;
+}
+
+bool UISelectCharWnd::HandleQtMouseUp(int x, int y)
+{
+    if (!HandleQtMouseDown(x, y)) {
+        return false;
+    }
+
+    const bool selectedEmpty = (FindCharacterIndexForSlot(m_selectedSlot) < 0);
+    const auto hitRect = [this, x, y](int left, int top, int width, int height) {
+        return x >= m_x + left && x < m_x + left + width
+            && y >= m_y + top && y < m_y + top + height;
+    };
+
+    if (hitRect(kSelectCharCancelX, kSelectCharButtonY, kSelectCharCancelW, kSelectCharButtonHeight)) {
+        SendMsg(nullptr, 6, 119, 0, 0);
+        return true;
+    }
+    if (hitRect(kSelectCharPrimaryX, kSelectCharButtonY, kSelectCharPrimaryW, kSelectCharButtonHeight)) {
+        SendMsg(nullptr, 6, selectedEmpty ? 137 : 118, 0, 0);
+        return true;
+    }
+    if (!selectedEmpty && hitRect(kSelectCharDeleteX, kSelectCharButtonY, kSelectCharDeleteW, kSelectCharButtonHeight)) {
+        SendMsg(nullptr, 6, 145, 0, 0);
+        return true;
+    }
+    if (hitRect(kSelectCharChargeX, kSelectCharButtonY, kSelectCharChargeW, kSelectCharButtonHeight)) {
+        SendMsg(nullptr, 6, 218, 0, 0);
+        return true;
+    }
+
+    OnLBtnUp(x, y);
+    return true;
+}
+
 void UISelectCharWnd::ClearAssets()
 {
     if (m_backgroundBmp) {
@@ -653,9 +787,13 @@ void UISelectCharWnd::EnsureButtons()
 
 void UISelectCharWnd::UpdateActionButtons()
 {
-    EnsureButtons();
-
     const bool selectedEmpty = (FindCharacterIndexForSlot(m_selectedSlot) < 0);
+    if (IsQtUiRuntimeEnabled()) {
+        m_defPushId = selectedEmpty ? 137 : 118;
+        return;
+    }
+
+    EnsureButtons();
     if (m_okButton) {
         m_okButton->SetShow(selectedEmpty ? 0 : 1);
     }
@@ -685,7 +823,6 @@ void UISelectCharWnd::OnCreate(int cx, int cy)
 
     Move((cx - 640) / 2 + 33, (cy - 480) / 2 + 65);
     ClampSelection();
-    EnsureButtons();
     UpdateActionButtons();
 }
 
@@ -1073,6 +1210,10 @@ void UISelectCharWnd::OnDraw()
     ClampSelection();
     UpdateActionButtons();
     RebuildVisiblePreviews();
+
+    if (IsQtUiRuntimeEnabled()) {
+        return;
+    }
 
     bool useShared = false;
     HDC targetDC = AcquireDrawTarget(&useShared);

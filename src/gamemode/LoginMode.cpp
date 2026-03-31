@@ -3,6 +3,8 @@
 #include "LoginMode.h"
 #include "ui/UIWindowMgr.h"
 #include "ui/UILoginWnd.h"
+#include "ui/UIMakeCharWnd.h"
+#include "ui/UISelectCharWnd.h"
 #include "ui/UIWaitWnd.h"
 #include "ui/UISelectServerWnd.h"
 #include "render/Renderer.h"
@@ -212,6 +214,28 @@ std::uint64_t ComputeLoginUiStateToken(int clientWidth, int clientHeight)
         HashTokenValue(&hash, static_cast<std::uint64_t>(g_windowMgr.m_loginWnd->GetPasswordLength()));
         HashTokenValue(&hash, static_cast<std::uint64_t>(g_windowMgr.m_loginWnd->IsSaveAccountChecked() ? 1 : 0));
         HashTokenValue(&hash, static_cast<std::uint64_t>(g_windowMgr.m_loginWnd->IsPasswordFocused() ? 1 : 0));
+    }
+    if (g_windowMgr.m_selectCharWnd && g_windowMgr.m_selectCharWnd->m_show != 0) {
+        HashTokenValue(&hash, static_cast<std::uint64_t>(g_windowMgr.m_selectCharWnd->GetSelectedSlotNumber()));
+        HashTokenValue(&hash, static_cast<std::uint64_t>(g_windowMgr.m_selectCharWnd->GetCurrentPage()));
+        UISelectCharWnd::SelectedCharacterDisplay selected{};
+        if (g_windowMgr.m_selectCharWnd->GetSelectedCharacterDisplay(&selected) && selected.valid) {
+            HashTokenString(&hash, selected.name);
+            HashTokenString(&hash, selected.job);
+            HashTokenValue(&hash, static_cast<std::uint64_t>(selected.level));
+        }
+    }
+    if (g_windowMgr.m_makeCharWnd && g_windowMgr.m_makeCharWnd->m_show != 0) {
+        UIMakeCharWnd::MakeCharDisplay makeChar{};
+        if (g_windowMgr.m_makeCharWnd->GetMakeCharDisplay(&makeChar)) {
+            HashTokenString(&hash, makeChar.name);
+            HashTokenValue(&hash, static_cast<std::uint64_t>(makeChar.nameFocused ? 1 : 0));
+            for (int i = 0; i < 6; ++i) {
+                HashTokenValue(&hash, static_cast<std::uint64_t>(makeChar.stats[i]));
+            }
+            HashTokenValue(&hash, static_cast<std::uint64_t>(makeChar.hairIndex));
+            HashTokenValue(&hash, static_cast<std::uint64_t>(makeChar.hairColor));
+        }
     }
     for (UIWindow* child : g_windowMgr.m_children) {
         if (!child) {

@@ -5,6 +5,7 @@
 #include "gamemode/GameMode.h"
 #include "gamemode/Mode.h"
 #include "main/WinMain.h"
+#include "qtui/QtUiRuntime.h"
 
 #include <windows.h>
 
@@ -108,6 +109,31 @@ u32 UINpcMenuWnd::GetNpcId() const
     return m_npcId;
 }
 
+const std::vector<std::string>& UINpcMenuWnd::GetOptions() const
+{
+    return m_options;
+}
+
+int UINpcMenuWnd::GetSelectedIndex() const
+{
+    return m_selectedIndex;
+}
+
+int UINpcMenuWnd::GetHoverIndex() const
+{
+    return m_hoverIndex;
+}
+
+bool UINpcMenuWnd::IsOkPressed() const
+{
+    return m_pressedTarget == ClickTarget::Ok;
+}
+
+bool UINpcMenuWnd::IsCancelPressed() const
+{
+    return m_pressedTarget == ClickTarget::Cancel;
+}
+
 RECT UINpcMenuWnd::GetOptionRect(int index) const
 {
     return MakeRect(m_x + kPadding,
@@ -167,6 +193,10 @@ void UINpcMenuWnd::DrawButton(HDC hdc, const RECT& rect, const char* label, bool
 
 void UINpcMenuWnd::OnDraw()
 {
+    if (IsQtUiRuntimeEnabled()) {
+        return;
+    }
+
     if (!g_hMainWnd || m_show == 0) {
         return;
     }

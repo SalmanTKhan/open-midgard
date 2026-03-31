@@ -18,11 +18,40 @@
 
 namespace {
 
+constexpr int kLoginFieldLeft = 92;
+constexpr int kLoginFieldTop = 29;
+constexpr int kPasswordFieldTop = 61;
+constexpr int kFieldWidth = 125;
+constexpr int kFieldHeight = 18;
+constexpr int kSaveCheckLeft = 232;
+constexpr int kSaveCheckTop = 33;
+constexpr int kSaveCheckSize = 16;
+
+struct LoginButtonHitArea {
+    int id;
+    int x;
+    int y;
+    int width;
+    int height;
+};
+
+constexpr LoginButtonHitArea kQtLoginButtonAreas[] = {
+    { 201, 4, 96, 52, 20 },
+    { 219, 137, 96, 44, 20 },
+    { 120, 189, 96, 40, 20 },
+    { 155, 234, 96, 40, 20 },
+};
+
 HBITMAP LoadBitmapFromGameData(const char* path)
 {
     HBITMAP outBmp = nullptr;
     LoadHBitmapFromGameData(path, &outBmp, nullptr, nullptr);
     return outBmp;
+}
+
+bool ContainsPoint(int left, int top, int width, int height, int x, int y)
+{
+    return x >= left && x < left + width && y >= top && y < top + height;
 }
 
 void DrawBitmapStretched(HDC target, HBITMAP bmp, const RECT& dst)
@@ -379,6 +408,7 @@ UILoginWnd::UILoginWnd()
       m_composeBitmap(nullptr),
       m_composeWidth(0),
       m_composeHeight(0),
+      m_saveAccountChecked(false),
       m_login(nullptr),
       m_password(nullptr),
       m_cancelButton(nullptr),
@@ -388,8 +418,39 @@ UILoginWnd::UILoginWnd()
 
 UILoginWnd::~UILoginWnd()
 {
+    if (m_login && m_login->m_parent != this) {
+        delete m_login;
+        m_login = nullptr;
+    }
+    if (m_password && m_password->m_parent != this) {
+        delete m_password;
+        m_password = nullptr;
+    }
+    if (m_saveAccountCheck && m_saveAccountCheck->m_parent != this) {
+        delete m_saveAccountCheck;
+        m_saveAccountCheck = nullptr;
+    }
+    if (m_cancelButton && m_cancelButton->m_parent != this) {
+        delete m_cancelButton;
+        m_cancelButton = nullptr;
+    }
     ReleaseComposeSurface();
     ClearUiAssets();
+}
+
+void SetLoginFieldFocus(UIEditCtrl* login, UIEditCtrl* password, bool focusPassword)
+{
+    if (login) {
+        login->m_hasFocus = !focusPassword;
+        login->Invalidate();
+    }
+    if (password) {
+        password->m_hasFocus = focusPassword;
+        password->Invalidate();
+    }
+    g_windowMgr.m_editWindow = focusPassword
+        ? static_cast<UIWindow*>(password)
+        : static_cast<UIWindow*>(login);
 }
 
 const char* UILoginWnd::GetLoginText() const
@@ -405,12 +466,60 @@ int UILoginWnd::GetPasswordLength() const
 
 bool UILoginWnd::IsSaveAccountChecked() const
 {
-    return m_saveAccountCheck && m_saveAccountCheck->m_isChecked != 0;
+    return m_saveAccountCheck ? (m_saveAccountCheck->m_isChecked != 0) : m_saveAccountChecked;
 }
 
 bool UILoginWnd::IsPasswordFocused() const
 {
     return m_password && m_password->m_hasFocus;
+}
+
+bool UILoginWnd::HandleQtMouseDown(int x, int y)
+{
+    if (m_show == 0) {
+        return false;
+    }
+
+    if (!m_controlsCreated && g_hMainWnd) {
+        RECT clientRect{};
+        GetClientRect(g_hMainWnd, &clientRect);
+        OnCreate(clientRect.right - clientRect.left, clientRect.bottom - clientRect.top);
+    }
+
+    const int localX = x - m_x;
+    const int localY = y - m_y;
+    if (localX < 0 || localY < 0 || localX >= m_w || localY >= m_h) {
+        return false;
+    }
+
+    if (ContainsPoint(kLoginFieldLeft, kLoginFieldTop, kFieldWidth, kFieldHeight, localX, localY)) {
+        SetLoginFieldFocus(m_login, m_password, false);
+        return true;
+    }
+
+    if (ContainsPoint(kLoginFieldLeft, kPasswordFieldTop, kFieldWidth, kFieldHeight, localX, localY)) {
+        SetLoginFieldFocus(m_login, m_password, true);
+        return true;
+    }
+
+    if (ContainsPoint(kSaveCheckLeft, kSaveCheckTop, kSaveCheckSize, kSaveCheckSize, localX, localY)) {
+        m_saveAccountChecked = !m_saveAccountChecked;
+        if (m_saveAccountCheck) {
+            m_saveAccountCheck->SetCheck(m_saveAccountChecked ? 1 : 0);
+        }
+        StoreRememberedUserId(m_login ? m_login->GetText() : "", m_saveAccountChecked);
+        g_modeMgr.SendMsg(CLoginMode::LoginMsg_SaveAccount, m_saveAccountChecked ? 1 : 0, 0, m_saveAccountChecked ? 1 : 0);
+        return true;
+    }
+
+    for (const LoginButtonHitArea& button : kQtLoginButtonAreas) {
+        if (ContainsPoint(button.x, button.y, button.width, button.height, localX, localY)) {
+            SendMsg(nullptr, 6, button.id, 0, 0);
+            return true;
+        }
+    }
+
+    return false;
 }
 
 void UILoginWnd::OnCreate(int cx, int cy)
@@ -440,23 +549,25 @@ void UILoginWnd::OnCreate(int cx, int cy)
         { "btn_intro.bmp", "btn_intro_a.bmp", "btn_intro_b.bmp", 219, 137, 96 },
     };
 
-    for (const ButtonSpec& spec : specs) {
-        auto* button = new UIBitmapButton();
-        button->SetBitmapName(ResolveUiAssetPath(spec.normal).c_str(), 0);
-        button->SetBitmapName(ResolveUiAssetPath(spec.hover).c_str(), 1);
-        button->SetBitmapName(ResolveUiAssetPath(spec.pressed).c_str(), 2);
-        const int buttonWidth = button->m_bitmapWidth > 0 ? button->m_bitmapWidth : 40;
-        const int buttonHeight = button->m_bitmapHeight > 0 ? button->m_bitmapHeight : 20;
-        if (spec.x < 0 || spec.y < 0 || spec.x + buttonWidth > m_w || spec.y + buttonHeight > m_h) {
-            delete button;
-            continue;
-        }
-        button->Create(buttonWidth, buttonHeight);
-        button->Move(m_x + spec.x, m_y + spec.y);
-        button->m_id = spec.id;
-        AddChild(button);
-        if (spec.id == 119) {
-            m_cancelButton = button;
+    if (!IsQtUiRuntimeEnabled()) {
+        for (const ButtonSpec& spec : specs) {
+            auto* button = new UIBitmapButton();
+            button->SetBitmapName(ResolveUiAssetPath(spec.normal).c_str(), 0);
+            button->SetBitmapName(ResolveUiAssetPath(spec.hover).c_str(), 1);
+            button->SetBitmapName(ResolveUiAssetPath(spec.pressed).c_str(), 2);
+            const int buttonWidth = button->m_bitmapWidth > 0 ? button->m_bitmapWidth : 40;
+            const int buttonHeight = button->m_bitmapHeight > 0 ? button->m_bitmapHeight : 20;
+            if (spec.x < 0 || spec.y < 0 || spec.x + buttonWidth > m_w || spec.y + buttonHeight > m_h) {
+                delete button;
+                continue;
+            }
+            button->Create(buttonWidth, buttonHeight);
+            button->Move(m_x + spec.x, m_y + spec.y);
+            button->m_id = spec.id;
+            AddChild(button);
+            if (spec.id == 119) {
+                m_cancelButton = button;
+            }
         }
     }
 
@@ -468,42 +579,41 @@ void UILoginWnd::OnCreate(int cx, int cy)
     m_password->Move(m_x + 92, m_y + 61);
     m_password->m_maskchar = '*';
     m_password->SetFrameColor(242, 242, 242);
-    AddChild(m_password);
+    if (!IsQtUiRuntimeEnabled()) {
+        AddChild(m_password);
+    }
 
     m_login = new UIEditCtrl();
     m_login->Create(kLoginFieldWidth, 18);
     m_login->m_maxchar = 24;
     m_login->Move(m_x + 92, m_y + 29);
     m_login->SetFrameColor(242, 242, 242);
-    AddChild(m_login);
+    if (!IsQtUiRuntimeEnabled()) {
+        AddChild(m_login);
+    }
 
     std::string rememberedUserId;
     bool rememberUserId = false;
     LoadRememberedUserId(&rememberedUserId, &rememberUserId);
+    m_saveAccountChecked = rememberUserId;
     if (rememberUserId && !rememberedUserId.empty()) {
         m_login->SetText(rememberedUserId.c_str());
     }
 
-    m_saveAccountCheck = new UICheckBox();
-    m_saveAccountCheck->SetBitmap(
-        ResolveUiAssetPath("chk_saveon.bmp").c_str(),
-        ResolveUiAssetPath("chk_saveoff.bmp").c_str());
-    m_saveAccountCheck->Create(m_saveAccountCheck->m_w > 0 ? m_saveAccountCheck->m_w : 16,
-        m_saveAccountCheck->m_h > 0 ? m_saveAccountCheck->m_h : 16);
-    m_saveAccountCheck->Move(m_x + 232, m_y + 33);
-    m_saveAccountCheck->SetCheck(rememberUserId ? 1 : 0);
-    AddChild(m_saveAccountCheck);
+    if (!IsQtUiRuntimeEnabled()) {
+        m_saveAccountCheck = new UICheckBox();
+        m_saveAccountCheck->SetBitmap(
+            ResolveUiAssetPath("chk_saveon.bmp").c_str(),
+            ResolveUiAssetPath("chk_saveoff.bmp").c_str());
+        m_saveAccountCheck->Create(m_saveAccountCheck->m_w > 0 ? m_saveAccountCheck->m_w : 16,
+            m_saveAccountCheck->m_h > 0 ? m_saveAccountCheck->m_h : 16);
+        m_saveAccountCheck->Move(m_x + 232, m_y + 33);
+        m_saveAccountCheck->SetCheck(rememberUserId ? 1 : 0);
+        AddChild(m_saveAccountCheck);
+    }
 
     const bool focusPassword = (m_login && m_login->GetText() && m_login->GetText()[0] != '\0');
-    if (m_login) {
-        m_login->m_hasFocus = !focusPassword;
-        m_login->Invalidate();
-    }
-    if (m_password) {
-        m_password->m_hasFocus = focusPassword;
-        m_password->Invalidate();
-    }
-    g_windowMgr.m_editWindow = focusPassword ? static_cast<UIWindow*>(m_password) : static_cast<UIWindow*>(m_login);
+    SetLoginFieldFocus(m_login, m_password, focusPassword);
 }
 
 void UILoginWnd::ClearUiAssets()
@@ -746,7 +856,7 @@ msgresult_t UILoginWnd::SendMsg(UIWindow* sender, int msg, msgparam_t wparam, ms
             PlayUiButtonSound();
             StoreRememberedUserId(
                 m_login ? m_login->GetText() : "",
-                m_saveAccountCheck && m_saveAccountCheck->m_isChecked != 0);
+                IsSaveAccountChecked());
             g_modeMgr.SendMsg(CLoginMode::LoginMsg_SetPassword,
                 reinterpret_cast<msgparam_t>(m_password ? m_password->GetText() : ""), 0, 0);
             g_modeMgr.SendMsg(CLoginMode::LoginMsg_SetUserId,
@@ -775,11 +885,12 @@ msgresult_t UILoginWnd::SendMsg(UIWindow* sender, int msg, msgparam_t wparam, ms
 
         // Check if it's from the save-account checkbox (its m_id may not be a well-known value)
         if (sender == m_saveAccountCheck) {
+            m_saveAccountChecked = (m_saveAccountCheck && m_saveAccountCheck->m_isChecked != 0);
             StoreRememberedUserId(
                 m_login ? m_login->GetText() : "",
-                m_saveAccountCheck->m_isChecked != 0);
+                m_saveAccountChecked);
             return g_modeMgr.SendMsg(CLoginMode::LoginMsg_SaveAccount,
-                m_saveAccountCheck->m_isChecked, 0, m_saveAccountCheck->m_isChecked);
+                m_saveAccountChecked ? 1 : 0, 0, m_saveAccountChecked ? 1 : 0);
         }
     }
 
@@ -790,7 +901,7 @@ msgresult_t UILoginWnd::SendMsg(UIWindow* sender, int msg, msgparam_t wparam, ms
         case 120:
             StoreRememberedUserId(
                 m_login ? m_login->GetText() : "",
-                m_saveAccountCheck && m_saveAccountCheck->m_isChecked != 0);
+                IsSaveAccountChecked());
             g_modeMgr.SendMsg(CLoginMode::LoginMsg_SetPassword,
                 reinterpret_cast<msgparam_t>(m_password ? m_password->GetText() : ""), 0, 0);
             g_modeMgr.SendMsg(CLoginMode::LoginMsg_SetUserId,
@@ -808,11 +919,12 @@ msgresult_t UILoginWnd::SendMsg(UIWindow* sender, int msg, msgparam_t wparam, ms
             break;
         }
         if (sender == m_saveAccountCheck) {
+            m_saveAccountChecked = (m_saveAccountCheck && m_saveAccountCheck->m_isChecked != 0);
             StoreRememberedUserId(
                 m_login ? m_login->GetText() : "",
-                m_saveAccountCheck->m_isChecked != 0);
+                m_saveAccountChecked);
             return g_modeMgr.SendMsg(CLoginMode::LoginMsg_SaveAccount,
-                m_saveAccountCheck->m_isChecked, extra, m_saveAccountCheck->m_isChecked);
+                m_saveAccountChecked ? 1 : 0, extra, m_saveAccountChecked ? 1 : 0);
         }
     }
 
