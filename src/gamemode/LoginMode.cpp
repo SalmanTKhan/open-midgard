@@ -401,6 +401,7 @@ bool QueueLoginUiQuad()
     const std::uint64_t uiStateToken = ComputeLoginUiStateToken(clientWidth, clientHeight);
     const bool needUiRefresh = !s_uiTextureValid || uiDirty || uiStateToken != s_uiStateToken;
     if (needUiRefresh) {
+        const bool qtMenuRuntimeEnabled = IsQtUiRuntimeEnabled();
         if (g_windowMgr.m_wallpaperSurface && g_windowMgr.m_wallpaperSurface->HasSoftwarePixels()) {
             g_windowMgr.DrawWallpaperToDC(s_uiComposeDc, clientWidth, clientHeight);
         } else {
@@ -409,11 +410,13 @@ bool QueueLoginUiQuad()
             DeleteObject(clearBrush);
         }
 
-        g_windowMgr.OnDrawToHdc(s_uiComposeDc);
+        if (!qtMenuRuntimeEnabled) {
+            g_windowMgr.OnDrawToHdc(s_uiComposeDc);
+        }
 
         ConvertOverlayComposeBitsToAlpha(s_uiComposeBits, clientWidth, clientHeight);
         bool renderedQtMenuOverlay = false;
-        if (IsQtUiRuntimeEnabled() && s_qtUiOverlayTexture) {
+        if (qtMenuRuntimeEnabled && s_qtUiOverlayTexture) {
             renderedQtMenuOverlay = RenderQtUiMenuOverlayTexture(
                 s_qtUiOverlayTexture,
                 clientWidth,
