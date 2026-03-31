@@ -2,6 +2,7 @@
 #include "LoginMode.h"
 #include "GameMode.h"
 #include "core/ClientInfoLocale.h"
+#include "qtui/QtUiRuntime.h"
 #include "ui/UIWindowMgr.h"
 #include "main/WinMain.h"
 #include <cstring>
@@ -172,6 +173,7 @@ void CModeMgr::Run(int startMode, const char* worldName)
             }
 
             if (m_curMode) {
+                ProcessQtUiRuntimeEvents();
                 m_curMode->OnRun();
                 RecordMainWindowFrame();
             } else {

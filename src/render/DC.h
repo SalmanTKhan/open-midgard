@@ -5,6 +5,8 @@
 #include <list>
 #include "res/Texture.h"
 
+class CDCBitmap;
+
 // Base class for drawing contexts
 class CDC {
 public:
@@ -23,7 +25,9 @@ public:
     virtual void Update(int x, int y, int w, int h, unsigned int* data, bool skipColorKey) = 0;
 };
 
+void BlitMotionToArgb(unsigned int* dest, int destW, int destH, int baseX, int baseY, class CSprRes* sprRes, const struct CMotion* motion, unsigned int* palette);
 bool DrawActMotionToHdc(HDC hdc, int x, int y, class CSprRes* sprRes, const struct CMotion* motion, unsigned int* palette);
+bool DrawActMotionToBitmap(CDCBitmap* bitmap, int x, int y, class CSprRes* sprRes, const struct CMotion* motion, unsigned int* palette);
 
 // Drawing context for software bitmaps backed by DIB sections
 class CDCBitmap : public CDC {
@@ -51,9 +55,6 @@ protected:
     void CreateDCSurface(unsigned int w, unsigned int h);
     void UpdateSurface();
 
-    HDC m_dc;
-    HBITMAP m_bitmap;
-    HBITMAP m_bitmapOld;
     unsigned int* m_image;
     unsigned int m_w, m_h;
     bool m_dirty;

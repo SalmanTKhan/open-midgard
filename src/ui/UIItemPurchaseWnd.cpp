@@ -191,7 +191,8 @@ void UIItemPurchaseWnd::ActivateButton(ButtonId buttonId)
 
 void UIItemPurchaseWnd::OnDraw()
 {
-    HDC hdc = GetSharedDrawDC();
+    bool useShared = false;
+    HDC hdc = AcquireDrawTarget(&useShared);
     if (!hdc || m_show == 0) {
         return;
     }
@@ -254,6 +255,7 @@ void UIItemPurchaseWnd::OnDraw()
 
     m_lastDrawStateToken = BuildDisplayStateToken();
     m_hasDrawStateToken = true;
+    ReleaseDrawTarget(hdc, useShared);
 }
 
 void UIItemPurchaseWnd::OnLBtnDown(int x, int y)

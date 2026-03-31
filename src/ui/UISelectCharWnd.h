@@ -60,7 +60,7 @@ private:
     void UpdateActionButtons();
     void ClearAssets();
     void ReleaseComposeSurface();
-    bool EnsureComposeSurface(HDC referenceDC, int width, int height);
+    bool EnsureComposeSurface(int width, int height);
     void RebuildVisiblePreviews();
     void BuildPreviewForSlot(int visibleIndex, const CHARACTER_INFO& info);
     void DrawPreview(HDC hdc, const PreviewState& preview) const;

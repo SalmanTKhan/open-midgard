@@ -144,7 +144,8 @@ void UIChooseSellBuyWnd::ActivateButton(ButtonId buttonId)
 
 void UIChooseSellBuyWnd::OnDraw()
 {
-    HDC hdc = GetSharedDrawDC();
+    bool useShared = false;
+    HDC hdc = AcquireDrawTarget(&useShared);
     if (!hdc || m_show == 0) {
         return;
     }
@@ -166,6 +167,7 @@ void UIChooseSellBuyWnd::OnDraw()
 
     m_lastDrawStateToken = BuildDisplayStateToken();
     m_hasDrawStateToken = true;
+    ReleaseDrawTarget(hdc, useShared);
 }
 
 void UIChooseSellBuyWnd::OnLBtnDown(int x, int y)

@@ -3,6 +3,7 @@
 #include "core/File.h"
 #include "render/DC.h"
 #include "render3d/Device.h"
+#include "res/Bitmap.h"
 #include "res/PaletteRes.h"
 #include "session/Session.h"
 #include "gamemode/LoginMode.h"
@@ -10,7 +11,6 @@
 #include "main/WinMain.h"
 #include "ui/UIWindowMgr.h"
 
-#include <gdiplus.h>
 #include <windows.h>
 
 #include <algorithm>
@@ -20,61 +20,12 @@
 #include <cstring>
 #include <vector>
 
-#pragma comment(lib, "gdiplus.lib")
-
 namespace {
-
-ULONG_PTR EnsureGdiplusStarted()
-{
-    static ULONG_PTR s_token = 0;
-    static bool s_started = false;
-    if (!s_started) {
-        Gdiplus::GdiplusStartupInput startupInput;
-        if (Gdiplus::GdiplusStartup(&s_token, &startupInput, nullptr) == Gdiplus::Ok) {
-            s_started = true;
-        }
-    }
-    return s_token;
-}
 
 HBITMAP LoadBitmapFromGameData(const char* path)
 {
-    if (!path || !*path || !EnsureGdiplusStarted()) {
-        return nullptr;
-    }
-
-    int size = 0;
-    unsigned char* bytes = g_fileMgr.GetData(path, &size);
-    if (!bytes || size <= 0) {
-        delete[] bytes;
-        return nullptr;
-    }
-
     HBITMAP outBmp = nullptr;
-    HGLOBAL mem = GlobalAlloc(GMEM_MOVEABLE, static_cast<SIZE_T>(size));
-    if (mem) {
-        void* dst = GlobalLock(mem);
-        if (dst) {
-            std::memcpy(dst, bytes, static_cast<size_t>(size));
-            GlobalUnlock(mem);
-
-            IStream* stream = nullptr;
-            if (CreateStreamOnHGlobal(mem, TRUE, &stream) == S_OK) {
-                auto* bmp = Gdiplus::Bitmap::FromStream(stream, FALSE);
-                if (bmp && bmp->GetLastStatus() == Gdiplus::Ok) {
-                    bmp->GetHBITMAP(RGB(0, 0, 0), &outBmp);
-                }
-                delete bmp;
-                stream->Release();
-            } else {
-                GlobalFree(mem);
-            }
-        } else {
-            GlobalFree(mem);
-        }
-    }
-
-    delete[] bytes;
+    LoadHBitmapFromGameData(path, &outBmp, nullptr, nullptr);
     return outBmp;
 }
 
@@ -369,9 +320,9 @@ void UIMakeCharWnd::ReleaseComposeSurface()
     m_composeHeight = 0;
 }
 
-bool UIMakeCharWnd::EnsureComposeSurface(HDC referenceDC, int width, int height)
+bool UIMakeCharWnd::EnsureComposeSurface(int width, int height)
 {
-    if (!referenceDC || width <= 0 || height <= 0) {
+    if (width <= 0 || height <= 0) {
         return false;
     }
 
@@ -381,12 +332,20 @@ bool UIMakeCharWnd::EnsureComposeSurface(HDC referenceDC, int width, int height)
 
     ReleaseComposeSurface();
 
-    m_composeDC = CreateCompatibleDC(referenceDC);
+    m_composeDC = CreateCompatibleDC(nullptr);
     if (!m_composeDC) {
         return false;
     }
 
-    m_composeBitmap = CreateCompatibleBitmap(referenceDC, width, height);
+    BITMAPINFO bmi{};
+    bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    bmi.bmiHeader.biWidth = width;
+    bmi.bmiHeader.biHeight = -height;
+    bmi.bmiHeader.biPlanes = 1;
+    bmi.bmiHeader.biBitCount = 32;
+    bmi.bmiHeader.biCompression = BI_RGB;
+    void* composeBits = nullptr;
+    m_composeBitmap = CreateDIBSection(nullptr, &bmi, DIB_RGB_COLORS, &composeBits, nullptr, 0);
     if (!m_composeBitmap) {
         ReleaseComposeSurface();
         return false;
@@ -679,14 +638,14 @@ void UIMakeCharWnd::OnDraw()
         OnCreate(clientW, clientH);
     }
 
-    const bool useShared = (UIWindow::GetSharedDrawDC() != nullptr);
-    HDC targetDC = useShared ? UIWindow::GetSharedDrawDC() : GetDC(g_hMainWnd);
+    bool useShared = false;
+    HDC targetDC = AcquireDrawTarget(&useShared);
     if (!targetDC) {
         return;
     }
 
     HDC hdc = targetDC;
-    const bool useCompose = !useShared && EnsureComposeSurface(targetDC, clientW, clientH);
+    const bool useCompose = !useShared && EnsureComposeSurface(clientW, clientH);
     if (useCompose) {
         PatBlt(m_composeDC, 0, 0, clientW, clientH, BLACKNESS);
         g_windowMgr.DrawWallpaperToDC(m_composeDC, clientW, clientH);
@@ -740,18 +699,13 @@ void UIMakeCharWnd::OnDraw()
 
     DrawPreview(hdc, m_preview);
 
-    HDC prevShared = UIWindow::GetSharedDrawDC();
-    UIWindow::SetSharedDrawDC(hdc);
-    DrawChildren();
-    UIWindow::SetSharedDrawDC(prevShared);
+    DrawChildrenToHdc(hdc);
 
     if (useCompose) {
         BitBlt(targetDC, 0, 0, clientW, clientH, hdc, 0, 0, SRCCOPY);
     }
 
-    if (!useShared) {
-        ReleaseDC(g_hMainWnd, targetDC);
-    }
+    ReleaseDrawTarget(targetDC, useShared);
 }
 
 msgresult_t UIMakeCharWnd::SendMsg(UIWindow* sender, int msg, msgparam_t wparam, msgparam_t lparam, msgparam_t extra)

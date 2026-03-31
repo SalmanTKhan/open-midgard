@@ -15,6 +15,10 @@ public:
     msgresult_t SendMsg(UIWindow* sender, int msg, msgparam_t wparam, msgparam_t lparam, msgparam_t extra) override;
     void OnKeyDown(int virtualKey);
     void SetWallpaperName(const std::string& wallpaperName);
+    const char* GetLoginText() const;
+    int GetPasswordLength() const;
+    bool IsSaveAccountChecked() const;
+    bool IsPasswordFocused() const;
 
 private:
     enum UiAssetSlot {
@@ -28,7 +32,7 @@ private:
     void EnsureResourceCache();
     void ClearUiAssets();
     void ReleaseComposeSurface();
-    bool EnsureComposeSurface(HDC referenceDC, int width, int height);
+    bool EnsureComposeSurface(int width, int height);
 
     bool m_controlsCreated;
     bool m_assetsProbed;

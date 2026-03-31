@@ -4,15 +4,14 @@
 #include "core/File.h"
 #include "DebugLog.h"
 #include "main/WinMain.h"
+#include "res/Bitmap.h"
 
-#include <gdiplus.h>
 #include <windows.h>
 
 #include <algorithm>
 #include <array>
 #include <cstring>
 
-#pragma comment(lib, "gdiplus.lib")
 #pragma comment(lib, "msimg32.lib")
 
 namespace {
@@ -174,57 +173,10 @@ std::string ResolveUiButtonSoundPath()
     return s_cachedPath;
 }
 
-ULONG_PTR EnsureGdiplusStarted()
-{
-    static ULONG_PTR s_token = 0;
-    static bool s_started = false;
-    if (!s_started) {
-        Gdiplus::GdiplusStartupInput startupInput;
-        if (Gdiplus::GdiplusStartup(&s_token, &startupInput, nullptr) == Gdiplus::Ok) {
-            s_started = true;
-        }
-    }
-    return s_token;
-}
-
 HBITMAP LoadBitmapFromGameData(const char* path)
 {
-    if (!path || !*path || !EnsureGdiplusStarted()) {
-        return nullptr;
-    }
-
-    int size = 0;
-    unsigned char* bytes = g_fileMgr.GetData(path, &size);
-    if (!bytes || size <= 0) {
-        delete[] bytes;
-        return nullptr;
-    }
-
     HBITMAP outBmp = nullptr;
-    HGLOBAL mem = GlobalAlloc(GMEM_MOVEABLE, static_cast<SIZE_T>(size));
-    if (mem) {
-        void* dst = GlobalLock(mem);
-        if (dst) {
-            std::memcpy(dst, bytes, static_cast<size_t>(size));
-            GlobalUnlock(mem);
-
-            IStream* stream = nullptr;
-            if (CreateStreamOnHGlobal(mem, TRUE, &stream) == S_OK) {
-                auto* bmp = Gdiplus::Bitmap::FromStream(stream, FALSE);
-                if (bmp && bmp->GetLastStatus() == Gdiplus::Ok) {
-                    bmp->GetHBITMAP(RGB(0, 0, 0), &outBmp);
-                }
-                delete bmp;
-                stream->Release();
-            } else {
-                GlobalFree(mem);
-            }
-        } else {
-            GlobalFree(mem);
-        }
-    }
-
-    delete[] bytes;
+    LoadHBitmapFromGameData(path, &outBmp, nullptr, nullptr);
     return outBmp;
 }
 
@@ -347,6 +299,50 @@ void UIWindow::DrawChildren()
         if (child && child->m_show != 0) {
             child->OnDraw();
         }
+    }
+}
+
+void UIWindow::DrawChildrenToHdc(HDC dc)
+{
+    if (!dc) {
+        return;
+    }
+
+    HDC previousSharedDC = UIWindow::GetSharedDrawDC();
+    UIWindow::SetSharedDrawDC(dc);
+    DrawChildren();
+    UIWindow::SetSharedDrawDC(previousSharedDC);
+}
+
+HDC UIWindow::AcquireDrawTarget(bool* outUseShared) const
+{
+    const HDC shared = UIWindow::GetSharedDrawDC();
+    const bool useShared = shared != nullptr;
+    if (outUseShared) {
+        *outUseShared = useShared;
+    }
+    if (useShared) {
+        return shared;
+    }
+    return g_hMainWnd ? GetDC(g_hMainWnd) : nullptr;
+}
+
+void UIWindow::ReleaseDrawTarget(HDC dc, bool useShared) const
+{
+    if (!useShared && dc && g_hMainWnd) {
+        ReleaseDC(g_hMainWnd, dc);
+    }
+}
+
+void UIWindow::DrawChildrenToCurrentTarget(HDC dc, bool useShared)
+{
+    if (!dc) {
+        return;
+    }
+    if (useShared) {
+        DrawChildren();
+    } else {
+        DrawChildrenToHdc(dc);
     }
 }
 
@@ -641,8 +637,8 @@ void UIBitmapButton::OnDraw()
         return;
     }
 
-    const bool useShared = (UIWindow::GetSharedDrawDC() != nullptr);
-    HDC hdc = useShared ? UIWindow::GetSharedDrawDC() : GetDC(g_hMainWnd);
+    bool useShared = false;
+    HDC hdc = AcquireDrawTarget(&useShared);
     if (!hdc) {
         return;
     }
@@ -669,10 +665,8 @@ void UIBitmapButton::OnDraw()
             DrawBitmapTransparent(hdc, drawBmp, dst);
         }
     }
-    if (!useShared) {
-        ReleaseDC(g_hMainWnd, hdc);
-    }
-    DrawChildren();
+    DrawChildrenToCurrentTarget(hdc, useShared);
+    ReleaseDrawTarget(hdc, useShared);
 }
 
 void UIBitmapButton::OnLBtnDown(int x, int y)
@@ -817,8 +811,8 @@ void UIEditCtrl::OnDraw()
         return;
     }
 
-    const bool useShared = (UIWindow::GetSharedDrawDC() != nullptr);
-    HDC hdc = useShared ? UIWindow::GetSharedDrawDC() : GetDC(g_hMainWnd);
+    bool useShared = false;
+    HDC hdc = AcquireDrawTarget(&useShared);
     if (!hdc) {
         return;
     }
@@ -841,10 +835,8 @@ void UIEditCtrl::OnDraw()
     RECT textRc = { m_x + m_xOffset, m_y + m_yOffset, m_x + m_w - 2, m_y + m_h - 2 };
     DrawTextA(hdc, drawText.c_str(), -1, &textRc, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
 
-    if (!useShared) {
-        ReleaseDC(g_hMainWnd, hdc);
-    }
-    DrawChildren();
+    DrawChildrenToCurrentTarget(hdc, useShared);
+    ReleaseDrawTarget(hdc, useShared);
 }
 
 UICheckBox::UICheckBox()
@@ -910,8 +902,8 @@ void UICheckBox::OnDraw()
         return;
     }
 
-    const bool useShared = (UIWindow::GetSharedDrawDC() != nullptr);
-    HDC hdc = useShared ? UIWindow::GetSharedDrawDC() : GetDC(g_hMainWnd);
+    bool useShared = false;
+    HDC hdc = AcquireDrawTarget(&useShared);
     if (!hdc) {
         return;
     }
@@ -949,10 +941,8 @@ void UICheckBox::OnDraw()
             DeleteObject(pen);
         }
     }
-    if (!useShared) {
-        ReleaseDC(g_hMainWnd, hdc);
-    }
-    DrawChildren();
+    DrawChildrenToCurrentTarget(hdc, useShared);
+    ReleaseDrawTarget(hdc, useShared);
 }
 
 void UICheckBox::OnLBtnUp(int x, int y)

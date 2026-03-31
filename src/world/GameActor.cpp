@@ -26,6 +26,7 @@
 #include <cstdio>
 #include <cstring>
 #include <map>
+#include <vector>
 
 namespace {
 
@@ -76,6 +77,33 @@ constexpr float kItemBillboardDepthBias = 0.00015f;
 constexpr float kItemProjectNearPlane = 10.0f;
 constexpr float kItemProjectSubmitNearPlane = 80.0f;
 constexpr const char* kLegacyItemSpriteRoot = "data\\sprite\\\xBE\xC6\xC0\xCC\xC5\xDB\\";
+
+struct BillboardComposeSurface {
+    BillboardComposeSurface(int width, int height)
+        : m_width(width), m_height(height), m_pixels(static_cast<size_t>(width) * static_cast<size_t>(height), 0u)
+    {
+    }
+
+    void Clear(unsigned int color)
+    {
+        std::fill(m_pixels.begin(), m_pixels.end(), color);
+    }
+
+    void BltSprite(int x, int y, CSprRes* sprRes, const CMotion* motion, unsigned int* palette)
+    {
+        BlitMotionToArgb(m_pixels.data(), m_width, m_height, x, y, sprRes, motion, palette);
+    }
+
+    unsigned int* GetImageData() { return m_pixels.data(); }
+    const unsigned int* GetImageData() const { return m_pixels.data(); }
+    int GetWidth() const { return m_width; }
+    int GetHeight() const { return m_height; }
+
+private:
+    int m_width = 0;
+    int m_height = 0;
+    std::vector<unsigned int> m_pixels;
+};
 
 #define LOG_ACT_LOAD(...) do { if constexpr (kLogActLoad) { DbgLog(__VA_ARGS__); } } while (0)
 
@@ -512,7 +540,7 @@ void DrawRing(unsigned int* pixels, int width, int height, float centerX, float 
     }
 }
 
-bool DrawWarpPortalFallback(CDCBitmap& bitmap, const CPc& actor, int* outJob)
+bool DrawWarpPortalFallback(BillboardComposeSurface& bitmap, const CPc& actor, int* outJob)
 {
     if (actor.m_job == kJobHiddenWarpNpc || !IsPortalFallbackJob(actor.m_job)) {
         return false;
@@ -1316,7 +1344,7 @@ POINT GetPlayerLayerPoint(int layerPriority,
     return point;
 }
 
-bool DrawAttachedAccessoryMotion(CDCBitmap& bitmap,
+bool DrawAttachedAccessoryMotion(BillboardComposeSurface& bitmap,
     int drawX,
     int drawY,
     int curAction,
@@ -1356,7 +1384,7 @@ bool DrawAttachedAccessoryMotion(CDCBitmap& bitmap,
     return true;
 }
 
-bool DrawPlayerLayer(CDCBitmap& bitmap,
+bool DrawPlayerLayer(BillboardComposeSurface& bitmap,
     int drawX,
     int drawY,
     int layerIndex,
@@ -1437,7 +1465,7 @@ bool DrawPlayerLayer(CDCBitmap& bitmap,
     return true;
 }
 
-bool DrawPcBillboard(CDCBitmap& bitmap,
+bool DrawPcBillboard(BillboardComposeSurface& bitmap,
     const CPc& actor,
     int drawX,
     int drawY,
@@ -1621,7 +1649,7 @@ void LogNonPcBillboardFailureOnce(int job, const char* jobName, int bodyAction, 
 bool ResolveCachedNonPcResourcesForActor(CPc& actor, CActRes** outActRes, CSprRes** outSprRes);
 CActRes* ResolveRuntimeActorActRes(CRenderObject* object);
 
-bool DrawNonPcBillboard(CDCBitmap& bitmap,
+bool DrawNonPcBillboard(BillboardComposeSurface& bitmap,
     const CPc& actor,
     int drawX,
     int drawY,
@@ -2916,9 +2944,8 @@ bool EnsureItemBillboardTexture(CItem& item)
         return false;
     }
 
-    CDCBitmap composeSurface(kItemBillboardComposeWidth, kItemBillboardComposeHeight);
-    RECT clearRect{ 0, 0, kItemBillboardComposeWidth, kItemBillboardComposeHeight };
-    composeSurface.ClearSurface(&clearRect, 0x00000000u);
+    BillboardComposeSurface composeSurface(kItemBillboardComposeWidth, kItemBillboardComposeHeight);
+    composeSurface.Clear(0x00000000u);
     composeSurface.BltSprite(kItemBillboardAnchorX,
         kItemBillboardAnchorY,
         item.m_sprRes,
@@ -3389,9 +3416,8 @@ bool CPc::EnsureBillboardTexture(float cameraLongitude)
         }
     }
 
-    CDCBitmap composeSurface(kPlayerBillboardComposeWidth, kPlayerBillboardComposeHeight);
-    RECT clearRect{ 0, 0, kPlayerBillboardComposeWidth, kPlayerBillboardComposeHeight };
-    composeSurface.ClearSurface(&clearRect, 0x00000000u);
+    BillboardComposeSurface composeSurface(kPlayerBillboardComposeWidth, kPlayerBillboardComposeHeight);
+    composeSurface.Clear(0x00000000u);
 
     int resolvedJob = -1;
     int resolvedHead = -1;

@@ -44,7 +44,7 @@ private:
     void EnsureButtons();
     void ClearAssets();
     void ReleaseComposeSurface();
-    bool EnsureComposeSurface(HDC referenceDC, int width, int height);
+    bool EnsureComposeSurface(int width, int height);
     void DrawHexagon(HDC hdc) const;
     void RebuildPreview();
     void DrawPreview(HDC hdc, const PreviewState& preview);

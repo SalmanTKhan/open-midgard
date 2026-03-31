@@ -3,6 +3,7 @@
 #include <windows.h>
 #include <ddraw.h>
 #include <d3d.h>
+#include <vector>
 
 enum PixelFormat {
     PF_DEFAULT = 0,
@@ -24,11 +25,13 @@ public:
     virtual void DrawSurface(int x, int y, int w, int h, unsigned int color);
     virtual void DrawSurfaceStretch(int x, int y, int w, int h);
     virtual void Update(int x, int y, int w, int h, unsigned int* data, bool skipColorKey, int lPitch);
+    bool HasSoftwarePixels() const { return !m_softwarePixels.empty() && m_w > 0 && m_h > 0; }
+    const unsigned int* GetSoftwarePixels() const { return m_softwarePixels.empty() ? nullptr : m_softwarePixels.data(); }
 
 public:
     IDirectDrawSurface7* m_pddsSurface;
     unsigned int m_w, m_h;
-    HBITMAP m_hBitmap;
+    std::vector<unsigned int> m_softwarePixels;
 };
 
 class CTexture : public CSurface {

@@ -18,6 +18,7 @@
 #include "network/Connection.h"
 #include "core/DllMgr.h"
 #include "core/ClientInfoLocale.h"
+#include "qtui/QtUiRuntime.h"
 #include "ui/UIOptionWnd.h"
 #include "ui/UIWindowMgr.h"
 #include "render3d/Device.h"
@@ -257,6 +258,8 @@ int ReadRegistry()
 // ---------------------------------------------------------------------------
 LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
+    NotifyQtUiRuntimeWindowMessage(msg, wParam, lParam);
+
     switch (msg)
     {
     case WM_ACTIVATE:
@@ -502,6 +505,7 @@ static bool InitClientSystems()
 
     g_renderer.Init();
     g_renderer.SetSize(renderW, renderH);
+    InitializeQtUiRuntime(g_hMainWnd);
     return true;
 }
 
@@ -629,6 +633,7 @@ int __stdcall WinMain(HINSTANCE hInstance, HINSTANCE /*hPrevInstance*/,
     // CDllMgr cleanup will happen automatically if we add it to a destructor or call it explicitly
     CConnection::Cleanup();
     g_windowMgr.Reset();
+    ShutdownQtUiRuntime();
     GetRenderDevice().Shutdown();
     UnInitMSS();
 

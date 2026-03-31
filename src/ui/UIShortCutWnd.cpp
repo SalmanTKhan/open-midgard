@@ -192,10 +192,8 @@ void UIShortCutWnd::StoreInfo()
 
 void UIShortCutWnd::OnDraw()
 {
-    HDC hdc = UIWindow::GetSharedDrawDC();
-    if (!hdc) {
-        hdc = GetDC(g_hMainWnd);
-    }
+    bool useShared = false;
+    HDC hdc = AcquireDrawTarget(&useShared);
     if (!hdc) {
         return;
     }
@@ -259,9 +257,7 @@ void UIShortCutWnd::OnDraw()
     RECT pageRect{ m_x + m_w - kPageTextInsetX - 12, m_y + m_h - kPageTextInsetY, m_x + m_w - 2, m_y + m_h - 2 };
     DrawOutlinedText(hdc, pageRect, std::to_string(g_session.GetShortcutPage() + 1), RGB(255, 255, 255));
 
-    if (UIWindow::GetSharedDrawDC() == nullptr) {
-        ReleaseDC(g_hMainWnd, hdc);
-    }
+    ReleaseDrawTarget(hdc, useShared);
 
     m_lastDrawStateToken = BuildDisplayStateToken();
     m_hasDrawStateToken = true;

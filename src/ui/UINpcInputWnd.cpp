@@ -185,11 +185,8 @@ void UINpcInputWnd::OnDraw()
         return;
     }
 
-    HDC hdc = UIWindow::GetSharedDrawDC();
-    const bool useShared = (hdc != nullptr);
-    if (!useShared) {
-        hdc = GetDC(g_hMainWnd);
-    }
+    bool useShared = false;
+    HDC hdc = AcquireDrawTarget(&useShared);
     if (!hdc) {
         return;
     }
@@ -206,18 +203,13 @@ void UINpcInputWnd::OnDraw()
     SetTextColor(hdc, RGB(0, 0, 0));
     DrawTextA(hdc, label, -1, &labelRect, DT_LEFT | DT_TOP | DT_SINGLELINE);
 
-    HDC previousShared = UIWindow::GetSharedDrawDC();
-    UIWindow::SetSharedDrawDC(hdc);
-    DrawChildren();
-    UIWindow::SetSharedDrawDC(previousShared);
+    DrawChildrenToHdc(hdc);
 
     DrawButton(hdc, GetOkRect(), "OK", m_pressedTarget == ClickTarget::Ok);
     DrawButton(hdc, GetCancelRect(), "Cancel", m_pressedTarget == ClickTarget::Cancel);
 
     SelectObject(hdc, oldFont);
-    if (!useShared) {
-        ReleaseDC(g_hMainWnd, hdc);
-    }
+    ReleaseDrawTarget(hdc, useShared);
 }
 
 void UINpcInputWnd::OpenForMode(u32 npcId, InputMode mode)

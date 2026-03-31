@@ -5,6 +5,7 @@
 #include "gamemode/LoginMode.h"
 #include "gamemode/Mode.h"
 #include "main/WinMain.h"
+#include "qtui/QtUiRuntime.h"
 #include "render/DrawUtil.h"
 #include "ui/UIWindowMgr.h"
 
@@ -80,6 +81,7 @@ void UISelectServerWnd::SyncGeometry()
         y = 8;
     }
     Move(x, y);
+    RebuildEntryRects();
 }
 
 void UISelectServerWnd::OnCreate(int cx, int cy)
@@ -105,6 +107,26 @@ int UISelectServerWnd::HitTestEntry(int x, int y) const
     return -1;
 }
 
+void UISelectServerWnd::RebuildEntryRects()
+{
+    m_entryRects.clear();
+
+    const std::vector<ClientInfoConnection>& connections = GetClientInfoConnections();
+    const int listLeft = m_x + kWindowPadding;
+    const int listTop = m_y + kWindowPadding + kTitleHeight;
+    const int listWidth = m_w - kWindowPadding * 2;
+
+    for (size_t index = 0; index < connections.size(); ++index) {
+        RECT rowRect = {
+            listLeft,
+            listTop + static_cast<int>(index) * kRowHeight,
+            listLeft + listWidth,
+            listTop + static_cast<int>(index + 1) * kRowHeight - 2
+        };
+        m_entryRects.push_back(rowRect);
+    }
+}
+
 void UISelectServerWnd::OnDraw()
 {
     if (!g_hMainWnd || m_show == 0 || GetClientInfoConnectionCount() <= 1) {
@@ -113,17 +135,17 @@ void UISelectServerWnd::OnDraw()
 
     EnsureCreated();
     SyncGeometry();
+    RebuildEntryRects();
 
-    HDC hdc = UIWindow::GetSharedDrawDC();
-    const bool useShared = (hdc != nullptr);
-    if (!useShared) {
-        hdc = GetDC(g_hMainWnd);
-    }
-    if (!hdc) {
+    if (IsQtUiRuntimeEnabled()) {
         return;
     }
 
-    m_entryRects.clear();
+    bool useShared = false;
+    HDC hdc = AcquireDrawTarget(&useShared);
+    if (!hdc) {
+        return;
+    }
 
     RECT panel = { m_x, m_y, m_x + m_w, m_y + m_h };
     HBRUSH panelBrush = CreateSolidBrush(RGB(243, 240, 231));
@@ -147,16 +169,9 @@ void UISelectServerWnd::OnDraw()
     const int selectedIndex = GetSelectedClientInfoIndex();
     const int listLeft = m_x + kWindowPadding;
     const int listTop = m_y + kWindowPadding + kTitleHeight;
-    const int listWidth = m_w - kWindowPadding * 2;
 
     for (size_t index = 0; index < connections.size(); ++index) {
-        RECT rowRect = {
-            listLeft,
-            listTop + static_cast<int>(index) * kRowHeight,
-            listLeft + listWidth,
-            listTop + static_cast<int>(index + 1) * kRowHeight - 2
-        };
-        m_entryRects.push_back(rowRect);
+        const RECT& rowRect = m_entryRects[index];
 
         COLORREF fill = RGB(250, 248, 242);
         if (static_cast<int>(index) == selectedIndex) {
@@ -182,13 +197,13 @@ void UISelectServerWnd::OnDraw()
         }
     }
 
-    if (!useShared) {
-        ReleaseDC(g_hMainWnd, hdc);
-    }
+    DrawChildrenToCurrentTarget(hdc, useShared);
+    ReleaseDrawTarget(hdc, useShared);
 }
 
 void UISelectServerWnd::OnLBtnDown(int x, int y)
 {
+    RebuildEntryRects();
     const int index = HitTestEntry(x, y);
     if (index >= 0) {
         PlayUiButtonSound();
@@ -206,6 +221,7 @@ void UISelectServerWnd::OnLBtnDblClk(int x, int y)
 
 void UISelectServerWnd::OnMouseMove(int x, int y)
 {
+    RebuildEntryRects();
     m_hoverIndex = HitTestEntry(x, y);
     UIFrameWnd::OnMouseMove(x, y);
 }

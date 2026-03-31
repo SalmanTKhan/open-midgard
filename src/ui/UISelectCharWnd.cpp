@@ -7,13 +7,13 @@
 #include "render/DC.h"
 #include "render3d/Device.h"
 #include "res/ActRes.h"
+#include "res/Bitmap.h"
 #include "res/ImfRes.h"
 #include "res/PaletteRes.h"
 #include "res/Sprite.h"
 #include "session/Session.h"
 #include "ui/UIWindowMgr.h"
 
-#include <gdiplus.h>
 #include <windows.h>
 
 #include <algorithm>
@@ -22,8 +22,6 @@
 #include <cstdio>
 #include <cstring>
 #include <vector>
-
-#pragma comment(lib, "gdiplus.lib")
 
 namespace {
 
@@ -45,57 +43,10 @@ constexpr int kPageButtonHeight = 48;
 constexpr char kRegPath[] = "Software\\Gravity Soft\\Ragnarok Online";
 constexpr char kCurSlotValue[] = "CURSLOT";
 
-ULONG_PTR EnsureGdiplusStarted()
-{
-    static ULONG_PTR s_token = 0;
-    static bool s_started = false;
-    if (!s_started) {
-        Gdiplus::GdiplusStartupInput startupInput;
-        if (Gdiplus::GdiplusStartup(&s_token, &startupInput, nullptr) == Gdiplus::Ok) {
-            s_started = true;
-        }
-    }
-    return s_token;
-}
-
 HBITMAP LoadBitmapFromGameData(const char* path)
 {
-    if (!path || !*path || !EnsureGdiplusStarted()) {
-        return nullptr;
-    }
-
-    int size = 0;
-    unsigned char* bytes = g_fileMgr.GetData(path, &size);
-    if (!bytes || size <= 0) {
-        delete[] bytes;
-        return nullptr;
-    }
-
     HBITMAP outBmp = nullptr;
-    HGLOBAL mem = GlobalAlloc(GMEM_MOVEABLE, static_cast<SIZE_T>(size));
-    if (mem) {
-        void* dst = GlobalLock(mem);
-        if (dst) {
-            std::memcpy(dst, bytes, static_cast<size_t>(size));
-            GlobalUnlock(mem);
-
-            IStream* stream = nullptr;
-            if (CreateStreamOnHGlobal(mem, TRUE, &stream) == S_OK) {
-                auto* bmp = Gdiplus::Bitmap::FromStream(stream, FALSE);
-                if (bmp && bmp->GetLastStatus() == Gdiplus::Ok) {
-                    bmp->GetHBITMAP(RGB(0, 0, 0), &outBmp);
-                }
-                delete bmp;
-                stream->Release();
-            } else {
-                GlobalFree(mem);
-            }
-        } else {
-            GlobalFree(mem);
-        }
-    }
-
-    delete[] bytes;
+    LoadHBitmapFromGameData(path, &outBmp, nullptr, nullptr);
     return outBmp;
 }
 
@@ -588,9 +539,9 @@ void UISelectCharWnd::ReleaseComposeSurface()
     m_composeHeight = 0;
 }
 
-bool UISelectCharWnd::EnsureComposeSurface(HDC referenceDC, int width, int height)
+bool UISelectCharWnd::EnsureComposeSurface(int width, int height)
 {
-    if (!referenceDC || width <= 0 || height <= 0) {
+    if (width <= 0 || height <= 0) {
         return false;
     }
 
@@ -600,12 +551,20 @@ bool UISelectCharWnd::EnsureComposeSurface(HDC referenceDC, int width, int heigh
 
     ReleaseComposeSurface();
 
-    m_composeDC = CreateCompatibleDC(referenceDC);
+    m_composeDC = CreateCompatibleDC(nullptr);
     if (!m_composeDC) {
         return false;
     }
 
-    m_composeBitmap = CreateCompatibleBitmap(referenceDC, width, height);
+    BITMAPINFO bmi{};
+    bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    bmi.bmiHeader.biWidth = width;
+    bmi.bmiHeader.biHeight = -height;
+    bmi.bmiHeader.biPlanes = 1;
+    bmi.bmiHeader.biBitCount = 32;
+    bmi.bmiHeader.biCompression = BI_RGB;
+    void* composeBits = nullptr;
+    m_composeBitmap = CreateDIBSection(nullptr, &bmi, DIB_RGB_COLORS, &composeBits, nullptr, 0);
     if (!m_composeBitmap) {
         ReleaseComposeSurface();
         return false;
@@ -1115,14 +1074,14 @@ void UISelectCharWnd::OnDraw()
     UpdateActionButtons();
     RebuildVisiblePreviews();
 
-    const bool useShared = (UIWindow::GetSharedDrawDC() != nullptr);
-    HDC targetDC = useShared ? UIWindow::GetSharedDrawDC() : GetDC(g_hMainWnd);
+    bool useShared = false;
+    HDC targetDC = AcquireDrawTarget(&useShared);
     if (!targetDC) {
         return;
     }
 
     HDC hdc = targetDC;
-    const bool useCompose = EnsureComposeSurface(targetDC, clientW, clientH);
+    const bool useCompose = EnsureComposeSurface(clientW, clientH);
     if (useCompose) {
         PatBlt(m_composeDC, 0, 0, clientW, clientH, BLACKNESS);
         g_windowMgr.DrawWallpaperToDC(m_composeDC, clientW, clientH);
@@ -1201,16 +1160,11 @@ void UISelectCharWnd::OnDraw()
         std::snprintf(line, sizeof(line), "%d", info.Luk); drawLabel(213, 286, line);
     }
 
-    HDC prevShared = UIWindow::GetSharedDrawDC();
-    UIWindow::SetSharedDrawDC(hdc);
-    DrawChildren();
-    UIWindow::SetSharedDrawDC(prevShared);
+    DrawChildrenToHdc(hdc);
 
     if (useCompose) {
         BitBlt(targetDC, 0, 0, clientW, clientH, hdc, 0, 0, SRCCOPY);
     }
 
-    if (!useShared) {
-        ReleaseDC(g_hMainWnd, targetDC);
-    }
+    ReleaseDrawTarget(targetDC, useShared);
 }

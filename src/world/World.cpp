@@ -1506,6 +1506,23 @@ public:
         return IsPortalLike() && DoesWorldPositionCoverAttrCell(attr, m_source.pos, ResolveFixedEffectRadius(m_source), attrX, attrY);
     }
 
+    bool ResolveCullSphere(vector3d* outCenter, float* outRadius) const
+    {
+        if (!outCenter || !outRadius) {
+            return false;
+        }
+
+        if (m_effect && m_effect->ResolveCullSphere(outCenter, outRadius)) {
+            return true;
+        }
+
+        const float baseRadius = ResolveFixedEffectRadius(m_source);
+        const float height = ResolveFixedEffectHeight(m_source);
+        *outCenter = m_source.pos;
+        *outRadius = std::sqrt(baseRadius * baseRadius + height * height);
+        return true;
+    }
+
     void Render(matrix* viewMatrix) override
     {
         if (m_effect) {
@@ -1949,23 +1966,23 @@ float MaxBackgroundActorScale(const C3dActor& actor)
         (std::max)(std::fabs(actor.m_scale.y), std::fabs(actor.m_scale.z)));
 }
 
-bool ShouldRenderBackgroundActor(const C3dActor& actor, const matrix& viewMatrix)
+bool IsWorldSphereVisible(const vector3d& worldPos, float worldRadius, const matrix& viewMatrix)
 {
-    const float clipX = actor.m_pos.x * viewMatrix.m[0][0]
-        + actor.m_pos.y * viewMatrix.m[1][0]
-        + actor.m_pos.z * viewMatrix.m[2][0]
+    const float radius = (std::max)(1.0f, worldRadius);
+    const float clipX = worldPos.x * viewMatrix.m[0][0]
+        + worldPos.y * viewMatrix.m[1][0]
+        + worldPos.z * viewMatrix.m[2][0]
         + viewMatrix.m[3][0];
-    const float clipY = actor.m_pos.x * viewMatrix.m[0][1]
-        + actor.m_pos.y * viewMatrix.m[1][1]
-        + actor.m_pos.z * viewMatrix.m[2][1]
+    const float clipY = worldPos.x * viewMatrix.m[0][1]
+        + worldPos.y * viewMatrix.m[1][1]
+        + worldPos.z * viewMatrix.m[2][1]
         + viewMatrix.m[3][1];
-    const float clipZ = actor.m_pos.x * viewMatrix.m[0][2]
-        + actor.m_pos.y * viewMatrix.m[1][2]
-        + actor.m_pos.z * viewMatrix.m[2][2]
+    const float clipZ = worldPos.x * viewMatrix.m[0][2]
+        + worldPos.y * viewMatrix.m[1][2]
+        + worldPos.z * viewMatrix.m[2][2]
         + viewMatrix.m[3][2];
 
-    const float worldRadius = (std::max)(1.0f, actor.m_boundRadius * (std::max)(1.0f, MaxBackgroundActorScale(actor)));
-    if (!std::isfinite(clipZ) || clipZ < (kBackgroundObjectCullNearZ - worldRadius) || clipZ > (kBackgroundObjectCullFarZ + worldRadius)) {
+    if (!std::isfinite(clipZ) || clipZ < (kBackgroundObjectCullNearZ - radius) || clipZ > (kBackgroundObjectCullFarZ + radius)) {
         return false;
     }
 
@@ -1973,12 +1990,45 @@ bool ShouldRenderBackgroundActor(const C3dActor& actor, const matrix& viewMatrix
     const float projectedY = g_renderer.m_yoffset + clipY * g_renderer.m_vpc / clipZ;
     const float projectedRadius = (std::max)(
         kBackgroundObjectCullPadding,
-        worldRadius * ((std::max)(std::fabs(g_renderer.m_hpc), std::fabs(g_renderer.m_vpc)) / clipZ));
+        radius * ((std::max)(std::fabs(g_renderer.m_hpc), std::fabs(g_renderer.m_vpc)) / clipZ));
 
     return projectedX >= -projectedRadius
         && projectedX <= static_cast<float>(g_renderer.m_width) + projectedRadius
         && projectedY >= -projectedRadius
         && projectedY <= static_cast<float>(g_renderer.m_height) + projectedRadius;
+}
+
+bool ShouldRenderBackgroundActor(const C3dActor& actor, const matrix& viewMatrix)
+{
+    const float worldRadius = (std::max)(1.0f, actor.m_boundRadius * (std::max)(1.0f, MaxBackgroundActorScale(actor)));
+    return IsWorldSphereVisible(actor.m_pos, worldRadius, viewMatrix);
+}
+
+bool ResolveGameObjectCullSphere(const CGameObject& object, vector3d* outCenter, float* outRadius)
+{
+    if (!outCenter || !outRadius) {
+        return false;
+    }
+
+    if (const CFixedWorldEffect* effect = dynamic_cast<const CFixedWorldEffect*>(&object)) {
+        return effect->ResolveCullSphere(outCenter, outRadius);
+    }
+
+    if (const CRagEffect* effect = dynamic_cast<const CRagEffect*>(&object)) {
+        return effect->ResolveCullSphere(outCenter, outRadius);
+    }
+
+    return false;
+}
+
+bool ShouldRenderGameObject(const CGameObject& object, const matrix& viewMatrix)
+{
+    vector3d center{};
+    float radius = 0.0f;
+    if (!ResolveGameObjectCullSphere(object, &center, &radius)) {
+        return true;
+    }
+    return IsWorldSphereVisible(center, radius, viewMatrix);
 }
 
 u32 ResolveBackgroundActorUpdateInterval(const C3dActor& actor,
@@ -4774,6 +4824,9 @@ void CWorld::RenderGameObjects(const matrix& viewMatrix) const
 {
     for (CGameObject* object : m_gameObjectList) {
         if (!object) {
+            continue;
+        }
+        if (!ShouldRenderGameObject(*object, viewMatrix)) {
             continue;
         }
         object->Render(const_cast<matrix*>(&viewMatrix));

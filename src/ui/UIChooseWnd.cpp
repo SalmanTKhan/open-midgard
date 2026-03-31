@@ -320,11 +320,8 @@ void UIChooseWnd::OnDraw()
         return;
     }
 
-    HDC hdc = UIWindow::GetSharedDrawDC();
-    const bool useShared = (hdc != nullptr);
-    if (!useShared) {
-        hdc = GetDC(g_hMainWnd);
-    }
+    bool useShared = false;
+    HDC hdc = AcquireDrawTarget(&useShared);
     if (!hdc) {
         return;
     }
@@ -334,14 +331,9 @@ void UIChooseWnd::OnDraw()
     const RECT panel = MakeRect(m_x, m_y, m_w, m_h);
     FillRoundedRectColor(hdc, panel, RGB(255, 255, 255), kWindowCornerRadius);
 
-    HDC previousShared = UIWindow::GetSharedDrawDC();
-    UIWindow::SetSharedDrawDC(hdc);
-    DrawChildren();
-    UIWindow::SetSharedDrawDC(previousShared);
+    DrawChildrenToHdc(hdc);
 
-    if (!useShared) {
-        ReleaseDC(g_hMainWnd, hdc);
-    }
+    ReleaseDrawTarget(hdc, useShared);
 }
 
 void UIChooseWnd::OnLBtnDown(int x, int y)

@@ -1,5 +1,7 @@
 #include "UILoadingWnd.h"
 
+#include "qtui/QtUiRuntime.h"
+
 #include <windows.h>
 
 #include <algorithm>
@@ -35,14 +37,21 @@ UILoadingWnd::~UILoadingWnd() = default;
 
 void UILoadingWnd::SetProgress(float progress)
 {
-    m_progress = (std::max)(0.0f, (std::min)(1.0f, progress));
+    const float clamped = (std::max)(0.0f, (std::min)(1.0f, progress));
+    if (m_progress == clamped) {
+        return;
+    }
+    m_progress = clamped;
+    Invalidate();
 }
 
 void UILoadingWnd::SetMessage(const std::string& message)
 {
-    if (!message.empty()) {
-        m_message = message;
+    if (message.empty() || m_message == message) {
+        return;
     }
+    m_message = message;
+    Invalidate();
 }
 
 float UILoadingWnd::GetProgress() const
@@ -63,7 +72,12 @@ void UILoadingWnd::OnCreate(int x, int y)
 
 void UILoadingWnd::OnDraw()
 {
-    HDC hdc = UIWindow::GetSharedDrawDC();
+    if (IsQtUiRuntimeEnabled()) {
+        return;
+    }
+
+    bool useShared = false;
+    HDC hdc = AcquireDrawTarget(&useShared);
     if (!hdc || !g_hMainWnd) {
         return;
     }
@@ -128,4 +142,5 @@ void UILoadingWnd::OnDraw()
     SelectObject(hdc, oldFont);
     DeleteObject(titleFont);
     DeleteObject(bodyFont);
+    ReleaseDrawTarget(hdc, useShared);
 }

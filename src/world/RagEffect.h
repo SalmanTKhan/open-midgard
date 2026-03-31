@@ -159,6 +159,7 @@ public:
 
     vector3d ResolveBasePosition() const;
     float ResolveBaseRotation() const;
+    bool ResolveCullSphere(vector3d* outCenter, float* outRadius) const;
 
 private:
     enum class Handler {

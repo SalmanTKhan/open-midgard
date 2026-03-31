@@ -12,6 +12,7 @@ class UILoginWnd;
 class UISelectServerWnd;
 class UISelectCharWnd;
 class UIMakeCharWnd;
+class UIWaitWnd;
 class UIItemWnd;
 class UIQuestWnd;
 class UIBasicInfoWnd;
@@ -85,10 +86,13 @@ public:
     void Reset();
     void OnProcess();
     void OnDraw();
+    void OnDrawToHdc(HDC targetDC);
+    void DrawVisibleWindowsToHdc(HDC targetDC, bool includeRoMap);
     bool HasDirtyVisualState() const;
     bool HasDirtyVisualStateExcludingRoMap() const;
     bool HasRoMapDirtyVisualState() const;
     void OnDrawExcludingRoMap();
+    void OnDrawExcludingRoMapToHdc(HDC targetDC);
     bool DrawRoMapToHdc(HDC targetDC, int x, int y);
     bool GetRoMapRect(RECT* outRect) const;
     void RenderWallPaper();
@@ -170,6 +174,7 @@ public:
     UISelectServerWnd* m_selectServerWnd;
     UISelectCharWnd* m_selectCharWnd;
     UIMakeCharWnd* m_makeCharWnd;
+    UIWaitWnd* m_waitWnd;
     UIChooseWnd* m_chooseWnd;
     UIOptionWnd* m_optionWnd;
     UIItemWnd* m_itemWnd;
@@ -197,7 +202,7 @@ public:
 private:
     UIWindow* HitTestWindow(int x, int y) const;
     void ReleaseComposeSurface();
-    bool EnsureComposeSurface(HDC referenceDC, int width, int height);
+    bool EnsureComposeSurface(int width, int height);
 };
 
 extern UIWindowMgr g_windowMgr;

@@ -224,8 +224,8 @@ void UINewChatWnd::OnDraw()
         return;
     }
 
-    const bool useShared = (UIWindow::GetSharedDrawDC() != nullptr);
-    HDC hdc = useShared ? UIWindow::GetSharedDrawDC() : GetDC(g_hMainWnd);
+    bool useShared = false;
+    HDC hdc = AcquireDrawTarget(&useShared);
     if (!hdc) {
         return;
     }
@@ -318,9 +318,7 @@ void UINewChatWnd::OnDraw()
     DrawTextA(hdc, drawText.c_str(), -1, &inputTextRc, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
 
     RestoreDC(hdc, savedDc);
-    if (!useShared) {
-        ReleaseDC(g_hMainWnd, hdc);
-    }
+    ReleaseDrawTarget(hdc, useShared);
 
     m_lastDrawTick = GetTickCount();
     m_isDirty = 0;

@@ -3,9 +3,9 @@
 #include "audio/Audio.h"
 #include "core/File.h"
 #include "main/WinMain.h"
+#include "res/Bitmap.h"
 #include "ui/UIWindowMgr.h"
 
-#include <gdiplus.h>
 #include <windows.h>
 
 #include <algorithm>
@@ -14,8 +14,6 @@
 #include <cstring>
 #include <string>
 #include <vector>
-
-#pragma comment(lib, "gdiplus.lib")
 
 namespace {
 
@@ -82,57 +80,10 @@ constexpr std::array<RenderBackendType, 4> kRendererEntries = {
     RenderBackendType::Vulkan,
 };
 
-ULONG_PTR EnsureGdiplusStarted()
-{
-    static ULONG_PTR s_token = 0;
-    static bool s_started = false;
-    if (!s_started) {
-        Gdiplus::GdiplusStartupInput startupInput;
-        if (Gdiplus::GdiplusStartup(&s_token, &startupInput, nullptr) == Gdiplus::Ok) {
-            s_started = true;
-        }
-    }
-    return s_token;
-}
-
 HBITMAP LoadBitmapFromGameData(const char* path)
 {
-    if (!path || !*path || !EnsureGdiplusStarted()) {
-        return nullptr;
-    }
-
-    int size = 0;
-    unsigned char* bytes = g_fileMgr.GetData(path, &size);
-    if (!bytes || size <= 0) {
-        delete[] bytes;
-        return nullptr;
-    }
-
     HBITMAP outBmp = nullptr;
-    HGLOBAL mem = GlobalAlloc(GMEM_MOVEABLE, static_cast<SIZE_T>(size));
-    if (mem) {
-        void* dst = GlobalLock(mem);
-        if (dst) {
-            std::memcpy(dst, bytes, static_cast<size_t>(size));
-            GlobalUnlock(mem);
-
-            IStream* stream = nullptr;
-            if (CreateStreamOnHGlobal(mem, TRUE, &stream) == S_OK) {
-                auto* bmp = Gdiplus::Bitmap::FromStream(stream, FALSE);
-                if (bmp && bmp->GetLastStatus() == Gdiplus::Ok) {
-                    bmp->GetHBITMAP(RGB(0, 0, 0), &outBmp);
-                }
-                delete bmp;
-                stream->Release();
-            } else {
-                GlobalFree(mem);
-            }
-        } else {
-            GlobalFree(mem);
-        }
-    }
-
-    delete[] bytes;
+    LoadHBitmapFromGameData(path, &outBmp, nullptr, nullptr);
     return outBmp;
 }
 
@@ -1198,8 +1149,8 @@ void UIOptionWnd::OnDraw()
 
     EnsureResources();
 
-    const bool useShared = (UIWindow::GetSharedDrawDC() != nullptr);
-    HDC hdc = useShared ? UIWindow::GetSharedDrawDC() : GetDC(g_hMainWnd);
+    bool useShared = false;
+    HDC hdc = AcquireDrawTarget(&useShared);
     if (!hdc) {
         return;
     }
@@ -1321,11 +1272,8 @@ void UIOptionWnd::OnDraw()
     SelectObject(hdc, oldPen);
     DeleteObject(borderPen);
 
-    DrawChildren();
-
-    if (!useShared) {
-        ReleaseDC(g_hMainWnd, hdc);
-    }
+    DrawChildrenToCurrentTarget(hdc, useShared);
+    ReleaseDrawTarget(hdc, useShared);
 }
 
 void UIOptionWnd::OnLBtnDown(int x, int y)

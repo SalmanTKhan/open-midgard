@@ -18,6 +18,8 @@
 #include "ui/UISayDialogWnd.h"
 #include "ui/UINpcMenuWnd.h"
 #include "ui/UINpcInputWnd.h"
+
+#include <cmath>
 #include "ui/UIChooseSellBuyWnd.h"
 #include "ui/UIItemPurchaseWnd.h"
 #include "ui/UIItemSellWnd.h"

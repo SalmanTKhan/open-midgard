@@ -6,10 +6,10 @@
 #include "UIWindowMgr.h"
 #include "core/File.h"
 #include "main/WinMain.h"
+#include "res/Bitmap.h"
 #include "session/Session.h"
 #include "skill/Skill.h"
 
-#include <gdiplus.h>
 #include <windows.h>
 
 #include <algorithm>
@@ -17,7 +17,6 @@
 #include <cstring>
 #include <string>
 
-#pragma comment(lib, "gdiplus.lib")
 #pragma comment(lib, "msimg32.lib")
 
 namespace {
@@ -39,19 +38,6 @@ constexpr int kButtonIdMini = 149;
 constexpr int kButtonIdClose = 150;
 constexpr int kBottomButtonUse = 0;
 constexpr int kBottomButtonClose = 1;
-
-ULONG_PTR EnsureGdiplusStarted()
-{
-    static ULONG_PTR s_token = 0;
-    static bool s_started = false;
-    if (!s_started) {
-        Gdiplus::GdiplusStartupInput startupInput;
-        if (Gdiplus::GdiplusStartup(&s_token, &startupInput, nullptr) == Gdiplus::Ok) {
-            s_started = true;
-        }
-    }
-    return s_token;
-}
 
 std::string NormalizeSlash(std::string value)
 {
@@ -155,42 +141,8 @@ std::string ResolveUiAssetPath(const char* fileName)
 
 HBITMAP LoadBitmapFromGameData(const std::string& path)
 {
-    if (path.empty() || !EnsureGdiplusStarted()) {
-        return nullptr;
-    }
-
-    int size = 0;
-    unsigned char* bytes = g_fileMgr.GetData(path.c_str(), &size);
-    if (!bytes || size <= 0) {
-        delete[] bytes;
-        return nullptr;
-    }
-
     HBITMAP outBitmap = nullptr;
-    HGLOBAL mem = GlobalAlloc(GMEM_MOVEABLE, static_cast<SIZE_T>(size));
-    if (mem) {
-        void* dst = GlobalLock(mem);
-        if (dst) {
-            std::memcpy(dst, bytes, static_cast<size_t>(size));
-            GlobalUnlock(mem);
-
-            IStream* stream = nullptr;
-            if (CreateStreamOnHGlobal(mem, TRUE, &stream) == S_OK) {
-                auto* bitmap = Gdiplus::Bitmap::FromStream(stream, FALSE);
-                if (bitmap && bitmap->GetLastStatus() == Gdiplus::Ok) {
-                    bitmap->GetHBITMAP(RGB(0, 0, 0), &outBitmap);
-                }
-                delete bitmap;
-                stream->Release();
-            } else {
-                GlobalFree(mem);
-            }
-        } else {
-            GlobalFree(mem);
-        }
-    }
-
-    delete[] bytes;
+    LoadHBitmapFromGameData(path.c_str(), &outBitmap, nullptr, nullptr);
     return outBitmap;
 }
 
@@ -506,10 +458,8 @@ void UISkillListWnd::OnDraw()
     m_viewOffset = std::max(0, std::min(m_viewOffset, GetMaxViewOffset(static_cast<int>(skills.size()))));
     m_visibleSkills.clear();
 
-    HDC hdc = UIWindow::GetSharedDrawDC();
-    if (!hdc) {
-        hdc = GetDC(g_hMainWnd);
-    }
+    bool useShared = false;
+    HDC hdc = AcquireDrawTarget(&useShared);
     if (!hdc) {
         return;
     }
@@ -594,13 +544,11 @@ void UISkillListWnd::OnDraw()
         DrawBottomButton(hdc, button);
     }
 
-    DrawChildren();
+    DrawChildrenToCurrentTarget(hdc, useShared);
 
     SelectObject(hdc, oldFont);
 
-    if (UIWindow::GetSharedDrawDC() == nullptr) {
-        ReleaseDC(g_hMainWnd, hdc);
-    }
+    ReleaseDrawTarget(hdc, useShared);
 
     m_lastVisualStateToken = BuildVisualStateToken();
     m_hasVisualStateToken = true;

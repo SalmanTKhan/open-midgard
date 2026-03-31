@@ -20,8 +20,8 @@ void UIRechargeGage::OnDraw()
         return;
     }
 
-    const bool useShared = (UIWindow::GetSharedDrawDC() != nullptr);
-    HDC hdc = useShared ? UIWindow::GetSharedDrawDC() : GetDC(g_hMainWnd);
+    bool useShared = false;
+    HDC hdc = AcquireDrawTarget(&useShared);
     if (!hdc) {
         return;
     }
@@ -48,8 +48,6 @@ void UIRechargeGage::OnDraw()
         }
     }
 
-    if (!useShared) {
-        ReleaseDC(g_hMainWnd, hdc);
-    }
-    DrawChildren();
+    DrawChildrenToCurrentTarget(hdc, useShared);
+    ReleaseDrawTarget(hdc, useShared);
 }

@@ -5,10 +5,10 @@
 #include "gamemode/GameMode.h"
 #include "gamemode/Mode.h"
 #include "main/WinMain.h"
+#include "res/Bitmap.h"
 #include "session/Session.h"
 #include "world/World.h"
 
-#include <gdiplus.h>
 #include <windows.h>
 
 #include <algorithm>
@@ -19,7 +19,6 @@
 #include <string>
 #include <vector>
 
-#pragma comment(lib, "gdiplus.lib")
 #pragma comment(lib, "msimg32.lib")
 
 namespace {
@@ -47,19 +46,6 @@ const char* UiKorPrefix()
         "\xC0\xAF\xC0\xFA\xC0\xCE\xC5\xCD\xC6\xE4\xC0\xCC\xBD\xBA"
         "\\";
     return kUiKor;
-}
-
-ULONG_PTR EnsureGdiplusStarted()
-{
-    static ULONG_PTR s_token = 0;
-    static bool s_started = false;
-    if (!s_started) {
-        Gdiplus::GdiplusStartupInput startupInput;
-        if (Gdiplus::GdiplusStartup(&s_token, &startupInput, nullptr) == Gdiplus::Ok) {
-            s_started = true;
-        }
-    }
-    return s_token;
 }
 
 std::string ToLowerAscii(std::string value)
@@ -205,53 +191,9 @@ HBITMAP LoadBitmapFromGameData(const std::string& path, int* outWidth = nullptr,
         *outHeight = 0;
     }
 
-    if (path.empty() || !EnsureGdiplusStarted()) {
-        return nullptr;
-    }
-
-    int size = 0;
-    unsigned char* bytes = g_fileMgr.GetData(path.c_str(), &size);
-    if (!bytes || size <= 0) {
-        delete[] bytes;
-        return nullptr;
-    }
-
     HBITMAP outBitmap = nullptr;
-    HGLOBAL mem = GlobalAlloc(GMEM_MOVEABLE, static_cast<SIZE_T>(size));
-    if (mem) {
-        void* dst = GlobalLock(mem);
-        if (dst) {
-            std::memcpy(dst, bytes, static_cast<size_t>(size));
-            GlobalUnlock(mem);
-
-            IStream* stream = nullptr;
-            if (CreateStreamOnHGlobal(mem, TRUE, &stream) == S_OK) {
-                auto* bitmap = Gdiplus::Bitmap::FromStream(stream, FALSE);
-                if (bitmap && bitmap->GetLastStatus() == Gdiplus::Ok) {
-                    bitmap->GetHBITMAP(RGB(0, 0, 0), &outBitmap);
-                }
-                delete bitmap;
-                stream->Release();
-            } else {
-                GlobalFree(mem);
-            }
-        } else {
-            GlobalFree(mem);
-        }
-    }
-
-    delete[] bytes;
-
-    if (outBitmap) {
-        BITMAP bm{};
-        if (GetObjectA(outBitmap, sizeof(bm), &bm)) {
-            if (outWidth) {
-                *outWidth = bm.bmWidth;
-            }
-            if (outHeight) {
-                *outHeight = bm.bmHeight;
-            }
-        }
+    if (!path.empty()) {
+        LoadHBitmapFromGameData(path.c_str(), &outBitmap, outWidth, outHeight);
     }
 
     return outBitmap;
@@ -774,16 +716,14 @@ void UIRoMapWnd::OnDraw()
         return;
     }
 
-    const bool useShared = (UIWindow::GetSharedDrawDC() != nullptr);
-    HDC hdc = useShared ? UIWindow::GetSharedDrawDC() : GetDC(g_hMainWnd);
+    bool useShared = false;
+    HDC hdc = AcquireDrawTarget(&useShared);
     if (!hdc) {
         return;
     }
 
     DrawToHdc(hdc, m_x, m_y);
-    if (!useShared) {
-        ReleaseDC(g_hMainWnd, hdc);
-    }
+    ReleaseDrawTarget(hdc, useShared);
 }
 
 void UIRoMapWnd::DrawToHdc(HDC hdc, int drawX, int drawY)
@@ -800,7 +740,7 @@ void UIRoMapWnd::DrawToHdc(HDC hdc, int drawX, int drawY)
         InvalidateRenderCache();
     }
 
-    EnsureRenderCache(hdc);
+    EnsureRenderCache();
     if (m_renderCacheDC && m_renderCacheBitmap) {
         if (m_renderCacheDirty) {
             DrawWindowContents(m_renderCacheDC, 0, 0);
@@ -918,9 +858,9 @@ void UIRoMapWnd::ReleaseAssets()
     m_mapBitmapHeight = 0;
 }
 
-void UIRoMapWnd::EnsureRenderCache(HDC referenceDc)
+void UIRoMapWnd::EnsureRenderCache()
 {
-    if (!referenceDc || m_w <= 0 || m_h <= 0) {
+    if (m_w <= 0 || m_h <= 0) {
         return;
     }
     if (m_renderCacheDC && m_renderCacheBitmap && m_renderCacheWidth == m_w && m_renderCacheHeight == m_h) {
@@ -929,12 +869,20 @@ void UIRoMapWnd::EnsureRenderCache(HDC referenceDc)
 
     ReleaseRenderCache();
 
-    m_renderCacheDC = CreateCompatibleDC(referenceDc);
+    m_renderCacheDC = CreateCompatibleDC(nullptr);
     if (!m_renderCacheDC) {
         return;
     }
 
-    m_renderCacheBitmap = CreateCompatibleBitmap(referenceDc, m_w, m_h);
+    BITMAPINFO bmi{};
+    bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    bmi.bmiHeader.biWidth = m_w;
+    bmi.bmiHeader.biHeight = -m_h;
+    bmi.bmiHeader.biPlanes = 1;
+    bmi.bmiHeader.biBitCount = 32;
+    bmi.bmiHeader.biCompression = BI_RGB;
+    void* cacheBits = nullptr;
+    m_renderCacheBitmap = CreateDIBSection(nullptr, &bmi, DIB_RGB_COLORS, &cacheBits, nullptr, 0);
     if (!m_renderCacheBitmap) {
         ReleaseRenderCache();
         return;

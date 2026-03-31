@@ -3,22 +3,37 @@
 #include "RenderDevice.h"
 #include "DebugLog.h"
 
+#if RO_HAS_NATIVE_D3D11
 #include <d3d11.h>
+#endif
+#if RO_HAS_NATIVE_D3D12
 #include <d3d12.h>
 #include <dxgi1_4.h>
+#endif
 #include <algorithm>
 #include <cctype>
 #include <cstring>
+#include <iterator>
 
+#if RO_HAS_NATIVE_D3D11
 #pragma comment(lib, "d3d11.lib")
+#endif
+#if RO_HAS_NATIVE_D3D12
 #pragma comment(lib, "d3d12.lib")
 #pragma comment(lib, "dxgi.lib")
+#endif
 
 namespace {
 
 constexpr char kRenderBackendRegPath[] = "Software\\Gravity Soft\\Ragnarok Online";
 constexpr char kRenderBackendValueName[] = "RenderBackend";
+#if RO_HAS_NATIVE_D3D11
 constexpr RenderBackendType kDefaultConfiguredBackend = RenderBackendType::Direct3D11;
+#elif RO_HAS_VULKAN
+constexpr RenderBackendType kDefaultConfiguredBackend = RenderBackendType::Vulkan;
+#else
+constexpr RenderBackendType kDefaultConfiguredBackend = RenderBackendType::LegacyDirect3D7;
+#endif
 
 bool IsBackendAllowedOnCurrentBuild(RenderBackendType backend)
 {
@@ -116,6 +131,7 @@ bool IsValidStoredBackend(DWORD rawValue)
 
 bool ProbeD3D11Support()
 {
+#if RO_HAS_NATIVE_D3D11
     const D3D_FEATURE_LEVEL featureLevels[] = {
         D3D_FEATURE_LEVEL_11_0,
         D3D_FEATURE_LEVEL_10_1,
@@ -153,10 +169,14 @@ bool ProbeD3D11Support()
     SafeRelease(context);
     SafeRelease(device);
     return SUCCEEDED(hr);
+#else
+    return false;
+#endif
 }
 
 bool ProbeD3D12Support()
 {
+#if RO_HAS_NATIVE_D3D12
     IDXGIFactory4* factory = nullptr;
     HRESULT hr = CreateDXGIFactory2(0, IID_PPV_ARGS(&factory));
     if (FAILED(hr) || !factory) {
@@ -177,6 +197,9 @@ bool ProbeD3D12Support()
     SafeRelease(device);
     SafeRelease(factory);
     return SUCCEEDED(hr);
+#else
+    return false;
+#endif
 }
 
 bool ProbeVulkanSupport()
@@ -218,9 +241,13 @@ bool IsRenderBackendImplemented(RenderBackendType backend)
 {
     switch (backend) {
     case RenderBackendType::LegacyDirect3D7:
-    case RenderBackendType::Direct3D11:
-    case RenderBackendType::Direct3D12:
         return true;
+
+    case RenderBackendType::Direct3D11:
+        return RO_HAS_NATIVE_D3D11 != 0;
+
+    case RenderBackendType::Direct3D12:
+        return RO_HAS_NATIVE_D3D12 != 0;
 
     case RenderBackendType::Vulkan:
         return RO_HAS_VULKAN != 0;

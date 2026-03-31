@@ -2,8 +2,8 @@
 #include "DebugLog.h"
 #include "core/File.h"
 
-#include <gdiplus.h>
 #include <objidl.h>
+#include <wincodec.h>
 
 #include <algorithm>
 #include <cctype>
@@ -12,7 +12,7 @@
 #include <string>
 #include <vector>
 
-#pragma comment(lib, "gdiplus.lib")
+#pragma comment(lib, "windowscodecs.lib")
 
 void ErrorMsg(const char* msg);
 
@@ -313,77 +313,114 @@ bool LoadStandardBmp(CBitmapRes& bitmapRes, const unsigned char* bitmap, int siz
     return true;
 }
 
-ULONG_PTR EnsureGdiPlus()
+bool EnsureWicAvailable()
 {
-    static ULONG_PTR s_token = 0;
-    static bool s_started = false;
-    if (!s_started) {
-        Gdiplus::GdiplusStartupInput startupInput;
-        if (Gdiplus::GdiplusStartup(&s_token, &startupInput, nullptr) == Gdiplus::Ok) {
-            s_started = true;
+    static bool s_initialized = false;
+    static bool s_available = false;
+    if (!s_initialized) {
+        const HRESULT hr = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+        s_available = SUCCEEDED(hr) || hr == RPC_E_CHANGED_MODE;
+        s_initialized = true;
+    }
+    return s_available;
+}
+
+IWICImagingFactory* GetWicFactory()
+{
+    static IWICImagingFactory* s_factory = nullptr;
+    static bool s_attempted = false;
+    if (!s_attempted) {
+        s_attempted = true;
+        if (EnsureWicAvailable()) {
+            CoCreateInstance(
+                CLSID_WICImagingFactory,
+                nullptr,
+                CLSCTX_INPROC_SERVER,
+                IID_PPV_ARGS(&s_factory));
         }
     }
-    return s_token;
+    return s_factory;
+}
+
+bool DecodeImageWithWic(const unsigned char* buffer, int size, int& outW, int& outH, u32*& outData)
+{
+    IWICImagingFactory* factory = GetWicFactory();
+    if (!factory || !buffer || size <= 0) {
+        return false;
+    }
+
+    IWICStream* stream = nullptr;
+    HRESULT hr = factory->CreateStream(&stream);
+    if (FAILED(hr) || !stream) {
+        return false;
+    }
+
+    hr = stream->InitializeFromMemory(const_cast<BYTE*>(reinterpret_cast<const BYTE*>(buffer)), static_cast<DWORD>(size));
+    if (FAILED(hr)) {
+        stream->Release();
+        return false;
+    }
+
+    IWICBitmapDecoder* decoder = nullptr;
+    hr = factory->CreateDecoderFromStream(stream, nullptr, WICDecodeMetadataCacheOnLoad, &decoder);
+    stream->Release();
+    if (FAILED(hr) || !decoder) {
+        return false;
+    }
+
+    IWICBitmapFrameDecode* frame = nullptr;
+    hr = decoder->GetFrame(0, &frame);
+    decoder->Release();
+    if (FAILED(hr) || !frame) {
+        return false;
+    }
+
+    UINT width = 0;
+    UINT height = 0;
+    hr = frame->GetSize(&width, &height);
+    if (FAILED(hr) || width == 0 || height == 0) {
+        frame->Release();
+        return false;
+    }
+
+    IWICFormatConverter* converter = nullptr;
+    hr = factory->CreateFormatConverter(&converter);
+    if (FAILED(hr) || !converter) {
+        frame->Release();
+        return false;
+    }
+
+    hr = converter->Initialize(
+        frame,
+        GUID_WICPixelFormat32bppBGRA,
+        WICBitmapDitherTypeNone,
+        nullptr,
+        0.0f,
+        WICBitmapPaletteTypeCustom);
+    frame->Release();
+    if (FAILED(hr)) {
+        converter->Release();
+        return false;
+    }
+
+    std::unique_ptr<u32[]> pixels(new u32[static_cast<size_t>(width) * static_cast<size_t>(height)]);
+    const UINT stride = width * static_cast<UINT>(sizeof(u32));
+    const UINT bufferSize = stride * height;
+    hr = converter->CopyPixels(nullptr, stride, bufferSize, reinterpret_cast<BYTE*>(pixels.get()));
+    converter->Release();
+    if (FAILED(hr)) {
+        return false;
+    }
+
+    outW = static_cast<int>(width);
+    outH = static_cast<int>(height);
+    outData = pixels.release();
+    return true;
 }
 
 bool LoadImageFromMemory(const unsigned char* buffer, int size, int& outW, int& outH, u32*& outData)
 {
-    if (!buffer || size <= 0 || !EnsureGdiPlus()) {
-        return false;
-    }
-
-    HGLOBAL mem = GlobalAlloc(GMEM_MOVEABLE, static_cast<SIZE_T>(size));
-    if (!mem) {
-        return false;
-    }
-
-    void* dst = GlobalLock(mem);
-    if (!dst) {
-        GlobalFree(mem);
-        return false;
-    }
-
-    std::memcpy(dst, buffer, static_cast<size_t>(size));
-    GlobalUnlock(mem);
-
-    IStream* stream = nullptr;
-    if (CreateStreamOnHGlobal(mem, TRUE, &stream) != S_OK) {
-        GlobalFree(mem);
-        return false;
-    }
-
-    std::unique_ptr<Gdiplus::Bitmap> bitmap(Gdiplus::Bitmap::FromStream(stream, FALSE));
-    stream->Release();
-
-    if (!bitmap || bitmap->GetLastStatus() != Gdiplus::Ok) {
-        return false;
-    }
-
-    const int w = static_cast<int>(bitmap->GetWidth());
-    const int h = static_cast<int>(bitmap->GetHeight());
-    if (w <= 0 || h <= 0) {
-        return false;
-    }
-
-    Gdiplus::Rect rect(0, 0, w, h);
-    Gdiplus::BitmapData bmpData{};
-    if (bitmap->LockBits(&rect, Gdiplus::ImageLockModeRead, PixelFormat32bppARGB, &bmpData) != Gdiplus::Ok) {
-        return false;
-    }
-
-    std::unique_ptr<u32[]> pixels(new u32[static_cast<size_t>(w) * static_cast<size_t>(h)]);
-    for (int y = 0; y < h; ++y) {
-        const u32* srcRow = reinterpret_cast<const u32*>(static_cast<const unsigned char*>(bmpData.Scan0) + y * bmpData.Stride);
-        u32* dstRow = pixels.get() + static_cast<size_t>(y) * static_cast<size_t>(w);
-        std::memcpy(dstRow, srcRow, static_cast<size_t>(w) * sizeof(u32));
-    }
-
-    bitmap->UnlockBits(&bmpData);
-
-    outW = w;
-    outH = h;
-    outData = pixels.release();
-    return true;
+    return DecodeImageWithWic(buffer, size, outW, outH, outData);
 }
 
 std::string ResolveAlphaBitmapPath(const char* fName)
@@ -499,6 +536,68 @@ bool LoadTgaPixels(const unsigned char* src, int size, int offset, int imageType
 }
 
 } // namespace
+
+bool LoadHBitmapFromGameData(const char* path, HBITMAP* outBitmap, int* outWidth, int* outHeight)
+{
+    if (!outBitmap || !path || !*path) {
+        return false;
+    }
+
+    *outBitmap = nullptr;
+    if (outWidth) {
+        *outWidth = 0;
+    }
+    if (outHeight) {
+        *outHeight = 0;
+    }
+
+    int size = 0;
+    unsigned char* bytes = g_fileMgr.GetData(path, &size);
+    if (!bytes || size <= 0) {
+        delete[] bytes;
+        return false;
+    }
+
+    int width = 0;
+    int height = 0;
+    u32* pixels = nullptr;
+    const bool decoded = DecodeImageWithWic(bytes, size, width, height, pixels);
+    delete[] bytes;
+    if (!decoded || !pixels || width <= 0 || height <= 0) {
+        delete[] pixels;
+        return false;
+    }
+
+    BITMAPINFO bmi{};
+    bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    bmi.bmiHeader.biWidth = width;
+    bmi.bmiHeader.biHeight = -height;
+    bmi.bmiHeader.biPlanes = 1;
+    bmi.bmiHeader.biBitCount = 32;
+    bmi.bmiHeader.biCompression = BI_RGB;
+
+    void* dibBits = nullptr;
+    HBITMAP bitmap = CreateDIBSection(nullptr, &bmi, DIB_RGB_COLORS, &dibBits, nullptr, 0);
+    if (!bitmap || !dibBits) {
+        delete[] pixels;
+        if (bitmap) {
+            DeleteObject(bitmap);
+        }
+        return false;
+    }
+
+    std::memcpy(dibBits, pixels, static_cast<size_t>(width) * static_cast<size_t>(height) * sizeof(u32));
+    delete[] pixels;
+
+    *outBitmap = bitmap;
+    if (outWidth) {
+        *outWidth = width;
+    }
+    if (outHeight) {
+        *outHeight = height;
+    }
+    return true;
+}
 
 CBitmapRes::CBitmapRes()
     : m_isAlpha(0), m_width(0), m_height(0), m_data(nullptr)

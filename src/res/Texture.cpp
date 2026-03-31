@@ -278,19 +278,15 @@ float CTexture::m_uOffset = 0.0f;
 float CTexture::m_vOffset = 0.0f;
 
 CSurface::CSurface(unsigned int w, unsigned int h)
-    : m_pddsSurface(nullptr), m_w(w), m_h(h), m_hBitmap(nullptr) {}
+    : m_pddsSurface(nullptr), m_w(w), m_h(h) {}
 
 CSurface::CSurface(unsigned int w, unsigned int h, IDirectDrawSurface7* pSurface)
-    : m_pddsSurface(pSurface), m_w(w), m_h(h), m_hBitmap(nullptr) {}
+    : m_pddsSurface(pSurface), m_w(w), m_h(h) {}
 
 CSurface::~CSurface() {
     if (m_pddsSurface) {
         m_pddsSurface->Release();
         m_pddsSurface = nullptr;
-    }
-    if (m_hBitmap) {
-        DeleteObject(m_hBitmap);
-        m_hBitmap = nullptr;
     }
 }
 
@@ -304,10 +300,10 @@ void CSurface::ClearSurface(RECT* r, unsigned int col) {(void)r; (void)col;}
 void CSurface::DrawSurface(int x, int y, int w, int h, unsigned int flags) {(void)x; (void)y; (void)w; (void)h; (void)flags;}
 
 void CSurface::DrawSurfaceStretch(int x, int y, int w, int h) {
-    DbgLog("[DrawSurfaceStretch] hBitmap=%p hWnd=%p x=%d y=%d w=%d h=%d\n",
-           (void*)m_hBitmap, (void*)GetRenderDevice().GetWindowHandle(), x, y, w, h);
-    if (!m_hBitmap || !GetRenderDevice().GetWindowHandle()) {
-        DbgLog("[DrawSurfaceStretch] SKIP: null handle\n");
+    DbgLog("[DrawSurfaceStretch] pixels=%p hWnd=%p x=%d y=%d w=%d h=%d\n",
+           (const void*)GetSoftwarePixels(), (void*)GetRenderDevice().GetWindowHandle(), x, y, w, h);
+    if (!HasSoftwarePixels() || !GetRenderDevice().GetWindowHandle()) {
+        DbgLog("[DrawSurfaceStretch] SKIP: null backing data\n");
         return;
     }
 
@@ -316,23 +312,29 @@ void CSurface::DrawSurfaceStretch(int x, int y, int w, int h) {
         return;
     }
 
-    HDC src = CreateCompatibleDC(target);
-    if (!src) {
-        ReleaseDC(GetRenderDevice().GetWindowHandle(), target);
-        return;
-    }
-
-    BITMAP bm{};
-    GetObjectA(m_hBitmap, sizeof(bm), &bm);
-
-    HGDIOBJ old = SelectObject(src, m_hBitmap);
+    BITMAPINFO bmi{};
+    bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    bmi.bmiHeader.biWidth = static_cast<LONG>(m_w);
+    bmi.bmiHeader.biHeight = -static_cast<LONG>(m_h);
+    bmi.bmiHeader.biPlanes = 1;
+    bmi.bmiHeader.biBitCount = 32;
+    bmi.bmiHeader.biCompression = BI_RGB;
     SetStretchBltMode(target, HALFTONE);
-    BOOL blitOk = StretchBlt(target, x, y, w, h, src, 0, 0, bm.bmWidth, bm.bmHeight, SRCCOPY);
+    const int blitOk = StretchDIBits(target,
+        x,
+        y,
+        w,
+        h,
+        0,
+        0,
+        static_cast<int>(m_w),
+        static_cast<int>(m_h),
+        GetSoftwarePixels(),
+        &bmi,
+        DIB_RGB_COLORS,
+        SRCCOPY);
     DbgLog("[DrawSurfaceStretch] StretchBlt(%d,%d,%d,%d from %dx%d) -> %d (err=%lu)\n",
-           x, y, w, h, bm.bmWidth, bm.bmHeight, (int)blitOk, blitOk ? 0UL : GetLastError());
-    SelectObject(src, old);
-
-    DeleteDC(src);
+           x, y, w, h, static_cast<int>(m_w), static_cast<int>(m_h), blitOk, blitOk == GDI_ERROR ? GetLastError() : 0UL);
     ReleaseDC(GetRenderDevice().GetWindowHandle(), target);
 }
 
@@ -346,32 +348,19 @@ CSurfaceWallpaper::CSurfaceWallpaper(unsigned int w, unsigned int h)
 CSurfaceWallpaper::~CSurfaceWallpaper() {}
 
 void CSurfaceWallpaper::Update(int x, int y, int w, int h, unsigned int* data, bool b, int p) {
-    (void)x; (void)y; (void)b; (void)p;
+    (void)x; (void)y; (void)b;
 
     if (!data || w <= 0 || h <= 0) {
         return;
     }
 
-    if (m_hBitmap) {
-        DeleteObject(m_hBitmap);
-        m_hBitmap = nullptr;
+    m_softwarePixels.resize(static_cast<size_t>(w) * static_cast<size_t>(h));
+    const int sourcePitch = p > 0 ? p : w * static_cast<int>(sizeof(unsigned int));
+    for (int row = 0; row < h; ++row) {
+        const unsigned char* srcRow = reinterpret_cast<const unsigned char*>(data) + static_cast<size_t>(row) * static_cast<size_t>(sourcePitch);
+        unsigned int* dstRow = m_softwarePixels.data() + static_cast<size_t>(row) * static_cast<size_t>(w);
+        std::memcpy(dstRow, srcRow, static_cast<size_t>(w) * sizeof(unsigned int));
     }
-
-    BITMAPINFO bmi{};
-    bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-    bmi.bmiHeader.biWidth = w;
-    bmi.bmiHeader.biHeight = -h;
-    bmi.bmiHeader.biPlanes = 1;
-    bmi.bmiHeader.biBitCount = 32;
-    bmi.bmiHeader.biCompression = BI_RGB;
-
-    void* bits = nullptr;
-    m_hBitmap = CreateDIBSection(nullptr, &bmi, DIB_RGB_COLORS, &bits, nullptr, 0);
-    if (!m_hBitmap || !bits) {
-        return;
-    }
-
-    std::copy(data, data + (w * h), static_cast<unsigned int*>(bits));
     m_w = static_cast<unsigned int>(w);
     m_h = static_cast<unsigned int>(h);
 }

@@ -144,7 +144,8 @@ HBITMAP UIItemShopWnd::GetItemIcon(const ITEM_INFO& item)
 
 void UIItemShopWnd::OnDraw()
 {
-    HDC hdc = GetSharedDrawDC();
+    bool useShared = false;
+    HDC hdc = AcquireDrawTarget(&useShared);
     if (!hdc || m_show == 0) {
         return;
     }
@@ -210,6 +211,7 @@ void UIItemShopWnd::OnDraw()
 
     m_lastDrawStateToken = BuildDisplayStateToken();
     m_hasDrawStateToken = true;
+    ReleaseDrawTarget(hdc, useShared);
 }
 
 void UIItemShopWnd::OnLBtnDown(int x, int y)

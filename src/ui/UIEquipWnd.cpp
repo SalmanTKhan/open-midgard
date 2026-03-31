@@ -11,6 +11,7 @@
 #include "render/DC.h"
 #include "render3d/Device.h"
 #include "res/ActRes.h"
+#include "res/Bitmap.h"
 #include "res/ImfRes.h"
 #include "res/PaletteRes.h"
 #include "res/Sprite.h"
@@ -19,7 +20,6 @@
 #include "world/GameActor.h"
 #include "world/World.h"
 
-#include <gdiplus.h>
 #include <windows.h>
 
 #include <algorithm>
@@ -31,7 +31,6 @@
 #include <string>
 #include <vector>
 
-#pragma comment(lib, "gdiplus.lib")
 #pragma comment(lib, "msimg32.lib")
 
 namespace {
@@ -72,19 +71,6 @@ constexpr std::array<EquipSlotDefLocal, 10> kEquipSlots = {{
     { 128, 248, 123 }, // accessory right
     { 2, 8, 71 },      // weapon
 }};
-
-ULONG_PTR EnsureGdiplusStarted()
-{
-    static ULONG_PTR s_token = 0;
-    static bool s_started = false;
-    if (!s_started) {
-        Gdiplus::GdiplusStartupInput startupInput;
-        if (Gdiplus::GdiplusStartup(&s_token, &startupInput, nullptr) == Gdiplus::Ok) {
-            s_started = true;
-        }
-    }
-    return s_token;
-}
 
 std::string ToLowerAscii(std::string value)
 {
@@ -188,42 +174,8 @@ std::string ResolveUiAssetPath(const char* fileName)
 
 HBITMAP LoadBitmapFromGameData(const std::string& path)
 {
-    if (path.empty() || !EnsureGdiplusStarted()) {
-        return nullptr;
-    }
-
-    int size = 0;
-    unsigned char* bytes = g_fileMgr.GetData(path.c_str(), &size);
-    if (!bytes || size <= 0) {
-        delete[] bytes;
-        return nullptr;
-    }
-
     HBITMAP outBitmap = nullptr;
-    HGLOBAL mem = GlobalAlloc(GMEM_MOVEABLE, static_cast<SIZE_T>(size));
-    if (mem) {
-        void* dst = GlobalLock(mem);
-        if (dst) {
-            std::memcpy(dst, bytes, static_cast<size_t>(size));
-            GlobalUnlock(mem);
-
-            IStream* stream = nullptr;
-            if (CreateStreamOnHGlobal(mem, TRUE, &stream) == S_OK) {
-                auto* bitmap = Gdiplus::Bitmap::FromStream(stream, FALSE);
-                if (bitmap && bitmap->GetLastStatus() == Gdiplus::Ok) {
-                    bitmap->GetHBITMAP(RGB(0, 0, 0), &outBitmap);
-                }
-                delete bitmap;
-                stream->Release();
-            } else {
-                GlobalFree(mem);
-            }
-        } else {
-            GlobalFree(mem);
-        }
-    }
-
-    delete[] bytes;
+    LoadHBitmapFromGameData(path.c_str(), &outBitmap, nullptr, nullptr);
     return outBitmap;
 }
 
@@ -955,11 +907,8 @@ void UIEquipWnd::OnDraw()
         }
     }
 
-    HDC hdc = UIWindow::GetSharedDrawDC();
-    const bool useShared = hdc != nullptr;
-    if (!hdc && g_hMainWnd) {
-        hdc = GetDC(g_hMainWnd);
-    }
+    bool useShared = false;
+    HDC hdc = AcquireDrawTarget(&useShared);
     if (!hdc) {
         return;
     }
@@ -1075,10 +1024,8 @@ void UIEquipWnd::OnDraw()
         }
     }
 
-    DrawChildren();
-    if (!useShared) {
-        ReleaseDC(g_hMainWnd, hdc);
-    }
+    DrawChildrenToCurrentTarget(hdc, useShared);
+    ReleaseDrawTarget(hdc, useShared);
 
     m_lastVisualStateToken = BuildVisualStateToken();
     m_hasVisualStateToken = true;

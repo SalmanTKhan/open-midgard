@@ -4,10 +4,11 @@
 #include "gamemode/LoginMode.h"
 #include "gamemode/Mode.h"
 #include "main/WinMain.h"
+#include "qtui/QtUiRuntime.h"
+#include "res/Bitmap.h"
 #include "ui/UIWindowMgr.h"
 #include "DebugLog.h"
 
-#include <gdiplus.h>
 #include <windows.h>
 
 #include <algorithm>
@@ -15,61 +16,12 @@
 #include <cctype>
 #include <vector>
 
-#pragma comment(lib, "gdiplus.lib")
-
 namespace {
-
-ULONG_PTR EnsureGdiplusStarted()
-{
-    static ULONG_PTR s_token = 0;
-    static bool s_started = false;
-    if (!s_started) {
-        Gdiplus::GdiplusStartupInput startupInput;
-        if (Gdiplus::GdiplusStartup(&s_token, &startupInput, nullptr) == Gdiplus::Ok) {
-            s_started = true;
-        }
-    }
-    return s_token;
-}
 
 HBITMAP LoadBitmapFromGameData(const char* path)
 {
-    if (!path || !*path || !EnsureGdiplusStarted()) {
-        return nullptr;
-    }
-
-    int size = 0;
-    unsigned char* bytes = g_fileMgr.GetData(path, &size);
-    if (!bytes || size <= 0) {
-        delete[] bytes;
-        return nullptr;
-    }
-
     HBITMAP outBmp = nullptr;
-    HGLOBAL mem = GlobalAlloc(GMEM_MOVEABLE, static_cast<SIZE_T>(size));
-    if (mem) {
-        void* dst = GlobalLock(mem);
-        if (dst) {
-            std::memcpy(dst, bytes, static_cast<size_t>(size));
-            GlobalUnlock(mem);
-
-            IStream* stream = nullptr;
-            if (CreateStreamOnHGlobal(mem, TRUE, &stream) == S_OK) {
-                auto* bmp = Gdiplus::Bitmap::FromStream(stream, FALSE);
-                if (bmp && bmp->GetLastStatus() == Gdiplus::Ok) {
-                    bmp->GetHBITMAP(RGB(0, 0, 0), &outBmp);
-                }
-                delete bmp;
-                stream->Release();
-            } else {
-                GlobalFree(mem);
-            }
-        } else {
-            GlobalFree(mem);
-        }
-    }
-
-    delete[] bytes;
+    LoadHBitmapFromGameData(path, &outBmp, nullptr, nullptr);
     return outBmp;
 }
 
@@ -440,6 +392,27 @@ UILoginWnd::~UILoginWnd()
     ClearUiAssets();
 }
 
+const char* UILoginWnd::GetLoginText() const
+{
+    return m_login ? m_login->GetText() : "";
+}
+
+int UILoginWnd::GetPasswordLength() const
+{
+    const char* text = m_password ? m_password->GetText() : "";
+    return text ? static_cast<int>(std::strlen(text)) : 0;
+}
+
+bool UILoginWnd::IsSaveAccountChecked() const
+{
+    return m_saveAccountCheck && m_saveAccountCheck->m_isChecked != 0;
+}
+
+bool UILoginWnd::IsPasswordFocused() const
+{
+    return m_password && m_password->m_hasFocus;
+}
+
 void UILoginWnd::OnCreate(int cx, int cy)
 {
     if (m_controlsCreated) {
@@ -572,9 +545,9 @@ void UILoginWnd::ReleaseComposeSurface()
     m_composeHeight = 0;
 }
 
-bool UILoginWnd::EnsureComposeSurface(HDC referenceDC, int width, int height)
+bool UILoginWnd::EnsureComposeSurface(int width, int height)
 {
-    if (!referenceDC || width <= 0 || height <= 0) {
+    if (width <= 0 || height <= 0) {
         return false;
     }
 
@@ -584,12 +557,20 @@ bool UILoginWnd::EnsureComposeSurface(HDC referenceDC, int width, int height)
 
     ReleaseComposeSurface();
 
-    m_composeDC = CreateCompatibleDC(referenceDC);
+    m_composeDC = CreateCompatibleDC(nullptr);
     if (!m_composeDC) {
         return false;
     }
 
-    m_composeBitmap = CreateCompatibleBitmap(referenceDC, width, height);
+    BITMAPINFO bmi{};
+    bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    bmi.bmiHeader.biWidth = width;
+    bmi.bmiHeader.biHeight = -height;
+    bmi.bmiHeader.biPlanes = 1;
+    bmi.bmiHeader.biBitCount = 32;
+    bmi.bmiHeader.biCompression = BI_RGB;
+    void* composeBits = nullptr;
+    m_composeBitmap = CreateDIBSection(nullptr, &bmi, DIB_RGB_COLORS, &composeBits, nullptr, 0);
     if (!m_composeBitmap) {
         ReleaseComposeSurface();
         return false;
@@ -695,8 +676,8 @@ void UILoginWnd::OnDraw()
 
     EnsureResourceCache();
 
-    const bool useShared = (UIWindow::GetSharedDrawDC() != nullptr);
-    HDC targetDC = useShared ? UIWindow::GetSharedDrawDC() : GetDC(g_hMainWnd);
+    bool useShared = false;
+    HDC targetDC = AcquireDrawTarget(&useShared);
     if (!targetDC) {
         return;
     }
@@ -707,9 +688,7 @@ void UILoginWnd::OnDraw()
     const int clientW = rcClient.right - rcClient.left;
     const int clientH = rcClient.bottom - rcClient.top;
     if (clientW <= 0 || clientH <= 0) {
-        if (!useShared) {
-            ReleaseDC(g_hMainWnd, targetDC);
-        }
+        ReleaseDrawTarget(targetDC, useShared);
         return;
     }
 
@@ -717,8 +696,13 @@ void UILoginWnd::OnDraw()
         OnCreate(clientW, clientH);
     }
 
+    if (IsQtUiRuntimeEnabled()) {
+        ReleaseDrawTarget(targetDC, useShared);
+        return;
+    }
+
     HDC drawDC = targetDC;
-    const bool useCompose = EnsureComposeSurface(targetDC, clientW, clientH);
+    const bool useCompose = EnsureComposeSurface(clientW, clientH);
     if (useCompose) {
         drawDC = m_composeDC;
     }
@@ -742,18 +726,13 @@ void UILoginWnd::OnDraw()
         FrameRect(drawDC, &rcPanel, (HBRUSH)GetStockObject(BLACK_BRUSH));
     }
 
-    HDC prevSharedDC = UIWindow::GetSharedDrawDC();
-    UIWindow::SetSharedDrawDC(drawDC);
-    DrawChildren();
-    UIWindow::SetSharedDrawDC(prevSharedDC);
+    DrawChildrenToHdc(drawDC);
 
     if (useCompose) {
         BitBlt(targetDC, 0, 0, clientW, clientH, drawDC, 0, 0, SRCCOPY);
     }
 
-    if (!useShared) {
-        ReleaseDC(g_hMainWnd, targetDC);
-    }
+    ReleaseDrawTarget(targetDC, useShared);
 }
 
 msgresult_t UILoginWnd::SendMsg(UIWindow* sender, int msg, msgparam_t wparam, msgparam_t lparam, msgparam_t extra)

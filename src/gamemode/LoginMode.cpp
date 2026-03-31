@@ -2,7 +2,9 @@
 #include "CursorRenderer.h"
 #include "LoginMode.h"
 #include "ui/UIWindowMgr.h"
+#include "ui/UILoginWnd.h"
 #include "ui/UIWaitWnd.h"
+#include "ui/UISelectServerWnd.h"
 #include "render/Renderer.h"
 #include "render3d/Device.h"
 #include "render3d/RenderDevice.h"
@@ -17,6 +19,7 @@
 #include "res/Sprite.h"
 #include "res/ActRes.h"
 #include "render/DC.h"
+#include "qtui/QtUiRuntime.h"
 #include "DebugLog.h"
 #include <vector>
 #include <cstdint>
@@ -112,10 +115,10 @@ void ReleaseOverlayComposeSurface(HDC* composeDc, HBITMAP* composeBitmap, void**
     }
 }
 
-bool EnsureOverlayComposeSurface(HDC referenceDc, int width, int height,
+bool EnsureOverlayComposeSurface(int width, int height,
     HDC* composeDc, HBITMAP* composeBitmap, void** composeBits, int* composeWidth, int* composeHeight)
 {
-    if (!referenceDc || !composeDc || !composeBitmap || !composeBits || !composeWidth || !composeHeight || width <= 0 || height <= 0) {
+    if (!composeDc || !composeBitmap || !composeBits || !composeWidth || !composeHeight || width <= 0 || height <= 0) {
         return false;
     }
 
@@ -125,7 +128,7 @@ bool EnsureOverlayComposeSurface(HDC referenceDc, int width, int height,
 
     ReleaseOverlayComposeSurface(composeDc, composeBitmap, composeBits, composeWidth, composeHeight);
 
-    *composeDc = CreateCompatibleDC(referenceDc);
+    *composeDc = CreateCompatibleDC(nullptr);
     if (!*composeDc) {
         return false;
     }
@@ -137,7 +140,7 @@ bool EnsureOverlayComposeSurface(HDC referenceDc, int width, int height,
     bmi.bmiHeader.biPlanes = 1;
     bmi.bmiHeader.biBitCount = 32;
     bmi.bmiHeader.biCompression = BI_RGB;
-    *composeBitmap = CreateDIBSection(*composeDc, &bmi, DIB_RGB_COLORS, composeBits, nullptr, 0);
+    *composeBitmap = CreateDIBSection(nullptr, &bmi, DIB_RGB_COLORS, composeBits, nullptr, 0);
     if (!*composeBitmap || !*composeBits) {
         ReleaseOverlayComposeSurface(composeDc, composeBitmap, composeBits, composeWidth, composeHeight);
         return false;
@@ -200,6 +203,16 @@ std::uint64_t ComputeLoginUiStateToken(int clientWidth, int clientHeight)
     HashTokenValue(&hash, static_cast<std::uint64_t>(clientHeight));
     HashTokenString(&hash, g_windowMgr.m_loadedWallpaperPath);
     HashTokenString(&hash, g_windowMgr.GetLoginStatus());
+    HashTokenValue(&hash, static_cast<std::uint64_t>(GetSelectedClientInfoIndex()));
+    if (g_windowMgr.m_selectServerWnd && g_windowMgr.m_selectServerWnd->m_show != 0) {
+        HashTokenValue(&hash, static_cast<std::uint64_t>(g_windowMgr.m_selectServerWnd->GetHoverIndex()));
+    }
+    if (g_windowMgr.m_loginWnd && g_windowMgr.m_loginWnd->m_show != 0) {
+        HashTokenString(&hash, g_windowMgr.m_loginWnd->GetLoginText());
+        HashTokenValue(&hash, static_cast<std::uint64_t>(g_windowMgr.m_loginWnd->GetPasswordLength()));
+        HashTokenValue(&hash, static_cast<std::uint64_t>(g_windowMgr.m_loginWnd->IsSaveAccountChecked() ? 1 : 0));
+        HashTokenValue(&hash, static_cast<std::uint64_t>(g_windowMgr.m_loginWnd->IsPasswordFocused() ? 1 : 0));
+    }
     for (UIWindow* child : g_windowMgr.m_children) {
         if (!child) {
             continue;
@@ -308,11 +321,6 @@ bool QueueLoginUiQuad()
         return false;
     }
 
-    HDC windowDc = GetDC(g_hMainWnd);
-    if (!windowDc) {
-        return false;
-    }
-
     static HDC s_uiComposeDc = nullptr;
     static HBITMAP s_uiComposeBitmap = nullptr;
     static void* s_uiComposeBits = nullptr;
@@ -320,9 +328,8 @@ bool QueueLoginUiQuad()
     static int s_uiComposeHeight = 0;
     static std::uint64_t s_uiStateToken = 0ull;
     static bool s_uiTextureValid = false;
-    const bool composeReady = EnsureOverlayComposeSurface(windowDc, clientWidth, clientHeight,
+    const bool composeReady = EnsureOverlayComposeSurface(clientWidth, clientHeight,
         &s_uiComposeDc, &s_uiComposeBitmap, &s_uiComposeBits, &s_uiComposeWidth, &s_uiComposeHeight);
-    ReleaseDC(g_hMainWnd, windowDc);
     if (!composeReady) {
         return false;
     }
@@ -330,6 +337,10 @@ bool QueueLoginUiQuad()
     static CTexture* s_uiTexture = nullptr;
     static int s_uiTextureWidth = 0;
     static int s_uiTextureHeight = 0;
+    static CTexture* s_qtUiOverlayTexture = nullptr;
+    static int s_qtUiOverlayTextureWidth = 0;
+    static int s_qtUiOverlayTextureHeight = 0;
+    static bool s_qtUiOverlayTextureValid = false;
     if (!s_uiTexture || s_uiTextureWidth != clientWidth || s_uiTextureHeight != clientHeight) {
         delete s_uiTexture;
         s_uiTexture = new CTexture();
@@ -345,12 +356,28 @@ bool QueueLoginUiQuad()
         s_uiTextureValid = false;
         s_uiStateToken = 0ull;
     }
+    if (!s_qtUiOverlayTexture || s_qtUiOverlayTextureWidth != clientWidth || s_qtUiOverlayTextureHeight != clientHeight) {
+        delete s_qtUiOverlayTexture;
+        s_qtUiOverlayTexture = new CTexture();
+        if (!s_qtUiOverlayTexture
+            || !s_qtUiOverlayTexture->Create(clientWidth, clientHeight, PF_A8R8G8B8, false)) {
+            delete s_qtUiOverlayTexture;
+            s_qtUiOverlayTexture = nullptr;
+            s_qtUiOverlayTextureWidth = 0;
+            s_qtUiOverlayTextureHeight = 0;
+            s_qtUiOverlayTextureValid = false;
+        } else {
+            s_qtUiOverlayTextureWidth = clientWidth;
+            s_qtUiOverlayTextureHeight = clientHeight;
+            s_qtUiOverlayTextureValid = false;
+        }
+    }
 
     const bool uiDirty = g_windowMgr.HasDirtyVisualState();
     const std::uint64_t uiStateToken = ComputeLoginUiStateToken(clientWidth, clientHeight);
     const bool needUiRefresh = !s_uiTextureValid || uiDirty || uiStateToken != s_uiStateToken;
     if (needUiRefresh) {
-        if (g_windowMgr.m_wallpaperSurface && g_windowMgr.m_wallpaperSurface->m_hBitmap) {
+        if (g_windowMgr.m_wallpaperSurface && g_windowMgr.m_wallpaperSurface->HasSoftwarePixels()) {
             g_windowMgr.DrawWallpaperToDC(s_uiComposeDc, clientWidth, clientHeight);
         } else {
             HBRUSH clearBrush = CreateSolidBrush(RGB(0, 0, 0));
@@ -358,12 +385,24 @@ bool QueueLoginUiQuad()
             DeleteObject(clearBrush);
         }
 
-        HDC previousSharedDc = UIWindow::GetSharedDrawDC();
-        UIWindow::SetSharedDrawDC(s_uiComposeDc);
-        g_windowMgr.OnDraw();
-        UIWindow::SetSharedDrawDC(previousSharedDc);
+        g_windowMgr.OnDrawToHdc(s_uiComposeDc);
 
         ConvertOverlayComposeBitsToAlpha(s_uiComposeBits, clientWidth, clientHeight);
+        bool renderedQtMenuOverlay = false;
+        if (IsQtUiRuntimeEnabled() && s_qtUiOverlayTexture) {
+            renderedQtMenuOverlay = RenderQtUiMenuOverlayTexture(
+                s_qtUiOverlayTexture,
+                clientWidth,
+                clientHeight);
+        }
+        if (!renderedQtMenuOverlay) {
+            CompositeQtUiMenuOverlay(
+                s_uiComposeBits,
+                clientWidth,
+                clientHeight,
+                clientWidth * static_cast<int>(sizeof(unsigned int)));
+        }
+        s_qtUiOverlayTextureValid = renderedQtMenuOverlay;
         s_uiTexture->Update(0,
             0,
             clientWidth,
@@ -375,7 +414,11 @@ bool QueueLoginUiQuad()
         s_uiStateToken = uiStateToken;
     }
 
-    return QueueFullScreenOverlayQuad(s_uiTexture, clientWidth, clientHeight, 1.0f, 3);
+    const bool queuedBaseUi = QueueFullScreenOverlayQuad(s_uiTexture, clientWidth, clientHeight, 1.0f, 3);
+    if (queuedBaseUi && s_qtUiOverlayTextureValid) {
+        QueueFullScreenOverlayQuad(s_qtUiOverlayTexture, clientWidth, clientHeight, 2.0f, 3);
+    }
+    return queuedBaseUi;
 }
 
 bool QueueMenuCursorOverlayQuad(int cursorActNum, u32 mouseAnimStartTick)
@@ -394,20 +437,14 @@ bool QueueMenuCursorOverlayQuad(int cursorActNum, u32 mouseAnimStartTick)
     const int left = cursorPos.x - kCursorTextureOrigin;
     const int top = cursorPos.y - kCursorTextureOrigin;
 
-    HDC windowDc = GetDC(g_hMainWnd);
-    if (!windowDc) {
-        return false;
-    }
-
     static HDC s_cursorComposeDc = nullptr;
     static HBITMAP s_cursorComposeBitmap = nullptr;
     static void* s_cursorComposeBits = nullptr;
     static int s_cursorComposeWidth = 0;
     static int s_cursorComposeHeight = 0;
     static bool s_cursorTextureValid = false;
-    const bool composeReady = EnsureOverlayComposeSurface(windowDc, kCursorTextureSize, kCursorTextureSize,
+    const bool composeReady = EnsureOverlayComposeSurface(kCursorTextureSize, kCursorTextureSize,
         &s_cursorComposeDc, &s_cursorComposeBitmap, &s_cursorComposeBits, &s_cursorComposeWidth, &s_cursorComposeHeight);
-    ReleaseDC(g_hMainWnd, windowDc);
     if (!composeReady) {
         return false;
     }

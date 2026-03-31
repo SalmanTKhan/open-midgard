@@ -29,7 +29,7 @@ private:
     void LoadAssets();
     void ReleaseAssets();
     void DrawCloseButton(HDC hdc, int drawX, int drawY);
-    void EnsureRenderCache(HDC referenceDc);
+    void EnsureRenderCache();
     void ReleaseRenderCache();
     void InvalidateRenderCache();
     void DrawWindowContents(HDC hdc, int baseX, int baseY);

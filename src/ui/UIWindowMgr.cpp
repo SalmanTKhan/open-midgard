@@ -214,7 +214,7 @@ UIWindowMgr::UIWindowMgr()
       m_isDragAll(0), m_conversionMode(0),
       m_captureWindow(nullptr), m_editWindow(nullptr), m_modalWindow(nullptr), m_lastHitWindow(nullptr),
       m_loadingWnd(nullptr), m_roMapWnd(nullptr), m_minimapZoomWnd(nullptr), m_statusWnd(nullptr), m_sayDialogWnd(nullptr), m_npcMenuWnd(nullptr), m_npcInputWnd(nullptr), m_chooseSellBuyWnd(nullptr), m_itemShopWnd(nullptr), m_itemPurchaseWnd(nullptr), m_itemSellWnd(nullptr), m_shortCutWnd(nullptr), m_chatWnd(nullptr),
-    m_loginWnd(nullptr), m_selectServerWnd(nullptr), m_selectCharWnd(nullptr), m_makeCharWnd(nullptr), m_chooseWnd(nullptr), m_optionWnd(nullptr), m_itemWnd(nullptr), m_questWnd(nullptr), m_basicInfoWnd(nullptr), m_notifyLevelUpWnd(nullptr), m_notifyJobLevelUpWnd(nullptr), m_equipWnd(nullptr), m_skillListWnd(nullptr),
+    m_loginWnd(nullptr), m_selectServerWnd(nullptr), m_selectCharWnd(nullptr), m_makeCharWnd(nullptr), m_waitWnd(nullptr), m_chooseWnd(nullptr), m_optionWnd(nullptr), m_itemWnd(nullptr), m_questWnd(nullptr), m_basicInfoWnd(nullptr), m_notifyLevelUpWnd(nullptr), m_notifyJobLevelUpWnd(nullptr), m_equipWnd(nullptr), m_skillListWnd(nullptr),
       m_wallpaperSurface(nullptr), m_uiComposeDC(nullptr), m_uiComposeBitmap(nullptr), m_uiComposeBits(nullptr), m_uiComposeWidth(0), m_uiComposeHeight(0),
       m_composeCursorActNum(0), m_composeCursorStartTick(0), m_composeCursorEnabled(false)
 {
@@ -384,9 +384,9 @@ void UIWindowMgr::ReleaseComposeSurface()
     m_uiComposeBits = nullptr;
 }
 
-bool UIWindowMgr::EnsureComposeSurface(HDC referenceDC, int width, int height)
+bool UIWindowMgr::EnsureComposeSurface(int width, int height)
 {
-    if (!referenceDC || width <= 0 || height <= 0) {
+    if (width <= 0 || height <= 0) {
         return false;
     }
 
@@ -396,7 +396,7 @@ bool UIWindowMgr::EnsureComposeSurface(HDC referenceDC, int width, int height)
 
     ReleaseComposeSurface();
 
-    m_uiComposeDC = CreateCompatibleDC(referenceDC);
+    m_uiComposeDC = CreateCompatibleDC(nullptr);
     if (!m_uiComposeDC) {
         return false;
     }
@@ -408,7 +408,7 @@ bool UIWindowMgr::EnsureComposeSurface(HDC referenceDC, int width, int height)
     bmi.bmiHeader.biPlanes = 1;
     bmi.bmiHeader.biBitCount = 32;
     bmi.bmiHeader.biCompression = BI_RGB;
-    m_uiComposeBitmap = CreateDIBSection(referenceDC, &bmi, DIB_RGB_COLORS, &m_uiComposeBits, nullptr, 0);
+    m_uiComposeBitmap = CreateDIBSection(nullptr, &bmi, DIB_RGB_COLORS, &m_uiComposeBits, nullptr, 0);
     if (!m_uiComposeBitmap || !m_uiComposeBits) {
         ReleaseComposeSurface();
         return false;
@@ -591,10 +591,14 @@ UIWindow* UIWindowMgr::MakeWindow(int windowId)
         return m_selectServerWnd;
 
     case WID_WAITWND: {
-        UIWaitWnd* waitWnd = new UIWaitWnd();
-        waitWnd->SetShow(1);
-        m_children.push_back(waitWnd);
-        return waitWnd;
+        if (!m_waitWnd) {
+            m_waitWnd = new UIWaitWnd();
+            m_children.push_back(m_waitWnd);
+        }
+        m_children.remove(m_waitWnd);
+        m_children.push_back(m_waitWnd);
+        m_waitWnd->SetShow(1);
+        return m_waitWnd;
     }
 
     case WID_LOADINGWND:
@@ -759,6 +763,9 @@ void UIWindowMgr::DeleteWindow(UIWindow* window)
     if (window == m_makeCharWnd) {
         m_makeCharWnd = nullptr;
     }
+    if (window == m_waitWnd) {
+        m_waitWnd = nullptr;
+    }
     if (window == m_chooseWnd) {
         m_chooseWnd = nullptr;
     }
@@ -854,6 +861,7 @@ void UIWindowMgr::RemoveAllWindows()
     m_selectServerWnd = nullptr;
     m_selectCharWnd = nullptr;
     m_makeCharWnd = nullptr;
+    m_waitWnd = nullptr;
     m_chooseWnd = nullptr;
     m_optionWnd = nullptr;
     m_itemWnd = nullptr;
@@ -916,25 +924,44 @@ bool UIWindowMgr::HasRoMapDirtyVisualState() const
     return HasDirtyWindowRecursive(m_roMapWnd);
 }
 
+void UIWindowMgr::DrawVisibleWindowsToHdc(HDC targetDC, bool includeRoMap)
+{
+    if (!g_hMainWnd || !targetDC) {
+        return;
+    }
+
+    RECT clientRect{};
+    GetClientRect(g_hMainWnd, &clientRect);
+    HDC previousSharedDC = UIWindow::GetSharedDrawDC();
+    UIWindow::SetSharedDrawDC(targetDC);
+    for (auto child : m_children) {
+        if (child && child->m_show != 0 && (includeRoMap || child != m_roMapWnd)) {
+            child->OnDraw();
+        }
+    }
+    if (m_itemWnd && m_itemWnd->m_show != 0) {
+        m_itemWnd->DrawHoverOverlay(targetDC, clientRect);
+    }
+    UIWindow::SetSharedDrawDC(previousSharedDC);
+    for (UIWindow* child : m_children) {
+        if (child && (includeRoMap || child != m_roMapWnd)) {
+            ClearDirtyWindowRecursive(child);
+        }
+    }
+}
+
+void UIWindowMgr::OnDrawToHdc(HDC targetDC)
+{
+    DrawVisibleWindowsToHdc(targetDC, true);
+}
+
 void UIWindowMgr::OnDraw() {
     if (!g_hMainWnd) {
         return;
     }
 
     if (HDC sharedDC = UIWindow::GetSharedDrawDC()) {
-        RECT clientRect{};
-        GetClientRect(g_hMainWnd, &clientRect);
-        for (auto child : m_children) {
-            if (child && child->m_show != 0) {
-                child->OnDraw();
-            }
-        }
-        if (m_itemWnd && m_itemWnd->m_show != 0) {
-            m_itemWnd->DrawHoverOverlay(sharedDC, clientRect);
-        }
-        for (UIWindow* child : m_children) {
-            ClearDirtyWindowRecursive(child);
-        }
+        OnDrawToHdc(sharedDC);
         return;
     }
 
@@ -943,30 +970,6 @@ void UIWindowMgr::OnDraw() {
         (m_selectCharWnd && m_selectCharWnd->m_show != 0) ||
         (m_makeCharWnd && m_makeCharWnd->m_show != 0) ||
         (m_loadingWnd && m_loadingWnd->m_show != 0);
-
-    if (!hasMenuUi && GetRenderDevice().GetLegacyDevice() != nullptr) {
-        HDC backBufferDC = nullptr;
-        if (GetRenderDevice().AcquireBackBufferDC(&backBufferDC) && backBufferDC) {
-            RECT clientRect{};
-            GetClientRect(g_hMainWnd, &clientRect);
-            HDC previousSharedDC = UIWindow::GetSharedDrawDC();
-            UIWindow::SetSharedDrawDC(backBufferDC);
-            for (auto child : m_children) {
-                if (child && child->m_show != 0) {
-                    child->OnDraw();
-                }
-            }
-            if (m_itemWnd && m_itemWnd->m_show != 0) {
-                m_itemWnd->DrawHoverOverlay(backBufferDC, clientRect);
-            }
-            UIWindow::SetSharedDrawDC(previousSharedDC);
-            GetRenderDevice().ReleaseBackBufferDC(backBufferDC);
-            for (UIWindow* child : m_children) {
-                ClearDirtyWindowRecursive(child);
-            }
-            return;
-        }
-    }
 
     HDC targetDC = GetDC(g_hMainWnd);
     if (!targetDC) {
@@ -983,10 +986,10 @@ void UIWindowMgr::OnDraw() {
     }
 
     HDC drawDC = targetDC;
-    const bool useCompose = EnsureComposeSurface(targetDC, clientWidth, clientHeight);
+    const bool useCompose = EnsureComposeSurface(clientWidth, clientHeight);
     if (useCompose) {
         drawDC = m_uiComposeDC;
-        if (m_wallpaperSurface && m_wallpaperSurface->m_hBitmap) {
+        if (m_wallpaperSurface && m_wallpaperSurface->HasSoftwarePixels()) {
             DrawWallpaperToDC(drawDC, clientWidth, clientHeight);
         } else {
             HBRUSH clearBrush = CreateSolidBrush(RGB(0, 0, 0));
@@ -995,23 +998,12 @@ void UIWindowMgr::OnDraw() {
         }
     }
 
-    HDC previousSharedDC = UIWindow::GetSharedDrawDC();
-    UIWindow::SetSharedDrawDC(drawDC);
-    for (auto child : m_children) {
-        if (child && child->m_show != 0) {
-            child->OnDraw();
-        }
-    }
-    if (m_itemWnd && m_itemWnd->m_show != 0) {
-        m_itemWnd->DrawHoverOverlay(drawDC, clientRect);
-    }
-    UIWindow::SetSharedDrawDC(previousSharedDC);
+    OnDrawToHdc(drawDC);
     if (useCompose && m_composeCursorEnabled) {
         DrawModeCursorToHdc(drawDC, m_composeCursorActNum, m_composeCursorStartTick);
     }
     const bool hasModernBackend = GetRenderDevice().GetLegacyDevice() == nullptr;
-    const bool allowModernUiPresent = hasModernBackend
-        && GetRenderDevice().GetBackendType() != RenderBackendType::Vulkan;
+    const bool allowModernUiPresent = hasModernBackend;
     bool presentedModernUiFrame = false;
     if (useCompose && allowModernUiPresent && m_uiComposeBits) {
         presentedModernUiFrame = GetRenderDevice().UpdateBackBufferFromMemory(
@@ -1030,11 +1022,12 @@ void UIWindowMgr::OnDraw() {
         }
     }
 
-    for (UIWindow* child : m_children) {
-        ClearDirtyWindowRecursive(child);
-    }
-
     ReleaseDC(g_hMainWnd, targetDC);
+}
+
+void UIWindowMgr::OnDrawExcludingRoMapToHdc(HDC targetDC)
+{
+    DrawVisibleWindowsToHdc(targetDC, false);
 }
 
 void UIWindowMgr::OnDrawExcludingRoMap()
@@ -1048,22 +1041,7 @@ void UIWindowMgr::OnDrawExcludingRoMap()
         OnDraw();
         return;
     }
-
-    RECT clientRect{};
-    GetClientRect(g_hMainWnd, &clientRect);
-    for (auto child : m_children) {
-        if (child && child != m_roMapWnd && child->m_show != 0) {
-            child->OnDraw();
-        }
-    }
-    if (m_itemWnd && m_itemWnd->m_show != 0) {
-        m_itemWnd->DrawHoverOverlay(sharedDC, clientRect);
-    }
-    for (UIWindow* child : m_children) {
-        if (child && child != m_roMapWnd) {
-            ClearDirtyWindowRecursive(child);
-        }
-    }
+    OnDrawExcludingRoMapToHdc(sharedDC);
 }
 
 bool UIWindowMgr::DrawRoMapToHdc(HDC targetDC, int x, int y)
@@ -1107,26 +1085,39 @@ void UIWindowMgr::RenderWallPaper() {
 }
 
 void UIWindowMgr::DrawWallpaperToDC(HDC targetDC, int width, int height) {
-    if (!targetDC || !m_wallpaperSurface || !m_wallpaperSurface->m_hBitmap || width <= 0 || height <= 0) {
+    if (!targetDC || !m_wallpaperSurface || !m_wallpaperSurface->HasSoftwarePixels() || width <= 0 || height <= 0) {
         return;
     }
 
-    BITMAP bm{};
-    if (!GetObjectA(m_wallpaperSurface->m_hBitmap, sizeof(bm), &bm) || bm.bmWidth <= 0 || bm.bmHeight <= 0) {
+    const unsigned int sourceWidth = m_wallpaperSurface->m_w;
+    const unsigned int sourceHeight = m_wallpaperSurface->m_h;
+    const unsigned int* sourcePixels = m_wallpaperSurface->GetSoftwarePixels();
+    if (!sourcePixels || sourceWidth == 0 || sourceHeight == 0) {
         return;
     }
 
-    HDC srcDC = CreateCompatibleDC(targetDC);
-    if (!srcDC) {
-        return;
-    }
+    BITMAPINFO bmi{};
+    bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    bmi.bmiHeader.biWidth = static_cast<LONG>(sourceWidth);
+    bmi.bmiHeader.biHeight = -static_cast<LONG>(sourceHeight);
+    bmi.bmiHeader.biPlanes = 1;
+    bmi.bmiHeader.biBitCount = 32;
+    bmi.bmiHeader.biCompression = BI_RGB;
 
-    HGDIOBJ old = SelectObject(srcDC, m_wallpaperSurface->m_hBitmap);
     SetStretchBltMode(targetDC, HALFTONE);
-    StretchBlt(targetDC, 0, 0, width, height,
-               srcDC, 0, 0, bm.bmWidth, bm.bmHeight, SRCCOPY);
-    SelectObject(srcDC, old);
-    DeleteDC(srcDC);
+    StretchDIBits(targetDC,
+        0,
+        0,
+        width,
+        height,
+        0,
+        0,
+        static_cast<int>(sourceWidth),
+        static_cast<int>(sourceHeight),
+        sourcePixels,
+        &bmi,
+        DIB_RGB_COLORS,
+        SRCCOPY);
 }
 
 void UIWindowMgr::SetWallpaper(CBitmapRes* bitmap) {
@@ -1153,7 +1144,7 @@ void UIWindowMgr::SetWallpaper(CBitmapRes* bitmap) {
     DbgLog("[SetWallpaper] Calling Update with %dx%d pixels\n",
            bitmap->m_width, bitmap->m_height);
     m_wallpaperSurface->Update(0, 0, bitmap->m_width, bitmap->m_height, bitmap->m_data, false, bitmap->m_width * 4);
-    DbgLog("[SetWallpaper] Update done, m_hBitmap=%p\n", (void*)m_wallpaperSurface);
+    DbgLog("[SetWallpaper] Update done, hasPixels=%d\n", m_wallpaperSurface->HasSoftwarePixels() ? 1 : 0);
 }
 
 bool UIWindowMgr::SetWallpaperFromGameData(const std::string& wallpaperName) {

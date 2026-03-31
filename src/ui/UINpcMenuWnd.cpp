@@ -171,11 +171,8 @@ void UINpcMenuWnd::OnDraw()
         return;
     }
 
-    HDC hdc = UIWindow::GetSharedDrawDC();
-    const bool useShared = (hdc != nullptr);
-    if (!useShared) {
-        hdc = GetDC(g_hMainWnd);
-    }
+    bool useShared = false;
+    HDC hdc = AcquireDrawTarget(&useShared);
     if (!hdc) {
         return;
     }
@@ -208,9 +205,7 @@ void UINpcMenuWnd::OnDraw()
     DrawButton(hdc, GetCancelRect(), "Cancel", false, cancelPressed);
 
     SelectObject(hdc, oldFont);
-    if (!useShared) {
-        ReleaseDC(g_hMainWnd, hdc);
-    }
+    ReleaseDrawTarget(hdc, useShared);
 }
 
 void UINpcMenuWnd::SetMenu(u32 npcId, const std::vector<std::string>& options)

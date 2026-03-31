@@ -1,6 +1,8 @@
 #pragma once
 #include "Res.h"
 
+#include <windows.h>
+
 class CBitmapRes : public CRes {
 public:
     int m_isAlpha;
@@ -26,3 +28,5 @@ private:
     bool LoadJPGData(const unsigned char* buffer, int size);
     bool LoadTGAData(const unsigned char* buffer, int size);
 };
+
+bool LoadHBitmapFromGameData(const char* path, HBITMAP* outBitmap, int* outWidth = nullptr, int* outHeight = nullptr);

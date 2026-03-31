@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <windows.h>
 #include <ddraw.h>
 #include <d3d.h>
@@ -7,6 +8,27 @@
 #include "RenderBackend.h"
 
 class CTexture;
+
+struct QtUiRenderTargetInfo {
+    bool available = false;
+    RenderBackendType backend = RenderBackendType::LegacyDirect3D7;
+    void* graphicsInstance = nullptr;
+    void* graphicsPhysicalDevice = nullptr;
+    void* graphicsDevice = nullptr;
+    void* graphicsQueueOrContext = nullptr;
+    void* colorTarget = nullptr;
+    void* colorTargetView = nullptr;
+    unsigned int width = 0;
+    unsigned int height = 0;
+    uint32_t queueFamilyIndex = 0xFFFFFFFFu;
+    uint32_t colorFormat = 0u;
+    uint32_t colorImageLayout = 0u;
+    uint32_t colorTargetState = 0u;
+    uint32_t targetSampleCount = 1u;
+    uint32_t minimumFeatureLevel = 0u;
+    uint32_t adapterLuidLow = 0u;
+    int32_t adapterLuidHigh = 0;
+};
 
 class IRenderDevice {
 public:
@@ -25,8 +47,6 @@ public:
     virtual int ClearColor(unsigned int color) = 0;
     virtual int ClearDepth() = 0;
     virtual int Present(bool vertSync) = 0;
-    virtual bool AcquireBackBufferDC(HDC* outDc) = 0;
-    virtual void ReleaseBackBufferDC(HDC dc) = 0;
     virtual bool UpdateBackBufferFromMemory(const void* bgraPixels, int width, int height, int pitch) = 0;
 
     virtual bool BeginScene() = 0;
@@ -48,6 +68,8 @@ public:
         int pixelFormat, unsigned int* outSurfaceWidth, unsigned int* outSurfaceHeight) = 0;
     virtual bool UpdateTextureResource(CTexture* texture, int x, int y, int w, int h,
         const unsigned int* data, bool skipColorKey, int pitch) = 0;
+    virtual bool GetQtUiRenderTargetInfo(QtUiRenderTargetInfo* outInfo) const = 0;
+    virtual bool GetQtUiTextureTargetInfo(const CTexture* texture, QtUiRenderTargetInfo* outInfo) const = 0;
 };
 
 IRenderDevice& GetRenderDevice();

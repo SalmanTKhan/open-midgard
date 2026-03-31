@@ -7,8 +7,6 @@
 
 #pragma comment(lib, "msimg32.lib")
 
-namespace {
-
 unsigned int PremultiplyColor(unsigned int color)
 {
     const unsigned int alpha = (color >> 24) & 0xFFu;
@@ -118,12 +116,9 @@ void BlitMotionToArgb(unsigned int* dest, int destW, int destH, int baseX, int b
     }
 }
 
-} // namespace
-
 // --- CDCBitmap Implementation ---
 
-CDCBitmap::CDCBitmap(unsigned int w, unsigned int h) : m_dc(NULL), m_bitmap(NULL), m_bitmapOld(NULL), m_image(NULL), m_w(0), m_h(0), m_dirty(false) {
-    m_dc = CreateCompatibleDC(NULL);
+CDCBitmap::CDCBitmap(unsigned int w, unsigned int h) : m_image(NULL), m_w(0), m_h(0), m_dirty(false) {
     CreateDCSurface(w, h);
 }
 
@@ -132,40 +127,30 @@ CDCBitmap::~CDCBitmap() {
         delete tex;
     }
     m_textureList.clear();
-
-    if (m_dc) {
-        if (m_bitmapOld) SelectObject(m_dc, m_bitmapOld);
-        DeleteDC(m_dc);
-    }
-    if (m_bitmap) DeleteObject(m_bitmap);
+    delete[] m_image;
 }
 
 void CDCBitmap::CreateDCSurface(unsigned int w, unsigned int h) {
+    if (m_w == w && m_h == h && m_image) {
+        return;
+    }
+
+    delete[] m_image;
+    m_image = nullptr;
     m_w = w;
     m_h = h;
     m_dirty = true;
 
-    if (m_bitmap) {
-        SelectObject(m_dc, m_bitmapOld);
-        DeleteObject(m_bitmap);
+    if (m_w > 0 && m_h > 0) {
+        m_image = new unsigned int[static_cast<size_t>(m_w) * static_cast<size_t>(m_h)]{};
     }
-
-    BITMAPINFO bmi = {0};
-    bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-    bmi.bmiHeader.biWidth = w;
-    bmi.bmiHeader.biHeight = -(int)h; // Top-down
-    bmi.bmiHeader.biPlanes = 1;
-    bmi.bmiHeader.biBitCount = 32;
-    bmi.bmiHeader.biCompression = BI_RGB;
-
-    m_bitmap = CreateDIBSection(m_dc, &bmi, DIB_RGB_COLORS, (void**)&m_image, NULL, 0);
-    m_bitmapOld = (HBITMAP)SelectObject(m_dc, m_bitmap);
 }
 
 bool CDCBitmap::GetDC(HDC* phdc) {
-    m_dirty = true;
-    *phdc = m_dc;
-    return true;
+    if (phdc) {
+        *phdc = nullptr;
+    }
+    return false;
 }
 
 void CDCBitmap::ReleaseDC(HDC hdc) {
@@ -372,5 +357,24 @@ bool DrawActMotionToHdc(HDC hdc, int x, int y, class CSprRes* sprRes, const stru
     SelectObject(memDc, oldBitmap);
     DeleteDC(memDc);
     DeleteObject(dib);
+    return true;
+}
+
+bool DrawActMotionToBitmap(CDCBitmap* bitmap, int x, int y, class CSprRes* sprRes, const struct CMotion* motion, unsigned int* palette)
+{
+    if (!bitmap || !bitmap->GetImageData() || bitmap->GetWidth() == 0 || bitmap->GetHeight() == 0
+            || !sprRes || !motion || !palette) {
+        return false;
+    }
+
+    BlitMotionToArgb(
+        bitmap->GetImageData(),
+        static_cast<int>(bitmap->GetWidth()),
+        static_cast<int>(bitmap->GetHeight()),
+        x,
+        y,
+        sprRes,
+        motion,
+        palette);
     return true;
 }
