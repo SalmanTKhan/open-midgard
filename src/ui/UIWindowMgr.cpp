@@ -67,6 +67,44 @@ std::string NormalizeSlash(std::string value)
     return value;
 }
 
+bool QueueFullScreenOverlayQuad(CTexture* texture, int width, int height, float sortKey)
+{
+    if (!texture || width <= 0 || height <= 0) {
+        return false;
+    }
+
+    RPFace* face = g_renderer.BorrowNullRP();
+    if (!face) {
+        return false;
+    }
+
+    const float right = static_cast<float>(width) - 0.5f;
+    const float bottom = static_cast<float>(height) - 0.5f;
+    const unsigned int overlayContentWidth = texture->m_surfaceUpdateWidth > 0 ? texture->m_surfaceUpdateWidth : static_cast<unsigned int>(width);
+    const unsigned int overlayContentHeight = texture->m_surfaceUpdateHeight > 0 ? texture->m_surfaceUpdateHeight : static_cast<unsigned int>(height);
+    const float maxU = texture->m_w != 0 ? static_cast<float>(overlayContentWidth) / static_cast<float>(texture->m_w) : 1.0f;
+    const float maxV = texture->m_h != 0 ? static_cast<float>(overlayContentHeight) / static_cast<float>(texture->m_h) : 1.0f;
+
+    face->primType = D3DPT_TRIANGLESTRIP;
+    face->verts = face->m_verts;
+    face->numVerts = 4;
+    face->indices = nullptr;
+    face->numIndices = 0;
+    face->tex = texture;
+    face->mtPreset = 3;
+    face->cullMode = D3DCULL_NONE;
+    face->srcAlphaMode = D3DBLEND_SRCALPHA;
+    face->destAlphaMode = D3DBLEND_INVSRCALPHA;
+    face->alphaSortKey = sortKey;
+
+    face->m_verts[0] = { -0.5f, -0.5f, 0.0f, 1.0f, 0xFFFFFFFFu, 0xFF000000u, 0.0f, 0.0f };
+    face->m_verts[1] = { right, -0.5f, 0.0f, 1.0f, 0xFFFFFFFFu, 0xFF000000u, maxU, 0.0f };
+    face->m_verts[2] = { -0.5f, bottom, 0.0f, 1.0f, 0xFFFFFFFFu, 0xFF000000u, 0.0f, maxV };
+    face->m_verts[3] = { right, bottom, 0.0f, 1.0f, 0xFFFFFFFFu, 0xFF000000u, maxU, maxV };
+    g_renderer.AddRP(face, 1 | 8);
+    return true;
+}
+
 void AddUniqueCandidate(std::vector<std::string>& out, const std::string& raw)
 {
     if (raw.empty()) {
@@ -1004,6 +1042,45 @@ void UIWindowMgr::OnDraw() {
         return;
     }
 
+    const bool qtMenuRuntimeEnabled = hasMenuUi
+        && IsQtUiRuntimeEnabled()
+        && GetRenderDevice().GetLegacyDevice() == nullptr
+        && !m_composeCursorEnabled;
+    if (qtMenuRuntimeEnabled) {
+        static CTexture* s_qtMenuOverlayTexture = nullptr;
+        static int s_qtMenuOverlayTextureWidth = 0;
+        static int s_qtMenuOverlayTextureHeight = 0;
+        if (!s_qtMenuOverlayTexture
+            || s_qtMenuOverlayTextureWidth != clientWidth
+            || s_qtMenuOverlayTextureHeight != clientHeight) {
+            delete s_qtMenuOverlayTexture;
+            s_qtMenuOverlayTexture = new CTexture();
+            if (!s_qtMenuOverlayTexture
+                || !s_qtMenuOverlayTexture->Create(clientWidth, clientHeight, PF_A8R8G8B8, false)) {
+                delete s_qtMenuOverlayTexture;
+                s_qtMenuOverlayTexture = nullptr;
+                s_qtMenuOverlayTextureWidth = 0;
+                s_qtMenuOverlayTextureHeight = 0;
+            } else {
+                s_qtMenuOverlayTextureWidth = clientWidth;
+                s_qtMenuOverlayTextureHeight = clientHeight;
+            }
+        }
+
+        if (s_qtMenuOverlayTexture
+            && RenderQtUiMenuOverlayTexture(s_qtMenuOverlayTexture, clientWidth, clientHeight)
+            && QueueFullScreenOverlayQuad(s_qtMenuOverlayTexture, clientWidth, clientHeight, 2.0f)) {
+            ClearDirtyVisualState();
+            g_renderer.ClearBackground();
+            g_renderer.Clear(0);
+            RenderWallPaper();
+            g_renderer.DrawScene();
+            g_renderer.Flip(false);
+            ReleaseDC(g_hMainWnd, targetDC);
+            return;
+        }
+    }
+
     HDC drawDC = targetDC;
     const bool useCompose = EnsureComposeSurface(clientWidth, clientHeight);
     if (useCompose) {
@@ -1017,11 +1094,11 @@ void UIWindowMgr::OnDraw() {
         }
     }
 
-    const bool qtMenuRuntimeEnabled = useCompose
+    const bool qtMenuComposeFallback = useCompose
         && hasMenuUi
         && IsQtUiRuntimeEnabled()
         && GetRenderDevice().GetLegacyDevice() == nullptr;
-    if (!qtMenuRuntimeEnabled) {
+    if (!qtMenuComposeFallback) {
         OnDrawToHdc(drawDC);
     } else {
         ClearDirtyVisualState();
