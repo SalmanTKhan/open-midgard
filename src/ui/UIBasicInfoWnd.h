@@ -10,6 +10,16 @@ class UIBitmapButton;
 
 class UIBasicInfoWnd : public UIFrameWnd {
 public:
+    struct QtButtonDisplay {
+        int id = 0;
+        int x = 0;
+        int y = 0;
+        int width = 0;
+        int height = 0;
+        std::string label;
+        bool visible = true;
+    };
+
     struct DisplayData {
         std::string name;
         std::string jobName;
@@ -44,6 +54,10 @@ public:
     void NewHeight(int height);
     bool IsMiniMode() const;
     bool GetDisplayDataForQt(DisplayData* outData) const;
+    int GetQtSystemButtonCount() const;
+    bool GetQtSystemButtonDisplayForQt(int index, QtButtonDisplay* out) const;
+    int GetQtMenuButtonCount() const;
+    bool GetQtMenuButtonDisplayForQt(int index, QtButtonDisplay* out) const;
 
 private:
     enum : int {

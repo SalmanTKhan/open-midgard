@@ -982,43 +982,28 @@ Item {
             font.bold: true
         }
 
-        Rectangle {
-            x: 3
-            y: 3
-            width: 11
-            height: 11
-            radius: 2
-            color: "#d7d2c5"
-            border.width: 1
-            border.color: "#7f7a70"
-            visible: uiState.basicInfoMini
+        Repeater {
+            model: uiState.basicInfoData.systemButtons || []
 
-            Text {
-                anchors.centerIn: parent
-                text: "B"
-                color: "#000000"
-                font.pixelSize: 8
-                font.bold: true
-            }
-        }
+            delegate: Rectangle {
+                required property var modelData
+                x: (modelData.x || 0) - uiState.basicInfoX
+                y: (modelData.y || 0) - uiState.basicInfoY
+                width: modelData.width || 0
+                height: modelData.height || 0
+                radius: 2
+                color: "#d7d2c5"
+                border.width: 1
+                border.color: "#7f7a70"
+                visible: modelData.visible || false
 
-        Rectangle {
-            x: 266
-            y: 3
-            width: 11
-            height: 11
-            radius: 2
-            color: "#d7d2c5"
-            border.width: 1
-            border.color: "#7f7a70"
-            visible: !uiState.basicInfoMini
-
-            Text {
-                anchors.centerIn: parent
-                text: "_"
-                color: "#000000"
-                font.pixelSize: 8
-                font.bold: true
+                Text {
+                    anchors.centerIn: parent
+                    text: modelData.label || ""
+                    color: "#000000"
+                    font.pixelSize: 8
+                    font.bold: true
+                }
             }
         }
 
@@ -1193,31 +1178,23 @@ Item {
         }
 
         Repeater {
-            model: !uiState.basicInfoMini ? [
-                { x: 207, y: 22, label: "ST" },
-                { x: 243, y: 22, label: "OP" },
-                { x: 207, y: 46, label: "IT" },
-                { x: 243, y: 46, label: "EQ" },
-                { x: 207, y: 70, label: "SK" },
-                { x: 243, y: 70, label: "MP" },
-                { x: 207, y: 94, label: "CM" },
-                { x: 243, y: 94, label: "FR" }
-            ] : []
+            model: uiState.basicInfoData.menuButtons || []
 
             delegate: Rectangle {
                 required property var modelData
-                x: modelData.x
-                y: modelData.y
-                width: 32
-                height: 20
+                x: (modelData.x || 0) - uiState.basicInfoX
+                y: (modelData.y || 0) - uiState.basicInfoY
+                width: modelData.width || 0
+                height: modelData.height || 0
                 radius: 3
                 color: "#d7d2c5"
                 border.width: 1
                 border.color: "#7f7a70"
+                visible: modelData.visible || false
 
                 Text {
                     anchors.centerIn: parent
-                    text: modelData.label
+                    text: modelData.label || ""
                     color: "#000000"
                     font.pixelSize: 8
                     font.bold: true

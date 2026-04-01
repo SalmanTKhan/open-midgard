@@ -973,6 +973,46 @@ void PopulateBasicInfoState(QtUiState* state)
         data.insert(QStringLiteral("maxWeight"), display.maxWeight);
         data.insert(QStringLiteral("expPercent"), display.expPercent);
         data.insert(QStringLiteral("jobExpPercent"), display.jobExpPercent);
+
+        QVariantList systemButtons;
+        systemButtons.reserve(basicInfoWnd->GetQtSystemButtonCount());
+        for (int index = 0; index < basicInfoWnd->GetQtSystemButtonCount(); ++index) {
+            UIBasicInfoWnd::QtButtonDisplay buttonDisplay{};
+            if (!basicInfoWnd->GetQtSystemButtonDisplayForQt(index, &buttonDisplay)) {
+                continue;
+            }
+
+            QVariantMap button;
+            button.insert(QStringLiteral("id"), buttonDisplay.id);
+            button.insert(QStringLiteral("x"), buttonDisplay.x);
+            button.insert(QStringLiteral("y"), buttonDisplay.y);
+            button.insert(QStringLiteral("width"), buttonDisplay.width);
+            button.insert(QStringLiteral("height"), buttonDisplay.height);
+            button.insert(QStringLiteral("label"), ToQString(buttonDisplay.label));
+            button.insert(QStringLiteral("visible"), buttonDisplay.visible);
+            systemButtons.push_back(button);
+        }
+        data.insert(QStringLiteral("systemButtons"), systemButtons);
+
+        QVariantList menuButtons;
+        menuButtons.reserve(basicInfoWnd->GetQtMenuButtonCount());
+        for (int index = 0; index < basicInfoWnd->GetQtMenuButtonCount(); ++index) {
+            UIBasicInfoWnd::QtButtonDisplay buttonDisplay{};
+            if (!basicInfoWnd->GetQtMenuButtonDisplayForQt(index, &buttonDisplay)) {
+                continue;
+            }
+
+            QVariantMap button;
+            button.insert(QStringLiteral("id"), buttonDisplay.id);
+            button.insert(QStringLiteral("x"), buttonDisplay.x);
+            button.insert(QStringLiteral("y"), buttonDisplay.y);
+            button.insert(QStringLiteral("width"), buttonDisplay.width);
+            button.insert(QStringLiteral("height"), buttonDisplay.height);
+            button.insert(QStringLiteral("label"), ToQString(buttonDisplay.label));
+            button.insert(QStringLiteral("visible"), buttonDisplay.visible);
+            menuButtons.push_back(button);
+        }
+        data.insert(QStringLiteral("menuButtons"), menuButtons);
     }
     state->setBasicInfoData(data);
 }

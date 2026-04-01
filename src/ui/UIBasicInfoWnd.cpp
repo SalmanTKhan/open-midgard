@@ -621,6 +621,66 @@ bool UIBasicInfoWnd::GetDisplayDataForQt(DisplayData* outData) const
     return true;
 }
 
+int UIBasicInfoWnd::GetQtSystemButtonCount() const
+{
+    return 2;
+}
+
+bool UIBasicInfoWnd::GetQtSystemButtonDisplayForQt(int index, QtButtonDisplay* out) const
+{
+    if (!out || index < 0 || index >= GetQtSystemButtonCount()) {
+        return false;
+    }
+
+    switch (index) {
+    case 0:
+        out->id = kButtonIdBase;
+        out->x = m_x + kBaseButtonX;
+        out->y = m_y + kTopButtonY;
+        out->width = kQtTopButtonWidth;
+        out->height = kQtTopButtonHeight;
+        out->label = "B";
+        out->visible = IsMiniMode();
+        return true;
+    case 1:
+        out->id = kButtonIdMini;
+        out->x = m_x + kMiniButtonX;
+        out->y = m_y + kTopButtonY;
+        out->width = kQtTopButtonWidth;
+        out->height = kQtTopButtonHeight;
+        out->label = "_";
+        out->visible = !IsMiniMode();
+        return true;
+    default:
+        return false;
+    }
+}
+
+int UIBasicInfoWnd::GetQtMenuButtonCount() const
+{
+    return static_cast<int>(kMenuButtonIds.size());
+}
+
+bool UIBasicInfoWnd::GetQtMenuButtonDisplayForQt(int index, QtButtonDisplay* out) const
+{
+    if (!out || index < 0 || index >= GetQtMenuButtonCount()) {
+        return false;
+    }
+
+    static const std::array<const char*, 8> kMenuLabels = {
+        "ST", "OP", "IT", "EQ", "SK", "MP", "CM", "FR"
+    };
+
+    out->id = kMenuButtonIds[static_cast<size_t>(index)];
+    out->x = m_x + 207 + 36 * (index % 2);
+    out->y = m_y + 22 + 24 * (index / 2);
+    out->width = kQtMenuButtonWidth;
+    out->height = kQtMenuButtonHeight;
+    out->label = kMenuLabels[static_cast<size_t>(index)];
+    out->visible = !IsMiniMode();
+    return true;
+}
+
 void UIBasicInfoWnd::EnsureCreated()
 {
     if (!m_controlsCreated) {
