@@ -895,12 +895,12 @@ bool QueueLockedTargetOverlayQuad(CGameMode& mode)
         UnionRect(&overlayRect, &overlayRect, &textRect);
     }
 
-    static bool s_bitmapLoaded = false;
-    static HBITMAP s_bitmap = nullptr;
-    static int s_width = 0;
-    static int s_height = 0;
-    if (!s_bitmapLoaded) {
-        s_bitmapLoaded = true;
+    static bool s_arrowPixelsLoaded = false;
+    static std::vector<unsigned int> s_arrowPixels;
+    static int s_arrowWidth = 0;
+    static int s_arrowHeight = 0;
+    if (!s_arrowPixelsLoaded) {
+        s_arrowPixelsLoaded = true;
         std::string bitmapPath = ResolveDataPath(kLockedTargetArrowBitmapName, "bmp", {
             "",
             std::string(UiKorPrefix()),
@@ -912,7 +912,16 @@ bool QueueLockedTargetOverlayQuad(CGameMode& mode)
             std::string("data\\") + UiKorPrefix() + "basic_interface\\"
         });
         if (!bitmapPath.empty()) {
-            LoadBitmapFromGameData(bitmapPath, &s_bitmap, &s_width, &s_height);
+            u32* pixels = nullptr;
+            if (LoadBgraPixelsFromGameData(bitmapPath.c_str(), &pixels, &s_arrowWidth, &s_arrowHeight)
+                && pixels
+                && s_arrowWidth > 0
+                && s_arrowHeight > 0) {
+                s_arrowPixels.assign(
+                    pixels,
+                    pixels + static_cast<size_t>(s_arrowWidth) * static_cast<size_t>(s_arrowHeight));
+            }
+            delete[] pixels;
         }
     }
 
@@ -920,12 +929,19 @@ bool QueueLockedTargetOverlayQuad(CGameMode& mode)
     const int bounce = static_cast<int>(std::lround((0.5f + 0.5f * std::sin(static_cast<float>(now) * kLockedTargetArrowBouncePerMs))
         * kLockedTargetArrowBouncePixels));
     RECT arrowRect{};
-    if (s_bitmap && s_width > 0 && s_height > 0) {
-        const int scaledWidth = (std::max)(1, static_cast<int>(std::lround(static_cast<float>(s_width) * kLockedTargetArrowScale)));
-        const int scaledHeight = (std::max)(1, static_cast<int>(std::lround(static_cast<float>(s_height) * kLockedTargetArrowScale)));
-        const int drawX = centerX - (scaledWidth / 2);
-        const int drawY = labelY - kLockedTargetArrowBaseLift - scaledHeight - kLockedTargetArrowYOffset - bounce;
-        arrowRect = { drawX - 2, drawY - 2, drawX + scaledWidth + 2, drawY + scaledHeight + 2 };
+    const bool hasArrowBitmap = !s_arrowPixels.empty() && s_arrowWidth > 0 && s_arrowHeight > 0;
+    int arrowDrawX = 0;
+    int arrowDrawY = 0;
+    int arrowScaledWidth = 0;
+    int arrowScaledHeight = 0;
+    if (hasArrowBitmap) {
+        arrowScaledWidth = (std::max)(1, static_cast<int>(std::lround(static_cast<float>(s_arrowWidth) * kLockedTargetArrowScale)));
+        arrowScaledHeight = (std::max)(1, static_cast<int>(std::lround(static_cast<float>(s_arrowHeight) * kLockedTargetArrowScale)));
+        arrowDrawX = centerX - (arrowScaledWidth / 2);
+        arrowDrawY = labelY - kLockedTargetArrowBaseLift - arrowScaledHeight - kLockedTargetArrowYOffset - bounce;
+        const int drawX = arrowDrawX;
+        const int drawY = arrowDrawY;
+        arrowRect = { drawX - 2, drawY - 2, drawX + arrowScaledWidth + 2, drawY + arrowScaledHeight + 2 };
     } else {
         const int tipY = labelY - kLockedTargetArrowBaseLift - bounce;
         arrowRect = { centerX - 9, tipY - 13, centerX + 9, tipY + 2 };
@@ -974,9 +990,55 @@ bool QueueLockedTargetOverlayQuad(CGameMode& mode)
     ClearOverlayComposeBits(s_targetComposeBits, width, height);
     const int savedDc = SaveDC(s_targetComposeDc);
     SetViewportOrgEx(s_targetComposeDc, -clippedRect.left, -clippedRect.top, nullptr);
-    DrawLockedTargetArrow(mode, s_targetComposeDc);
     DrawLockedTargetName(mode, s_targetComposeDc);
     RestoreDC(s_targetComposeDc, savedDc);
+
+    if (hasArrowBitmap) {
+        unsigned int* targetPixels = static_cast<unsigned int*>(s_targetComposeBits);
+        for (int destY = 0; destY < arrowScaledHeight; ++destY) {
+            const int localY = (arrowDrawY - clippedRect.top) + destY;
+            if (localY < 0 || localY >= height) {
+                continue;
+            }
+
+            const int srcY = destY * s_arrowHeight / arrowScaledHeight;
+            for (int destX = 0; destX < arrowScaledWidth; ++destX) {
+                const int localX = (arrowDrawX - clippedRect.left) + destX;
+                if (localX < 0 || localX >= width) {
+                    continue;
+                }
+
+                const int srcX = destX * s_arrowWidth / arrowScaledWidth;
+                const unsigned int srcPixel = s_arrowPixels[static_cast<size_t>(srcY) * static_cast<size_t>(s_arrowWidth) + static_cast<size_t>(srcX)];
+                if ((srcPixel & 0x00FFFFFFu) == (kOverlayTransparentKey & 0x00FFFFFFu)) {
+                    continue;
+                }
+
+                const unsigned int srcAlpha = (srcPixel >> 24) & 0xFFu;
+                unsigned int& dstPixel = targetPixels[static_cast<size_t>(localY) * static_cast<size_t>(width) + static_cast<size_t>(localX)];
+                if (srcAlpha >= 0xFFu || (dstPixel & 0x00FFFFFFu) == (kOverlayTransparentKey & 0x00FFFFFFu)) {
+                    dstPixel = srcPixel & 0x00FFFFFFu;
+                } else if (srcAlpha != 0u) {
+                    const unsigned int dstBlue = dstPixel & 0xFFu;
+                    const unsigned int dstGreen = (dstPixel >> 8) & 0xFFu;
+                    const unsigned int dstRed = (dstPixel >> 16) & 0xFFu;
+                    const unsigned int srcBlue = srcPixel & 0xFFu;
+                    const unsigned int srcGreen = (srcPixel >> 8) & 0xFFu;
+                    const unsigned int srcRed = (srcPixel >> 16) & 0xFFu;
+                    const unsigned int invAlpha = 255u - srcAlpha;
+                    const unsigned int outBlue = (srcBlue * srcAlpha + dstBlue * invAlpha) / 255u;
+                    const unsigned int outGreen = (srcGreen * srcAlpha + dstGreen * invAlpha) / 255u;
+                    const unsigned int outRed = (srcRed * srcAlpha + dstRed * invAlpha) / 255u;
+                    dstPixel = (outRed << 16) | (outGreen << 8) | outBlue;
+                }
+            }
+        }
+    } else {
+        const int savedArrowDc = SaveDC(s_targetComposeDc);
+        SetViewportOrgEx(s_targetComposeDc, -clippedRect.left, -clippedRect.top, nullptr);
+        DrawLockedTargetArrow(mode, s_targetComposeDc);
+        RestoreDC(s_targetComposeDc, savedArrowDc);
+    }
 
     ConvertOverlayComposeBitsToAlpha(s_targetComposeBits, width, height);
     s_targetTexture->Update(0,
