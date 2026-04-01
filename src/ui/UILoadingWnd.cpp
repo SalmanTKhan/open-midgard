@@ -1,8 +1,17 @@
 #include "UILoadingWnd.h"
 
 #include "qtui/QtUiRuntime.h"
+#include "render/DC.h"
 
 #include <windows.h>
+
+#if RO_ENABLE_QT6_UI
+#include <QFont>
+#include <QFontMetrics>
+#include <QImage>
+#include <QPainter>
+#include <QString>
+#endif
 
 #include <algorithm>
 #include <cstdio>
@@ -24,6 +33,83 @@ void FillSolidRect(HDC hdc, const RECT& rect, COLORREF color)
     FillRect(hdc, &rect, brush);
     DeleteObject(brush);
 }
+
+#if RO_ENABLE_QT6_UI
+QFont BuildLoadingFontFromHdc(HDC hdc)
+{
+    LOGFONTA logFont{};
+    if (hdc) {
+        if (HGDIOBJ fontObject = GetCurrentObject(hdc, OBJ_FONT)) {
+            GetObjectA(fontObject, sizeof(logFont), &logFont);
+        }
+    }
+
+    const QString family = logFont.lfFaceName[0] != '\0'
+        ? QString::fromLocal8Bit(logFont.lfFaceName)
+        : QStringLiteral("Tahoma");
+    QFont font(family);
+    font.setPixelSize(logFont.lfHeight != 0 ? (std::max)(1, std::abs(logFont.lfHeight)) : 16);
+    font.setBold(logFont.lfWeight >= FW_BOLD);
+    font.setStyleStrategy(QFont::PreferAntialias);
+    return font;
+}
+
+Qt::Alignment ToQtLoadingAlignment(UINT format)
+{
+    Qt::Alignment alignment = Qt::AlignLeft | Qt::AlignTop;
+    if (format & DT_CENTER) {
+        alignment &= ~Qt::AlignLeft;
+        alignment |= Qt::AlignHCenter;
+    } else if (format & DT_RIGHT) {
+        alignment &= ~Qt::AlignLeft;
+        alignment |= Qt::AlignRight;
+    }
+
+    if (format & DT_VCENTER) {
+        alignment &= ~Qt::AlignTop;
+        alignment |= Qt::AlignVCenter;
+    } else if (format & DT_BOTTOM) {
+        alignment &= ~Qt::AlignTop;
+        alignment |= Qt::AlignBottom;
+    }
+
+    return alignment;
+}
+
+void DrawLoadingText(HDC hdc, const RECT& rect, const char* text, COLORREF color, UINT format)
+{
+    if (!hdc || !text || rect.right <= rect.left || rect.bottom <= rect.top) {
+        return;
+    }
+
+    QString label = QString::fromLocal8Bit(text);
+    if (label.isEmpty()) {
+        return;
+    }
+
+    const int width = rect.right - rect.left;
+    const int height = rect.bottom - rect.top;
+    std::vector<unsigned int> pixels(static_cast<size_t>(width) * static_cast<size_t>(height), 0u);
+    QImage image(reinterpret_cast<uchar*>(pixels.data()), width, height, width * static_cast<int>(sizeof(unsigned int)), QImage::Format_ARGB32);
+    if (image.isNull()) {
+        return;
+    }
+
+    const QFont font = BuildLoadingFontFromHdc(hdc);
+    if (format & DT_END_ELLIPSIS) {
+        const QFontMetrics metrics(font);
+        label = metrics.elidedText(label, Qt::ElideRight, width);
+    }
+
+    QPainter painter(&image);
+    painter.setRenderHint(QPainter::Antialiasing, true);
+    painter.setRenderHint(QPainter::TextAntialiasing, true);
+    painter.setFont(font);
+    painter.setPen(QColor(GetRValue(color), GetGValue(color), GetBValue(color)));
+    painter.drawText(QRect(0, 0, width, height), ToQtLoadingAlignment(format) | Qt::TextSingleLine, label);
+    AlphaBlendArgbToHdc(hdc, rect.left, rect.top, width, height, pixels.data(), width, height);
+}
+#endif
 
 } // namespace
 
@@ -127,16 +213,28 @@ void UILoadingWnd::OnDraw()
 
     HGDIOBJ oldFont = SelectObject(hdc, titleFont);
     RECT titleRect = MakeRect(panelLeft + 22, panelTop + 10, panelLeft + panelWidth - 22, panelTop + 32);
+#if RO_ENABLE_QT6_UI
+    DrawLoadingText(hdc, titleRect, "Entering World", RGB(245, 239, 221), DT_LEFT | DT_SINGLELINE | DT_VCENTER);
+#else
     DrawTextA(hdc, "Entering World", -1, &titleRect, DT_LEFT | DT_SINGLELINE | DT_VCENTER);
+#endif
 
     SelectObject(hdc, bodyFont);
     RECT messageRect = MakeRect(panelLeft + 24, panelTop + 28, panelLeft + panelWidth - 24, panelTop + 48);
+#if RO_ENABLE_QT6_UI
+    DrawLoadingText(hdc, messageRect, m_message.c_str(), RGB(245, 239, 221), DT_LEFT | DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS);
+#else
     DrawTextA(hdc, m_message.c_str(), -1, &messageRect, DT_LEFT | DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS);
+#endif
 
     char percentText[16] = {};
     std::snprintf(percentText, sizeof(percentText), "%d%%", static_cast<int>(m_progress * 100.0f + 0.5f));
     RECT percentRect = MakeRect(panelLeft + panelWidth - 70, panelTop + 10, panelLeft + panelWidth - 20, panelTop + 32);
+#if RO_ENABLE_QT6_UI
+    DrawLoadingText(hdc, percentRect, percentText, RGB(245, 239, 221), DT_RIGHT | DT_SINGLELINE | DT_VCENTER);
+#else
     DrawTextA(hdc, percentText, -1, &percentRect, DT_RIGHT | DT_SINGLELINE | DT_VCENTER);
+#endif
 
     SelectObject(hdc, oldFont);
     DeleteObject(titleFont);

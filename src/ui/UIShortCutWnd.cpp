@@ -7,8 +7,16 @@
 #include "item/Item.h"
 #include "main/WinMain.h"
 #include "qtui/QtUiRuntime.h"
+#include "render/DC.h"
 #include "session/Session.h"
 #include "skill/Skill.h"
+
+#if RO_ENABLE_QT6_UI
+#include <QFont>
+#include <QImage>
+#include <QPainter>
+#include <QString>
+#endif
 
 #include <algorithm>
 #include <string>
@@ -29,6 +37,50 @@ void DrawBitmapFit(HDC hdc, const shopui::BitmapPixels& bitmap, const RECT& rect
     shopui::DrawBitmapPixelsTransparent(hdc, bitmap, rect);
 }
 
+#if RO_ENABLE_QT6_UI
+QFont BuildShortCutFontFromHdc(HDC hdc)
+{
+    LOGFONTA logFont{};
+    if (hdc) {
+        if (HGDIOBJ fontObject = GetCurrentObject(hdc, OBJ_FONT)) {
+            GetObjectA(fontObject, sizeof(logFont), &logFont);
+        }
+    }
+
+    const QString family = logFont.lfFaceName[0] != '\0'
+        ? QString::fromLocal8Bit(logFont.lfFaceName)
+        : QStringLiteral("MS Sans Serif");
+    QFont font(family);
+    font.setPixelSize(logFont.lfHeight != 0 ? (std::max)(1, std::abs(logFont.lfHeight)) : 13);
+    font.setBold(logFont.lfWeight >= FW_BOLD);
+    font.setStyleStrategy(QFont::NoAntialias);
+    return font;
+}
+
+void DrawShortCutTextPass(HDC hdc, const RECT& rect, const QString& text, COLORREF color)
+{
+    if (!hdc || text.isEmpty() || rect.right <= rect.left || rect.bottom <= rect.top) {
+        return;
+    }
+
+    const int width = rect.right - rect.left;
+    const int height = rect.bottom - rect.top;
+    std::vector<unsigned int> pixels(static_cast<size_t>(width) * static_cast<size_t>(height), 0u);
+    QImage image(reinterpret_cast<uchar*>(pixels.data()), width, height, width * static_cast<int>(sizeof(unsigned int)), QImage::Format_ARGB32);
+    if (image.isNull()) {
+        return;
+    }
+
+    QPainter painter(&image);
+    painter.setRenderHint(QPainter::Antialiasing, false);
+    painter.setRenderHint(QPainter::TextAntialiasing, false);
+    painter.setFont(BuildShortCutFontFromHdc(hdc));
+    painter.setPen(QColor(GetRValue(color), GetGValue(color), GetBValue(color)));
+    painter.drawText(QRect(0, 0, width, height), Qt::AlignRight | Qt::AlignBottom | Qt::TextSingleLine, text);
+    AlphaBlendArgbToHdc(hdc, rect.left, rect.top, width, height, pixels.data(), width, height);
+}
+#endif
+
 void DrawOutlinedText(HDC hdc, RECT rect, const std::string& text, COLORREF fillColor, COLORREF outlineColor = RGB(0, 0, 0))
 {
     if (!hdc || text.empty()) {
@@ -38,6 +90,22 @@ void DrawOutlinedText(HDC hdc, RECT rect, const std::string& text, COLORREF fill
     SetBkMode(hdc, TRANSPARENT);
     HGDIOBJ oldFont = SelectObject(hdc, shopui::GetUiFont());
 
+#if RO_ENABLE_QT6_UI
+    const QString label = QString::fromLocal8Bit(text.c_str());
+    RECT shadowRect = rect;
+    OffsetRect(&shadowRect, -1, 0);
+    DrawShortCutTextPass(hdc, shadowRect, label, outlineColor);
+    shadowRect = rect;
+    OffsetRect(&shadowRect, 1, 0);
+    DrawShortCutTextPass(hdc, shadowRect, label, outlineColor);
+    shadowRect = rect;
+    OffsetRect(&shadowRect, 0, -1);
+    DrawShortCutTextPass(hdc, shadowRect, label, outlineColor);
+    shadowRect = rect;
+    OffsetRect(&shadowRect, 0, 1);
+    DrawShortCutTextPass(hdc, shadowRect, label, outlineColor);
+    DrawShortCutTextPass(hdc, rect, label, fillColor);
+#else
     RECT shadowRect = rect;
     SetTextColor(hdc, outlineColor);
     OffsetRect(&shadowRect, -1, 0);
@@ -54,6 +122,7 @@ void DrawOutlinedText(HDC hdc, RECT rect, const std::string& text, COLORREF fill
 
     SetTextColor(hdc, fillColor);
     DrawTextA(hdc, text.c_str(), -1, &rect, DT_RIGHT | DT_BOTTOM | DT_SINGLELINE | DT_NOPREFIX);
+#endif
     SelectObject(hdc, oldFont);
 }
 
