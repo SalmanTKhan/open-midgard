@@ -482,12 +482,6 @@ bool QueueMenuCursorOverlayQuad(int cursorActNum, u32 mouseAnimStartTick)
     static int s_cursorComposeWidth = 0;
     static int s_cursorComposeHeight = 0;
     static bool s_cursorTextureValid = false;
-    const bool composeReady = EnsureOverlayComposeSurface(kCursorTextureSize, kCursorTextureSize,
-        &s_cursorComposeDc, &s_cursorComposeBitmap, &s_cursorComposeBits, &s_cursorComposeWidth, &s_cursorComposeHeight);
-    if (!composeReady) {
-        return false;
-    }
-
     static CTexture* s_cursorTexture = nullptr;
     static std::uint64_t s_cursorStateToken = 0ull;
     if (!s_cursorTexture) {
