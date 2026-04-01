@@ -724,6 +724,8 @@ private:
             return false;
         }
 
+        m_nativeTargetMirrorVertically = true;
+        DbgLog("[QtUi] Vulkan native overlay target uses vertical mirroring.\n");
         m_nativeGraphicsInitialized = true;
         m_nativeGraphicsBackend = RenderBackendType::Vulkan;
         return true;
@@ -747,6 +749,7 @@ private:
             return false;
         }
 
+        m_nativeTargetMirrorVertically = false;
         m_nativeGraphicsInitialized = true;
         m_nativeGraphicsBackend = RenderBackendType::Direct3D11;
         return true;
@@ -781,6 +784,7 @@ private:
             return false;
         }
 
+        m_nativeTargetMirrorVertically = false;
         m_nativeGraphicsInitialized = true;
         m_nativeGraphicsBackend = RenderBackendType::Direct3D12;
         return true;
