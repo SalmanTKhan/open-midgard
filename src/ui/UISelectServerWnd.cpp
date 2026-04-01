@@ -6,8 +6,16 @@
 #include "gamemode/Mode.h"
 #include "main/WinMain.h"
 #include "qtui/QtUiRuntime.h"
+#include "render/DC.h"
 #include "render/DrawUtil.h"
 #include "ui/UIWindowMgr.h"
+
+#if RO_ENABLE_QT6_UI
+#include <QFont>
+#include <QImage>
+#include <QPainter>
+#include <QString>
+#endif
 
 #include <algorithm>
 
@@ -18,6 +26,57 @@ constexpr int kTitleHeight = 20;
 constexpr int kRowHeight = 24;
 constexpr int kWindowPadding = 10;
 constexpr int kWindowGapAboveLogin = 10;
+
+#if RO_ENABLE_QT6_UI
+QFont BuildSelectServerFontFromHdc(HDC hdc)
+{
+    LOGFONTA logFont{};
+    if (hdc) {
+        if (HGDIOBJ fontObject = GetCurrentObject(hdc, OBJ_FONT)) {
+            GetObjectA(fontObject, sizeof(logFont), &logFont);
+        }
+    }
+
+    const QString family = logFont.lfFaceName[0] != '\0'
+        ? QString::fromLocal8Bit(logFont.lfFaceName)
+        : QStringLiteral("MS Sans Serif");
+    QFont font(family);
+    font.setPixelSize(logFont.lfHeight != 0 ? (std::max)(1, std::abs(logFont.lfHeight)) : 14);
+    font.setBold(logFont.lfWeight >= FW_BOLD);
+    font.setStyleStrategy(QFont::NoAntialias);
+    return font;
+}
+
+void DrawSelectServerText(HDC hdc, int x, int y, const std::string& text, COLORREF color)
+{
+    if (!hdc || text.empty()) {
+        return;
+    }
+
+    const QString label = QString::fromLocal8Bit(text.c_str());
+    if (label.isEmpty()) {
+        return;
+    }
+
+    const QFont font = BuildSelectServerFontFromHdc(hdc);
+    const QFontMetrics metrics(font);
+    const int width = (std::max)(1, metrics.horizontalAdvance(label) + 2);
+    const int height = (std::max)(1, metrics.height() + 2);
+    std::vector<unsigned int> pixels(static_cast<size_t>(width) * static_cast<size_t>(height), 0u);
+    QImage image(reinterpret_cast<uchar*>(pixels.data()), width, height, width * static_cast<int>(sizeof(unsigned int)), QImage::Format_ARGB32);
+    if (image.isNull()) {
+        return;
+    }
+
+    QPainter painter(&image);
+    painter.setRenderHint(QPainter::Antialiasing, false);
+    painter.setRenderHint(QPainter::TextAntialiasing, false);
+    painter.setFont(font);
+    painter.setPen(QColor(GetRValue(color), GetGValue(color), GetBValue(color)));
+    painter.drawText(0, metrics.ascent(), label);
+    AlphaBlendArgbToHdc(hdc, x, y, width, height, pixels.data(), width, height);
+}
+#endif
 
 }
 
@@ -181,9 +240,13 @@ void UISelectServerWnd::OnDraw()
     DrawDC drawDc(hdc);
     drawDc.SetFont(FONT_DEFAULT, 14, 1);
     SetBkMode(hdc, TRANSPARENT);
-    drawDc.SetTextColor(RGB(48, 48, 48));
     const char* title = "Select Server";
+#if RO_ENABLE_QT6_UI
+    DrawSelectServerText(hdc, m_x + kWindowPadding, m_y + kWindowPadding - 1, title, RGB(48, 48, 48));
+#else
+    drawDc.SetTextColor(RGB(48, 48, 48));
     drawDc.TextOutA(m_x + kWindowPadding, m_y + kWindowPadding - 1, title, 13);
+#endif
 
     const std::vector<ClientInfoConnection>& connections = GetClientInfoConnections();
     const int selectedIndex = GetSelectedClientInfoIndex();
@@ -208,12 +271,20 @@ void UISelectServerWnd::OnDraw()
         const ClientInfoConnection& info = connections[index];
         const std::string label = !info.display.empty() ? info.display : info.address;
         const std::string detail = !info.desc.empty() ? info.desc : info.port;
+#if RO_ENABLE_QT6_UI
+        DrawSelectServerText(hdc, rowRect.left + 6, rowRect.top + 4, label, RGB(24, 24, 24));
+#else
         drawDc.SetTextColor(RGB(24, 24, 24));
         drawDc.TextOutA(rowRect.left + 6, rowRect.top + 4, label.c_str(), static_cast<int>(label.size()));
+#endif
         if (!detail.empty()) {
-            drawDc.SetTextColor(RGB(96, 96, 96));
             const int detailX = (std::max)(rowRect.left + 90, rowRect.right - 8 - static_cast<int>(detail.size()) * 6);
+#if RO_ENABLE_QT6_UI
+            DrawSelectServerText(hdc, detailX, rowRect.top + 4, detail, RGB(96, 96, 96));
+#else
+            drawDc.SetTextColor(RGB(96, 96, 96));
             drawDc.TextOutA(detailX, rowRect.top + 4, detail.c_str(), static_cast<int>(detail.size()));
+#endif
         }
     }
 
