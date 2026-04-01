@@ -40,6 +40,8 @@ constexpr int kGridBottomMargin = 21;
 constexpr int kTabWidth = 20;
 constexpr int kTabHeight = 82;
 constexpr int kTabCount = 3;
+constexpr int kQtButtonWidth = 12;
+constexpr int kQtButtonHeight = 11;
 constexpr int kButtonIdBase = 134;
 constexpr int kButtonIdClose = 135;
 constexpr int kButtonIdMini = 136;
@@ -83,6 +85,17 @@ void HashTokenString(unsigned long long* hash, const std::string& value)
         HashTokenValue(hash, static_cast<unsigned long long>(ch));
     }
     HashTokenValue(hash, 0xFFull);
+}
+
+RECT MakeItemRect(int x, int y, int left, int top, int width, int height)
+{
+    RECT rect{ x + left, y + top, x + left + width, y + top + height };
+    return rect;
+}
+
+bool IsPointInRect(const RECT& rect, int x, int y)
+{
+    return x >= rect.left && x < rect.right && y >= rect.top && y < rect.bottom;
 }
 
 void AddUniqueCandidate(std::vector<std::string>& out, const std::string& raw)
@@ -749,6 +762,16 @@ void UIItemWnd::OnLBtnDown(int x, int y)
     m_dragItemIndex = 0;
     m_dragItemEquipLocation = 0;
 
+    if (IsQtUiRuntimeEnabled()) {
+        const RECT baseRect = MakeItemRect(m_x, m_y, 3, 3, kQtButtonWidth, kQtButtonHeight);
+        const RECT miniRect = MakeItemRect(m_x, m_y, 247, 3, kQtButtonWidth, kQtButtonHeight);
+        const RECT closeRect = MakeItemRect(m_x, m_y, 265, 3, kQtButtonWidth, kQtButtonHeight);
+        if (IsPointInRect(baseRect, x, y) || IsPointInRect(miniRect, x, y) || IsPointInRect(closeRect, x, y)) {
+            UIWindow::OnLBtnDown(x, y);
+            return;
+        }
+    }
+
     if (y >= m_y && y < m_y + kTitleBarHeight) {
         UIFrameWnd::OnLBtnDown(x, y);
         return;
@@ -796,6 +819,34 @@ void UIItemWnd::OnLBtnUp(int x, int y)
     m_dragItemId = 0;
     m_dragItemIndex = 0;
     m_dragItemEquipLocation = 0;
+
+    if (IsQtUiRuntimeEnabled()) {
+        const bool wasDragging = m_isDragging != 0;
+        UIFrameWnd::OnLBtnUp(x, y);
+        if (wasDragging) {
+            return;
+        }
+
+        const RECT baseRect = MakeItemRect(m_x, m_y, 3, 3, kQtButtonWidth, kQtButtonHeight);
+        const RECT miniRect = MakeItemRect(m_x, m_y, 247, 3, kQtButtonWidth, kQtButtonHeight);
+        const RECT closeRect = MakeItemRect(m_x, m_y, 265, 3, kQtButtonWidth, kQtButtonHeight);
+
+        if (m_h == kMiniHeight && IsPointInRect(baseRect, x, y)) {
+            SendMsg(this, 6, kButtonIdBase, 0, 0);
+            return;
+        }
+        if (m_h > kMiniHeight && IsPointInRect(miniRect, x, y)) {
+            SendMsg(this, 6, kButtonIdMini, 0, 0);
+            return;
+        }
+        if (IsPointInRect(closeRect, x, y)) {
+            SendMsg(this, 6, kButtonIdClose, 0, 0);
+            return;
+        }
+
+        return;
+    }
+
     UIFrameWnd::OnLBtnUp(x, y);
 }
 
