@@ -140,92 +140,68 @@ std::string ResolveUiAssetPath(const char* fileName)
     return NormalizeSlash(fileName ? fileName : "");
 }
 
-HBITMAP LoadBitmapFromGameData(const std::string& path)
+shopui::BitmapPixels LoadBitmapPixelsFromGameData(const std::string& path)
 {
-    HBITMAP outBitmap = nullptr;
-    LoadHBitmapFromGameData(path.c_str(), &outBitmap, nullptr, nullptr);
-    return outBitmap;
+    return shopui::LoadBitmapPixelsFromGameData(path, true);
 }
 
-void DrawBitmapTransparent(HDC target, HBITMAP bitmap, const RECT& dst)
+void DrawBitmapPixelsStretched(HDC target, const shopui::BitmapPixels& bitmap, const RECT& dst)
 {
-    if (!target || !bitmap) {
+    if (!target || !bitmap.IsValid() || dst.right <= dst.left || dst.bottom <= dst.top) {
         return;
     }
-
-    BITMAP bm{};
-    if (!GetObjectA(bitmap, sizeof(bm), &bm) || bm.bmWidth <= 0 || bm.bmHeight <= 0) {
-        return;
-    }
-
-    HDC srcDC = CreateCompatibleDC(target);
-    if (!srcDC) {
-        return;
-    }
-
-    HGDIOBJ oldBitmap = SelectObject(srcDC, bitmap);
-    TransparentBlt(target,
-        dst.left,
-        dst.top,
-        dst.right - dst.left,
-        dst.bottom - dst.top,
-        srcDC,
-        0,
-        0,
-        bm.bmWidth,
-        bm.bmHeight,
-        RGB(255, 0, 255));
-    SelectObject(srcDC, oldBitmap);
-    DeleteDC(srcDC);
+    AlphaBlendArgbToHdc(target,
+                        dst.left,
+                        dst.top,
+                        dst.right - dst.left,
+                        dst.bottom - dst.top,
+                        bitmap.pixels.data(),
+                        bitmap.width,
+                        bitmap.height);
 }
 
-void TileBitmap(HDC target, HBITMAP bitmap, const RECT& rect)
+void TileBitmapPixels(HDC target, const shopui::BitmapPixels& bitmap, const RECT& rect)
 {
-    if (!target || !bitmap || rect.right <= rect.left || rect.bottom <= rect.top) {
+    if (!target || !bitmap.IsValid() || rect.right <= rect.left || rect.bottom <= rect.top) {
         return;
     }
 
-    BITMAP bm{};
-    if (!GetObjectA(bitmap, sizeof(bm), &bm) || bm.bmWidth <= 0 || bm.bmHeight <= 0) {
-        return;
-    }
-
-    for (int y = rect.top; y < rect.bottom; y += bm.bmHeight) {
-        for (int x = rect.left; x < rect.right; x += bm.bmWidth) {
-            RECT dst{ x, y, std::min(x + bm.bmWidth, rect.right), std::min(y + bm.bmHeight, rect.bottom) };
-            DrawBitmapTransparent(target, bitmap, dst);
+    const int rectRight = static_cast<int>(rect.right);
+    const int rectBottom = static_cast<int>(rect.bottom);
+    for (int y = rect.top; y < rect.bottom; y += bitmap.height) {
+        for (int x = rect.left; x < rect.right; x += bitmap.width) {
+            RECT dst{ x, y, (std::min)(x + bitmap.width, rectRight), (std::min)(y + bitmap.height, rectBottom) };
+            DrawBitmapPixelsStretched(target, bitmap, dst);
         }
     }
 }
 
-void DrawThreePieceBar(HDC hdc, const RECT& rect, HBITMAP left, HBITMAP mid, HBITMAP right)
+void DrawThreePieceBarPixels(HDC hdc, const RECT& rect, const shopui::BitmapPixels& left, const shopui::BitmapPixels& mid, const shopui::BitmapPixels& right)
 {
     if (rect.right <= rect.left || rect.bottom <= rect.top) {
         return;
     }
 
-    BITMAP leftBm{};
-    BITMAP rightBm{};
     int leftWidth = 0;
     int rightWidth = 0;
-    if (left && GetObjectA(left, sizeof(leftBm), &leftBm)) {
-        leftWidth = leftBm.bmWidth;
+    if (left.IsValid()) {
+        leftWidth = left.width;
     }
-    if (right && GetObjectA(right, sizeof(rightBm), &rightBm)) {
-        rightWidth = rightBm.bmWidth;
+    if (right.IsValid()) {
+        rightWidth = right.width;
     }
 
-    if (left) {
+    if (left.IsValid()) {
         RECT dst{ rect.left, rect.top, rect.left + leftWidth, rect.bottom };
-        DrawBitmapTransparent(hdc, left, dst);
+        DrawBitmapPixelsStretched(hdc, left, dst);
     }
-    if (right) {
+    if (right.IsValid()) {
         RECT dst{ rect.right - rightWidth, rect.top, rect.right, rect.bottom };
-        DrawBitmapTransparent(hdc, right, dst);
+        DrawBitmapPixelsStretched(hdc, right, dst);
     }
 
     RECT midRect{ rect.left + leftWidth, rect.top, rect.right - rightWidth, rect.bottom };
-    TileBitmap(hdc, mid, midRect);
+    TileBitmapPixels(hdc, mid, midRect);
 }
 
 void DrawTextLine(HDC hdc, int x, int y, COLORREF color, const std::string& text)
@@ -318,24 +294,24 @@ UISkillListWnd::UISkillListWnd()
       m_scrollDragOffsetY(0),
       m_systemButtons{},
       m_bottomButtons{},
-      m_titleBarBitmap(nullptr),
-      m_titleBarLeftBitmap(nullptr),
-      m_titleBarMidBitmap(nullptr),
-      m_titleBarRightBitmap(nullptr),
-      m_btnBarLeftBitmap(nullptr),
-      m_btnBarMidBitmap(nullptr),
-      m_btnBarRightBitmap(nullptr),
-      m_btnBarLeft2Bitmap(nullptr),
-      m_btnBarMid2Bitmap(nullptr),
-      m_btnBarRight2Bitmap(nullptr),
-      m_itemRowBitmap(nullptr),
-      m_itemInvertBitmap(nullptr),
-      m_upgradeNormalBitmap(nullptr),
-      m_upgradeHoverBitmap(nullptr),
-      m_upgradePressedBitmap(nullptr),
-      m_mesBtnLeftBitmap(nullptr),
-      m_mesBtnMidBitmap(nullptr),
-      m_mesBtnRightBitmap(nullptr),
+      m_titleBarBitmap(),
+      m_titleBarLeftBitmap(),
+      m_titleBarMidBitmap(),
+      m_titleBarRightBitmap(),
+      m_btnBarLeftBitmap(),
+      m_btnBarMidBitmap(),
+      m_btnBarRightBitmap(),
+      m_btnBarLeft2Bitmap(),
+      m_btnBarMid2Bitmap(),
+      m_btnBarRight2Bitmap(),
+      m_itemRowBitmap(),
+      m_itemInvertBitmap(),
+      m_upgradeNormalBitmap(),
+      m_upgradeHoverBitmap(),
+      m_upgradePressedBitmap(),
+      m_mesBtnLeftBitmap(),
+      m_mesBtnMidBitmap(),
+      m_mesBtnRightBitmap(),
       m_lastVisualStateToken(0ull),
       m_hasVisualStateToken(false)
 {
@@ -501,11 +477,11 @@ void UISkillListWnd::OnDraw()
             iconCellRect.left + ((kIconCellSize - kIconSize) / 2) + kIconSize,
             iconCellRect.top + ((kIconCellSize - kIconSize) / 2) + kIconSize
         };
-        if (m_itemRowBitmap) {
-            DrawBitmapTransparent(hdc, m_itemRowBitmap, iconCellRect);
+        if (m_itemRowBitmap.IsValid()) {
+            DrawBitmapPixelsStretched(hdc, m_itemRowBitmap, iconCellRect);
         }
-        if (isSelected && m_itemInvertBitmap) {
-            DrawBitmapTransparent(hdc, m_itemInvertBitmap, iconInvertRect);
+        if (isSelected && m_itemInvertBitmap.IsValid()) {
+            DrawBitmapPixelsStretched(hdc, m_itemInvertBitmap, iconInvertRect);
         }
 
         if (skill) {
@@ -525,9 +501,9 @@ void UISkillListWnd::OnDraw()
 
             const bool canUpgrade = skill->upgradable != 0 && g_session.GetPlayerSkillPointCount() > 0;
             if (canUpgrade) {
-                HBITMAP upgradeBitmap = m_upgradeNormalBitmap;
-                if (upgradeBitmap) {
-                    DrawBitmapTransparent(hdc, upgradeBitmap, upgradeRect);
+                const shopui::BitmapPixels& upgradeBitmap = m_upgradeNormalBitmap;
+                if (upgradeBitmap.IsValid()) {
+                    DrawBitmapPixelsStretched(hdc, upgradeBitmap, upgradeRect);
                 }
             }
         }
@@ -813,53 +789,46 @@ void UISkillListWnd::LayoutChildren()
 void UISkillListWnd::LoadAssets()
 {
     ReleaseAssets();
-    m_titleBarBitmap = LoadBitmapFromGameData(ResolveUiAssetPath("titlebar_fix.bmp"));
-    m_titleBarLeftBitmap = LoadBitmapFromGameData(ResolveUiAssetPath("titlebar_left.bmp"));
-    m_titleBarMidBitmap = LoadBitmapFromGameData(ResolveUiAssetPath("titlebar_mid.bmp"));
-    m_titleBarRightBitmap = LoadBitmapFromGameData(ResolveUiAssetPath("titlebar_right.bmp"));
-    m_btnBarLeftBitmap = LoadBitmapFromGameData(ResolveUiAssetPath("btnbar_left.bmp"));
-    m_btnBarMidBitmap = LoadBitmapFromGameData(ResolveUiAssetPath("btnbar_mid.bmp"));
-    m_btnBarRightBitmap = LoadBitmapFromGameData(ResolveUiAssetPath("btnbar_right.bmp"));
-    m_btnBarLeft2Bitmap = LoadBitmapFromGameData(ResolveUiAssetPath("btnbar_left2.bmp"));
-    m_btnBarMid2Bitmap = LoadBitmapFromGameData(ResolveUiAssetPath("btnbar_mid2.bmp"));
-    m_btnBarRight2Bitmap = LoadBitmapFromGameData(ResolveUiAssetPath("btnbar_right2.bmp"));
-    m_itemRowBitmap = LoadBitmapFromGameData(ResolveUiAssetPath("itemwin_mid.bmp"));
-    m_itemInvertBitmap = LoadBitmapFromGameData(ResolveUiAssetPath("item_invert.bmp"));
-    m_upgradeNormalBitmap = LoadBitmapFromGameData(ResolveUiAssetPath("skill_up_a.bmp"));
-    m_upgradeHoverBitmap = LoadBitmapFromGameData(ResolveUiAssetPath("skill_up_b.bmp"));
-    m_upgradePressedBitmap = LoadBitmapFromGameData(ResolveUiAssetPath("skill_up_c.bmp"));
-    m_mesBtnLeftBitmap = LoadBitmapFromGameData(ResolveUiAssetPath("mesbtn_left.bmp"));
-    m_mesBtnMidBitmap = LoadBitmapFromGameData(ResolveUiAssetPath("mesbtn_mid.bmp"));
-    m_mesBtnRightBitmap = LoadBitmapFromGameData(ResolveUiAssetPath("mesbtn_right.bmp"));
+    m_titleBarBitmap = LoadBitmapPixelsFromGameData(ResolveUiAssetPath("titlebar_fix.bmp"));
+    m_titleBarLeftBitmap = LoadBitmapPixelsFromGameData(ResolveUiAssetPath("titlebar_left.bmp"));
+    m_titleBarMidBitmap = LoadBitmapPixelsFromGameData(ResolveUiAssetPath("titlebar_mid.bmp"));
+    m_titleBarRightBitmap = LoadBitmapPixelsFromGameData(ResolveUiAssetPath("titlebar_right.bmp"));
+    m_btnBarLeftBitmap = LoadBitmapPixelsFromGameData(ResolveUiAssetPath("btnbar_left.bmp"));
+    m_btnBarMidBitmap = LoadBitmapPixelsFromGameData(ResolveUiAssetPath("btnbar_mid.bmp"));
+    m_btnBarRightBitmap = LoadBitmapPixelsFromGameData(ResolveUiAssetPath("btnbar_right.bmp"));
+    m_btnBarLeft2Bitmap = LoadBitmapPixelsFromGameData(ResolveUiAssetPath("btnbar_left2.bmp"));
+    m_btnBarMid2Bitmap = LoadBitmapPixelsFromGameData(ResolveUiAssetPath("btnbar_mid2.bmp"));
+    m_btnBarRight2Bitmap = LoadBitmapPixelsFromGameData(ResolveUiAssetPath("btnbar_right2.bmp"));
+    m_itemRowBitmap = LoadBitmapPixelsFromGameData(ResolveUiAssetPath("itemwin_mid.bmp"));
+    m_itemInvertBitmap = LoadBitmapPixelsFromGameData(ResolveUiAssetPath("item_invert.bmp"));
+    m_upgradeNormalBitmap = LoadBitmapPixelsFromGameData(ResolveUiAssetPath("skill_up_a.bmp"));
+    m_upgradeHoverBitmap = LoadBitmapPixelsFromGameData(ResolveUiAssetPath("skill_up_b.bmp"));
+    m_upgradePressedBitmap = LoadBitmapPixelsFromGameData(ResolveUiAssetPath("skill_up_c.bmp"));
+    m_mesBtnLeftBitmap = LoadBitmapPixelsFromGameData(ResolveUiAssetPath("mesbtn_left.bmp"));
+    m_mesBtnMidBitmap = LoadBitmapPixelsFromGameData(ResolveUiAssetPath("mesbtn_mid.bmp"));
+    m_mesBtnRightBitmap = LoadBitmapPixelsFromGameData(ResolveUiAssetPath("mesbtn_right.bmp"));
 }
 
 void UISkillListWnd::ReleaseAssets()
 {
-    auto releaseBitmap = [](HBITMAP& bitmap) {
-        if (bitmap) {
-            DeleteObject(bitmap);
-            bitmap = nullptr;
-        }
-    };
-
-    releaseBitmap(m_titleBarBitmap);
-    releaseBitmap(m_titleBarLeftBitmap);
-    releaseBitmap(m_titleBarMidBitmap);
-    releaseBitmap(m_titleBarRightBitmap);
-    releaseBitmap(m_btnBarLeftBitmap);
-    releaseBitmap(m_btnBarMidBitmap);
-    releaseBitmap(m_btnBarRightBitmap);
-    releaseBitmap(m_btnBarLeft2Bitmap);
-    releaseBitmap(m_btnBarMid2Bitmap);
-    releaseBitmap(m_btnBarRight2Bitmap);
-    releaseBitmap(m_itemRowBitmap);
-    releaseBitmap(m_itemInvertBitmap);
-    releaseBitmap(m_upgradeNormalBitmap);
-    releaseBitmap(m_upgradeHoverBitmap);
-    releaseBitmap(m_upgradePressedBitmap);
-    releaseBitmap(m_mesBtnLeftBitmap);
-    releaseBitmap(m_mesBtnMidBitmap);
-    releaseBitmap(m_mesBtnRightBitmap);
+    m_titleBarBitmap.Clear();
+    m_titleBarLeftBitmap.Clear();
+    m_titleBarMidBitmap.Clear();
+    m_titleBarRightBitmap.Clear();
+    m_btnBarLeftBitmap.Clear();
+    m_btnBarMidBitmap.Clear();
+    m_btnBarRightBitmap.Clear();
+    m_btnBarLeft2Bitmap.Clear();
+    m_btnBarMid2Bitmap.Clear();
+    m_btnBarRight2Bitmap.Clear();
+    m_itemRowBitmap.Clear();
+    m_itemInvertBitmap.Clear();
+    m_upgradeNormalBitmap.Clear();
+    m_upgradeHoverBitmap.Clear();
+    m_upgradePressedBitmap.Clear();
+    m_mesBtnLeftBitmap.Clear();
+    m_mesBtnMidBitmap.Clear();
+    m_mesBtnRightBitmap.Clear();
 
     m_iconCache.clear();
 }
@@ -907,35 +876,33 @@ void UISkillListWnd::DrawWindowChrome(HDC hdc) const
     FillRect(hdc, &outer, whiteBrush);
     DeleteObject(whiteBrush);
 
-    if (m_titleBarBitmap && m_w == 280) {
+    if (m_titleBarBitmap.IsValid() && m_w == 280) {
         RECT titleRect{ m_x, m_y, m_x + m_w, m_y + kTitleBarHeight };
-        DrawBitmapTransparent(hdc, m_titleBarBitmap, titleRect);
+        DrawBitmapPixelsStretched(hdc, m_titleBarBitmap, titleRect);
     } else {
         RECT titleRect{ m_x, m_y, m_x + m_w, m_y + kTitleBarHeight };
-        DrawThreePieceBar(hdc, titleRect, m_titleBarLeftBitmap, m_titleBarMidBitmap, m_titleBarRightBitmap);
+        DrawThreePieceBarPixels(hdc, titleRect, m_titleBarLeftBitmap, m_titleBarMidBitmap, m_titleBarRightBitmap);
     }
 
     RECT bottomTopRect{ m_x, m_y + m_h - kBottomBarHeight, m_x + m_w, m_y + m_h - 29 };
     RECT bottomBottomRect{ m_x, m_y + m_h - 29, m_x + m_w, m_y + m_h };
-    DrawThreePieceBar(hdc, bottomTopRect, m_btnBarLeftBitmap, m_btnBarMidBitmap, m_btnBarRightBitmap);
-    DrawThreePieceBar(hdc, bottomBottomRect, m_btnBarLeft2Bitmap, m_btnBarMid2Bitmap, m_btnBarRight2Bitmap);
+    DrawThreePieceBarPixels(hdc, bottomTopRect, m_btnBarLeftBitmap, m_btnBarMidBitmap, m_btnBarRightBitmap);
+    DrawThreePieceBarPixels(hdc, bottomBottomRect, m_btnBarLeft2Bitmap, m_btnBarMid2Bitmap, m_btnBarRight2Bitmap);
 
     RECT leftBarRect{ m_x, m_y + kTitleBarHeight, m_x + kLeftGutterWidth, m_y + m_h - kBottomBarHeight };
     if (leftBarRect.bottom > leftBarRect.top) {
-        BITMAP topBm{};
-        BITMAP bottomBm{};
         int y = leftBarRect.top;
         const int limit = leftBarRect.bottom;
-        if (m_btnBarMidBitmap && GetObjectA(m_btnBarMidBitmap, sizeof(topBm), &topBm)) {
-            while (y + topBm.bmHeight <= limit) {
-                RECT dst{ leftBarRect.left, y, leftBarRect.right, y + topBm.bmHeight };
-                DrawBitmapTransparent(hdc, m_btnBarMidBitmap, dst);
-                y += topBm.bmHeight;
-                if (m_btnBarMid2Bitmap && GetObjectA(m_btnBarMid2Bitmap, sizeof(bottomBm), &bottomBm)) {
-                    if (y + bottomBm.bmHeight <= limit) {
-                        RECT dst2{ leftBarRect.left, y, leftBarRect.right, y + bottomBm.bmHeight };
-                        DrawBitmapTransparent(hdc, m_btnBarMid2Bitmap, dst2);
-                        y += bottomBm.bmHeight;
+        if (m_btnBarMidBitmap.IsValid()) {
+            while (y + m_btnBarMidBitmap.height <= limit) {
+                RECT dst{ leftBarRect.left, y, leftBarRect.right, y + m_btnBarMidBitmap.height };
+                DrawBitmapPixelsStretched(hdc, m_btnBarMidBitmap, dst);
+                y += m_btnBarMidBitmap.height;
+                if (m_btnBarMid2Bitmap.IsValid()) {
+                    if (y + m_btnBarMid2Bitmap.height <= limit) {
+                        RECT dst2{ leftBarRect.left, y, leftBarRect.right, y + m_btnBarMid2Bitmap.height };
+                        DrawBitmapPixelsStretched(hdc, m_btnBarMid2Bitmap, dst2);
+                        y += m_btnBarMid2Bitmap.height;
                     }
                 }
             }
@@ -969,7 +936,7 @@ void UISkillListWnd::DrawWindowChrome(HDC hdc) const
 
 void UISkillListWnd::DrawBottomButton(HDC hdc, const TextButton& button) const
 {
-    DrawThreePieceBar(hdc, button.rect, m_mesBtnLeftBitmap, m_mesBtnMidBitmap, m_mesBtnRightBitmap);
+    DrawThreePieceBarPixels(hdc, button.rect, m_mesBtnLeftBitmap, m_mesBtnMidBitmap, m_mesBtnRightBitmap);
     RECT textRect{ button.rect.left, button.rect.top + 3, button.rect.right, button.rect.bottom };
     SetBkMode(hdc, TRANSPARENT);
     SetTextColor(hdc, RGB(0, 0, 0));
