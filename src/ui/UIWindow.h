@@ -32,6 +32,7 @@ public:
     virtual void AddChild(UIWindow* child);
     virtual void DrawChildren();
     virtual void DrawChildrenToHdc(HDC dc);
+    virtual void DrawToHdc(HDC dc);
     virtual HDC AcquireDrawTarget() const;
     virtual void ReleaseDrawTarget(HDC dc) const;
     bool BlitArgbBitsToDrawTarget(const void* bits, int width, int height) const;

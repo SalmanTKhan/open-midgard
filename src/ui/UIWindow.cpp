@@ -309,9 +309,22 @@ void UIWindow::DrawChildrenToHdc(HDC dc)
         return;
     }
 
+    for (UIWindow* child : m_children) {
+        if (child && child->m_show != 0) {
+            child->DrawToHdc(dc);
+        }
+    }
+}
+
+void UIWindow::DrawToHdc(HDC dc)
+{
+    if (!dc) {
+        return;
+    }
+
     HDC previousSharedDC = UIWindow::GetSharedDrawDC();
     UIWindow::SetSharedDrawDC(dc);
-    DrawChildren();
+    OnDraw();
     UIWindow::SetSharedDrawDC(previousSharedDC);
 }
 

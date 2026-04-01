@@ -988,17 +988,14 @@ void UIWindowMgr::DrawVisibleWindowsToHdc(HDC targetDC, bool includeRoMap)
 
     RECT clientRect{};
     GetClientRect(g_hMainWnd, &clientRect);
-    HDC previousSharedDC = UIWindow::GetSharedDrawDC();
-    UIWindow::SetSharedDrawDC(targetDC);
     for (auto child : m_children) {
         if (child && child->m_show != 0 && (includeRoMap || child != m_roMapWnd)) {
-            child->OnDraw();
+            child->DrawToHdc(targetDC);
         }
     }
     if (m_itemWnd && m_itemWnd->m_show != 0) {
         m_itemWnd->DrawHoverOverlay(targetDC, clientRect);
     }
-    UIWindow::SetSharedDrawDC(previousSharedDC);
     if (includeRoMap) {
         ClearDirtyVisualState();
     } else {
