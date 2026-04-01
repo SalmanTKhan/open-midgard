@@ -457,3 +457,29 @@ int UIChooseWnd::GetSelectedIndex() const
 {
     return m_selectedIndex;
 }
+
+int UIChooseWnd::GetPressedIndex() const
+{
+    return m_pressedIndex;
+}
+
+int UIChooseWnd::GetEntryCount() const
+{
+    return MenuEntry_Count;
+}
+
+const char* UIChooseWnd::GetEntryLabelForQt(int index) const
+{
+    switch (index) {
+    case MenuEntry_CharacterSelect:
+        return "Character Select";
+    case MenuEntry_ReturnToGame:
+        return "Return To Game";
+    case MenuEntry_ExitToWindows:
+        return "Exit To Windows";
+    case MenuEntry_ReturnToSavePoint:
+        return "Return To Save Point";
+    default:
+        return "";
+    }
+}

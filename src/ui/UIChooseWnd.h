@@ -19,6 +19,9 @@ public:
     msgresult_t SendMsg(UIWindow* sender, int msg, msgparam_t wparam, msgparam_t lparam, msgparam_t extra) override;
     void OnKeyDown(int virtualKey);
     int GetSelectedIndex() const;
+    int GetPressedIndex() const;
+    int GetEntryCount() const;
+    const char* GetEntryLabelForQt(int index) const;
 
 private:
     enum MenuEntry {

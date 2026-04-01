@@ -87,6 +87,8 @@ class QtUiState : public QObject {
     Q_PROPERTY(int chooseMenuWidth READ chooseMenuWidth NOTIFY chooseMenuGeometryChanged)
     Q_PROPERTY(int chooseMenuHeight READ chooseMenuHeight NOTIFY chooseMenuGeometryChanged)
     Q_PROPERTY(int chooseMenuSelectedIndex READ chooseMenuSelectedIndex NOTIFY chooseMenuSelectedIndexChanged)
+    Q_PROPERTY(int chooseMenuPressedIndex READ chooseMenuPressedIndex NOTIFY chooseMenuPressedIndexChanged)
+    Q_PROPERTY(QVariantList chooseMenuOptions READ chooseMenuOptions NOTIFY chooseMenuOptionsChanged)
     Q_PROPERTY(bool itemShopVisible READ itemShopVisible NOTIFY itemShopVisibleChanged)
     Q_PROPERTY(int itemShopX READ itemShopX NOTIFY itemShopGeometryChanged)
     Q_PROPERTY(int itemShopY READ itemShopY NOTIFY itemShopGeometryChanged)
@@ -277,6 +279,8 @@ public:
     int chooseMenuWidth() const { return m_chooseMenuWidth; }
     int chooseMenuHeight() const { return m_chooseMenuHeight; }
     int chooseMenuSelectedIndex() const { return m_chooseMenuSelectedIndex; }
+    int chooseMenuPressedIndex() const { return m_chooseMenuPressedIndex; }
+    const QVariantList& chooseMenuOptions() const { return m_chooseMenuOptions; }
     bool itemShopVisible() const { return m_itemShopVisible; }
     int itemShopX() const { return m_itemShopX; }
     int itemShopY() const { return m_itemShopY; }
@@ -779,6 +783,22 @@ public:
         }
         m_chooseMenuSelectedIndex = value;
         emit chooseMenuSelectedIndexChanged();
+    }
+
+    void setChooseMenuPressedIndex(int value) {
+        if (m_chooseMenuPressedIndex == value) {
+            return;
+        }
+        m_chooseMenuPressedIndex = value;
+        emit chooseMenuPressedIndexChanged();
+    }
+
+    void setChooseMenuOptions(const QVariantList& value) {
+        if (m_chooseMenuOptions == value) {
+            return;
+        }
+        m_chooseMenuOptions = value;
+        emit chooseMenuOptionsChanged();
     }
 
     void setItemShopVisible(bool value) {
@@ -1303,6 +1323,8 @@ signals:
     void chooseMenuVisibleChanged();
     void chooseMenuGeometryChanged();
     void chooseMenuSelectedIndexChanged();
+    void chooseMenuPressedIndexChanged();
+    void chooseMenuOptionsChanged();
     void itemShopVisibleChanged();
     void itemShopGeometryChanged();
     void itemShopTitleChanged();
@@ -1445,6 +1467,8 @@ private:
     int m_chooseMenuWidth = 0;
     int m_chooseMenuHeight = 0;
     int m_chooseMenuSelectedIndex = -1;
+    int m_chooseMenuPressedIndex = -1;
+    QVariantList m_chooseMenuOptions;
     bool m_itemShopVisible = false;
     int m_itemShopX = 0;
     int m_itemShopY = 0;

@@ -434,20 +434,17 @@ Item {
         visible: uiState.chooseMenuVisible
 
         Repeater {
-            model: [
-                "Character Select",
-                "Return To Game",
-                "Exit To Windows",
-                "Return To Save Point"
-            ]
+            model: uiState.chooseMenuOptions
 
             delegate: Rectangle {
-                required property string modelData
+                required property var modelData
                 x: (parent.width - 221) / 2
                 y: 12 + index * 23
                 width: 221
                 height: 20
-                color: index === uiState.chooseMenuSelectedIndex ? "#cad8ea" : "#f1f1f1"
+                color: index === uiState.chooseMenuPressedIndex
+                    ? "#b7c8de"
+                    : (index === uiState.chooseMenuSelectedIndex ? "#cad8ea" : "#f1f1f1")
                 border.width: 1
                 border.color: "#8f8f8f"
 

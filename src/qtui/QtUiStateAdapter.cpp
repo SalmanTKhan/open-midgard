@@ -618,11 +618,22 @@ void PopulateChooseMenuState(QtUiState* state)
     if (!visible) {
         state->setChooseMenuGeometry(0, 0, 0, 0);
         state->setChooseMenuSelectedIndex(-1);
+        state->setChooseMenuPressedIndex(-1);
+        state->setChooseMenuOptions(QVariantList{});
         return;
     }
 
     state->setChooseMenuGeometry(chooseWnd->m_x, chooseWnd->m_y, chooseWnd->m_w, chooseWnd->m_h);
     state->setChooseMenuSelectedIndex(chooseWnd->GetSelectedIndex());
+    state->setChooseMenuPressedIndex(chooseWnd->GetPressedIndex());
+
+    QVariantList options;
+    const int optionCount = chooseWnd->GetEntryCount();
+    options.reserve(optionCount);
+    for (int index = 0; index < optionCount; ++index) {
+        options.push_back(ToQString(chooseWnd->GetEntryLabelForQt(index)));
+    }
+    state->setChooseMenuOptions(options);
 }
 
 void PopulateItemShopState(QtUiState* state)
@@ -1514,6 +1525,8 @@ bool QtUiStateAdapter::syncMenu(RenderBackendType activeBackend,
     m_state->setChooseMenuVisible(false);
     m_state->setChooseMenuGeometry(0, 0, 0, 0);
     m_state->setChooseMenuSelectedIndex(-1);
+    m_state->setChooseMenuPressedIndex(-1);
+    m_state->setChooseMenuOptions(QVariantList{});
     m_state->setItemShopVisible(false);
     m_state->setItemShopGeometry(0, 0, 0, 0);
     m_state->setItemShopTitle(QString());
