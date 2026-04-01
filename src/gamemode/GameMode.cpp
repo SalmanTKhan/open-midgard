@@ -7106,11 +7106,6 @@ int  CGameMode::OnRun() {
             if (trackMovePerfFrame) {
                 g_overlayMovePerfStats.fallbackOverlayDrawMs += qpcNowMs() - overlayDrawStartMs;
             }
-            const double queuedMsgStartMs = trackMovePerfFrame ? qpcNowMs() : 0.0;
-            DrawQueuedMsgEffects(windowDc);
-            if (trackMovePerfFrame) {
-                g_overlayMovePerfStats.fallbackMsgMs += qpcNowMs() - queuedMsgStartMs;
-            }
             g_windowMgr.OnDrawToHdc(windowDc);
             if (trackMovePerfFrame) {
                 g_overlayMovePerfStats.fallbackUiDrawMs += qpcNowMs() - uiDrawStartMs;
@@ -7165,11 +7160,6 @@ int  CGameMode::OnRun() {
                 DrawPlayerVitalsOverlay(*this, windowDc);
                 if (trackMovePerfFrame) {
                     g_overlayMovePerfStats.fallbackOverlayDrawMs += qpcNowMs() - overlayDrawStartMs;
-                }
-                const double queuedMsgStartMs = trackMovePerfFrame ? qpcNowMs() : 0.0;
-                DrawQueuedMsgEffects(windowDc);
-                if (trackMovePerfFrame) {
-                    g_overlayMovePerfStats.fallbackMsgMs += qpcNowMs() - queuedMsgStartMs;
                 }
                 const double uiDrawStartMs = trackMovePerfFrame ? qpcNowMs() : 0.0;
                 g_windowMgr.OnDrawToHdc(windowDc);
