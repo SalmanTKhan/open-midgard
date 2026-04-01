@@ -34,6 +34,8 @@ constexpr int kRowHeight = 37;
 constexpr int kIconSize = 24;
 constexpr int kIconCellSize = 32;
 constexpr int kScrollBarWidth = 10;
+constexpr int kQtButtonWidth = 12;
+constexpr int kQtButtonHeight = 11;
 constexpr int kButtonIdBase = 148;
 constexpr int kButtonIdMini = 149;
 constexpr int kButtonIdClose = 150;
@@ -231,6 +233,12 @@ void FrameRectColor(HDC hdc, const RECT& rect, COLORREF color)
 bool IsInsideRect(const RECT& rect, int x, int y)
 {
     return x >= rect.left && x < rect.right && y >= rect.top && y < rect.bottom;
+}
+
+RECT MakeSkillRect(int x, int y, int left, int top, int width, int height)
+{
+    RECT rect{ x + left, y + top, x + left + width, y + top + height };
+    return rect;
 }
 
 std::string ResolveSkillIconPath(const SkillMetadata& metadata)
@@ -544,6 +552,16 @@ void UISkillListWnd::OnLBtnDown(int x, int y)
     m_dragSkillId = 0;
     m_dragSkillLevel = 0;
 
+    if (IsQtUiRuntimeEnabled()) {
+        const RECT baseRect = MakeSkillRect(m_x, m_y, 231, 2, kQtButtonWidth, kQtButtonHeight);
+        const RECT miniRect = MakeSkillRect(m_x, m_y, 247, 2, kQtButtonWidth, kQtButtonHeight);
+        const RECT closeRect = MakeSkillRect(m_x, m_y, 263, 2, kQtButtonWidth, kQtButtonHeight);
+        if (IsInsideRect(baseRect, x, y) || IsInsideRect(miniRect, x, y) || IsInsideRect(closeRect, x, y)) {
+            UIWindow::OnLBtnDown(x, y);
+            return;
+        }
+    }
+
     if (y >= m_y && y < m_y + kTitleBarHeight) {
         UIFrameWnd::OnLBtnDown(x, y);
         return;
@@ -602,7 +620,33 @@ void UISkillListWnd::OnLBtnDown(int x, int y)
 
 void UISkillListWnd::OnLBtnUp(int x, int y)
 {
-    UIFrameWnd::OnLBtnUp(x, y);
+    if (IsQtUiRuntimeEnabled()) {
+        const bool wasDragging = m_isDragging != 0;
+        UIFrameWnd::OnLBtnUp(x, y);
+        if (wasDragging) {
+            return;
+        }
+
+        const RECT baseRect = MakeSkillRect(m_x, m_y, 231, 2, kQtButtonWidth, kQtButtonHeight);
+        const RECT miniRect = MakeSkillRect(m_x, m_y, 247, 2, kQtButtonWidth, kQtButtonHeight);
+        const RECT closeRect = MakeSkillRect(m_x, m_y, 263, 2, kQtButtonWidth, kQtButtonHeight);
+
+        if (IsInsideRect(baseRect, x, y)) {
+            SendMsg(this, 6, kButtonIdBase, 0, 0);
+            return;
+        }
+        if (IsInsideRect(miniRect, x, y)) {
+            SendMsg(this, 6, kButtonIdMini, 0, 0);
+            return;
+        }
+        if (IsInsideRect(closeRect, x, y)) {
+            SendMsg(this, 6, kButtonIdClose, 0, 0);
+            return;
+        }
+    } else {
+        UIFrameWnd::OnLBtnUp(x, y);
+    }
+
     m_isDraggingScrollThumb = 0;
     const int bottomButtonIndex = HitTestBottomButton(x, y);
     for (size_t index = 0; index < m_bottomButtons.size(); ++index) {
