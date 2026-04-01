@@ -1132,20 +1132,6 @@ void UIWindowMgr::OnDrawExcludingRoMapToHdc(HDC targetDC)
     DrawVisibleWindowsToHdc(targetDC, false);
 }
 
-void UIWindowMgr::OnDrawExcludingRoMap()
-{
-    if (!g_hMainWnd) {
-        return;
-    }
-
-    HDC sharedDC = UIWindow::GetSharedDrawDC();
-    if (!sharedDC) {
-        OnDraw();
-        return;
-    }
-    OnDrawExcludingRoMapToHdc(sharedDC);
-}
-
 bool UIWindowMgr::DrawRoMapToHdc(HDC targetDC, int x, int y)
 {
     if (!targetDC || !m_roMapWnd || m_roMapWnd->m_show == 0) {

@@ -93,7 +93,6 @@ public:
     bool HasRoMapDirtyVisualState() const;
     void ClearDirtyVisualState();
     void ClearDirtyVisualStateExcludingRoMap();
-    void OnDrawExcludingRoMap();
     void OnDrawExcludingRoMapToHdc(HDC targetDC);
     bool DrawRoMapToHdc(HDC targetDC, int x, int y);
     bool GetRoMapRect(RECT* outRect) const;
