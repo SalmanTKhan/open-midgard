@@ -1027,17 +1027,11 @@ void UIWindowMgr::OnDraw() {
         (m_makeCharWnd && m_makeCharWnd->m_show != 0) ||
         (m_loadingWnd && m_loadingWnd->m_show != 0);
 
-    HDC targetDC = GetDC(g_hMainWnd);
-    if (!targetDC) {
-        return;
-    }
-
     RECT clientRect{};
     GetClientRect(g_hMainWnd, &clientRect);
     const int clientWidth = clientRect.right - clientRect.left;
     const int clientHeight = clientRect.bottom - clientRect.top;
     if (clientWidth <= 0 || clientHeight <= 0) {
-        ReleaseDC(g_hMainWnd, targetDC);
         return;
     }
 
@@ -1074,9 +1068,13 @@ void UIWindowMgr::OnDraw() {
             RenderWallPaper();
             g_renderer.DrawScene();
             g_renderer.Flip(false);
-            ReleaseDC(g_hMainWnd, targetDC);
             return;
         }
+    }
+
+    HDC targetDC = GetDC(g_hMainWnd);
+    if (!targetDC) {
+        return;
     }
 
     HDC drawDC = targetDC;
