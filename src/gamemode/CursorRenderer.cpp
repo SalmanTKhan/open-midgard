@@ -28,6 +28,16 @@ constexpr int kDragPreviewSize = 24;
 constexpr int kDragPreviewOffsetX = 0;
 constexpr int kDragPreviewOffsetY = 0;
 
+struct DragPreviewPixels
+{
+    int width = 0;
+    int height = 0;
+    std::vector<unsigned int> pixels;
+};
+
+unsigned int PremultiplyCursorColor(unsigned int color);
+void AlphaBlendCursorPixel(unsigned int& dst, unsigned int src);
+
 CursorResCache ResolveCursorResources()
 {
     CursorResCache cache{};
@@ -106,16 +116,31 @@ std::string ResolveShortcutDragSkillIconPath(int skillId)
     return g_skillMgr.GetSkillIconPath(skillId);
 }
 
+bool ResolveDragPreviewCacheKey(const DRAG_INFO& dragInfo, unsigned long long* outKey)
+{
+    if (!outKey) {
+        return false;
+    }
+
+    if (dragInfo.type == static_cast<int>(DragType::ShortcutItem) && dragInfo.itemId != 0) {
+        *outKey = (1ull << 32) | static_cast<unsigned long long>(dragInfo.itemId);
+        return true;
+    }
+    if (dragInfo.type == static_cast<int>(DragType::ShortcutSkill) && dragInfo.skillId != 0) {
+        *outKey = (2ull << 32) | static_cast<unsigned long long>(static_cast<unsigned int>(dragInfo.skillId));
+        return true;
+    }
+
+    *outKey = 0;
+    return false;
+}
+
 HBITMAP LoadDragPreviewBitmap(const DRAG_INFO& dragInfo)
 {
     static std::unordered_map<unsigned long long, HBITMAP> s_dragPreviewCache;
 
     unsigned long long cacheKey = 0;
-    if (dragInfo.type == static_cast<int>(DragType::ShortcutItem) && dragInfo.itemId != 0) {
-        cacheKey = (1ull << 32) | static_cast<unsigned long long>(dragInfo.itemId);
-    } else if (dragInfo.type == static_cast<int>(DragType::ShortcutSkill) && dragInfo.skillId != 0) {
-        cacheKey = (2ull << 32) | static_cast<unsigned long long>(static_cast<unsigned int>(dragInfo.skillId));
-    } else {
+    if (!ResolveDragPreviewCacheKey(dragInfo, &cacheKey)) {
         return nullptr;
     }
 
@@ -149,6 +174,62 @@ HBITMAP LoadDragPreviewBitmap(const DRAG_INFO& dragInfo)
     return bitmap;
 }
 
+bool LoadDragPreviewPixels(const DRAG_INFO& dragInfo, DragPreviewPixels* outPreview)
+{
+    if (!outPreview) {
+        return false;
+    }
+
+    static std::unordered_map<unsigned long long, DragPreviewPixels> s_dragPreviewCache;
+
+    unsigned long long cacheKey = 0;
+    if (!ResolveDragPreviewCacheKey(dragInfo, &cacheKey)) {
+        return false;
+    }
+
+    const auto found = s_dragPreviewCache.find(cacheKey);
+    if (found != s_dragPreviewCache.end()) {
+        *outPreview = found->second;
+        return !outPreview->pixels.empty();
+    }
+
+    std::string bitmapPath;
+    if (dragInfo.type == static_cast<int>(DragType::ShortcutItem) && dragInfo.itemId != 0) {
+        ITEM_INFO item{};
+        item.SetItemId(dragInfo.itemId);
+        item.m_isIdentified = 1;
+        for (const std::string& candidate : shopui::BuildItemIconCandidates(item)) {
+            if (g_fileMgr.IsDataExist(candidate.c_str())) {
+                bitmapPath = candidate;
+                break;
+            }
+        }
+    } else if (dragInfo.type == static_cast<int>(DragType::ShortcutSkill) && dragInfo.skillId != 0) {
+        const std::string path = ResolveShortcutDragSkillIconPath(dragInfo.skillId);
+        if (!path.empty() && g_fileMgr.IsDataExist(path.c_str())) {
+            bitmapPath = path;
+        }
+    }
+
+    DragPreviewPixels preview{};
+    if (!bitmapPath.empty()) {
+        u32* pixels = nullptr;
+        if (LoadBgraPixelsFromGameData(bitmapPath.c_str(), &pixels, &preview.width, &preview.height)
+            && pixels
+            && preview.width > 0
+            && preview.height > 0) {
+            preview.pixels.assign(
+                pixels,
+                pixels + static_cast<size_t>(preview.width) * static_cast<size_t>(preview.height));
+        }
+        delete[] pixels;
+    }
+
+    s_dragPreviewCache[cacheKey] = preview;
+    *outPreview = preview;
+    return !outPreview->pixels.empty();
+}
+
 void DrawDragPreviewAt(HDC hdc, int x, int y)
 {
     if (!hdc) {
@@ -172,6 +253,57 @@ void DrawDragPreviewAt(HDC hdc, int x, int y)
         y + kDragPreviewOffsetY + (kDragPreviewSize / 2)
     };
     shopui::DrawBitmapTransparent(hdc, bitmap, dst);
+}
+
+bool DrawDragPreviewToArgb(unsigned int* dest, int destW, int destH, int x, int y)
+{
+    if (!dest || destW <= 0 || destH <= 0) {
+        return false;
+    }
+
+    const CGameMode* gameMode = g_modeMgr.GetCurrentGameMode();
+    if (!gameMode || gameMode->m_dragType == static_cast<int>(DragType::None)) {
+        return false;
+    }
+
+    DragPreviewPixels preview{};
+    if (!LoadDragPreviewPixels(gameMode->m_dragInfo, &preview)
+        || preview.width <= 0
+        || preview.height <= 0
+        || preview.pixels.empty()) {
+        return false;
+    }
+
+    const int destLeft = x + kDragPreviewOffsetX - (kDragPreviewSize / 2);
+    const int destTop = y + kDragPreviewOffsetY - (kDragPreviewSize / 2);
+    for (int dy = 0; dy < kDragPreviewSize; ++dy) {
+        const int destY = destTop + dy;
+        if (destY < 0 || destY >= destH) {
+            continue;
+        }
+
+        const int srcY = dy * preview.height / kDragPreviewSize;
+        for (int dx = 0; dx < kDragPreviewSize; ++dx) {
+            const int destX = destLeft + dx;
+            if (destX < 0 || destX >= destW) {
+                continue;
+            }
+
+            const int srcX = dx * preview.width / kDragPreviewSize;
+            unsigned int srcColor = preview.pixels[static_cast<size_t>(srcY) * static_cast<size_t>(preview.width) + static_cast<size_t>(srcX)];
+            if ((srcColor & 0x00FFFFFFu) == 0x00FF00FFu) {
+                continue;
+            }
+            if (((srcColor >> 24) & 0xFFu) == 0u) {
+                srcColor |= 0xFF000000u;
+            }
+            AlphaBlendCursorPixel(
+                dest[static_cast<size_t>(destY) * static_cast<size_t>(destW) + static_cast<size_t>(destX)],
+                PremultiplyCursorColor(srcColor));
+        }
+    }
+
+    return true;
 }
 
 u32 GetDragPreviewVisualToken()
@@ -631,11 +763,6 @@ bool DrawModeCursorAtToArgb(unsigned int* dest, int destW, int destH, int x, int
         return false;
     }
 
-    const CGameMode* gameMode = g_modeMgr.GetCurrentGameMode();
-    if (gameMode && gameMode->m_dragType != static_cast<int>(DragType::None)) {
-        return false;
-    }
-
     static bool s_cacheInit = false;
     static CursorResCache s_cache{};
     if (!s_cacheInit) {
@@ -649,6 +776,10 @@ bool DrawModeCursorAtToArgb(unsigned int* dest, int destW, int destH, int x, int
         drewCustomCursor = DrawResolvedCursorActionToArgb(dest, destW, destH, x, y, cursorActNum, mouseAnimStartTick, s_cache) || drewCustomCursor;
     } else {
         drewCustomCursor = DrawResolvedCursorActionToArgb(dest, destW, destH, x, y, cursorActNum, mouseAnimStartTick, s_cache);
+    }
+
+    if (drewCustomCursor) {
+        DrawDragPreviewToArgb(dest, destW, destH, x, y);
     }
 
     return drewCustomCursor;
