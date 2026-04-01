@@ -384,6 +384,11 @@ void UIBasicInfoWnd::OnCreate(int x, int y)
     m_controlsCreated = true;
     LoadAssets();
 
+    if (IsQtUiRuntimeEnabled()) {
+        SetMiniMode(false);
+        return;
+    }
+
     for (size_t index = 0; index < kMenuButtonNames.size(); ++index) {
         auto* button = new UIBitmapButton();
         const std::string offName = std::string("btn_") + kMenuButtonNames[index] + "_off.bmp";
