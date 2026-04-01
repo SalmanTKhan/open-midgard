@@ -105,22 +105,6 @@ bool QueueFullScreenOverlayQuad(CTexture* texture, int width, int height, float 
     return true;
 }
 
-bool BlitToMainWindow(HDC sourceDc, int width, int height)
-{
-    if (!g_hMainWnd || !sourceDc || width <= 0 || height <= 0) {
-        return false;
-    }
-
-    HDC targetDc = GetDC(g_hMainWnd);
-    if (!targetDc) {
-        return false;
-    }
-
-    BitBlt(targetDc, 0, 0, width, height, sourceDc, 0, 0, SRCCOPY);
-    ReleaseDC(g_hMainWnd, targetDc);
-    return true;
-}
-
 void AddUniqueCandidate(std::vector<std::string>& out, const std::string& raw)
 {
     if (raw.empty()) {
