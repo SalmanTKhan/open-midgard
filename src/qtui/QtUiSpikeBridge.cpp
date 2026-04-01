@@ -79,14 +79,12 @@ bool HasFrontMenuUiVisible()
 
 bool IsEnabledInEnvironment()
 {
-    QByteArray value = qgetenv("OPEN_MIDGARD_QT_UI").trimmed().toLower();
-    if (value.isEmpty()) {
-        value = qgetenv("OPEN_MIDGARD_QT_UI_SPIKE").trimmed().toLower();
+    static bool logged = false;
+    if (!logged) {
+        DbgLog("[QtUi] Runtime force-enabled in code; environment variables are ignored for this test build.\n");
+        logged = true;
     }
-    if (value.isEmpty()) {
-        return RO_QT_UI_DEFAULT_ENABLED != 0 || RO_QT_UI_SPIKE_DEFAULT_ENABLED != 0;
-    }
-    return value == "1" || value == "true" || value == "on" || value == "yes";
+    return true;
 }
 
 class QtUiImageProvider final : public QQuickImageProvider {
