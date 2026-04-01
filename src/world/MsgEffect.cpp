@@ -3,8 +3,6 @@
 #include "World.h"
 #include "DebugLog.h"
 #include "main/WinMain.h"
-#include "render/DC.h"
-#include "render/DrawUtil.h"
 #include "render/Renderer.h"
 #include "render3d/Device.h"
 #include "res/ActRes.h"
@@ -14,7 +12,6 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
-#include <cstring>
 #include <vector>
 
 namespace {
@@ -66,15 +63,6 @@ bool ProjectMsgEffectPoint(const matrix& viewMatrix, const vector3d& point, tlve
     outVertex->oow = oow;
     outVertex->specular = 0xFF000000u;
     return std::isfinite(outVertex->x) && std::isfinite(outVertex->y) && std::isfinite(outVertex->z);
-}
-
-COLORREF ScaleColorByAlpha(u32 argb, int alpha)
-{
-    const int effectiveAlpha = (std::max)(0, (std::min)(255, alpha));
-    const int red = static_cast<int>((argb >> 16) & 0xFFu) * effectiveAlpha / 255;
-    const int green = static_cast<int>((argb >> 8) & 0xFFu) * effectiveAlpha / 255;
-    const int blue = static_cast<int>(argb & 0xFFu) * effectiveAlpha / 255;
-    return RGB(red, green, blue);
 }
 
 CSprRes* GetDamageCountSprite()
@@ -236,154 +224,6 @@ unsigned int ModulateDigitColor(unsigned int srcRgb, unsigned int alpha, unsigne
     const unsigned int modulatedGreen = maxChannel * tintGreen / 255u;
     const unsigned int modulatedBlue = maxChannel * tintBlue / 255u;
     return PremultiplyArgb((alpha << 24) | (modulatedRed << 16) | (modulatedGreen << 8) | modulatedBlue);
-}
-
-bool DrawDigitSprite(HDC hdc, const QueuedMsgEffectDraw& draw)
-{
-    if (!hdc) {
-        return false;
-    }
-
-    CSprRes* sprite = GetDamageCountSprite();
-    CActRes* act = GetDamageCountAct();
-    if (!sprite || !act) {
-        return false;
-    }
-
-    const int digitIndex = (std::max)(0, (std::min)(9, draw.digit));
-    const CMotion* motion = act->GetMotion(0, digitIndex);
-    if (!motion) {
-        motion = act->GetMotion(0, 0);
-    }
-    if (!motion) {
-        return false;
-    }
-
-    RECT clipBox{};
-    if (!ResolveDigitClipBox(draw.digit, &clipBox)) {
-        return false;
-    }
-
-    const float scale = ResolveDigitScale(draw.zoom);
-    const int nativeWidth = (std::max)(1, static_cast<int>(clipBox.right - clipBox.left));
-    const int nativeHeight = (std::max)(1, static_cast<int>(clipBox.bottom - clipBox.top));
-    const int outWidth = (std::max)(1, static_cast<int>(std::lround(static_cast<float>(nativeWidth) * scale)));
-    const int outHeight = (std::max)(1, static_cast<int>(std::lround(static_cast<float>(nativeHeight) * scale)));
-    const int originX = draw.screenX + ResolveDigitShiftPixels(draw) - outWidth / 2;
-    const int originY = draw.screenY - outHeight / 2;
-
-    const unsigned int tintAlpha = (draw.colorArgb >> 24) & 0xFFu;
-    const unsigned int totalAlpha = static_cast<unsigned int>((std::max)(0, (std::min)(255, draw.alpha))) * tintAlpha / 255u;
-    const unsigned int tintRed = (draw.colorArgb >> 16) & 0xFFu;
-    const unsigned int tintGreen = (draw.colorArgb >> 8) & 0xFFu;
-    const unsigned int tintBlue = draw.colorArgb & 0xFFu;
-
-    std::vector<unsigned int> srcPixels(static_cast<size_t>(nativeWidth) * nativeHeight, 0u);
-    for (const CSprClip& clip : motion->sprClips) {
-        const SprImg* image = sprite->GetSprite(clip.clipType, clip.sprIndex);
-        if (!image || image->width <= 0 || image->height <= 0) {
-            continue;
-        }
-
-        const bool flipX = (clip.flags & 1) != 0;
-        const int destLeft = clip.x - image->width / 2 - clipBox.left;
-        const int destTop = clip.y - image->height / 2 - clipBox.top;
-
-        for (int sy = 0; sy < image->height; ++sy) {
-            const int dy = destTop + sy;
-            if (dy < 0 || dy >= nativeHeight) {
-                continue;
-            }
-
-            for (int sx = 0; sx < image->width; ++sx) {
-                const int sourceX = flipX ? (image->width - 1 - sx) : sx;
-                const int dx = destLeft + sx;
-                if (dx < 0 || dx >= nativeWidth) {
-                    continue;
-                }
-
-                unsigned int pixel = 0u;
-                if (clip.clipType == 0) {
-                    const unsigned char paletteIndex = image->indices[static_cast<size_t>(sy) * image->width + sourceX];
-                    if (paletteIndex == 0) {
-                        continue;
-                    }
-                    const unsigned int paletteColor = sprite->m_pal[paletteIndex] & 0x00FFFFFFu;
-                    const unsigned int clipAlpha = static_cast<unsigned int>(clip.a) * totalAlpha / 255u;
-                    pixel = ModulateDigitColor(
-                        paletteColor,
-                        clipAlpha,
-                        tintRed * clip.r / 255u,
-                        tintGreen * clip.g / 255u,
-                        tintBlue * clip.b / 255u);
-                } else {
-                    const unsigned int rgba = image->rgba[static_cast<size_t>(sy) * image->width + sourceX];
-                    const unsigned int srcAlpha = (rgba >> 24) & 0xFFu;
-                    if (srcAlpha == 0u) {
-                        continue;
-                    }
-                    const unsigned int clipAlpha = srcAlpha * clip.a * totalAlpha / (255u * 255u);
-                    pixel = ModulateDigitColor(
-                        rgba & 0x00FFFFFFu,
-                        clipAlpha,
-                        tintRed * clip.r / 255u,
-                        tintGreen * clip.g / 255u,
-                        tintBlue * clip.b / 255u);
-                }
-
-                const size_t destIndex = static_cast<size_t>(dy) * nativeWidth + dx;
-                const unsigned int srcAlpha = (pixel >> 24) & 0xFFu;
-                if (srcAlpha == 0xFFu || (srcPixels[destIndex] >> 24) == 0u) {
-                    srcPixels[destIndex] = pixel;
-                } else if (srcAlpha != 0u) {
-                    const unsigned int dst = srcPixels[destIndex];
-                    const unsigned int dstAlpha = (dst >> 24) & 0xFFu;
-                    const unsigned int invAlpha = 255u - srcAlpha;
-                    const unsigned int outAlpha = srcAlpha + dstAlpha * invAlpha / 255u;
-                    const unsigned int outRed = ((pixel >> 16) & 0xFFu) + (((dst >> 16) & 0xFFu) * invAlpha / 255u);
-                    const unsigned int outGreen = ((pixel >> 8) & 0xFFu) + (((dst >> 8) & 0xFFu) * invAlpha / 255u);
-                    const unsigned int outBlue = (pixel & 0xFFu) + ((dst & 0xFFu) * invAlpha / 255u);
-                    srcPixels[destIndex] = (outAlpha << 24) | (outRed << 16) | (outGreen << 8) | outBlue;
-                }
-            }
-        }
-    }
-
-    BITMAPINFO srcBmi{};
-    srcBmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-    srcBmi.bmiHeader.biWidth = nativeWidth;
-    srcBmi.bmiHeader.biHeight = -nativeHeight;
-    srcBmi.bmiHeader.biPlanes = 1;
-    srcBmi.bmiHeader.biBitCount = 32;
-    srcBmi.bmiHeader.biCompression = BI_RGB;
-
-    void* srcBits = nullptr;
-    HBITMAP srcDib = CreateDIBSection(hdc, &srcBmi, DIB_RGB_COLORS, &srcBits, nullptr, 0);
-    if (!srcDib || !srcBits) {
-        if (srcDib) {
-            DeleteObject(srcDib);
-        }
-        return false;
-    }
-    std::memcpy(srcBits, srcPixels.data(), srcPixels.size() * sizeof(unsigned int));
-
-    HDC memDc = CreateCompatibleDC(hdc);
-    if (!memDc) {
-        DeleteObject(srcDib);
-        return false;
-    }
-
-    BLENDFUNCTION blend{};
-    blend.BlendOp = AC_SRC_OVER;
-    blend.SourceConstantAlpha = 255;
-    blend.AlphaFormat = AC_SRC_ALPHA;
-
-    HGDIOBJ oldBitmap = SelectObject(memDc, srcDib);
-    AlphaBlend(hdc, originX, originY, outWidth, outHeight, memDc, 0, 0, nativeWidth, nativeHeight, blend);
-    SelectObject(memDc, oldBitmap);
-    DeleteDC(memDc);
-    DeleteObject(srcDib);
-    return true;
 }
 
 unsigned int BuildDigitMaskPixel(unsigned int rgb, unsigned int alpha)
@@ -594,27 +434,6 @@ bool GetDigitDrawBounds(const QueuedMsgEffectDraw& draw, RECT* outRect)
     outRect->right = drawX + fontHeight + 2;
     outRect->bottom = drawY + fontHeight + 2;
     return true;
-}
-
-void DrawOutlinedDigit(HDC hdc, int x, int y, const char* text, COLORREF color, int fontHeight)
-{
-    if (!hdc || !text || !*text) {
-        return;
-    }
-
-    DrawDC drawDc(hdc);
-    drawDc.SetFont(FONT_DEFAULT, fontHeight, 0);
-    SetBkMode(hdc, TRANSPARENT);
-
-    const int textLen = static_cast<int>(std::strlen(text));
-    drawDc.SetTextColor(RGB(0, 0, 0));
-    drawDc.TextOutA(x - 1, y, text, textLen);
-    drawDc.TextOutA(x + 1, y, text, textLen);
-    drawDc.TextOutA(x, y - 1, text, textLen);
-    drawDc.TextOutA(x, y + 1, text, textLen);
-
-    drawDc.SetTextColor(color);
-    drawDc.TextOutA(x, y, text, textLen);
 }
 
 void ResolveLateralOffset(float rotationDegrees, float* outX, float* outZ)
@@ -870,32 +689,6 @@ void CMsgEffect::Render(matrix* viewMatrix)
         g_queuedMsgEffects.push_back(draw);
         currentLeft += digitWidths[index] + digitGap;
     }
-}
-
-void DrawQueuedMsgEffects(HDC hdc)
-{
-    if (!hdc) {
-        g_queuedMsgEffects.clear();
-        return;
-    }
-
-    for (const QueuedMsgEffectDraw& draw : g_queuedMsgEffects) {
-        if (!DrawDigitSprite(hdc, draw)) {
-            const int fontHeight = (std::max)(14, (std::min)(32, static_cast<int>(std::lround(8.0f + draw.zoom * 4.0f))));
-            char text[2] = {
-                static_cast<char>('0' + (std::max)(0, (std::min)(9, draw.digit))),
-                '\0'
-            };
-            DrawOutlinedDigit(hdc,
-                draw.screenX + ResolveDigitShiftPixels(draw) - fontHeight / 4,
-                draw.screenY - fontHeight / 2,
-                text,
-                ScaleColorByAlpha(draw.colorArgb, draw.alpha),
-                fontHeight);
-        }
-    }
-
-    g_queuedMsgEffects.clear();
 }
 
 bool QueueQueuedMsgEffectsQuads()
