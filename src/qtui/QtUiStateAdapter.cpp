@@ -1499,19 +1499,29 @@ void PopulateOptionState(QtUiState* state)
         data.insert(QStringLiteral("contentY"), display.contentY);
         data.insert(QStringLiteral("contentWidth"), display.contentWidth);
         data.insert(QStringLiteral("contentHeight"), display.contentHeight);
-        data.insert(QStringLiteral("miniButtonX"), display.miniButtonX);
-        data.insert(QStringLiteral("miniButtonY"), display.miniButtonY);
-        data.insert(QStringLiteral("miniButtonWidth"), display.miniButtonWidth);
-        data.insert(QStringLiteral("miniButtonHeight"), display.miniButtonHeight);
-        data.insert(QStringLiteral("closeButtonX"), display.closeButtonX);
-        data.insert(QStringLiteral("closeButtonY"), display.closeButtonY);
-        data.insert(QStringLiteral("closeButtonWidth"), display.closeButtonWidth);
-        data.insert(QStringLiteral("closeButtonHeight"), display.closeButtonHeight);
-        data.insert(QStringLiteral("restartVisible"), display.restartVisible);
-        data.insert(QStringLiteral("restartX"), display.restartX);
-        data.insert(QStringLiteral("restartY"), display.restartY);
-        data.insert(QStringLiteral("restartWidth"), display.restartWidth);
-        data.insert(QStringLiteral("restartHeight"), display.restartHeight);
+
+        QVariantList systemButtons;
+        systemButtons.reserve(static_cast<qsizetype>(display.systemButtons.size()));
+        for (const UIOptionWnd::DisplayButton& buttonDisplay : display.systemButtons) {
+            QVariantMap button;
+            button.insert(QStringLiteral("x"), buttonDisplay.x);
+            button.insert(QStringLiteral("y"), buttonDisplay.y);
+            button.insert(QStringLiteral("width"), buttonDisplay.width);
+            button.insert(QStringLiteral("height"), buttonDisplay.height);
+            button.insert(QStringLiteral("visible"), buttonDisplay.visible);
+            button.insert(QStringLiteral("label"), ToQString(buttonDisplay.label));
+            systemButtons.push_back(button);
+        }
+        data.insert(QStringLiteral("systemButtons"), systemButtons);
+
+        QVariantMap restartButton;
+        restartButton.insert(QStringLiteral("x"), display.restartButton.x);
+        restartButton.insert(QStringLiteral("y"), display.restartButton.y);
+        restartButton.insert(QStringLiteral("width"), display.restartButton.width);
+        restartButton.insert(QStringLiteral("height"), display.restartButton.height);
+        restartButton.insert(QStringLiteral("visible"), display.restartButton.visible);
+        restartButton.insert(QStringLiteral("label"), ToQString(display.restartButton.label));
+        data.insert(QStringLiteral("restartButton"), restartButton);
 
         QVariantList tabs;
         tabs.reserve(static_cast<qsizetype>(display.tabs.size()));
@@ -1571,6 +1581,8 @@ void PopulateOptionState(QtUiState* state)
             entry.insert(QStringLiteral("nextY"), row.nextY);
             entry.insert(QStringLiteral("nextWidth"), row.nextWidth);
             entry.insert(QStringLiteral("nextHeight"), row.nextHeight);
+            entry.insert(QStringLiteral("prevLabel"), ToQString(row.prevLabel));
+            entry.insert(QStringLiteral("nextLabel"), ToQString(row.nextLabel));
             entry.insert(QStringLiteral("label"), ToQString(row.label));
             entry.insert(QStringLiteral("value"), ToQString(row.value));
             graphicsRows.push_back(entry);

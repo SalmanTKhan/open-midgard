@@ -15,6 +15,15 @@ void ApplySavedAudioSettings();
 
 class UIOptionWnd : public UIFrameWnd {
 public:
+    struct DisplayButton {
+        int x = 0;
+        int y = 0;
+        int width = 0;
+        int height = 0;
+        bool visible = true;
+        std::string label;
+    };
+
     struct DisplayToggle {
         int x = 0;
         int y = 0;
@@ -46,6 +55,8 @@ public:
         int nextY = 0;
         int nextWidth = 0;
         int nextHeight = 0;
+        std::string prevLabel;
+        std::string nextLabel;
         std::string label;
         std::string value;
     };
@@ -66,19 +77,8 @@ public:
         int contentY = 0;
         int contentWidth = 0;
         int contentHeight = 0;
-        int miniButtonX = 0;
-        int miniButtonY = 0;
-        int miniButtonWidth = 0;
-        int miniButtonHeight = 0;
-        int closeButtonX = 0;
-        int closeButtonY = 0;
-        int closeButtonWidth = 0;
-        int closeButtonHeight = 0;
-        bool restartVisible = false;
-        int restartX = 0;
-        int restartY = 0;
-        int restartWidth = 0;
-        int restartHeight = 0;
+        std::vector<DisplayButton> systemButtons;
+        DisplayButton restartButton;
         std::vector<DisplayTab> tabs;
         std::vector<DisplayToggle> toggles;
         std::vector<DisplaySlider> sliders;

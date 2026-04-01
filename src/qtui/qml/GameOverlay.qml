@@ -2172,41 +2172,28 @@ Item {
             font.bold: true
         }
 
-        Rectangle {
-            x: (uiState.optionData.miniButtonX || 0) - uiState.optionX
-            y: (uiState.optionData.miniButtonY || 0) - uiState.optionY
-            width: uiState.optionData.miniButtonWidth || 0
-            height: uiState.optionData.miniButtonHeight || 0
-            radius: 4
-            color: "#f8faff"
-            border.width: 1
-            border.color: "#607096"
+        Repeater {
+            model: uiState.optionData.systemButtons || []
 
-            Text {
-                anchors.centerIn: parent
-                text: "_"
-                color: "#28375c"
-                font.pixelSize: 9
-                font.bold: true
-            }
-        }
+            delegate: Rectangle {
+                required property var modelData
+                x: (modelData.x || 0) - uiState.optionX
+                y: (modelData.y || 0) - uiState.optionY
+                width: modelData.width || 0
+                height: modelData.height || 0
+                radius: 4
+                color: "#f8faff"
+                border.width: 1
+                border.color: "#607096"
+                visible: modelData.visible || false
 
-        Rectangle {
-            x: (uiState.optionData.closeButtonX || 0) - uiState.optionX
-            y: (uiState.optionData.closeButtonY || 0) - uiState.optionY
-            width: uiState.optionData.closeButtonWidth || 0
-            height: uiState.optionData.closeButtonHeight || 0
-            radius: 4
-            color: "#f8faff"
-            border.width: 1
-            border.color: "#607096"
-
-            Text {
-                anchors.centerIn: parent
-                text: "X"
-                color: "#28375c"
-                font.pixelSize: 9
-                font.bold: true
+                Text {
+                    anchors.centerIn: parent
+                    text: modelData.label || ""
+                    color: "#28375c"
+                    font.pixelSize: 9
+                    font.bold: true
+                }
             }
         }
 
@@ -2375,7 +2362,7 @@ Item {
 
                     Text {
                         anchors.centerIn: parent
-                        text: "<"
+                        text: modelData.prevLabel || ""
                         color: "#28375c"
                         font.pixelSize: 10
                         font.bold: true
@@ -2394,7 +2381,7 @@ Item {
 
                     Text {
                         anchors.centerIn: parent
-                        text: ">"
+                        text: modelData.nextLabel || ""
                         color: "#28375c"
                         font.pixelSize: 10
                         font.bold: true
@@ -2404,19 +2391,19 @@ Item {
         }
 
         Rectangle {
-            x: (uiState.optionData.restartX || 0) - uiState.optionX
-            y: (uiState.optionData.restartY || 0) - uiState.optionY
-            width: uiState.optionData.restartWidth || 0
-            height: uiState.optionData.restartHeight || 0
+            x: (uiState.optionData.restartButton.x || 0) - uiState.optionX
+            y: (uiState.optionData.restartButton.y || 0) - uiState.optionY
+            width: uiState.optionData.restartButton.width || 0
+            height: uiState.optionData.restartButton.height || 0
             radius: 4
-            visible: uiState.optionData.restartVisible || false
+            visible: uiState.optionData.restartButton.visible || false
             color: "#f8faff"
             border.width: 1
             border.color: "#607096"
 
             Text {
                 anchors.centerIn: parent
-                text: "Restart"
+                text: uiState.optionData.restartButton.label || ""
                 color: "#28375c"
                 font.pixelSize: 10
             }

@@ -1494,16 +1494,24 @@ bool UIOptionWnd::GetDisplayDataForQt(DisplayData* outData) const
     data.contentHeight = contentRect.bottom - contentRect.top;
 
     const RECT miniRect = GetMiniButtonRect();
-    data.miniButtonX = miniRect.left;
-    data.miniButtonY = miniRect.top;
-    data.miniButtonWidth = miniRect.right - miniRect.left;
-    data.miniButtonHeight = miniRect.bottom - miniRect.top;
-
     const RECT closeRect = GetCloseButtonRect();
-    data.closeButtonX = closeRect.left;
-    data.closeButtonY = closeRect.top;
-    data.closeButtonWidth = closeRect.right - closeRect.left;
-    data.closeButtonHeight = closeRect.bottom - closeRect.top;
+    data.systemButtons.reserve(2);
+
+    DisplayButton miniButton{};
+    miniButton.x = miniRect.left;
+    miniButton.y = miniRect.top;
+    miniButton.width = miniRect.right - miniRect.left;
+    miniButton.height = miniRect.bottom - miniRect.top;
+    miniButton.label = "_";
+    data.systemButtons.push_back(std::move(miniButton));
+
+    DisplayButton closeButton{};
+    closeButton.x = closeRect.left;
+    closeButton.y = closeRect.top;
+    closeButton.width = closeRect.right - closeRect.left;
+    closeButton.height = closeRect.bottom - closeRect.top;
+    closeButton.label = "X";
+    data.systemButtons.push_back(std::move(closeButton));
 
     data.tabs.reserve(TabId_Count);
     static const char* const kTabLabels[TabId_Count] = { "Game", "Graphics", "Audio" };
@@ -1521,11 +1529,12 @@ bool UIOptionWnd::GetDisplayDataForQt(DisplayData* outData) const
 
     if (HasPendingGraphicsRestart()) {
         const RECT restartRect = GetRestartButtonRect();
-        data.restartVisible = true;
-        data.restartX = restartRect.left;
-        data.restartY = restartRect.top;
-        data.restartWidth = restartRect.right - restartRect.left;
-        data.restartHeight = restartRect.bottom - restartRect.top;
+        data.restartButton.visible = true;
+        data.restartButton.x = restartRect.left;
+        data.restartButton.y = restartRect.top;
+        data.restartButton.width = restartRect.right - restartRect.left;
+        data.restartButton.height = restartRect.bottom - restartRect.top;
+        data.restartButton.label = "Restart";
     }
 
     if (!data.collapsed) {
@@ -1612,6 +1621,8 @@ bool UIOptionWnd::GetDisplayDataForQt(DisplayData* outData) const
                 row.nextY = nextRect.top;
                 row.nextWidth = nextRect.right - nextRect.left;
                 row.nextHeight = nextRect.bottom - nextRect.top;
+                row.prevLabel = "<";
+                row.nextLabel = ">";
                 switch (rows[index]) {
                 case GraphicsRow_Resolution:
                     row.label = "Resolution";
