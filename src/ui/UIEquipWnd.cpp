@@ -1194,6 +1194,50 @@ bool UIEquipWnd::GetDisplayDataForQt(DisplayData* outData) const
     return true;
 }
 
+int UIEquipWnd::GetQtSystemButtonCount() const
+{
+    return 3;
+}
+
+bool UIEquipWnd::GetQtSystemButtonDisplayForQt(int index, QtButtonDisplay* outData) const
+{
+    if (!outData || index < 0 || index >= GetQtSystemButtonCount()) {
+        return false;
+    }
+
+    switch (index) {
+    case 0:
+        outData->id = kButtonIdBase;
+        outData->x = m_x + 247;
+        outData->y = m_y + 3;
+        outData->width = kQtButtonWidth;
+        outData->height = kQtButtonHeight;
+        outData->label = "B";
+        outData->visible = IsMiniMode();
+        return true;
+    case 1:
+        outData->id = kButtonIdMini;
+        outData->x = m_x + 247;
+        outData->y = m_y + 3;
+        outData->width = kQtButtonWidth;
+        outData->height = kQtButtonHeight;
+        outData->label = "_";
+        outData->visible = !IsMiniMode();
+        return true;
+    case 2:
+        outData->id = kButtonIdClose;
+        outData->x = m_x + 265;
+        outData->y = m_y + 3;
+        outData->width = kQtButtonWidth;
+        outData->height = kQtButtonHeight;
+        outData->label = "X";
+        outData->visible = true;
+        return true;
+    default:
+        return false;
+    }
+}
+
 void UIEquipWnd::EnsureCreated()
 {
     if (!m_controlsCreated) {

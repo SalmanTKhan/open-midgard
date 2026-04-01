@@ -1259,6 +1259,26 @@ void PopulateEquipState(QtUiState* state)
     UIEquipWnd::DisplayData display{};
     QVariantMap data;
     if (equipWnd->GetDisplayDataForQt(&display)) {
+        QVariantList systemButtons;
+        systemButtons.reserve(equipWnd->GetQtSystemButtonCount());
+        for (int index = 0; index < equipWnd->GetQtSystemButtonCount(); ++index) {
+            UIEquipWnd::QtButtonDisplay buttonDisplay{};
+            if (!equipWnd->GetQtSystemButtonDisplayForQt(index, &buttonDisplay)) {
+                continue;
+            }
+
+            QVariantMap button;
+            button.insert(QStringLiteral("id"), buttonDisplay.id);
+            button.insert(QStringLiteral("x"), buttonDisplay.x);
+            button.insert(QStringLiteral("y"), buttonDisplay.y);
+            button.insert(QStringLiteral("width"), buttonDisplay.width);
+            button.insert(QStringLiteral("height"), buttonDisplay.height);
+            button.insert(QStringLiteral("label"), ToQString(buttonDisplay.label));
+            button.insert(QStringLiteral("visible"), buttonDisplay.visible);
+            systemButtons.push_back(button);
+        }
+        data.insert(QStringLiteral("systemButtons"), systemButtons);
+
         QVariantList slots;
         slots.reserve(static_cast<qsizetype>(display.slots.size()));
         for (const UIEquipWnd::DisplaySlot& slot : display.slots) {

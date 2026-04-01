@@ -13,6 +13,16 @@ struct ITEM_INFO;
 
 class UIEquipWnd : public UIFrameWnd {
 public:
+    struct QtButtonDisplay {
+        int id = 0;
+        int x = 0;
+        int y = 0;
+        int width = 0;
+        int height = 0;
+        std::string label;
+        bool visible = true;
+    };
+
     struct DisplaySlot {
         int x = 0;
         int y = 0;
@@ -45,6 +55,8 @@ public:
     void StoreInfo() override;
     bool IsMiniMode() const;
     bool GetDisplayDataForQt(DisplayData* outData) const;
+    int GetQtSystemButtonCount() const;
+    bool GetQtSystemButtonDisplayForQt(int index, QtButtonDisplay* outData) const;
 
 private:
     void EnsureCreated();
