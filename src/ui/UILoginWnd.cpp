@@ -786,18 +786,12 @@ void UILoginWnd::OnDraw()
 
     EnsureResourceCache();
 
-    HDC targetDC = AcquireDrawTarget();
-    if (!targetDC) {
-        return;
-    }
-
     RECT rcClient{};
     GetClientRect(g_hMainWnd, &rcClient);
 
     const int clientW = rcClient.right - rcClient.left;
     const int clientH = rcClient.bottom - rcClient.top;
     if (clientW <= 0 || clientH <= 0) {
-        ReleaseDrawTarget(targetDC);
         return;
     }
 
@@ -806,14 +800,20 @@ void UILoginWnd::OnDraw()
     }
 
     if (IsQtUiRuntimeEnabled()) {
-        ReleaseDrawTarget(targetDC);
         return;
     }
 
-    HDC drawDC = targetDC;
     const bool useCompose = EnsureComposeSurface(clientW, clientH);
+    HDC targetDC = nullptr;
+    HDC drawDC = nullptr;
     if (useCompose) {
         drawDC = m_composeDC;
+    } else {
+        targetDC = AcquireDrawTarget();
+        if (!targetDC) {
+            return;
+        }
+        drawDC = targetDC;
     }
 
     if (m_wallpaperBmp) {
@@ -838,10 +838,15 @@ void UILoginWnd::OnDraw()
     DrawChildrenToHdc(drawDC);
 
     if (useCompose) {
+        targetDC = AcquireDrawTarget();
+        if (!targetDC) {
+            return;
+        }
         BitBlt(targetDC, 0, 0, clientW, clientH, drawDC, 0, 0, SRCCOPY);
+        ReleaseDrawTarget(targetDC);
+    } else {
+        ReleaseDrawTarget(targetDC);
     }
-
-    ReleaseDrawTarget(targetDC);
 }
 
 msgresult_t UILoginWnd::SendMsg(UIWindow* sender, int msg, msgparam_t wparam, msgparam_t lparam, msgparam_t extra)

@@ -1215,18 +1215,19 @@ void UISelectCharWnd::OnDraw()
         return;
     }
 
-    HDC targetDC = AcquireDrawTarget();
-    if (!targetDC) {
-        return;
-    }
-
-    HDC hdc = targetDC;
     const bool useCompose = EnsureComposeSurface(clientW, clientH);
+    HDC targetDC = nullptr;
+    HDC hdc = nullptr;
     if (useCompose) {
         PatBlt(m_composeDC, 0, 0, clientW, clientH, BLACKNESS);
         g_windowMgr.DrawWallpaperToDC(m_composeDC, clientW, clientH);
         hdc = m_composeDC;
     } else {
+        targetDC = AcquireDrawTarget();
+        if (!targetDC) {
+            return;
+        }
+        hdc = targetDC;
         g_windowMgr.DrawWallpaperToDC(hdc, clientW, clientH);
     }
 
@@ -1303,8 +1304,13 @@ void UISelectCharWnd::OnDraw()
     DrawChildrenToHdc(hdc);
 
     if (useCompose) {
+        targetDC = AcquireDrawTarget();
+        if (!targetDC) {
+            return;
+        }
         BitBlt(targetDC, 0, 0, clientW, clientH, hdc, 0, 0, SRCCOPY);
+        ReleaseDrawTarget(targetDC);
+    } else {
+        ReleaseDrawTarget(targetDC);
     }
-
-    ReleaseDrawTarget(targetDC);
 }
