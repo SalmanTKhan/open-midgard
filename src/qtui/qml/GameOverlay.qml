@@ -1724,7 +1724,7 @@ Item {
             width: Math.max(10, minimapData.closeWidth || 0)
             height: Math.max(10, minimapData.closeHeight || 0)
             radius: 2
-            color: "#dde4ef"
+            color: minimapData.closePressed ? "#b8c7da" : "#dde4ef"
             border.width: 1
             border.color: "#4d5662"
 

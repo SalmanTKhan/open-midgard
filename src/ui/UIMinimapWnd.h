@@ -29,6 +29,7 @@ public:
         int closeY = 0;
         int closeWidth = 0;
         int closeHeight = 0;
+        bool closePressed = false;
         int coordsX = 0;
         int coordsY = 0;
         int coordsWidth = 0;

@@ -1262,6 +1262,7 @@ void PopulateMinimapState(QtUiState* state)
         data.insert(QStringLiteral("closeY"), display.closeY);
         data.insert(QStringLiteral("closeWidth"), display.closeWidth);
         data.insert(QStringLiteral("closeHeight"), display.closeHeight);
+        data.insert(QStringLiteral("closePressed"), display.closePressed);
         data.insert(QStringLiteral("coordsX"), display.coordsX);
         data.insert(QStringLiteral("coordsY"), display.coordsY);
         data.insert(QStringLiteral("coordsWidth"), display.coordsWidth);

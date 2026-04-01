@@ -862,6 +862,7 @@ bool UIRoMapWnd::GetDisplayDataForQt(DisplayData* outData) const
     data.closeY = closeRect.top;
     data.closeWidth = closeRect.right - closeRect.left;
     data.closeHeight = closeRect.bottom - closeRect.top;
+    data.closePressed = m_qtCloseButtonPressed;
 
     data.mapName = StripExtension(GetCurrentMinimapBitmapName());
     char coordsText[64] = {};
