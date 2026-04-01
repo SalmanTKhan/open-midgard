@@ -36,8 +36,34 @@ struct DragPreviewPixels
     std::vector<unsigned int> pixels;
 };
 
+constexpr const char* kFallbackCursorMask[] = {
+    "X.............",
+    "XX............",
+    "XOX...........",
+    "XOOX..........",
+    "XOOOX.........",
+    "XOOOOX........",
+    "XOOOOOX.......",
+    "XOOOOOOX......",
+    "XOOOOOOOX.....",
+    "XOOOOOOOOX....",
+    "XOOOOOOOOOX...",
+    "XOOOOOOOOOOX..",
+    "XOOOOXXXXXXXX.",
+    "XOOXOX........",
+    "XOX..OX.......",
+    "XX....OX......",
+    "X......OX.....",
+    "........X....."
+};
+constexpr int kFallbackCursorHeight = static_cast<int>(sizeof(kFallbackCursorMask) / sizeof(kFallbackCursorMask[0]));
+constexpr int kFallbackCursorWidth = 14;
+constexpr unsigned int kFallbackCursorOutlineColor = 0xFF000000u;
+constexpr unsigned int kFallbackCursorFillColor = 0xFFF6F6F6u;
+
 unsigned int PremultiplyCursorColor(unsigned int color);
 void AlphaBlendCursorPixel(unsigned int& dst, unsigned int src);
+bool BuildFallbackCursorPixels(std::vector<unsigned int>* outPixels);
 
 CursorResCache ResolveCursorResources()
 {
@@ -77,10 +103,73 @@ void DrawFallbackCursorAt(HDC hdc, int x, int y)
         return;
     }
 
-    HCURSOR cursor = LoadCursor(nullptr, IDC_ARROW);
-    if (cursor) {
-        DrawIconEx(hdc, x, y, cursor, 0, 0, 0, nullptr, DI_NORMAL);
+    std::vector<unsigned int> pixels;
+    if (!BuildFallbackCursorPixels(&pixels) || pixels.empty()) {
+        return;
     }
+
+    BITMAPINFO bmi{};
+    bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    bmi.bmiHeader.biWidth = kFallbackCursorWidth;
+    bmi.bmiHeader.biHeight = -kFallbackCursorHeight;
+    bmi.bmiHeader.biPlanes = 1;
+    bmi.bmiHeader.biBitCount = 32;
+    bmi.bmiHeader.biCompression = BI_RGB;
+
+    void* dibBits = nullptr;
+    HBITMAP dib = CreateDIBSection(hdc, &bmi, DIB_RGB_COLORS, &dibBits, nullptr, 0);
+    if (!dib || !dibBits) {
+        if (dib) {
+            DeleteObject(dib);
+        }
+        return;
+    }
+
+    std::memcpy(dibBits, pixels.data(), pixels.size() * sizeof(unsigned int));
+
+    HDC memDc = CreateCompatibleDC(hdc);
+    if (!memDc) {
+        DeleteObject(dib);
+        return;
+    }
+
+    BLENDFUNCTION blend{};
+    blend.BlendOp = AC_SRC_OVER;
+    blend.SourceConstantAlpha = 255;
+    blend.AlphaFormat = AC_SRC_ALPHA;
+
+    HGDIOBJ oldBitmap = SelectObject(memDc, dib);
+    AlphaBlend(hdc, x, y, kFallbackCursorWidth, kFallbackCursorHeight, memDc, 0, 0, kFallbackCursorWidth, kFallbackCursorHeight, blend);
+    SelectObject(memDc, oldBitmap);
+    DeleteDC(memDc);
+    DeleteObject(dib);
+}
+
+bool BuildFallbackCursorPixels(std::vector<unsigned int>* outPixels)
+{
+    if (!outPixels) {
+        return false;
+    }
+
+    outPixels->assign(static_cast<size_t>(kFallbackCursorWidth) * static_cast<size_t>(kFallbackCursorHeight), 0u);
+    for (int row = 0; row < kFallbackCursorHeight; ++row) {
+        const char* maskRow = kFallbackCursorMask[row];
+        for (int col = 0; maskRow[col] != '\0'; ++col) {
+            unsigned int srcColor = 0u;
+            if (maskRow[col] == 'X') {
+                srcColor = kFallbackCursorOutlineColor;
+            } else if (maskRow[col] == 'O') {
+                srcColor = kFallbackCursorFillColor;
+            } else {
+                continue;
+            }
+
+            (*outPixels)[static_cast<size_t>(row) * static_cast<size_t>(kFallbackCursorWidth) + static_cast<size_t>(col)] =
+                PremultiplyCursorColor(srcColor);
+        }
+    }
+
+    return true;
 }
 
 bool DrawFallbackCursorToArgb(unsigned int* dest, int destW, int destH, int x, int y)
@@ -89,52 +178,28 @@ bool DrawFallbackCursorToArgb(unsigned int* dest, int destW, int destH, int x, i
         return false;
     }
 
-    static const char* const kFallbackCursorMask[] = {
-        "X.............",
-        "XX............",
-        "XOX...........",
-        "XOOX..........",
-        "XOOOX.........",
-        "XOOOOX........",
-        "XOOOOOX.......",
-        "XOOOOOOX......",
-        "XOOOOOOOX.....",
-        "XOOOOOOOOX....",
-        "XOOOOOOOOOX...",
-        "XOOOOOOOOOOX..",
-        "XOOOOXXXXXXXX.",
-        "XOOXOX........",
-        "XOX..OX.......",
-        "XX....OX......",
-        "X......OX.....",
-        "........X....."
-    };
+    std::vector<unsigned int> pixels;
+    if (!BuildFallbackCursorPixels(&pixels) || pixels.empty()) {
+        return false;
+    }
 
-    constexpr int kMaskHeight = static_cast<int>(sizeof(kFallbackCursorMask) / sizeof(kFallbackCursorMask[0]));
-    constexpr unsigned int kOutlineColor = 0xFF000000u;
-    constexpr unsigned int kFillColor = 0xFFF6F6F6u;
-
-    for (int row = 0; row < kMaskHeight; ++row) {
-        const char* maskRow = kFallbackCursorMask[row];
-        for (int col = 0; maskRow[col] != '\0'; ++col) {
+    for (int row = 0; row < kFallbackCursorHeight; ++row) {
+        for (int col = 0; col < kFallbackCursorWidth; ++col) {
             const int destX = x + col;
             const int destY = y + row;
             if (destX < 0 || destX >= destW || destY < 0 || destY >= destH) {
                 continue;
             }
 
-            unsigned int srcColor = 0u;
-            if (maskRow[col] == 'X') {
-                srcColor = kOutlineColor;
-            } else if (maskRow[col] == 'O') {
-                srcColor = kFillColor;
-            } else {
+            const unsigned int srcColor =
+                pixels[static_cast<size_t>(row) * static_cast<size_t>(kFallbackCursorWidth) + static_cast<size_t>(col)];
+            if (srcColor == 0u) {
                 continue;
             }
 
             AlphaBlendCursorPixel(
                 dest[static_cast<size_t>(destY) * static_cast<size_t>(destW) + static_cast<size_t>(destX)],
-                PremultiplyCursorColor(srcColor));
+                srcColor);
         }
     }
 

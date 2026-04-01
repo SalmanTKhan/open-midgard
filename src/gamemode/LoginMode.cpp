@@ -637,7 +637,6 @@ void CLoginMode::OnUpdate() {
 
     g_windowMgr.OnProcess();
     const bool hasLegacyDevice = GetRenderDevice().GetLegacyDevice() != nullptr;
-    const bool isVulkanBackend = GetRenderDevice().GetBackendType() == RenderBackendType::Vulkan;
     if (!hasLegacyDevice) {
         g_renderer.ClearBackground();
         g_renderer.Clear(0);
