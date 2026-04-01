@@ -350,6 +350,7 @@ bool QueueLoginUiQuad()
     static void* s_uiComposeBits = nullptr;
     static int s_uiComposeWidth = 0;
     static int s_uiComposeHeight = 0;
+    static std::vector<unsigned int> s_qtUiComposePixels;
     static std::uint64_t s_uiStateToken = 0ull;
     static bool s_uiTextureValid = false;
 
@@ -409,29 +410,41 @@ bool QueueLoginUiQuad()
             g_windowMgr.ClearDirtyVisualState();
             s_uiTextureValid = false;
         } else {
-            const bool composeReady = EnsureOverlayComposeSurface(clientWidth, clientHeight,
-                &s_uiComposeDc, &s_uiComposeBitmap, &s_uiComposeBits, &s_uiComposeWidth, &s_uiComposeHeight);
-            if (!composeReady) {
-                return false;
-            }
-
-            if (g_windowMgr.m_wallpaperSurface && g_windowMgr.m_wallpaperSurface->HasSoftwarePixels()) {
-                g_windowMgr.DrawWallpaperToDC(s_uiComposeDc, clientWidth, clientHeight);
-            } else {
-                HBRUSH clearBrush = CreateSolidBrush(RGB(0, 0, 0));
-                FillRect(s_uiComposeDc, &clientRect, clearBrush);
-                DeleteObject(clearBrush);
-            }
-
             if (!qtMenuRuntimeEnabled) {
+                const bool composeReady = EnsureOverlayComposeSurface(clientWidth, clientHeight,
+                    &s_uiComposeDc, &s_uiComposeBitmap, &s_uiComposeBits, &s_uiComposeWidth, &s_uiComposeHeight);
+                if (!composeReady) {
+                    return false;
+                }
+
+                if (g_windowMgr.m_wallpaperSurface && g_windowMgr.m_wallpaperSurface->HasSoftwarePixels()) {
+                    g_windowMgr.DrawWallpaperToDC(s_uiComposeDc, clientWidth, clientHeight);
+                } else {
+                    HBRUSH clearBrush = CreateSolidBrush(RGB(0, 0, 0));
+                    FillRect(s_uiComposeDc, &clientRect, clearBrush);
+                    DeleteObject(clearBrush);
+                }
+
                 g_windowMgr.DrawVisibleWindowsToHdc(s_uiComposeDc, true);
             } else {
                 g_windowMgr.ClearDirtyVisualState();
             }
 
-            ConvertOverlayComposeBitsToAlpha(s_uiComposeBits, clientWidth, clientHeight);
+            unsigned int* overlayPixels = nullptr;
+            if (qtMenuRuntimeEnabled) {
+                const size_t pixelCount = static_cast<size_t>(clientWidth) * static_cast<size_t>(clientHeight);
+                if (s_qtUiComposePixels.size() != pixelCount) {
+                    s_qtUiComposePixels.assign(pixelCount, 0u);
+                } else {
+                    std::fill(s_qtUiComposePixels.begin(), s_qtUiComposePixels.end(), 0u);
+                }
+                overlayPixels = s_qtUiComposePixels.data();
+            } else {
+                ConvertOverlayComposeBitsToAlpha(s_uiComposeBits, clientWidth, clientHeight);
+                overlayPixels = static_cast<unsigned int*>(s_uiComposeBits);
+            }
             CompositeQtUiMenuOverlay(
-                s_uiComposeBits,
+                overlayPixels,
                 clientWidth,
                 clientHeight,
                 clientWidth * static_cast<int>(sizeof(unsigned int)));
@@ -439,7 +452,7 @@ bool QueueLoginUiQuad()
                 0,
                 clientWidth,
                 clientHeight,
-                static_cast<unsigned int*>(s_uiComposeBits),
+                overlayPixels,
                 true,
                 clientWidth * static_cast<int>(sizeof(unsigned int)));
             s_uiTextureValid = true;
