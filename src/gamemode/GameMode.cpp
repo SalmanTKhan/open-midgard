@@ -2410,41 +2410,7 @@ void DrawLockedTargetArrow(CGameMode& mode, HDC hdc)
     const int drawX = centerX - (scaledWidth / 2);
     const int drawY = labelY - kLockedTargetArrowBaseLift - scaledHeight - kLockedTargetArrowYOffset - bounce;
 
-    BITMAPINFO bmi{};
-    bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-    bmi.bmiHeader.biWidth = s_width;
-    bmi.bmiHeader.biHeight = -s_height;
-    bmi.bmiHeader.biPlanes = 1;
-    bmi.bmiHeader.biBitCount = 32;
-    bmi.bmiHeader.biCompression = BI_RGB;
-
-    void* dibBits = nullptr;
-    HBITMAP dib = CreateDIBSection(nullptr, &bmi, DIB_RGB_COLORS, &dibBits, nullptr, 0);
-    if (!dib || !dibBits) {
-        if (dib) {
-            DeleteObject(dib);
-        }
-        return;
-    }
-
-    std::memcpy(dibBits, s_bitmapPixels.data(), s_bitmapPixels.size() * sizeof(unsigned int));
-
-    HDC memDc = CreateCompatibleDC(hdc);
-    if (!memDc) {
-        DeleteObject(dib);
-        return;
-    }
-
-    BLENDFUNCTION blend{};
-    blend.BlendOp = AC_SRC_OVER;
-    blend.SourceConstantAlpha = 255;
-    blend.AlphaFormat = AC_SRC_ALPHA;
-
-    HGDIOBJ oldBitmap = SelectObject(memDc, dib);
-    AlphaBlend(hdc, drawX, drawY, scaledWidth, scaledHeight, memDc, 0, 0, s_width, s_height, blend);
-    SelectObject(memDc, oldBitmap);
-    DeleteDC(memDc);
-    DeleteObject(dib);
+    AlphaBlendArgbToHdc(hdc, drawX, drawY, scaledWidth, scaledHeight, s_bitmapPixels.data(), s_width, s_height);
 }
 
 u32 PackLockedTargetColor(u8 alpha, u8 red, u8 green, u8 blue)

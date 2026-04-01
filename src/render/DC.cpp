@@ -116,6 +116,74 @@ void BlitMotionToArgb(unsigned int* dest, int destW, int destH, int baseX, int b
     }
 }
 
+bool AlphaBlendArgbToHdc(HDC hdc,
+                         int dstX,
+                         int dstY,
+                         int dstWidth,
+                         int dstHeight,
+                         const unsigned int* pixels,
+                         int pixelWidth,
+                         int pixelHeight,
+                         int srcX,
+                         int srcY,
+                         int srcWidth,
+                         int srcHeight)
+{
+    if (!hdc || !pixels || pixelWidth <= 0 || pixelHeight <= 0 || dstWidth <= 0 || dstHeight <= 0) {
+        return false;
+    }
+
+    if (srcWidth < 0) {
+        srcWidth = pixelWidth - srcX;
+    }
+    if (srcHeight < 0) {
+        srcHeight = pixelHeight - srcY;
+    }
+    if (srcX < 0 || srcY < 0 || srcWidth <= 0 || srcHeight <= 0
+        || srcX + srcWidth > pixelWidth || srcY + srcHeight > pixelHeight) {
+        return false;
+    }
+
+    BITMAPINFO bmi{};
+    bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    bmi.bmiHeader.biWidth = pixelWidth;
+    bmi.bmiHeader.biHeight = -pixelHeight;
+    bmi.bmiHeader.biPlanes = 1;
+    bmi.bmiHeader.biBitCount = 32;
+    bmi.bmiHeader.biCompression = BI_RGB;
+
+    void* dibBits = nullptr;
+    HBITMAP dib = CreateDIBSection(nullptr, &bmi, DIB_RGB_COLORS, &dibBits, nullptr, 0);
+    if (!dib || !dibBits) {
+        if (dib) {
+            DeleteObject(dib);
+        }
+        return false;
+    }
+
+    std::memcpy(dibBits,
+                pixels,
+                static_cast<size_t>(pixelWidth) * static_cast<size_t>(pixelHeight) * sizeof(unsigned int));
+
+    HDC memDc = CreateCompatibleDC(hdc);
+    if (!memDc) {
+        DeleteObject(dib);
+        return false;
+    }
+
+    BLENDFUNCTION blend{};
+    blend.BlendOp = AC_SRC_OVER;
+    blend.SourceConstantAlpha = 255;
+    blend.AlphaFormat = AC_SRC_ALPHA;
+
+    HGDIOBJ oldBitmap = SelectObject(memDc, dib);
+    const BOOL ok = AlphaBlend(hdc, dstX, dstY, dstWidth, dstHeight, memDc, srcX, srcY, srcWidth, srcHeight, blend);
+    SelectObject(memDc, oldBitmap);
+    DeleteDC(memDc);
+    DeleteObject(dib);
+    return ok == TRUE;
+}
+
 bool DrawActMotionToHdc(HDC hdc, int x, int y, class CSprRes* sprRes, const struct CMotion* motion, unsigned int* palette)
 {
     if (!hdc || !sprRes || !motion || !palette) {
@@ -154,40 +222,6 @@ bool DrawActMotionToHdc(HDC hdc, int x, int y, class CSprRes* sprRes, const stru
 
     BlitMotionToArgb(pixels.data(), width, height, -clipBox.left, -clipBox.top, sprRes, motion, palette);
 
-    BITMAPINFO bmi{};
-    bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-    bmi.bmiHeader.biWidth = width;
-    bmi.bmiHeader.biHeight = -height;
-    bmi.bmiHeader.biPlanes = 1;
-    bmi.bmiHeader.biBitCount = 32;
-    bmi.bmiHeader.biCompression = BI_RGB;
-
-    BLENDFUNCTION blend{};
-    blend.BlendOp = AC_SRC_OVER;
-    blend.SourceConstantAlpha = 255;
-    blend.AlphaFormat = AC_SRC_ALPHA;
-
-    void* dibBits = nullptr;
-    HBITMAP dib = CreateDIBSection(nullptr, &bmi, DIB_RGB_COLORS, &dibBits, nullptr, 0);
-    if (!dib || !dibBits) {
-        if (dib) {
-            DeleteObject(dib);
-        }
-        return false;
-    }
-
-    std::memcpy(dibBits, pixels.data(), pixels.size() * sizeof(unsigned int));
-    HDC memDc = CreateCompatibleDC(hdc);
-    if (!memDc) {
-        DeleteObject(dib);
-        return false;
-    }
-
-    HGDIOBJ oldBitmap = SelectObject(memDc, dib);
-    AlphaBlend(hdc, x + clipBox.left, y + clipBox.top, width, height, memDc, 0, 0, width, height, blend);
-    SelectObject(memDc, oldBitmap);
-    DeleteDC(memDc);
-    DeleteObject(dib);
-    return true;
+    return AlphaBlendArgbToHdc(hdc, x + clipBox.left, y + clipBox.top, width, height, pixels.data(), width, height);
 }
 

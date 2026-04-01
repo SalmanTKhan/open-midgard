@@ -4,6 +4,7 @@
 #include "GameMode.h"
 #include "Mode.h"
 #include "main/WinMain.h"
+#include "render/DC.h"
 #include "res/ActRes.h"
 #include "res/Sprite.h"
 #include "session/Session.h"
@@ -124,41 +125,7 @@ void DrawFallbackCursorAt(HDC hdc, int x, int y)
         return;
     }
 
-    BITMAPINFO bmi{};
-    bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-    bmi.bmiHeader.biWidth = kFallbackCursorWidth;
-    bmi.bmiHeader.biHeight = -kFallbackCursorHeight;
-    bmi.bmiHeader.biPlanes = 1;
-    bmi.bmiHeader.biBitCount = 32;
-    bmi.bmiHeader.biCompression = BI_RGB;
-
-    void* dibBits = nullptr;
-    HBITMAP dib = CreateDIBSection(nullptr, &bmi, DIB_RGB_COLORS, &dibBits, nullptr, 0);
-    if (!dib || !dibBits) {
-        if (dib) {
-            DeleteObject(dib);
-        }
-        return;
-    }
-
-    std::memcpy(dibBits, pixels.data(), pixels.size() * sizeof(unsigned int));
-
-    HDC memDc = CreateCompatibleDC(hdc);
-    if (!memDc) {
-        DeleteObject(dib);
-        return;
-    }
-
-    BLENDFUNCTION blend{};
-    blend.BlendOp = AC_SRC_OVER;
-    blend.SourceConstantAlpha = 255;
-    blend.AlphaFormat = AC_SRC_ALPHA;
-
-    HGDIOBJ oldBitmap = SelectObject(memDc, dib);
-    AlphaBlend(hdc, x, y, kFallbackCursorWidth, kFallbackCursorHeight, memDc, 0, 0, kFallbackCursorWidth, kFallbackCursorHeight, blend);
-    SelectObject(memDc, oldBitmap);
-    DeleteDC(memDc);
-    DeleteObject(dib);
+    AlphaBlendArgbToHdc(hdc, x, y, kFallbackCursorWidth, kFallbackCursorHeight, pixels.data(), kFallbackCursorWidth, kFallbackCursorHeight);
 }
 
 bool BuildFallbackCursorPixels(std::vector<unsigned int>* outPixels)
@@ -377,51 +344,14 @@ void DrawDragPreviewAt(HDC hdc, int x, int y)
         return;
     }
 
-    BITMAPINFO bmi{};
-    bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-    bmi.bmiHeader.biWidth = kDragPreviewSize;
-    bmi.bmiHeader.biHeight = -kDragPreviewSize;
-    bmi.bmiHeader.biPlanes = 1;
-    bmi.bmiHeader.biBitCount = 32;
-    bmi.bmiHeader.biCompression = BI_RGB;
-
-    void* dibBits = nullptr;
-    HBITMAP dib = CreateDIBSection(nullptr, &bmi, DIB_RGB_COLORS, &dibBits, nullptr, 0);
-    if (!dib || !dibBits) {
-        if (dib) {
-            DeleteObject(dib);
-        }
-        return;
-    }
-
-    std::memcpy(dibBits, scaledPixels.data(), scaledPixels.size() * sizeof(unsigned int));
-
-    HDC memDc = CreateCompatibleDC(hdc);
-    if (!memDc) {
-        DeleteObject(dib);
-        return;
-    }
-
-    BLENDFUNCTION blend{};
-    blend.BlendOp = AC_SRC_OVER;
-    blend.SourceConstantAlpha = 255;
-    blend.AlphaFormat = AC_SRC_ALPHA;
-
-    HGDIOBJ oldBitmap = SelectObject(memDc, dib);
-    AlphaBlend(hdc,
+    AlphaBlendArgbToHdc(hdc,
         x + kDragPreviewOffsetX - (kDragPreviewSize / 2),
         y + kDragPreviewOffsetY - (kDragPreviewSize / 2),
         kDragPreviewSize,
         kDragPreviewSize,
-        memDc,
-        0,
-        0,
+        scaledPixels.data(),
         kDragPreviewSize,
-        kDragPreviewSize,
-        blend);
-    SelectObject(memDc, oldBitmap);
-    DeleteDC(memDc);
-    DeleteObject(dib);
+        kDragPreviewSize);
 }
 
 bool DrawDragPreviewToArgb(unsigned int* dest, int destW, int destH, int x, int y)
@@ -710,36 +640,6 @@ bool DrawCursorMotionToHdc(HDC hdc, int x, int y, CSprRes* sprRes, const CMotion
     std::vector<unsigned int> pixels(static_cast<size_t>(width) * static_cast<size_t>(height), 0u);
     BlitCursorMotionToArgb(pixels.data(), width, height, -bounds.left, -bounds.top, sprRes, motion, palette, globalColor);
 
-    BITMAPINFO bmi{};
-    bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-    bmi.bmiHeader.biWidth = width;
-    bmi.bmiHeader.biHeight = -height;
-    bmi.bmiHeader.biPlanes = 1;
-    bmi.bmiHeader.biBitCount = 32;
-    bmi.bmiHeader.biCompression = BI_RGB;
-
-    void* dibBits = nullptr;
-    HBITMAP dib = CreateDIBSection(nullptr, &bmi, DIB_RGB_COLORS, &dibBits, nullptr, 0);
-    if (!dib || !dibBits) {
-        if (dib) {
-            DeleteObject(dib);
-        }
-        return false;
-    }
-
-    std::memcpy(dibBits, pixels.data(), pixels.size() * sizeof(unsigned int));
-
-    HDC memDc = CreateCompatibleDC(hdc);
-    if (!memDc) {
-        DeleteObject(dib);
-        return false;
-    }
-
-    BLENDFUNCTION blend{};
-    blend.BlendOp = AC_SRC_OVER;
-    blend.SourceConstantAlpha = 255;
-    blend.AlphaFormat = AC_SRC_ALPHA;
-
     // Cursor ACT motions are authored around a hotspot-relative local origin.
     // When the motion bounds start entirely in positive space, placing the
     // bitmap at `x + bounds.left/y + bounds.top` shifts the visible cursor
@@ -748,22 +648,14 @@ bool DrawCursorMotionToHdc(HDC hdc, int x, int y, CSprRes* sprRes, const CMotion
     const int hotspotOffsetX = (std::max)(0, static_cast<int>(bounds.left));
     const int hotspotOffsetY = (std::max)(0, static_cast<int>(bounds.top));
 
-    HGDIOBJ oldBitmap = SelectObject(memDc, dib);
-    AlphaBlend(hdc,
+    return AlphaBlendArgbToHdc(hdc,
         x + bounds.left - hotspotOffsetX,
         y + bounds.top - hotspotOffsetY,
         width,
         height,
-        memDc,
-        0,
-        0,
+        pixels.data(),
         width,
-        height,
-        blend);
-    SelectObject(memDc, oldBitmap);
-    DeleteDC(memDc);
-    DeleteObject(dib);
-    return true;
+        height);
 }
 
 bool DrawCursorMotionToArgb(unsigned int* dest,
