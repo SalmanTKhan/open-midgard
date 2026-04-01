@@ -41,6 +41,7 @@ constexpr int kCoordsHeight = 16;
 constexpr int kDefaultScreenMargin = 20;
 constexpr int kButtonIdClose = 135;
 constexpr int kWindowCornerRadius = 10;
+constexpr int kFallbackCloseButtonSize = 11;
 constexpr u32 kDynamicRefreshIntervalMs = 100;
 constexpr float kMinZoom = 1.0f;
 constexpr float kMaxZoom = 4.0f;
@@ -419,7 +420,8 @@ UIRoMapWnd::UIRoMapWnd()
       m_lastPlayerX(std::numeric_limits<int>::min()),
       m_lastPlayerY(std::numeric_limits<int>::min()),
       m_lastPlayerDir(std::numeric_limits<int>::min()),
-      m_lastDynamicInvalidateTick(0)
+      m_lastDynamicInvalidateTick(0),
+      m_qtCloseButtonPressed(false)
 {
     Create(kWindowWidth, kWindowHeight);
 
@@ -505,6 +507,12 @@ void UIRoMapWnd::OnCreate(int x, int y)
     m_controlsCreated = true;
     LoadAssets();
 
+    if (IsQtUiRuntimeEnabled()) {
+        LayoutChildren();
+        UpdateMinimapBitmap();
+        return;
+    }
+
     m_closeButton = new UIBitmapButton();
     m_closeButton->SetBitmapName(ResolveUiAssetPath("sys_close_off.bmp").c_str(), 0);
     m_closeButton->SetBitmapName(ResolveUiAssetPath("sys_close_on.bmp").c_str(), 1);
@@ -516,6 +524,42 @@ void UIRoMapWnd::OnCreate(int x, int y)
 
     LayoutChildren();
     UpdateMinimapBitmap();
+}
+
+void UIRoMapWnd::OnLBtnDown(int x, int y)
+{
+    const RECT closeRect = GetCloseButtonRect();
+    const bool insideClose = x >= closeRect.left && x < closeRect.right
+        && y >= closeRect.top && y < closeRect.bottom;
+    if (IsQtUiRuntimeEnabled() && insideClose) {
+        m_qtCloseButtonPressed = true;
+        return;
+    }
+
+    m_qtCloseButtonPressed = false;
+    UIFrameWnd::OnLBtnDown(x, y);
+}
+
+void UIRoMapWnd::OnLBtnDblClk(int x, int y)
+{
+    OnLBtnDown(x, y);
+}
+
+void UIRoMapWnd::OnLBtnUp(int x, int y)
+{
+    if (m_qtCloseButtonPressed) {
+        const RECT closeRect = GetCloseButtonRect();
+        const bool shouldClose = x >= closeRect.left && x < closeRect.right
+            && y >= closeRect.top && y < closeRect.bottom;
+        m_qtCloseButtonPressed = false;
+        if (shouldClose) {
+            SetShow(0);
+            StoreInfo();
+        }
+        return;
+    }
+
+    UIFrameWnd::OnLBtnUp(x, y);
 }
 
 void UIRoMapWnd::OnProcess()
@@ -813,12 +857,11 @@ bool UIRoMapWnd::GetDisplayDataForQt(DisplayData* outData) const
     data.coordsWidth = coordsRect.right - coordsRect.left;
     data.coordsHeight = coordsRect.bottom - coordsRect.top;
 
-    if (m_closeButton) {
-        data.closeX = m_closeButton->m_x;
-        data.closeY = m_closeButton->m_y;
-        data.closeWidth = m_closeButton->m_bitmapWidth;
-        data.closeHeight = m_closeButton->m_bitmapHeight;
-    }
+    const RECT closeRect = GetCloseButtonRect();
+    data.closeX = closeRect.left;
+    data.closeY = closeRect.top;
+    data.closeWidth = closeRect.right - closeRect.left;
+    data.closeHeight = closeRect.bottom - closeRect.top;
 
     data.mapName = StripExtension(GetCurrentMinimapBitmapName());
     char coordsText[64] = {};
@@ -1012,9 +1055,23 @@ void UIRoMapWnd::EnsureCreated()
 void UIRoMapWnd::LayoutChildren()
 {
     if (m_closeButton) {
-        m_closeButton->Move(m_x + m_w - 19, m_y + 3);
+        const RECT closeRect = GetCloseButtonRect();
+        m_closeButton->Move(closeRect.left, closeRect.top);
         m_closeButton->SetShow(1);
     }
+}
+
+RECT UIRoMapWnd::GetCloseButtonRect() const
+{
+    int width = kFallbackCloseButtonSize;
+    int height = kFallbackCloseButtonSize;
+    if (m_closeButton) {
+        width = m_closeButton->m_bitmapWidth > 0 ? m_closeButton->m_bitmapWidth : width;
+        height = m_closeButton->m_bitmapHeight > 0 ? m_closeButton->m_bitmapHeight : height;
+    }
+
+    RECT rc{ m_x + m_w - 19, m_y + 3, m_x + m_w - 19 + width, m_y + 3 + height };
+    return rc;
 }
 
 void UIRoMapWnd::LoadAssets()

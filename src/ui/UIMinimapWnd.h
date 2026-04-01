@@ -49,6 +49,9 @@ public:
     void OnCreate(int x, int y) override;
     void OnProcess() override;
     void OnDraw() override;
+    void OnLBtnDown(int x, int y) override;
+    void OnLBtnDblClk(int x, int y) override;
+    void OnLBtnUp(int x, int y) override;
     void OnWheel(int delta) override;
     void StoreInfo() override;
     void DrawToHdc(HDC hdc, int drawX, int drawY);
@@ -66,6 +69,7 @@ private:
     void InvalidateRenderCache();
     void DrawWindowContents(HDC hdc, int baseX, int baseY);
     void UpdateMinimapBitmap();
+    RECT GetCloseButtonRect() const;
     std::string GetCurrentMinimapBitmapName() const;
     unsigned long long BuildVisualStateToken() const;
 
@@ -86,4 +90,5 @@ private:
     int m_lastPlayerY;
     int m_lastPlayerDir;
     u32 m_lastDynamicInvalidateTick;
+    bool m_qtCloseButtonPressed;
 };
