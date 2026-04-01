@@ -639,7 +639,6 @@ void CLoginMode::OnUpdate() {
     const bool hasLegacyDevice = GetRenderDevice().GetLegacyDevice() != nullptr;
     const bool isVulkanBackend = GetRenderDevice().GetBackendType() == RenderBackendType::Vulkan;
     if (!hasLegacyDevice) {
-        g_windowMgr.SetComposeCursorState(m_cursorActNum, m_mouseAnimStartTick, false);
         g_renderer.ClearBackground();
         g_renderer.Clear(0);
         const bool queuedUi = QueueLoginUiQuad();
@@ -652,9 +651,7 @@ void CLoginMode::OnUpdate() {
             DrawModeCursor(m_cursorActNum, m_mouseAnimStartTick);
         }
     } else {
-        g_windowMgr.SetComposeCursorState(m_cursorActNum, m_mouseAnimStartTick, !hasLegacyDevice);
         g_windowMgr.OnDraw();
-        g_windowMgr.SetComposeCursorState(m_cursorActNum, m_mouseAnimStartTick, false);
     }
     if (hasLegacyDevice) {
         DrawModeCursor(m_cursorActNum, m_mouseAnimStartTick);

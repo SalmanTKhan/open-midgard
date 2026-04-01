@@ -104,7 +104,6 @@ public:
     void ShowLoadingScreen(const std::string& wallpaperName, const std::string& message, float progress);
     void UpdateLoadingScreen(const std::string& message, float progress);
     void HideLoadingScreen();
-    void SetComposeCursorState(int cursorActNum, u32 mouseAnimStartTick, bool enabled);
     void SendMsg(int msg, msgparam_t wparam, msgparam_t lparam);
     void PushChatEvent(const char* text, u32 color, u8 channel, u32 tick = 0);
     void SetLoginStatus(const std::string& status);
@@ -195,9 +194,6 @@ public:
     void* m_uiComposeBits;
     int m_uiComposeWidth;
     int m_uiComposeHeight;
-    int m_composeCursorActNum;
-    u32 m_composeCursorStartTick;
-    bool m_composeCursorEnabled;
 
     std::vector<UIChatEvent> m_chatEvents;
 

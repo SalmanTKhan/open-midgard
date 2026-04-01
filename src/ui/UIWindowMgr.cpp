@@ -254,8 +254,7 @@ UIWindowMgr::UIWindowMgr()
       m_captureWindow(nullptr), m_editWindow(nullptr), m_modalWindow(nullptr), m_lastHitWindow(nullptr),
       m_loadingWnd(nullptr), m_roMapWnd(nullptr), m_minimapZoomWnd(nullptr), m_statusWnd(nullptr), m_sayDialogWnd(nullptr), m_npcMenuWnd(nullptr), m_npcInputWnd(nullptr), m_chooseSellBuyWnd(nullptr), m_itemShopWnd(nullptr), m_itemPurchaseWnd(nullptr), m_itemSellWnd(nullptr), m_shortCutWnd(nullptr), m_chatWnd(nullptr),
     m_loginWnd(nullptr), m_selectServerWnd(nullptr), m_selectCharWnd(nullptr), m_makeCharWnd(nullptr), m_waitWnd(nullptr), m_chooseWnd(nullptr), m_optionWnd(nullptr), m_itemWnd(nullptr), m_questWnd(nullptr), m_basicInfoWnd(nullptr), m_notifyLevelUpWnd(nullptr), m_notifyJobLevelUpWnd(nullptr), m_equipWnd(nullptr), m_skillListWnd(nullptr),
-      m_wallpaperSurface(nullptr), m_uiComposeDC(nullptr), m_uiComposeBitmap(nullptr), m_uiComposeBits(nullptr), m_uiComposeWidth(0), m_uiComposeHeight(0),
-      m_composeCursorActNum(0), m_composeCursorStartTick(0), m_composeCursorEnabled(false)
+      m_wallpaperSurface(nullptr), m_uiComposeDC(nullptr), m_uiComposeBitmap(nullptr), m_uiComposeBits(nullptr), m_uiComposeWidth(0), m_uiComposeHeight(0)
 {
     m_loginStatus = "Login: idle";
 }
@@ -1044,8 +1043,7 @@ void UIWindowMgr::OnDraw() {
 
     const bool qtMenuRuntimeEnabled = hasMenuUi
         && IsQtUiRuntimeEnabled()
-        && GetRenderDevice().GetLegacyDevice() == nullptr
-        && !m_composeCursorEnabled;
+        && GetRenderDevice().GetLegacyDevice() == nullptr;
     if (qtMenuRuntimeEnabled) {
         static CTexture* s_qtMenuOverlayTexture = nullptr;
         static int s_qtMenuOverlayTextureWidth = 0;
@@ -1107,9 +1105,6 @@ void UIWindowMgr::OnDraw() {
             clientWidth,
             clientHeight,
             clientWidth * static_cast<int>(sizeof(unsigned int)));
-    }
-    if (useCompose && m_composeCursorEnabled) {
-        DrawModeCursorToHdc(drawDC, m_composeCursorActNum, m_composeCursorStartTick);
     }
     const bool hasModernBackend = GetRenderDevice().GetLegacyDevice() == nullptr;
     const bool allowModernUiPresent = hasModernBackend;
@@ -1329,13 +1324,6 @@ void UIWindowMgr::HideLoadingScreen()
     }
     m_loadedWallpaperPath.clear();
     SetWallpaper(nullptr);
-}
-
-void UIWindowMgr::SetComposeCursorState(int cursorActNum, u32 mouseAnimStartTick, bool enabled)
-{
-    m_composeCursorActNum = cursorActNum;
-    m_composeCursorStartTick = mouseAnimStartTick;
-    m_composeCursorEnabled = enabled;
 }
 
 void UIWindowMgr::SendMsg(int msg, msgparam_t wparam, msgparam_t lparam) {
