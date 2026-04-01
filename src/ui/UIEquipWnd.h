@@ -1,6 +1,7 @@
 #pragma once
 
 #include "UIFrameWnd.h"
+#include "UIShopCommon.h"
 
 #include <array>
 #include <string>
@@ -52,7 +53,7 @@ private:
     void ReleaseAssets();
     void SetMiniMode(bool miniMode);
     std::vector<const ITEM_INFO*> BuildSlotAssignments() const;
-    HBITMAP GetItemIcon(const ITEM_INFO& item);
+    const shopui::BitmapPixels* GetItemIcon(const ITEM_INFO& item);
     unsigned long long BuildVisualStateToken() const;
 
     bool m_controlsCreated;
@@ -65,7 +66,7 @@ private:
     HBITMAP m_titleBarLeft;
     HBITMAP m_titleBarMid;
     HBITMAP m_titleBarRight;
-    std::unordered_map<unsigned int, HBITMAP> m_iconCache;
+    std::unordered_map<unsigned int, shopui::BitmapPixels> m_iconCache;
     bool m_dragArmed;
     POINT m_dragStartPoint;
     unsigned int m_dragItemId;

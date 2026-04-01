@@ -1008,8 +1008,8 @@ void UIEquipWnd::OnDraw()
                 drawItem = nullptr;
             }
             if (drawItem) {
-                if (HBITMAP icon = GetItemIcon(*drawItem)) {
-                    DrawBitmapTransparent(hdc, icon, slotRect);
+                if (const shopui::BitmapPixels* icon = GetItemIcon(*drawItem)) {
+                    shopui::DrawBitmapPixelsTransparent(hdc, *icon, slotRect);
                 }
 
                 const bool leftColumn = kEquipSlots[i].iconX < kCenterPanelLeft;
@@ -1303,11 +1303,6 @@ void UIEquipWnd::ReleaseAssets()
         DeleteObject(m_titleBarRight);
         m_titleBarRight = nullptr;
     }
-    for (auto& entry : m_iconCache) {
-        if (entry.second) {
-            DeleteObject(entry.second);
-        }
-    }
     m_iconCache.clear();
 }
 
@@ -1390,27 +1385,27 @@ std::vector<const ITEM_INFO*> UIEquipWnd::BuildSlotAssignments() const
 }
 
 
-HBITMAP UIEquipWnd::GetItemIcon(const ITEM_INFO& item)
+const shopui::BitmapPixels* UIEquipWnd::GetItemIcon(const ITEM_INFO& item)
 {
     const unsigned int itemId = item.GetItemId();
     const auto found = m_iconCache.find(itemId);
     if (found != m_iconCache.end()) {
-        return found->second;
+        return found->second.IsValid() ? &found->second : nullptr;
     }
 
-    HBITMAP bitmap = nullptr;
+    shopui::BitmapPixels bitmap;
     for (const std::string& candidate : BuildItemIconCandidates(item)) {
         if (!g_fileMgr.IsDataExist(candidate.c_str())) {
             continue;
         }
-        bitmap = LoadBitmapFromGameData(candidate);
-        if (bitmap) {
+        bitmap = shopui::LoadBitmapPixelsFromGameData(candidate, true);
+        if (bitmap.IsValid()) {
             break;
         }
     }
 
-    m_iconCache[itemId] = bitmap;
-    return bitmap;
+    auto inserted = m_iconCache.emplace(itemId, std::move(bitmap));
+    return inserted.first->second.IsValid() ? &inserted.first->second : nullptr;
 }
 
 unsigned long long UIEquipWnd::BuildVisualStateToken() const
