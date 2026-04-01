@@ -47,6 +47,7 @@ constexpr int kSliderMax = 127;
 constexpr int kTabHeight = 18;
 constexpr int kGraphicsRowHeight = 24;
 constexpr int kWindowCornerRadius = 10;
+constexpr int kToggleSize = 16;
 
 constexpr COLORREF kFallbackTitleBarColor = RGB(98, 114, 158);
 constexpr COLORREF kFallbackBodyColor = RGB(244, 247, 252);
@@ -709,37 +710,40 @@ void UIOptionWnd::LayoutControls()
 {
     const bool showAudio = !m_collapsed && m_activeTab == TabId_Audio;
     const bool showGame = !m_collapsed && m_activeTab == TabId_Game;
-    const RECT contentRect = GetContentRect();
 
     if (m_bgmOnCheckBox) {
-        const RECT sliderRect = GetBgmSliderRect();
-        m_bgmOnCheckBox->Move(sliderRect.right + 10, sliderRect.top - 2);
+        const RECT toggleRect = GetAudioToggleRect(0);
+        m_bgmOnCheckBox->Move(toggleRect.left, toggleRect.top);
         m_bgmOnCheckBox->SetShow(showAudio ? 1 : 0);
         m_bgmOnCheckBox->SetCheck(m_bgmEnabled == 0);
     }
     if (m_soundOnCheckBox) {
-        const RECT sliderRect = GetSoundSliderRect();
-        m_soundOnCheckBox->Move(sliderRect.right + 10, sliderRect.top - 2);
+        const RECT toggleRect = GetAudioToggleRect(1);
+        m_soundOnCheckBox->Move(toggleRect.left, toggleRect.top);
         m_soundOnCheckBox->SetShow(showAudio ? 1 : 0);
         m_soundOnCheckBox->SetCheck(m_soundEnabled == 0);
     }
     if (m_noCtrlCheckBox) {
-        m_noCtrlCheckBox->Move(contentRect.left + 16, contentRect.top + 16);
+        const RECT toggleRect = GetGameToggleRect(0);
+        m_noCtrlCheckBox->Move(toggleRect.left, toggleRect.top);
         m_noCtrlCheckBox->SetShow(showGame ? 1 : 0);
         m_noCtrlCheckBox->SetCheck(m_noCtrl);
     }
     if (m_attackSnapCheckBox) {
-        m_attackSnapCheckBox->Move(contentRect.left + 16, contentRect.top + 42);
+        const RECT toggleRect = GetGameToggleRect(1);
+        m_attackSnapCheckBox->Move(toggleRect.left, toggleRect.top);
         m_attackSnapCheckBox->SetShow(showGame ? 1 : 0);
         m_attackSnapCheckBox->SetCheck(m_attackSnap);
     }
     if (m_skillSnapCheckBox) {
-        m_skillSnapCheckBox->Move(contentRect.left + 16, contentRect.top + 68);
+        const RECT toggleRect = GetGameToggleRect(2);
+        m_skillSnapCheckBox->Move(toggleRect.left, toggleRect.top);
         m_skillSnapCheckBox->SetShow(showGame ? 1 : 0);
         m_skillSnapCheckBox->SetCheck(m_skillSnap);
     }
     if (m_itemSnapCheckBox) {
-        m_itemSnapCheckBox->Move(contentRect.left + 16, contentRect.top + 94);
+        const RECT toggleRect = GetGameToggleRect(3);
+        m_itemSnapCheckBox->Move(toggleRect.left, toggleRect.top);
         m_itemSnapCheckBox->SetShow(showGame ? 1 : 0);
         m_itemSnapCheckBox->SetCheck(m_itemSnap);
     }
@@ -888,6 +892,21 @@ RECT UIOptionWnd::GetSoundSliderRect() const
 {
     RECT contentRect = GetContentRect();
     RECT rc = { contentRect.left + 54, contentRect.top + 58, contentRect.right - 72, contentRect.top + 72 };
+    return rc;
+}
+
+RECT UIOptionWnd::GetAudioToggleRect(int toggleIndex) const
+{
+    const RECT sliderRect = toggleIndex == 0 ? GetBgmSliderRect() : GetSoundSliderRect();
+    RECT rc = { sliderRect.right + 10, sliderRect.top - 2, sliderRect.right + 10 + kToggleSize, sliderRect.top - 2 + kToggleSize };
+    return rc;
+}
+
+RECT UIOptionWnd::GetGameToggleRect(int toggleIndex) const
+{
+    const RECT contentRect = GetContentRect();
+    const int top = contentRect.top + 16 + toggleIndex * 26;
+    RECT rc = { contentRect.left + 16, top, contentRect.left + 16 + kToggleSize, top + kToggleSize };
     return rc;
 }
 
@@ -1113,19 +1132,21 @@ void UIOptionWnd::OnCreate(int cx, int cy)
         checkBox->SetBitmap(
             ResolveUiAssetPath({ "chk_saveon.bmp", "checkon.bmp", "chk_on.bmp" }).c_str(),
             ResolveUiAssetPath({ "chk_saveoff.bmp", "checkoff.bmp", "chk_off.bmp" }).c_str());
-        checkBox->Create(checkBox->m_w > 0 ? checkBox->m_w : 16, checkBox->m_h > 0 ? checkBox->m_h : 16);
+        checkBox->Create(checkBox->m_w > 0 ? checkBox->m_w : kToggleSize, checkBox->m_h > 0 ? checkBox->m_h : kToggleSize);
         checkBox->m_id = id;
         checkBox->SetCheck(checked);
         AddChild(checkBox);
         return checkBox;
     };
 
-    m_bgmOnCheckBox = makeCheckBox(kCheckIdBgm, m_bgmEnabled == 0);
-    m_soundOnCheckBox = makeCheckBox(kCheckIdSound, m_soundEnabled == 0);
-    m_noCtrlCheckBox = makeCheckBox(kCheckIdNoCtrl, m_noCtrl);
-    m_attackSnapCheckBox = makeCheckBox(kCheckIdAttack, m_attackSnap);
-    m_skillSnapCheckBox = makeCheckBox(kCheckIdSkill, m_skillSnap);
-    m_itemSnapCheckBox = makeCheckBox(kCheckIdItem, m_itemSnap);
+    if (!IsQtUiRuntimeEnabled()) {
+        m_bgmOnCheckBox = makeCheckBox(kCheckIdBgm, m_bgmEnabled == 0);
+        m_soundOnCheckBox = makeCheckBox(kCheckIdSound, m_soundEnabled == 0);
+        m_noCtrlCheckBox = makeCheckBox(kCheckIdNoCtrl, m_noCtrl);
+        m_attackSnapCheckBox = makeCheckBox(kCheckIdAttack, m_attackSnap);
+        m_skillSnapCheckBox = makeCheckBox(kCheckIdSkill, m_skillSnap);
+        m_itemSnapCheckBox = makeCheckBox(kCheckIdItem, m_itemSnap);
+    }
 
     LayoutControls();
     ApplyAudioSettings();
@@ -1153,6 +1174,7 @@ void UIOptionWnd::OnDraw()
     }
 
     if (IsQtUiRuntimeEnabled()) {
+        ReleaseDrawTarget(hdc);
         m_isDirty = 0;
         return;
     }
@@ -1528,47 +1550,44 @@ bool UIOptionWnd::GetDisplayDataForQt(DisplayData* outData) const
             sound.label = "Sound";
             data.sliders.push_back(std::move(sound));
 
-            if (m_bgmOnCheckBox) {
-                DisplayToggle toggle{};
-                toggle.x = m_bgmOnCheckBox->m_x;
-                toggle.y = m_bgmOnCheckBox->m_y;
-                toggle.width = m_bgmOnCheckBox->m_w;
-                toggle.height = m_bgmOnCheckBox->m_h;
-                toggle.checked = m_bgmEnabled == 0;
-                toggle.label = "Mute";
-                data.toggles.push_back(std::move(toggle));
-            }
-            if (m_soundOnCheckBox) {
-                DisplayToggle toggle{};
-                toggle.x = m_soundOnCheckBox->m_x;
-                toggle.y = m_soundOnCheckBox->m_y;
-                toggle.width = m_soundOnCheckBox->m_w;
-                toggle.height = m_soundOnCheckBox->m_h;
-                toggle.checked = m_soundEnabled == 0;
-                toggle.label = "Mute";
-                data.toggles.push_back(std::move(toggle));
-            }
+            DisplayToggle bgmToggle{};
+            const RECT bgmToggleRect = GetAudioToggleRect(0);
+            bgmToggle.x = bgmToggleRect.left;
+            bgmToggle.y = bgmToggleRect.top;
+            bgmToggle.width = bgmToggleRect.right - bgmToggleRect.left;
+            bgmToggle.height = bgmToggleRect.bottom - bgmToggleRect.top;
+            bgmToggle.checked = m_bgmEnabled == 0;
+            bgmToggle.label = "Mute";
+            data.toggles.push_back(std::move(bgmToggle));
+
+            DisplayToggle soundToggle{};
+            const RECT soundToggleRect = GetAudioToggleRect(1);
+            soundToggle.x = soundToggleRect.left;
+            soundToggle.y = soundToggleRect.top;
+            soundToggle.width = soundToggleRect.right - soundToggleRect.left;
+            soundToggle.height = soundToggleRect.bottom - soundToggleRect.top;
+            soundToggle.checked = m_soundEnabled == 0;
+            soundToggle.label = "Mute";
+            data.toggles.push_back(std::move(soundToggle));
         } else if (m_activeTab == TabId_Game) {
             struct ToggleDef {
-                const UICheckBox* box;
+                int index;
                 bool checked;
                 const char* label;
             };
             const ToggleDef toggleDefs[] = {
-                { m_noCtrlCheckBox, m_noCtrl != 0, "Disable Ctrl+Click movement" },
-                { m_attackSnapCheckBox, m_attackSnap != 0, "Attack target snap" },
-                { m_skillSnapCheckBox, m_skillSnap != 0, "Skill target snap" },
-                { m_itemSnapCheckBox, m_itemSnap != 0, "Item target snap" },
+                { 0, m_noCtrl != 0, "Disable Ctrl+Click movement" },
+                { 1, m_attackSnap != 0, "Attack target snap" },
+                { 2, m_skillSnap != 0, "Skill target snap" },
+                { 3, m_itemSnap != 0, "Item target snap" },
             };
             for (const ToggleDef& def : toggleDefs) {
-                if (!def.box) {
-                    continue;
-                }
+                const RECT toggleRect = GetGameToggleRect(def.index);
                 DisplayToggle toggle{};
-                toggle.x = def.box->m_x;
-                toggle.y = def.box->m_y;
-                toggle.width = def.box->m_w;
-                toggle.height = def.box->m_h;
+                toggle.x = toggleRect.left;
+                toggle.y = toggleRect.top;
+                toggle.width = toggleRect.right - toggleRect.left;
+                toggle.height = toggleRect.bottom - toggleRect.top;
                 toggle.checked = def.checked;
                 toggle.label = def.label;
                 data.toggles.push_back(std::move(toggle));

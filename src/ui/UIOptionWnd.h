@@ -149,6 +149,8 @@ private:
     RECT GetRestartButtonRect() const;
     RECT GetBgmSliderRect() const;
     RECT GetSoundSliderRect() const;
+    RECT GetAudioToggleRect(int toggleIndex) const;
+    RECT GetGameToggleRect(int toggleIndex) const;
     RECT GetSliderKnobRect(const RECT& sliderRect, int value) const;
     void DrawSlider(HDC hdc, const RECT& sliderRect, int value, const char* label) const;
     void DrawHeaderButton(HDC hdc, const RECT& rect, const char* text) const;
