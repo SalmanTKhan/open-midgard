@@ -1317,6 +1317,26 @@ void PopulateSkillListState(QtUiState* state)
     UISkillListWnd::DisplayData display{};
     QVariantMap data;
     if (skillWnd->GetDisplayDataForQt(&display)) {
+        QVariantList systemButtons;
+        systemButtons.reserve(skillWnd->GetQtSystemButtonCount());
+        for (int index = 0; index < skillWnd->GetQtSystemButtonCount(); ++index) {
+            UISkillListWnd::QtButtonDisplay buttonDisplay{};
+            if (!skillWnd->GetQtSystemButtonDisplayForQt(index, &buttonDisplay)) {
+                continue;
+            }
+
+            QVariantMap button;
+            button.insert(QStringLiteral("id"), buttonDisplay.id);
+            button.insert(QStringLiteral("x"), buttonDisplay.x);
+            button.insert(QStringLiteral("y"), buttonDisplay.y);
+            button.insert(QStringLiteral("width"), buttonDisplay.width);
+            button.insert(QStringLiteral("height"), buttonDisplay.height);
+            button.insert(QStringLiteral("label"), ToQString(buttonDisplay.label));
+            button.insert(QStringLiteral("visible"), buttonDisplay.visible);
+            systemButtons.push_back(button);
+        }
+        data.insert(QStringLiteral("systemButtons"), systemButtons);
+
         data.insert(QStringLiteral("skillPointCount"), display.skillPointCount);
         data.insert(QStringLiteral("viewOffset"), display.viewOffset);
         data.insert(QStringLiteral("maxViewOffset"), display.maxViewOffset);

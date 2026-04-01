@@ -1982,60 +1982,28 @@ Item {
             font.bold: true
         }
 
-        Rectangle {
-            x: 231
-            y: 2
-            width: 12
-            height: 11
-            radius: 2
-            color: "#d7d2c5"
-            border.width: 1
-            border.color: "#7f7a70"
+        Repeater {
+            model: uiState.skillListData.systemButtons || []
 
-            Text {
-                anchors.centerIn: parent
-                text: "B"
-                color: "#000000"
-                font.pixelSize: 8
-                font.bold: true
-            }
-        }
+            delegate: Rectangle {
+                required property var modelData
+                x: (modelData.x || 0) - uiState.skillListX
+                y: (modelData.y || 0) - uiState.skillListY
+                width: modelData.width || 0
+                height: modelData.height || 0
+                radius: 2
+                color: "#d7d2c5"
+                border.width: 1
+                border.color: "#7f7a70"
+                visible: modelData.visible || false
 
-        Rectangle {
-            x: 247
-            y: 2
-            width: 12
-            height: 11
-            radius: 2
-            color: "#d7d2c5"
-            border.width: 1
-            border.color: "#7f7a70"
-
-            Text {
-                anchors.centerIn: parent
-                text: "_"
-                color: "#000000"
-                font.pixelSize: 8
-                font.bold: true
-            }
-        }
-
-        Rectangle {
-            x: 263
-            y: 2
-            width: 12
-            height: 11
-            radius: 2
-            color: "#d7d2c5"
-            border.width: 1
-            border.color: "#7f7a70"
-
-            Text {
-                anchors.centerIn: parent
-                text: "X"
-                color: "#000000"
-                font.pixelSize: 8
-                font.bold: true
+                Text {
+                    anchors.centerIn: parent
+                    text: modelData.label || ""
+                    color: "#000000"
+                    font.pixelSize: 8
+                    font.bold: true
+                }
             }
         }
 
