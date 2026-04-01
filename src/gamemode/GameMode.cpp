@@ -229,7 +229,6 @@ void DrawGameplayOverlayToHdc(CGameMode& mode, HDC targetDc);
 std::string ResolveHoveredActorName(CGameMode& mode, CGameActor* actor);
 const char* UiKorPrefix();
 std::string ResolveDataPath(const std::string& fileName, const char* ext, const std::vector<std::string>& directPrefixes);
-bool LoadBitmapFromGameData(const std::string& dataPath, HBITMAP* outBmp, int* outWidth, int* outHeight);
 
 void ReleaseOverlayComposeSurface(HDC* composeDc, HBITMAP* composeBitmap, void** composeBits, int* composeWidth, int* composeHeight)
 {
@@ -1408,7 +1407,6 @@ std::string LowercaseAscii(std::string value)
 ULONG_PTR EnsureGdiplusStarted();
 const char* UiKorPrefix();
 std::string ResolveDataPath(const std::string& fileName, const char* ext, const std::vector<std::string>& directPrefixes);
-bool LoadBitmapFromGameData(const std::string& dataPath, HBITMAP* outBmp, int* outWidth, int* outHeight);
 
 std::string NormalizeRswNameForCameraTables(const char* rswName)
 {
@@ -5347,7 +5345,7 @@ struct BootstrapWorldCache {
     size_t nextFixedEffectIndex = 0;
     BootstrapLoadStage loadStage = BootstrapLoadStage::ResolveWorld;
     std::string minimapPath;
-    HBITMAP minimapBmp;
+    std::vector<u32> minimapPixels;
     int minimapWidth;
     int minimapHeight;
 };
@@ -5658,10 +5656,6 @@ std::string ResolveExistingPath(const std::string& candidate, const std::vector<
 
 void ResetBootstrapWorldCache(BootstrapWorldCache& cache)
 {
-    if (cache.minimapBmp) {
-        DeleteObject(cache.minimapBmp);
-        cache.minimapBmp = nullptr;
-    }
     cache.mapName.clear();
     cache.rswPath.clear();
     cache.attrPath.clear();
@@ -5676,6 +5670,7 @@ void ResetBootstrapWorldCache(BootstrapWorldCache& cache)
     cache.nextFixedEffectIndex = 0;
     cache.loadStage = BootstrapLoadStage::ResolveWorld;
     cache.minimapPath.clear();
+    cache.minimapPixels.clear();
     cache.minimapWidth = 0;
     cache.minimapHeight = 0;
 }
@@ -5757,11 +5752,6 @@ std::string ResolveDataPath(const std::string& fileName, const char* ext, const 
     }
 
     return std::string();
-}
-
-bool LoadBitmapFromGameData(const std::string& dataPath, HBITMAP* outBmp, int* outWidth, int* outHeight)
-{
-    return !dataPath.empty() && LoadHBitmapFromGameData(dataPath.c_str(), outBmp, outWidth, outHeight);
 }
 
 bool ComputeBitmapAverageColor(const unsigned int* pixels, size_t pixelCount, COLORREF* outColor)
@@ -5870,37 +5860,34 @@ void ApplyBootstrapWorldLighting(const BootstrapWorldCache& cache)
         cache.worldInfo.ambientCol.z);
 }
 
-void DrawBitmapStretched(HDC targetDC, HBITMAP bitmap, const RECT& dst)
+void DrawPixelsStretched(HDC targetDC, const u32* pixels, int width, int height, const RECT& dst)
 {
-    if (!targetDC || !bitmap) {
+    if (!targetDC || !pixels || width <= 0 || height <= 0) {
         return;
     }
 
-    BITMAP bm{};
-    if (!GetObjectA(bitmap, sizeof(bm), &bm) || bm.bmWidth <= 0 || bm.bmHeight <= 0) {
-        return;
-    }
+    BITMAPINFO bmi{};
+    bmi.bmiHeader.biSize = sizeof(bmi.bmiHeader);
+    bmi.bmiHeader.biWidth = width;
+    bmi.bmiHeader.biHeight = -height;
+    bmi.bmiHeader.biPlanes = 1;
+    bmi.bmiHeader.biBitCount = 32;
+    bmi.bmiHeader.biCompression = BI_RGB;
 
-    HDC srcDC = CreateCompatibleDC(targetDC);
-    if (!srcDC) {
-        return;
-    }
-
-    HGDIOBJ old = SelectObject(srcDC, bitmap);
     SetStretchBltMode(targetDC, HALFTONE);
-    StretchBlt(targetDC,
+    StretchDIBits(targetDC,
         dst.left,
         dst.top,
         dst.right - dst.left,
         dst.bottom - dst.top,
-        srcDC,
         0,
         0,
-        bm.bmWidth,
-        bm.bmHeight,
+        width,
+        height,
+        pixels,
+        &bmi,
+        DIB_RGB_COLORS,
         SRCCOPY);
-    SelectObject(srcDC, old);
-    DeleteDC(srcDC);
 }
 
 float ClampUnit(float value)
@@ -6524,8 +6511,17 @@ void EnsureBootstrapWorldAssets(const CGameMode& mode)
                     std::string("data\\") + UiKorPrefix() + "minimap\\"
                 });
             }
-            if (!cache.minimapPath.empty() && !cache.minimapBmp) {
-                LoadBitmapFromGameData(cache.minimapPath, &cache.minimapBmp, &cache.minimapWidth, &cache.minimapHeight);
+            if (!cache.minimapPath.empty() && cache.minimapPixels.empty()) {
+                u32* pixels = nullptr;
+                if (LoadBgraPixelsFromGameData(cache.minimapPath.c_str(), &pixels, &cache.minimapWidth, &cache.minimapHeight)
+                    && pixels
+                    && cache.minimapWidth > 0
+                    && cache.minimapHeight > 0) {
+                    cache.minimapPixels.assign(
+                        pixels,
+                        pixels + static_cast<size_t>(cache.minimapWidth) * static_cast<size_t>(cache.minimapHeight));
+                }
+                delete[] pixels;
             }
             cache.loadStage = BootstrapLoadStage::Complete;
             break;
@@ -6609,7 +6605,7 @@ void DrawBootstrapScene(HWND hwnd, const CGameMode& mode)
     FrameRect(memDC, &worldRect, static_cast<HBRUSH>(GetStockObject(WHITE_BRUSH)));
 
     RECT mapRect{ width - 184, 20, width - 20, 184 };
-    if (cache.minimapBmp && cache.minimapWidth > 0 && cache.minimapHeight > 0) {
+    if (!cache.minimapPixels.empty() && cache.minimapWidth > 0 && cache.minimapHeight > 0) {
         const float mapAspect = static_cast<float>(cache.minimapWidth) / static_cast<float>(cache.minimapHeight);
         const float viewAspect = static_cast<float>(mapRect.right - mapRect.left) / static_cast<float>(mapRect.bottom - mapRect.top);
         if (mapAspect > viewAspect) {
@@ -6624,7 +6620,12 @@ void DrawBootstrapScene(HWND hwnd, const CGameMode& mode)
             mapRect.right = mapRect.left + fittedWidth;
         }
 
-        DrawBitmapStretched(memDC, cache.minimapBmp, mapRect);
+        DrawPixelsStretched(
+            memDC,
+            cache.minimapPixels.data(),
+            cache.minimapWidth,
+            cache.minimapHeight,
+            mapRect);
     } else {
         HBRUSH fallbackBrush = CreateSolidBrush(RGB(62, 88, 52));
         FillRect(memDC, &mapRect, fallbackBrush);
