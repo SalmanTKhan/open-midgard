@@ -52,6 +52,7 @@ class QtUiState : public QObject {
     Q_PROPERTY(QVariantList makeCharStats READ makeCharStats NOTIFY makeCharDataChanged)
     Q_PROPERTY(int makeCharHairIndex READ makeCharHairIndex NOTIFY makeCharDataChanged)
     Q_PROPERTY(int makeCharHairColor READ makeCharHairColor NOTIFY makeCharDataChanged)
+    Q_PROPERTY(QVariantList makeCharButtons READ makeCharButtons NOTIFY makeCharButtonsChanged)
     Q_PROPERTY(bool loadingVisible READ loadingVisible NOTIFY loadingVisibleChanged)
     Q_PROPERTY(QString loadingMessage READ loadingMessage NOTIFY loadingMessageChanged)
     Q_PROPERTY(double loadingProgress READ loadingProgress NOTIFY loadingProgressChanged)
@@ -249,6 +250,7 @@ public:
     const QVariantList& makeCharStats() const { return m_makeCharStats; }
     int makeCharHairIndex() const { return m_makeCharHairIndex; }
     int makeCharHairColor() const { return m_makeCharHairColor; }
+    const QVariantList& makeCharButtons() const { return m_makeCharButtons; }
     bool loadingVisible() const { return m_loadingVisible; }
     const QString& loadingMessage() const { return m_loadingMessage; }
     double loadingProgress() const { return m_loadingProgress; }
@@ -631,6 +633,14 @@ public:
         m_makeCharHairIndex = hairIndex;
         m_makeCharHairColor = hairColor;
         emit makeCharDataChanged();
+    }
+
+    void setMakeCharButtons(const QVariantList& value) {
+        if (m_makeCharButtons == value) {
+            return;
+        }
+        m_makeCharButtons = value;
+        emit makeCharButtonsChanged();
     }
 
     void setLoadingVisible(bool value) {
@@ -1349,6 +1359,7 @@ signals:
     void makeCharVisibleChanged();
     void makeCharPanelGeometryChanged();
     void makeCharDataChanged();
+    void makeCharButtonsChanged();
     void loadingVisibleChanged();
     void loadingMessageChanged();
     void loadingProgressChanged();
@@ -1479,6 +1490,7 @@ private:
     QVariantList m_makeCharStats;
     int m_makeCharHairIndex = 0;
     int m_makeCharHairColor = 0;
+    QVariantList m_makeCharButtons;
     bool m_loadingVisible = false;
     QString m_loadingMessage;
     double m_loadingProgress = 0.0;

@@ -399,6 +399,57 @@ bool UIMakeCharWnd::GetMakeCharDisplay(MakeCharDisplay* out) const
     return true;
 }
 
+int UIMakeCharWnd::GetQtButtonCount() const
+{
+    return 11;
+}
+
+bool UIMakeCharWnd::GetQtButtonDisplayForQt(int index, QtButtonDisplay* out) const
+{
+    if (!out || index < 0 || index >= GetQtButtonCount()) {
+        return false;
+    }
+
+    if (index < 6) {
+        out->id = kMakeCharStatIds[index];
+        out->x = m_x + kMakeCharStatX[index];
+        out->y = m_y + kMakeCharStatY[index];
+        out->width = kMakeCharSmallButtonW;
+        out->height = kMakeCharSmallButtonH;
+        out->label = "+";
+        return true;
+    }
+
+    if (index < 9) {
+        const int hairIndex = index - 6;
+        out->id = kMakeCharHairIds[hairIndex];
+        out->x = m_x + kMakeCharHairX[hairIndex];
+        out->y = m_y + kMakeCharHairY[hairIndex];
+        out->width = kMakeCharSmallButtonW;
+        out->height = kMakeCharSmallButtonH;
+        out->label = hairIndex == 0 ? "<" : (hairIndex == 1 ? ">" : "^");
+        return true;
+    }
+
+    if (index == 9) {
+        out->id = 118;
+        out->x = m_x + kMakeCharOkX;
+        out->y = m_y + kMakeCharOkY;
+        out->width = kMakeCharOkW;
+        out->height = kMakeCharOkH;
+        out->label = "OK";
+        return true;
+    }
+
+    out->id = 119;
+    out->x = m_x + kMakeCharCancelX;
+    out->y = m_y + kMakeCharCancelY;
+    out->width = kMakeCharCancelW;
+    out->height = kMakeCharCancelH;
+    out->label = "Cancel";
+    return true;
+}
+
 void UIMakeCharWnd::ClearAssets()
 {
     m_backgroundBmp.Clear();

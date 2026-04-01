@@ -483,6 +483,7 @@ void PopulateMakeCharState(QtUiState* state)
     if (!visible) {
         state->setMakeCharPanelGeometry(0, 0, 0, 0);
         state->setMakeCharData(QString(), false, QVariantList{}, 0, 0);
+        state->setMakeCharButtons(QVariantList{});
         return;
     }
 
@@ -504,10 +505,29 @@ void PopulateMakeCharState(QtUiState* state)
             stats,
             display.hairIndex,
             display.hairColor);
+        QVariantList buttons;
+        buttons.reserve(makeCharWnd->GetQtButtonCount());
+        for (int index = 0; index < makeCharWnd->GetQtButtonCount(); ++index) {
+            UIMakeCharWnd::QtButtonDisplay buttonDisplay{};
+            if (!makeCharWnd->GetQtButtonDisplayForQt(index, &buttonDisplay)) {
+                continue;
+            }
+
+            QVariantMap button;
+            button.insert(QStringLiteral("id"), buttonDisplay.id);
+            button.insert(QStringLiteral("x"), buttonDisplay.x);
+            button.insert(QStringLiteral("y"), buttonDisplay.y);
+            button.insert(QStringLiteral("width"), buttonDisplay.width);
+            button.insert(QStringLiteral("height"), buttonDisplay.height);
+            button.insert(QStringLiteral("label"), ToQString(buttonDisplay.label));
+            buttons.push_back(button);
+        }
+        state->setMakeCharButtons(buttons);
         return;
     }
 
     state->setMakeCharData(QString(), false, QVariantList{}, 0, 0);
+    state->setMakeCharButtons(QVariantList{});
 }
 
 void PopulateNotificationState(QtUiState* state)

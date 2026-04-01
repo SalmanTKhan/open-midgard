@@ -40,6 +40,15 @@ public:
         std::string headPaletteName;
     };
 
+    struct QtButtonDisplay {
+        int id = 0;
+        int x = 0;
+        int y = 0;
+        int width = 0;
+        int height = 0;
+        std::string label;
+    };
+
     UIMakeCharWnd();
     ~UIMakeCharWnd() override;
 
@@ -51,6 +60,8 @@ public:
     bool HandleQtMouseDown(int x, int y);
     bool HandleQtMouseUp(int x, int y);
     bool GetMakeCharDisplay(MakeCharDisplay* out) const;
+    int GetQtButtonCount() const;
+    bool GetQtButtonDisplayForQt(int index, QtButtonDisplay* out) const;
 
 private:
     void EnsureResourceCache();
