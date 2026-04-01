@@ -236,8 +236,7 @@ void UINewChatWnd::OnDraw()
         return;
     }
 
-    bool useShared = false;
-    HDC hdc = AcquireDrawTarget(&useShared);
+    HDC hdc = AcquireDrawTarget();
     if (!hdc) {
         return;
     }
@@ -330,7 +329,7 @@ void UINewChatWnd::OnDraw()
     DrawTextA(hdc, drawText.c_str(), -1, &inputTextRc, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
 
     RestoreDC(hdc, savedDc);
-    ReleaseDrawTarget(hdc, useShared);
+    ReleaseDrawTarget(hdc);
 
     m_lastDrawTick = GetTickCount();
     m_isDirty = 0;

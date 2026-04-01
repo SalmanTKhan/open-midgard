@@ -151,8 +151,7 @@ void UIItemShopWnd::OnDraw()
         return;
     }
 
-    bool useShared = false;
-    HDC hdc = AcquireDrawTarget(&useShared);
+    HDC hdc = AcquireDrawTarget();
     if (!hdc || m_show == 0) {
         return;
     }
@@ -218,7 +217,7 @@ void UIItemShopWnd::OnDraw()
 
     m_lastDrawStateToken = BuildDisplayStateToken();
     m_hasDrawStateToken = true;
-    ReleaseDrawTarget(hdc, useShared);
+    ReleaseDrawTarget(hdc);
 }
 
 void UIItemShopWnd::OnLBtnDown(int x, int y)

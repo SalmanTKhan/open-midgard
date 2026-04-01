@@ -225,8 +225,7 @@ void UISayDialogWnd::OnDraw()
         return;
     }
 
-    bool useShared = false;
-    HDC hdc = AcquireDrawTarget(&useShared);
+    HDC hdc = AcquireDrawTarget();
     if (!hdc) {
         return;
     }
@@ -246,7 +245,7 @@ void UISayDialogWnd::OnDraw()
     }
 
     SelectObject(hdc, oldFont);
-    ReleaseDrawTarget(hdc, useShared);
+    ReleaseDrawTarget(hdc);
 }
 
 void UISayDialogWnd::AppendText(u32 npcId, const std::string& text)

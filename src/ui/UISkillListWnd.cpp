@@ -466,8 +466,7 @@ void UISkillListWnd::OnDraw()
         return;
     }
 
-    bool useShared = false;
-    HDC hdc = AcquireDrawTarget(&useShared);
+    HDC hdc = AcquireDrawTarget();
     if (!hdc) {
         return;
     }
@@ -551,7 +550,7 @@ void UISkillListWnd::OnDraw()
 
     SelectObject(hdc, oldFont);
 
-    ReleaseDrawTarget(hdc, useShared);
+    ReleaseDrawTarget(hdc);
 
     m_lastVisualStateToken = BuildVisualStateToken();
     m_hasVisualStateToken = true;

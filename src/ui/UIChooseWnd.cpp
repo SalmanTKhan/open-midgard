@@ -324,8 +324,7 @@ void UIChooseWnd::OnDraw()
         return;
     }
 
-    bool useShared = false;
-    HDC hdc = AcquireDrawTarget(&useShared);
+    HDC hdc = AcquireDrawTarget();
     if (!hdc) {
         return;
     }
@@ -337,7 +336,7 @@ void UIChooseWnd::OnDraw()
 
     DrawChildrenToHdc(hdc);
 
-    ReleaseDrawTarget(hdc, useShared);
+    ReleaseDrawTarget(hdc);
 }
 
 void UIChooseWnd::OnLBtnDown(int x, int y)

@@ -162,8 +162,7 @@ void UISelectServerWnd::OnDraw()
         return;
     }
 
-    bool useShared = false;
-    HDC hdc = AcquireDrawTarget(&useShared);
+    HDC hdc = AcquireDrawTarget();
     if (!hdc) {
         return;
     }
@@ -219,7 +218,7 @@ void UISelectServerWnd::OnDraw()
     }
 
     DrawChildrenToHdc(hdc);
-    ReleaseDrawTarget(hdc, useShared);
+    ReleaseDrawTarget(hdc);
 }
 
 void UISelectServerWnd::OnLBtnDown(int x, int y)

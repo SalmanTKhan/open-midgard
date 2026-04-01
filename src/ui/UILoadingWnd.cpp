@@ -76,8 +76,7 @@ void UILoadingWnd::OnDraw()
         return;
     }
 
-    bool useShared = false;
-    HDC hdc = AcquireDrawTarget(&useShared);
+    HDC hdc = AcquireDrawTarget();
     if (!hdc || !g_hMainWnd) {
         return;
     }
@@ -142,5 +141,5 @@ void UILoadingWnd::OnDraw()
     SelectObject(hdc, oldFont);
     DeleteObject(titleFont);
     DeleteObject(bodyFont);
-    ReleaseDrawTarget(hdc, useShared);
+    ReleaseDrawTarget(hdc);
 }

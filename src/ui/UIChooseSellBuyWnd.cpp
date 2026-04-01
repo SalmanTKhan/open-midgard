@@ -151,8 +151,7 @@ void UIChooseSellBuyWnd::OnDraw()
         return;
     }
 
-    bool useShared = false;
-    HDC hdc = AcquireDrawTarget(&useShared);
+    HDC hdc = AcquireDrawTarget();
     if (!hdc || m_show == 0) {
         return;
     }
@@ -174,7 +173,7 @@ void UIChooseSellBuyWnd::OnDraw()
 
     m_lastDrawStateToken = BuildDisplayStateToken();
     m_hasDrawStateToken = true;
-    ReleaseDrawTarget(hdc, useShared);
+    ReleaseDrawTarget(hdc);
 }
 
 void UIChooseSellBuyWnd::OnLBtnDown(int x, int y)

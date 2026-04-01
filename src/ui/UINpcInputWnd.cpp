@@ -218,8 +218,7 @@ void UINpcInputWnd::OnDraw()
         return;
     }
 
-    bool useShared = false;
-    HDC hdc = AcquireDrawTarget(&useShared);
+    HDC hdc = AcquireDrawTarget();
     if (!hdc) {
         return;
     }
@@ -242,7 +241,7 @@ void UINpcInputWnd::OnDraw()
     DrawButton(hdc, GetCancelRect(), "Cancel", m_pressedTarget == ClickTarget::Cancel);
 
     SelectObject(hdc, oldFont);
-    ReleaseDrawTarget(hdc, useShared);
+    ReleaseDrawTarget(hdc);
 }
 
 void UINpcInputWnd::OpenForMode(u32 npcId, InputMode mode)

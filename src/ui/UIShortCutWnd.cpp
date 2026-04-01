@@ -200,8 +200,7 @@ void UIShortCutWnd::OnDraw()
         return;
     }
 
-    bool useShared = false;
-    HDC hdc = AcquireDrawTarget(&useShared);
+    HDC hdc = AcquireDrawTarget();
     if (!hdc) {
         return;
     }
@@ -265,7 +264,7 @@ void UIShortCutWnd::OnDraw()
     RECT pageRect{ m_x + m_w - kPageTextInsetX - 12, m_y + m_h - kPageTextInsetY, m_x + m_w - 2, m_y + m_h - 2 };
     DrawOutlinedText(hdc, pageRect, std::to_string(g_session.GetShortcutPage() + 1), RGB(255, 255, 255));
 
-    ReleaseDrawTarget(hdc, useShared);
+    ReleaseDrawTarget(hdc);
 
     m_lastDrawStateToken = BuildDisplayStateToken();
     m_hasDrawStateToken = true;

@@ -786,8 +786,7 @@ void UILoginWnd::OnDraw()
 
     EnsureResourceCache();
 
-    bool useShared = false;
-    HDC targetDC = AcquireDrawTarget(&useShared);
+    HDC targetDC = AcquireDrawTarget();
     if (!targetDC) {
         return;
     }
@@ -798,7 +797,7 @@ void UILoginWnd::OnDraw()
     const int clientW = rcClient.right - rcClient.left;
     const int clientH = rcClient.bottom - rcClient.top;
     if (clientW <= 0 || clientH <= 0) {
-        ReleaseDrawTarget(targetDC, useShared);
+        ReleaseDrawTarget(targetDC);
         return;
     }
 
@@ -807,7 +806,7 @@ void UILoginWnd::OnDraw()
     }
 
     if (IsQtUiRuntimeEnabled()) {
-        ReleaseDrawTarget(targetDC, useShared);
+        ReleaseDrawTarget(targetDC);
         return;
     }
 
@@ -842,7 +841,7 @@ void UILoginWnd::OnDraw()
         BitBlt(targetDC, 0, 0, clientW, clientH, drawDC, 0, 0, SRCCOPY);
     }
 
-    ReleaseDrawTarget(targetDC, useShared);
+    ReleaseDrawTarget(targetDC);
 }
 
 msgresult_t UILoginWnd::SendMsg(UIWindow* sender, int msg, msgparam_t wparam, msgparam_t lparam, msgparam_t extra)

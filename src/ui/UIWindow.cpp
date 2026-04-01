@@ -328,9 +328,9 @@ HDC UIWindow::AcquireDrawTarget(bool* outUseShared) const
     return g_hMainWnd ? GetDC(g_hMainWnd) : nullptr;
 }
 
-void UIWindow::ReleaseDrawTarget(HDC dc, bool useShared) const
+void UIWindow::ReleaseDrawTarget(HDC dc) const
 {
-    if (!useShared && dc && g_hMainWnd) {
+    if (dc && dc != UIWindow::GetSharedDrawDC() && g_hMainWnd) {
         ReleaseDC(g_hMainWnd, dc);
     }
 }
@@ -629,8 +629,7 @@ void UIBitmapButton::OnDraw()
         return;
     }
 
-    bool useShared = false;
-    HDC hdc = AcquireDrawTarget(&useShared);
+    HDC hdc = AcquireDrawTarget();
     if (!hdc) {
         return;
     }
@@ -658,7 +657,7 @@ void UIBitmapButton::OnDraw()
         }
     }
     DrawChildrenToHdc(hdc);
-    ReleaseDrawTarget(hdc, useShared);
+    ReleaseDrawTarget(hdc);
 }
 
 void UIBitmapButton::OnLBtnDown(int x, int y)
@@ -806,8 +805,7 @@ void UIEditCtrl::OnDraw()
         return;
     }
 
-    bool useShared = false;
-    HDC hdc = AcquireDrawTarget(&useShared);
+    HDC hdc = AcquireDrawTarget();
     if (!hdc) {
         return;
     }
@@ -831,7 +829,7 @@ void UIEditCtrl::OnDraw()
     DrawTextA(hdc, drawText.c_str(), -1, &textRc, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
 
     DrawChildrenToHdc(hdc);
-    ReleaseDrawTarget(hdc, useShared);
+    ReleaseDrawTarget(hdc);
 }
 
 UICheckBox::UICheckBox()
@@ -900,8 +898,7 @@ void UICheckBox::OnDraw()
         return;
     }
 
-    bool useShared = false;
-    HDC hdc = AcquireDrawTarget(&useShared);
+    HDC hdc = AcquireDrawTarget();
     if (!hdc) {
         return;
     }
@@ -940,7 +937,7 @@ void UICheckBox::OnDraw()
         }
     }
     DrawChildrenToHdc(hdc);
-    ReleaseDrawTarget(hdc, useShared);
+    ReleaseDrawTarget(hdc);
 }
 
 void UICheckBox::OnLBtnUp(int x, int y)

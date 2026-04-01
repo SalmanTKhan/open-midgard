@@ -730,14 +730,13 @@ void UIRoMapWnd::OnDraw()
         return;
     }
 
-    bool useShared = false;
-    HDC hdc = AcquireDrawTarget(&useShared);
+    HDC hdc = AcquireDrawTarget();
     if (!hdc) {
         return;
     }
 
     DrawToHdc(hdc, m_x, m_y);
-    ReleaseDrawTarget(hdc, useShared);
+    ReleaseDrawTarget(hdc);
 }
 
 void UIRoMapWnd::DrawToHdc(HDC hdc, int drawX, int drawY)

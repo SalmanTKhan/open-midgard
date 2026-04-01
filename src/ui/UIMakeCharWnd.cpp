@@ -754,12 +754,12 @@ void UIMakeCharWnd::OnDraw()
         return;
     }
 
-    bool useShared = false;
-    HDC targetDC = AcquireDrawTarget(&useShared);
+    HDC targetDC = AcquireDrawTarget();
     if (!targetDC) {
         return;
     }
 
+    const bool useShared = targetDC == UIWindow::GetSharedDrawDC();
     HDC hdc = targetDC;
     const bool useCompose = !useShared && EnsureComposeSurface(clientW, clientH);
     if (useCompose) {
@@ -821,7 +821,7 @@ void UIMakeCharWnd::OnDraw()
         BitBlt(targetDC, 0, 0, clientW, clientH, hdc, 0, 0, SRCCOPY);
     }
 
-    ReleaseDrawTarget(targetDC, useShared);
+    ReleaseDrawTarget(targetDC);
 }
 
 msgresult_t UIMakeCharWnd::SendMsg(UIWindow* sender, int msg, msgparam_t wparam, msgparam_t lparam, msgparam_t extra)

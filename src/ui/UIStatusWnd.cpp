@@ -425,8 +425,7 @@ void UIStatusWnd::OnDraw()
     EnsureCreated();
     RefreshIncrementButtons();
 
-    bool useShared = false;
-    HDC hdc = AcquireDrawTarget(&useShared);
+    HDC hdc = AcquireDrawTarget();
     if (!hdc) {
         return;
     }
@@ -462,7 +461,7 @@ void UIStatusWnd::OnDraw()
     }
 
     DrawChildrenToHdc(hdc);
-    ReleaseDrawTarget(hdc, useShared);
+    ReleaseDrawTarget(hdc);
 
     m_lastDrawStateToken = BuildDisplayStateToken();
     m_hasDrawStateToken = true;

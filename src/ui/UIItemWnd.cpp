@@ -644,8 +644,7 @@ void UIItemWnd::OnDraw()
         }
     }
 
-    bool useShared = false;
-    HDC hdc = AcquireDrawTarget(&useShared);
+    HDC hdc = AcquireDrawTarget();
     if (!hdc) {
         return;
     }
@@ -710,7 +709,7 @@ void UIItemWnd::OnDraw()
     }
 
     DrawChildrenToHdc(hdc);
-    ReleaseDrawTarget(hdc, useShared);
+    ReleaseDrawTarget(hdc);
 
     m_lastVisualStateToken = BuildVisualStateToken();
     m_hasVisualStateToken = true;

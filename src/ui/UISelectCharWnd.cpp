@@ -1215,8 +1215,7 @@ void UISelectCharWnd::OnDraw()
         return;
     }
 
-    bool useShared = false;
-    HDC targetDC = AcquireDrawTarget(&useShared);
+    HDC targetDC = AcquireDrawTarget();
     if (!targetDC) {
         return;
     }
@@ -1307,5 +1306,5 @@ void UISelectCharWnd::OnDraw()
         BitBlt(targetDC, 0, 0, clientW, clientH, hdc, 0, 0, SRCCOPY);
     }
 
-    ReleaseDrawTarget(targetDC, useShared);
+    ReleaseDrawTarget(targetDC);
 }

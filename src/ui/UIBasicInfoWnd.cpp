@@ -445,8 +445,7 @@ void UIBasicInfoWnd::OnDraw()
 
     EnsureCreated();
 
-    bool useShared = false;
-    HDC hdc = AcquireDrawTarget(&useShared);
+    HDC hdc = AcquireDrawTarget();
     if (!hdc) {
         return;
     }
@@ -509,7 +508,7 @@ void UIBasicInfoWnd::OnDraw()
     }
 
     DrawChildrenToHdc(hdc);
-    ReleaseDrawTarget(hdc, useShared);
+    ReleaseDrawTarget(hdc);
     m_lastDrawStateToken = BuildDisplayStateToken();
     m_hasDrawStateToken = true;
     m_isDirty = 0;

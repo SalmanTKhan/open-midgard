@@ -1150,8 +1150,7 @@ void UIOptionWnd::OnDraw()
 
     EnsureResources();
 
-    bool useShared = false;
-    HDC hdc = AcquireDrawTarget(&useShared);
+    HDC hdc = AcquireDrawTarget();
     if (!hdc) {
         return;
     }
@@ -1279,7 +1278,7 @@ void UIOptionWnd::OnDraw()
     DeleteObject(borderPen);
 
     DrawChildrenToHdc(hdc);
-    ReleaseDrawTarget(hdc, useShared);
+    ReleaseDrawTarget(hdc);
 }
 
 void UIOptionWnd::OnLBtnDown(int x, int y)
