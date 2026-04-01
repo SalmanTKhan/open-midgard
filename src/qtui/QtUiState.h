@@ -30,6 +30,7 @@ class QtUiState : public QObject {
     Q_PROPERTY(QString loginPasswordMask READ loginPasswordMask NOTIFY loginPanelDataChanged)
     Q_PROPERTY(bool loginSaveAccountChecked READ loginSaveAccountChecked NOTIFY loginPanelDataChanged)
     Q_PROPERTY(bool loginPasswordFocused READ loginPasswordFocused NOTIFY loginPanelDataChanged)
+    Q_PROPERTY(QVariantList loginButtons READ loginButtons NOTIFY loginButtonsChanged)
     Q_PROPERTY(bool charSelectVisible READ charSelectVisible NOTIFY charSelectVisibleChanged)
     Q_PROPERTY(int charSelectPanelX READ charSelectPanelX NOTIFY charSelectPanelGeometryChanged)
     Q_PROPERTY(int charSelectPanelY READ charSelectPanelY NOTIFY charSelectPanelGeometryChanged)
@@ -224,6 +225,7 @@ public:
     const QString& loginPasswordMask() const { return m_loginPasswordMask; }
     bool loginSaveAccountChecked() const { return m_loginSaveAccountChecked; }
     bool loginPasswordFocused() const { return m_loginPasswordFocused; }
+    const QVariantList& loginButtons() const { return m_loginButtons; }
     bool charSelectVisible() const { return m_charSelectVisible; }
     int charSelectPanelX() const { return m_charSelectPanelX; }
     int charSelectPanelY() const { return m_charSelectPanelY; }
@@ -521,6 +523,14 @@ public:
         m_loginSaveAccountChecked = saveAccountChecked;
         m_loginPasswordFocused = passwordFocused;
         emit loginPanelDataChanged();
+    }
+
+    void setLoginButtons(const QVariantList& value) {
+        if (m_loginButtons == value) {
+            return;
+        }
+        m_loginButtons = value;
+        emit loginButtonsChanged();
     }
 
     void setCharSelectVisible(bool value) {
@@ -1308,6 +1318,7 @@ signals:
     void loginPanelVisibleChanged();
     void loginPanelGeometryChanged();
     void loginPanelDataChanged();
+    void loginButtonsChanged();
     void charSelectVisibleChanged();
     void charSelectPanelGeometryChanged();
     void charSelectPageChanged();
@@ -1424,6 +1435,7 @@ private:
     QString m_loginPasswordMask;
     bool m_loginSaveAccountChecked = false;
     bool m_loginPasswordFocused = false;
+    QVariantList m_loginButtons;
     bool m_charSelectVisible = false;
     int m_charSelectPanelX = 0;
     int m_charSelectPanelY = 0;

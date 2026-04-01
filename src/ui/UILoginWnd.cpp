@@ -33,13 +33,14 @@ struct LoginButtonHitArea {
     int y;
     int width;
     int height;
+    const char* label;
 };
 
 constexpr LoginButtonHitArea kQtLoginButtonAreas[] = {
-    { 201, 4, 96, 52, 20 },
-    { 219, 137, 96, 44, 20 },
-    { 120, 189, 96, 40, 20 },
-    { 155, 234, 96, 40, 20 },
+    { 201, 4, 96, 52, 20, "Request" },
+    { 219, 137, 96, 44, 20, "Intro" },
+    { 120, 189, 96, 40, 20, "Connect" },
+    { 155, 234, 96, 40, 20, "Exit" },
 };
 
 shopui::BitmapPixels LoadBitmapPixelsFromGameData(const char* path)
@@ -465,6 +466,27 @@ bool UILoginWnd::IsSaveAccountChecked() const
 bool UILoginWnd::IsPasswordFocused() const
 {
     return m_password && m_password->m_hasFocus;
+}
+
+int UILoginWnd::GetQtButtonCount() const
+{
+    return static_cast<int>(std::size(kQtLoginButtonAreas));
+}
+
+bool UILoginWnd::GetQtButtonDisplayForQt(int index, QtButtonDisplay* outButton) const
+{
+    if (!outButton || index < 0 || index >= GetQtButtonCount()) {
+        return false;
+    }
+
+    const LoginButtonHitArea& button = kQtLoginButtonAreas[index];
+    outButton->id = button.id;
+    outButton->x = m_x + button.x;
+    outButton->y = m_y + button.y;
+    outButton->width = button.width;
+    outButton->height = button.height;
+    outButton->label = button.label;
+    return true;
 }
 
 bool UILoginWnd::HandleQtMouseDown(int x, int y)

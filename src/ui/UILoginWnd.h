@@ -9,6 +9,15 @@
 
 class UILoginWnd : public UIFrameWnd {
 public:
+    struct QtButtonDisplay {
+        int id = 0;
+        int x = 0;
+        int y = 0;
+        int width = 0;
+        int height = 0;
+        const char* label = "";
+    };
+
     UILoginWnd();
     ~UILoginWnd() override;
 
@@ -22,6 +31,8 @@ public:
     int GetPasswordLength() const;
     bool IsSaveAccountChecked() const;
     bool IsPasswordFocused() const;
+    int GetQtButtonCount() const;
+    bool GetQtButtonDisplayForQt(int index, QtButtonDisplay* outButton) const;
 
 private:
     enum UiAssetSlot {

@@ -2784,19 +2784,14 @@ Item {
         }
 
         Repeater {
-            model: [
-                { x: 4, y: 96, w: 52, text: "Request" },
-                { x: 137, y: 96, w: 44, text: "Intro" },
-                { x: 189, y: 96, w: 40, text: "Connect" },
-                { x: 234, y: 96, w: 40, text: "Exit" }
-            ]
+            model: uiState.loginButtons
 
             delegate: Rectangle {
                 required property var modelData
-                x: modelData.x
-                y: modelData.y
-                width: modelData.w
-                height: 20
+                x: (modelData.x || 0) - uiState.loginPanelX
+                y: (modelData.y || 0) - uiState.loginPanelY
+                width: modelData.width || 0
+                height: modelData.height || 0
                 radius: 3
                 color: "#d8d0c4"
                 border.width: 1
@@ -2804,7 +2799,7 @@ Item {
 
                 Text {
                     anchors.centerIn: parent
-                    text: modelData.text
+                    text: modelData.label || ""
                     color: "#202020"
                     font.pixelSize: 11
                     font.bold: true

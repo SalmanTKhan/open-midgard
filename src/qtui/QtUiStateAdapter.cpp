@@ -328,6 +328,7 @@ void PopulateLoginPanelState(QtUiState* state)
     if (!visible) {
         state->setLoginPanelGeometry(0, 0, 0, 0);
         state->setLoginPanelData(QString(), QString(), false, false);
+        state->setLoginButtons(QVariantList{});
         return;
     }
 
@@ -339,6 +340,26 @@ void PopulateLoginPanelState(QtUiState* state)
         passwordMask,
         loginWnd->IsSaveAccountChecked(),
         loginWnd->IsPasswordFocused());
+
+    QVariantList buttons;
+    const int buttonCount = loginWnd->GetQtButtonCount();
+    buttons.reserve(buttonCount);
+    for (int index = 0; index < buttonCount; ++index) {
+        UILoginWnd::QtButtonDisplay buttonDisplay{};
+        if (!loginWnd->GetQtButtonDisplayForQt(index, &buttonDisplay)) {
+            continue;
+        }
+
+        QVariantMap button;
+        button.insert(QStringLiteral("id"), buttonDisplay.id);
+        button.insert(QStringLiteral("x"), buttonDisplay.x);
+        button.insert(QStringLiteral("y"), buttonDisplay.y);
+        button.insert(QStringLiteral("width"), buttonDisplay.width);
+        button.insert(QStringLiteral("height"), buttonDisplay.height);
+        button.insert(QStringLiteral("label"), ToQString(buttonDisplay.label));
+        buttons.push_back(button);
+    }
+    state->setLoginButtons(buttons);
 }
 
 void PopulateCharSelectState(QtUiState* state)
