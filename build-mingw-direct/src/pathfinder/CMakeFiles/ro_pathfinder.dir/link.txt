@@ -1,0 +1,2 @@
+C:\Qt\Tools\mingw1310_64\bin\ar.exe qc libro_pathfinder.a CMakeFiles/ro_pathfinder.dir/PathFinder.cpp.obj
+C:\Qt\Tools\mingw1310_64\bin\ranlib.exe libro_pathfinder.a

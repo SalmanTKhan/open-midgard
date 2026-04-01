@@ -97,7 +97,7 @@ QFont BuildStatusFontFromHdc(HDC hdc)
         ? QString::fromLocal8Bit(logFont.lfFaceName)
         : QStringLiteral("MS Sans Serif");
     QFont font(family);
-    font.setPixelSize(logFont.lfHeight != 0 ? (std::max)(1, std::abs(logFont.lfHeight)) : 13);
+    font.setPixelSize(logFont.lfHeight != 0 ? (std::max)(1, static_cast<int>(std::abs(logFont.lfHeight))) : 13);
     font.setBold(logFont.lfWeight >= FW_BOLD);
     font.setStyleStrategy(QFont::NoAntialias);
     return font;

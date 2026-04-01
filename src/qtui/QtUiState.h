@@ -2,6 +2,7 @@
 
 #include <QObject>
 #include <QString>
+#include <QStringList>
 #include <QVariantList>
 
 class QtUiState : public QObject {
@@ -23,6 +24,8 @@ class QtUiState : public QObject {
     Q_PROPERTY(int serverHoverIndex READ serverHoverIndex NOTIFY serverHoverIndexChanged)
     Q_PROPERTY(QVariantMap serverPanelData READ serverPanelData NOTIFY serverPanelDataChanged)
     Q_PROPERTY(QVariantList serverEntries READ serverEntries NOTIFY serverEntriesChanged)
+    Q_PROPERTY(QStringList serverEntryLabels READ serverEntryLabels NOTIFY serverEntriesChanged)
+    Q_PROPERTY(QStringList serverEntryDetails READ serverEntryDetails NOTIFY serverEntriesChanged)
     Q_PROPERTY(bool loginPanelVisible READ loginPanelVisible NOTIFY loginPanelVisibleChanged)
     Q_PROPERTY(int loginPanelX READ loginPanelX NOTIFY loginPanelGeometryChanged)
     Q_PROPERTY(int loginPanelY READ loginPanelY NOTIFY loginPanelGeometryChanged)
@@ -232,6 +235,8 @@ public:
     int serverHoverIndex() const { return m_serverHoverIndex; }
     const QVariantMap& serverPanelData() const { return m_serverPanelData; }
     const QVariantList& serverEntries() const { return m_serverEntries; }
+    const QStringList& serverEntryLabels() const { return m_serverEntryLabels; }
+    const QStringList& serverEntryDetails() const { return m_serverEntryDetails; }
     bool loginPanelVisible() const { return m_loginPanelVisible; }
     int loginPanelX() const { return m_loginPanelX; }
     int loginPanelY() const { return m_loginPanelY; }
@@ -528,6 +533,15 @@ public:
 
     void setServerEntries(const QVariantList& value) {
         m_serverEntries = value;
+        emit serverEntriesChanged();
+    }
+
+    void setServerEntryText(const QStringList& labels, const QStringList& details) {
+        if (m_serverEntryLabels == labels && m_serverEntryDetails == details) {
+            return;
+        }
+        m_serverEntryLabels = labels;
+        m_serverEntryDetails = details;
         emit serverEntriesChanged();
     }
 
@@ -1579,6 +1593,8 @@ private:
     int m_serverHoverIndex = -1;
     QVariantMap m_serverPanelData;
     QVariantList m_serverEntries;
+    QStringList m_serverEntryLabels;
+    QStringList m_serverEntryDetails;
     bool m_loginPanelVisible = false;
     int m_loginPanelX = 0;
     int m_loginPanelY = 0;

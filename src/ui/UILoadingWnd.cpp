@@ -48,7 +48,7 @@ QFont BuildLoadingFontFromHdc(HDC hdc)
         ? QString::fromLocal8Bit(logFont.lfFaceName)
         : QStringLiteral("Tahoma");
     QFont font(family);
-    font.setPixelSize(logFont.lfHeight != 0 ? (std::max)(1, std::abs(logFont.lfHeight)) : 16);
+    font.setPixelSize(logFont.lfHeight != 0 ? (std::max)(1, static_cast<int>(std::abs(logFont.lfHeight))) : 16);
     font.setBold(logFont.lfWeight >= FW_BOLD);
     font.setStyleStrategy(QFont::PreferAntialias);
     return font;

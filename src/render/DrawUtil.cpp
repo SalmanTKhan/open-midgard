@@ -139,7 +139,7 @@ void DrawDC::TextOutA(int x, int y, const char* text, int len) {
     }
 
     QFont font(QString::fromLocal8Bit(fontFaceNT[m_fontType]));
-    font.setPixelSize((std::max)(1, std::abs(m_fontHeight)));
+    font.setPixelSize((std::max)(1, static_cast<int>(std::abs(m_fontHeight))));
     font.setBold(m_bold != 0);
     font.setStyleStrategy(QFont::NoAntialias);
 
@@ -182,7 +182,7 @@ void DrawDC::GetTextExtentPoint32A(const char* text, int len, SIZE* size) {
     }
 
     QFont font(QString::fromLocal8Bit(fontFaceNT[m_fontType]));
-    font.setPixelSize((std::max)(1, std::abs(m_fontHeight)));
+    font.setPixelSize((std::max)(1, static_cast<int>(std::abs(m_fontHeight))));
     font.setBold(m_bold != 0);
     font.setStyleStrategy(QFont::NoAntialias);
 

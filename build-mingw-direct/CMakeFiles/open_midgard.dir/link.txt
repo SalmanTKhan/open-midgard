@@ -1,0 +1,3 @@
+"C:\Program Files\CMake\bin\cmake.exe" -E rm -f CMakeFiles\open_midgard.dir/objects.a
+C:\Qt\Tools\mingw1310_64\bin\ar.exe qc CMakeFiles\open_midgard.dir/objects.a @CMakeFiles\open_midgard.dir\objects1.rsp
+C:\Qt\Tools\mingw1310_64\bin\c++.exe -mwindows -Wl,--whole-archive CMakeFiles\open_midgard.dir/objects.a -Wl,--no-whole-archive -o open-midgard.exe -Wl,--out-implib,libopen-midgard.dll.a -Wl,--major-image-version,0,--minor-image-version,0 @CMakeFiles\open_midgard.dir\linkLibs.rsp

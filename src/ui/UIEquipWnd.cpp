@@ -268,7 +268,7 @@ QFont BuildEquipWindowFontFromHdc(HDC hdc, const char* fallbackFamily = "MS Sans
         ? QString::fromLocal8Bit(logFont.lfFaceName)
         : QString::fromLocal8Bit(fallbackFamily);
     QFont font(family);
-    font.setPixelSize(logFont.lfHeight != 0 ? (std::max)(1, std::abs(logFont.lfHeight)) : fallbackPixelSize);
+    font.setPixelSize(logFont.lfHeight != 0 ? (std::max)(1, static_cast<int>(std::abs(logFont.lfHeight))) : fallbackPixelSize);
     font.setBold(logFont.lfWeight >= FW_BOLD);
     font.setStyleStrategy(QFont::NoAntialias);
     return font;
@@ -1257,7 +1257,7 @@ bool UIEquipWnd::GetDisplayDataForQt(DisplayData* outData) const
             && gameMode->m_dragInfo.source == static_cast<int>(DragSource::EquipmentWindow)
             && gameMode->m_dragInfo.itemIndex != 0;
         const std::vector<const ITEM_INFO*> slotItems = BuildSlotAssignments();
-        data.slots.reserve(kEquipSlots.size());
+        data.displaySlots.reserve(kEquipSlots.size());
         for (size_t i = 0; i < kEquipSlots.size(); ++i) {
             DisplaySlot slot{};
             slot.x = m_x + kEquipSlots[i].iconX;
@@ -1276,7 +1276,7 @@ bool UIEquipWnd::GetDisplayDataForQt(DisplayData* outData) const
                 slot.occupied = true;
                 slot.label = drawItem->GetEquipDisplayName();
             }
-            data.slots.push_back(slot);
+            data.displaySlots.push_back(slot);
         }
     }
 

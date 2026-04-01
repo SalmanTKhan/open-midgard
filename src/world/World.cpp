@@ -5103,19 +5103,18 @@ bool CWorld::GetActorScreenMarker(const matrix& viewMatrix,
         return false;
     }
 
-    if (actor != m_player) {
-        EnsureBillboardFrameCache(viewMatrix, cameraLongitude);
-    }
-    if (actor != m_player) {
-        if (const BillboardScreenEntry* entry = FindBillboardFrameEntryByGid(gid)) {
+    if (CPc* pc = dynamic_cast<CPc*>(actor)) {
+        BillboardScreenEntry liveEntry{};
+        const float zoom = m_ground ? m_ground->m_zoom : static_cast<float>(m_attr ? m_attr->m_zoom : 5);
+        if (BuildBillboardRenderEntry(pc, viewMatrix, cameraLongitude, zoom, &liveEntry)) {
             if (outCenterX) {
-                *outCenterX = static_cast<int>(std::lround((entry->left + entry->right) * 0.5f));
+                *outCenterX = static_cast<int>(std::lround(liveEntry.labelX));
             }
             if (outTopY) {
-                *outTopY = static_cast<int>(std::lround(entry->top));
+                *outTopY = static_cast<int>(std::lround(liveEntry.top));
             }
             if (outLabelY) {
-                *outLabelY = static_cast<int>(std::lround(entry->labelY));
+                *outLabelY = static_cast<int>(std::lround(liveEntry.labelY));
             }
             return true;
         }
@@ -5156,10 +5155,31 @@ bool CWorld::FindHoveredActorScreen(const matrix& viewMatrix,
         *outLabelY = 0;
     }
 
-    EnsureBillboardFrameCache(viewMatrix, cameraLongitude);
-
     const float mouseX = static_cast<float>(screenX);
     const float mouseY = static_cast<float>(screenY);
+
+    if (CPc* playerPc = dynamic_cast<CPc*>(m_player)) {
+        const float zoom = m_ground ? m_ground->m_zoom : static_cast<float>(m_attr ? m_attr->m_zoom : 5);
+        BillboardScreenEntry playerEntry{};
+        if (BuildBillboardRenderEntry(playerPc, viewMatrix, cameraLongitude, zoom, &playerEntry)
+            && mouseX >= playerEntry.left
+            && mouseX <= playerEntry.right
+            && mouseY >= playerEntry.top
+            && mouseY <= playerEntry.bottom) {
+            if (outActor) {
+                *outActor = playerPc;
+            }
+            if (outLabelX) {
+                *outLabelX = static_cast<int>(std::lround(playerEntry.labelX));
+            }
+            if (outLabelY) {
+                *outLabelY = static_cast<int>(std::lround(playerEntry.labelY));
+            }
+            return true;
+        }
+    }
+
+    EnsureBillboardFrameCache(viewMatrix, cameraLongitude);
     const BillboardScreenEntry* stickyEntry = nullptr;
     CPc* stickyActor = nullptr;
     float stickyDistanceSq = 0.0f;

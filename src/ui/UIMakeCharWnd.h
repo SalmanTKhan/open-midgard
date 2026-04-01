@@ -14,6 +14,7 @@
 
 class UIEditCtrl;
 class UIBitmapButton;
+class QImage;
 
 class UIMakeCharWnd : public UIFrameWnd {
 public:
@@ -46,6 +47,7 @@ public:
         int y = 0;
         int width = 0;
         int height = 0;
+        bool pressed = false;
         std::string label;
     };
 
@@ -66,6 +68,13 @@ public:
     void OnProcess() override;
     msgresult_t SendMsg(UIWindow* sender, int msg, msgparam_t wparam, msgparam_t lparam, msgparam_t extra) override;
     void OnKeyDown(int virtualKey);
+    void EnsureQtLayout();
+    bool GetQtBackgroundBitmap(const unsigned int** pixels, int* width, int* height);
+    bool GetQtButtonBitmap(int index, const unsigned int** pixels, int* width, int* height);
+#if RO_ENABLE_QT6_UI
+    void DrawQtHexagon(QImage* image) const;
+    void DrawQtPreview(QImage* image);
+#endif
     bool HandleQtMouseDown(int x, int y);
     bool HandleQtMouseUp(int x, int y);
     bool GetMakeCharDisplay(MakeCharDisplay* out) const;
@@ -80,6 +89,8 @@ private:
     void ClearAssets();
     void ReleaseComposeSurface();
     bool EnsureComposeSurface(int width, int height);
+    bool HitQtButton(int x, int y, int* outIndex) const;
+    void SetQtPressedButtonIndex(int index);
     void DrawHexagon(HDC hdc) const;
     void RebuildPreview();
     void DrawPreview(HDC hdc, const PreviewState& preview);
@@ -103,4 +114,5 @@ private:
     UIBitmapButton* m_hairBtns[3];
     PreviewState m_preview;
     DWORD m_lastPreviewAdvanceTick;
+    int m_pressedQtButtonIndex;
 };

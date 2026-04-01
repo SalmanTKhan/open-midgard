@@ -25,6 +25,7 @@ constexpr int kWindowWidth = 280;
 constexpr int kTitleHeight = 20;
 constexpr int kRowHeight = 24;
 constexpr int kWindowPadding = 10;
+constexpr int kBottomListPadding = 8;
 constexpr int kWindowGapAboveLogin = 10;
 
 #if RO_ENABLE_QT6_UI
@@ -41,7 +42,7 @@ QFont BuildSelectServerFontFromHdc(HDC hdc)
         ? QString::fromLocal8Bit(logFont.lfFaceName)
         : QStringLiteral("MS Sans Serif");
     QFont font(family);
-    font.setPixelSize(logFont.lfHeight != 0 ? (std::max)(1, std::abs(logFont.lfHeight)) : 14);
+    font.setPixelSize(logFont.lfHeight != 0 ? (std::max)(1, static_cast<int>(std::abs(logFont.lfHeight))) : 14);
     font.setBold(logFont.lfWeight >= FW_BOLD);
     font.setStyleStrategy(QFont::NoAntialias);
     return font;
@@ -116,7 +117,7 @@ void UISelectServerWnd::EnsureCreated()
 int UISelectServerWnd::ComputeWindowHeight() const
 {
     const int rows = (std::max)(0, GetClientInfoConnectionCount());
-    return kWindowPadding * 2 + kTitleHeight + rows * kRowHeight;
+    return kWindowPadding * 2 + kTitleHeight + rows * kRowHeight + kBottomListPadding;
 }
 
 void UISelectServerWnd::SyncGeometry()

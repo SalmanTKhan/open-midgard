@@ -67,6 +67,9 @@ include_directories(${CMAKE_CURRENT_SOURCE_DIR}/src)
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 include(QtSetup)
 ro_configure_qt6()
+if(RO_ENABLE_QT6_UI)
+    find_package(Qt6 REQUIRED COMPONENTS Core Gui GuiPrivate Qml Quick)
+endif()
 
 # ─── Compiler options ─────────────────────────────────────────────────────
 if(MSVC)

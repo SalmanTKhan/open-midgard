@@ -41,7 +41,7 @@ public:
         int currentTab = 0;
         int viewOffset = 0;
         int maxViewOffset = 0;
-        std::vector<DisplaySlot> slots;
+        std::vector<DisplaySlot> displaySlots;
     };
 
     UIItemWnd();

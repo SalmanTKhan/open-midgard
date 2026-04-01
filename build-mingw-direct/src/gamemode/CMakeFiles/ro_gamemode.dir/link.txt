@@ -1,0 +1,2 @@
+C:\Qt\Tools\mingw1310_64\bin\ar.exe qc libro_gamemode.a CMakeFiles/ro_gamemode.dir/Mode.cpp.obj CMakeFiles/ro_gamemode.dir/CursorRenderer.cpp.obj CMakeFiles/ro_gamemode.dir/LoginMode.cpp.obj CMakeFiles/ro_gamemode.dir/GameMode.cpp.obj CMakeFiles/ro_gamemode.dir/View.cpp.obj CMakeFiles/ro_gamemode.dir/GameModePacket.cpp.obj
+C:\Qt\Tools\mingw1310_64\bin\ranlib.exe libro_gamemode.a

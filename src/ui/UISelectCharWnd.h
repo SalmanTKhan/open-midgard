@@ -9,6 +9,7 @@
 #include <windows.h>
 
 class UIBitmapButton;
+class QImage;
 
 class UISelectCharWnd : public UIFrameWnd {
 public:
@@ -87,7 +88,14 @@ public:
     void OnLBtnUp(int x, int y) override;
     msgresult_t SendMsg(UIWindow* sender, int msg, msgparam_t wparam, msgparam_t lparam, msgparam_t extra) override;
     void OnKeyDown(int virtualKey);
+    void EnsureQtLayout();
+    bool GetQtBackgroundBitmap(const unsigned int** pixels, int* width, int* height);
+    bool GetQtSelectedSlotBitmap(const unsigned int** pixels, int* width, int* height);
+#if RO_ENABLE_QT6_UI
+    void DrawQtPreviews(QImage* image);
+#endif
     bool HandleQtMouseDown(int x, int y);
+    bool HandleQtDoubleClick(int x, int y);
     bool HandleQtMouseUp(int x, int y);
     int GetSelectedSlotNumber() const { return m_selectedSlot; }
     int GetCurrentPage() const { return m_page; }

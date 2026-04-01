@@ -273,7 +273,7 @@ void DrawWindowTitleText(HDC hdc, int x, int y, int windowRight, const char* tex
         ? QString::fromLocal8Bit(logFont.lfFaceName)
         : QStringLiteral("MS Sans Serif");
     QFont font(family);
-    font.setPixelSize(logFont.lfHeight != 0 ? (std::max)(1, std::abs(logFont.lfHeight)) : 12);
+    font.setPixelSize(logFont.lfHeight != 0 ? (std::max)(1, static_cast<int>(std::abs(logFont.lfHeight))) : 12);
     font.setBold(logFont.lfWeight >= FW_BOLD);
     font.setStyleStrategy(QFont::NoAntialias);
     const QFontMetrics metrics(font);
@@ -314,7 +314,7 @@ QFont BuildUiOptionFontFromHdc(HDC hdc)
         ? QString::fromLocal8Bit(logFont.lfFaceName)
         : QStringLiteral("MS Sans Serif");
     QFont font(family);
-    font.setPixelSize(logFont.lfHeight != 0 ? (std::max)(1, std::abs(logFont.lfHeight)) : 12);
+    font.setPixelSize(logFont.lfHeight != 0 ? (std::max)(1, static_cast<int>(std::abs(logFont.lfHeight))) : 12);
     font.setBold(logFont.lfWeight >= FW_BOLD);
     font.setItalic(logFont.lfItalic != 0);
     font.setUnderline(logFont.lfUnderline != 0);

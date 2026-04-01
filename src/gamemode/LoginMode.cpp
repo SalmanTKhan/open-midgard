@@ -422,7 +422,6 @@ bool QueueLoginUiQuad()
         queuedAnyUi = QueueFullScreenOverlayQuad(s_uiTexture, clientWidth, clientHeight, 1.0f, 3);
     }
     if (s_qtUiOverlayTextureValid) {
-        g_windowMgr.RenderWallPaper();
         queuedAnyUi = QueueFullScreenOverlayQuad(s_qtUiOverlayTexture, clientWidth, clientHeight, 2.0f, 3) || queuedAnyUi;
     }
     return queuedAnyUi;

@@ -35,6 +35,7 @@
 #include <QQmlEngine>
 #include <QQmlError>
 #include <QImage>
+#include <QPainter>
 #include <QQuickImageProvider>
 #include <QQuickGraphicsDevice>
 #include <QQuickItem>
@@ -107,6 +108,144 @@ public:
             const UIRoMapWnd* const minimapWnd = g_windowMgr.m_roMapWnd;
             if (minimapWnd && minimapWnd->m_show != 0) {
                 minimapWnd->BuildQtMinimapImage(&image);
+            }
+        } else if (baseId.startsWith(QStringLiteral("makecharbutton/"))) {
+            if (g_windowMgr.m_makeCharWnd) {
+                bool ok = false;
+                const int buttonIndex = baseId.mid(QStringLiteral("makecharbutton/").size()).toInt(&ok);
+                if (ok) {
+                    const unsigned int* pixels = nullptr;
+                    int width = 0;
+                    int height = 0;
+                    if (g_windowMgr.m_makeCharWnd->GetQtButtonBitmap(buttonIndex, &pixels, &width, &height)
+                        && pixels && width > 0 && height > 0) {
+                        const QImage source(
+                            reinterpret_cast<const uchar*>(pixels),
+                            width,
+                            height,
+                            width * static_cast<int>(sizeof(unsigned int)),
+                            QImage::Format_ARGB32);
+                        image = source.copy();
+                    }
+                }
+            }
+        } else if (baseId == QStringLiteral("makecharpanel")) {
+            if (g_windowMgr.m_makeCharWnd && g_windowMgr.m_makeCharWnd->m_show != 0) {
+                const unsigned int* pixels = nullptr;
+                int width = 0;
+                int height = 0;
+                if (g_windowMgr.m_makeCharWnd->GetQtBackgroundBitmap(&pixels, &width, &height)
+                    && pixels && width > 0 && height > 0) {
+                    const QImage source(
+                        reinterpret_cast<const uchar*>(pixels),
+                        width,
+                        height,
+                        width * static_cast<int>(sizeof(unsigned int)),
+                        QImage::Format_ARGB32);
+                    image = source.copy();
+                    if (!image.isNull()) {
+                        g_windowMgr.m_makeCharWnd->EnsureQtLayout();
+                        g_windowMgr.m_makeCharWnd->DrawQtHexagon(&image);
+                        g_windowMgr.m_makeCharWnd->DrawQtPreview(&image);
+
+                        QPainter painter(&image);
+                        for (int buttonIndex = 0; buttonIndex < g_windowMgr.m_makeCharWnd->GetQtButtonCount(); ++buttonIndex) {
+                            UIMakeCharWnd::QtButtonDisplay buttonDisplay;
+                            const unsigned int* buttonPixels = nullptr;
+                            int buttonWidth = 0;
+                            int buttonHeight = 0;
+                            if (!g_windowMgr.m_makeCharWnd->GetQtButtonDisplayForQt(buttonIndex, &buttonDisplay)
+                                || !g_windowMgr.m_makeCharWnd->GetQtButtonBitmap(
+                                    buttonIndex,
+                                    &buttonPixels,
+                                    &buttonWidth,
+                                    &buttonHeight)
+                                || !buttonPixels
+                                || buttonWidth <= 0
+                                || buttonHeight <= 0) {
+                                continue;
+                            }
+
+                            const QImage buttonSource(
+                                reinterpret_cast<const uchar*>(buttonPixels),
+                                buttonWidth,
+                                buttonHeight,
+                                buttonWidth * static_cast<int>(sizeof(unsigned int)),
+                                QImage::Format_ARGB32);
+                            painter.drawImage(
+                                buttonDisplay.x - g_windowMgr.m_makeCharWnd->m_x,
+                                buttonDisplay.y - g_windowMgr.m_makeCharWnd->m_y,
+                                buttonSource);
+                        }
+                    }
+                }
+            }
+        } else if (baseId == QStringLiteral("charselectpanel")) {
+            if (g_windowMgr.m_selectCharWnd && g_windowMgr.m_selectCharWnd->m_show != 0) {
+                const unsigned int* pixels = nullptr;
+                int width = 0;
+                int height = 0;
+                if (g_windowMgr.m_selectCharWnd->GetQtBackgroundBitmap(&pixels, &width, &height)
+                    && pixels && width > 0 && height > 0) {
+                    const QImage source(
+                        reinterpret_cast<const uchar*>(pixels),
+                        width,
+                        height,
+                        width * static_cast<int>(sizeof(unsigned int)),
+                        QImage::Format_ARGB32);
+                    image = source.copy();
+                    if (!image.isNull()) {
+                        g_windowMgr.m_selectCharWnd->EnsureQtLayout();
+                        g_windowMgr.m_selectCharWnd->DrawQtPreviews(&image);
+                    }
+                }
+            }
+        } else if (baseId == QStringLiteral("charselectslotselected")) {
+            if (g_windowMgr.m_selectCharWnd && g_windowMgr.m_selectCharWnd->m_show != 0) {
+                const unsigned int* pixels = nullptr;
+                int width = 0;
+                int height = 0;
+                if (g_windowMgr.m_selectCharWnd->GetQtSelectedSlotBitmap(&pixels, &width, &height)
+                    && pixels && width > 0 && height > 0) {
+                    const QImage source(
+                        reinterpret_cast<const uchar*>(pixels),
+                        width,
+                        height,
+                        width * static_cast<int>(sizeof(unsigned int)),
+                        QImage::Format_ARGB32);
+                    image = source.copy();
+                }
+            }
+        } else if (baseId == QStringLiteral("loginpanel")) {
+            if (g_windowMgr.m_loginWnd && g_windowMgr.m_loginWnd->m_show != 0) {
+                const unsigned int* pixels = nullptr;
+                int width = 0;
+                int height = 0;
+                if (g_windowMgr.m_loginWnd->GetQtPanelBitmap(&pixels, &width, &height)
+                    && pixels && width > 0 && height > 0) {
+                    const QImage source(
+                        reinterpret_cast<const uchar*>(pixels),
+                        width,
+                        height,
+                        width * static_cast<int>(sizeof(unsigned int)),
+                        QImage::Format_ARGB32);
+                    image = source.copy();
+                }
+            }
+        } else if (baseId == QStringLiteral("wallpaper")) {
+            if (g_windowMgr.m_wallpaperSurface && g_windowMgr.m_wallpaperSurface->HasSoftwarePixels()) {
+                const unsigned int width = g_windowMgr.m_wallpaperSurface->m_w;
+                const unsigned int height = g_windowMgr.m_wallpaperSurface->m_h;
+                const unsigned int* pixels = g_windowMgr.m_wallpaperSurface->GetSoftwarePixels();
+                if (pixels && width > 0 && height > 0) {
+                    const QImage source(
+                        reinterpret_cast<const uchar*>(pixels),
+                        static_cast<int>(width),
+                        static_cast<int>(height),
+                        static_cast<int>(width * sizeof(unsigned int)),
+                        QImage::Format_ARGB32);
+                    image = source.copy();
+                }
             }
         }
 
@@ -313,8 +452,18 @@ public:
             }
             return false;
 
-        case WM_LBUTTONDOWN:
         case WM_LBUTTONDBLCLK:
+            if (g_windowMgr.m_selectCharWnd
+                && g_windowMgr.m_selectCharWnd->m_show != 0
+                && g_windowMgr.m_selectCharWnd->HandleQtDoubleClick(
+                    static_cast<int>(static_cast<short>(LOWORD(lParam))),
+                    static_cast<int>(static_cast<short>(HIWORD(lParam))))) {
+                m_menuPointerCaptureTarget = MenuPointerCaptureTarget::None;
+                return true;
+            }
+            [[fallthrough]];
+
+        case WM_LBUTTONDOWN:
             if (g_windowMgr.m_makeCharWnd
                 && g_windowMgr.m_makeCharWnd->m_show != 0
                 && g_windowMgr.m_makeCharWnd->HandleQtMouseDown(
@@ -381,7 +530,8 @@ public:
                     && g_windowMgr.m_selectCharWnd->m_show != 0
                     && g_windowMgr.m_selectCharWnd->HandleQtMouseUp(
                         static_cast<int>(static_cast<short>(LOWORD(lParam))),
-                        static_cast<int>(static_cast<short>(HIWORD(lParam))));
+                        static_cast<int>(static_cast<short>(HIWORD(lParam))))) {
+                }
                 m_menuPointerCaptureTarget = MenuPointerCaptureTarget::None;
                 return true;
             }
@@ -700,6 +850,9 @@ private:
 
         m_quickWindow->setGeometry(0, 0, width, height);
         m_quickWindow->setRenderTarget(QQuickRenderTarget::fromPaintDevice(&m_renderImage));
+        if (m_quickWindow->contentItem()) {
+            m_quickWindow->contentItem()->setSize(QSizeF(static_cast<qreal>(width), static_cast<qreal>(height)));
+        }
         m_rootItem->setSize(QSizeF(static_cast<qreal>(width), static_cast<qreal>(height)));
 
         processEvents();
@@ -740,8 +893,8 @@ private:
             return false;
         }
 
-        m_nativeTargetMirrorVertically = true;
-        DbgLog("[QtUi] Vulkan native overlay target uses vertical mirroring.\n");
+        m_nativeTargetMirrorVertically = false;
+        DbgLog("[QtUi] Vulkan native overlay target does not use vertical mirroring.\n");
         m_nativeGraphicsInitialized = true;
         m_nativeGraphicsBackend = RenderBackendType::Vulkan;
         return true;
@@ -826,6 +979,9 @@ private:
 
         m_quickWindow->setGeometry(0, 0, width, height);
         m_quickWindow->setRenderTarget(quickRenderTarget);
+        if (m_quickWindow->contentItem()) {
+            m_quickWindow->contentItem()->setSize(QSizeF(static_cast<qreal>(width), static_cast<qreal>(height)));
+        }
         m_rootItem->setSize(QSizeF(static_cast<qreal>(width), static_cast<qreal>(height)));
 
         processEvents();
@@ -856,6 +1012,9 @@ private:
 
         m_quickWindow->setGeometry(0, 0, width, height);
         m_quickWindow->setRenderTarget(quickRenderTarget);
+        if (m_quickWindow->contentItem()) {
+            m_quickWindow->contentItem()->setSize(QSizeF(static_cast<qreal>(width), static_cast<qreal>(height)));
+        }
         m_rootItem->setSize(QSizeF(static_cast<qreal>(width), static_cast<qreal>(height)));
 
         processEvents();
@@ -887,6 +1046,9 @@ private:
 
         m_quickWindow->setGeometry(0, 0, width, height);
         m_quickWindow->setRenderTarget(quickRenderTarget);
+        if (m_quickWindow->contentItem()) {
+            m_quickWindow->contentItem()->setSize(QSizeF(static_cast<qreal>(width), static_cast<qreal>(height)));
+        }
         m_rootItem->setSize(QSizeF(static_cast<qreal>(width), static_cast<qreal>(height)));
 
         processEvents();

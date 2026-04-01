@@ -1,0 +1,27 @@
+{
+	"InstallScripts" : 
+	[
+		"D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/build-mingw-direct/cmake_install.cmake",
+		"D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/build-mingw-direct/src/core/cmake_install.cmake",
+		"D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/build-mingw-direct/_deps/zlib-build/cmake_install.cmake",
+		"D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/build-mingw-direct/src/cipher/cmake_install.cmake",
+		"D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/build-mingw-direct/src/network/cmake_install.cmake",
+		"D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/build-mingw-direct/src/res/cmake_install.cmake",
+		"D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/build-mingw-direct/src/audio/cmake_install.cmake",
+		"D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/build-mingw-direct/src/input/cmake_install.cmake",
+		"D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/build-mingw-direct/src/session/cmake_install.cmake",
+		"D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/build-mingw-direct/src/gamemode/cmake_install.cmake",
+		"D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/build-mingw-direct/src/world/cmake_install.cmake",
+		"D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/build-mingw-direct/src/render/cmake_install.cmake",
+		"D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/build-mingw-direct/src/render3d/cmake_install.cmake",
+		"D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/build-mingw-direct/src/ui/cmake_install.cmake",
+		"D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/build-mingw-direct/src/qtui/cmake_install.cmake",
+		"D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/build-mingw-direct/src/skill/cmake_install.cmake",
+		"D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/build-mingw-direct/src/item/cmake_install.cmake",
+		"D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/build-mingw-direct/src/pathfinder/cmake_install.cmake",
+		"D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/build-mingw-direct/src/lua/cmake_install.cmake",
+		"D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/build-mingw-direct/src/security/cmake_install.cmake",
+		"D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/build-mingw-direct/src/main/cmake_install.cmake"
+	],
+	"Parallel" : false
+}

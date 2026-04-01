@@ -7,6 +7,7 @@
 #include "core/ClientInfoLocale.h"
 #include "gamemode/GameMode.h"
 #include "gamemode/View.h"
+#include "main/WinMain.h"
 #include "render3d/RenderBackend.h"
 #include "render3d/RenderDevice.h"
 #include "session/Session.h"
@@ -35,11 +36,14 @@
 #include "ui/UIShortCutWnd.h"
 #include "ui/UIStatusWnd.h"
 #include "ui/UIShopCommon.h"
+#include "ui/UIWaitWnd.h"
 #include "ui/UIWindowMgr.h"
 #include "world/GameActor.h"
 #include "world/World.h"
 
 #include <QChar>
+#include <QFont>
+#include <QFontMetrics>
 #include <QStringList>
 #include <QVariantMap>
 
@@ -354,8 +358,14 @@ void PopulateServerSelectState(QtUiState* state)
         state->setServerHoverIndex(-1);
         state->setServerPanelData(QVariantMap{});
         state->setServerEntries(QVariantList{});
+        state->setServerEntryText(QStringList{}, QStringList{});
         return;
     }
+
+    if (g_windowMgr.m_loginWnd && g_windowMgr.m_loginWnd->m_show != 0) {
+        g_windowMgr.m_loginWnd->EnsureQtLayout();
+    }
+    g_windowMgr.m_selectServerWnd->SetShow(1);
 
     state->setServerPanelGeometry(serverWnd->m_x, serverWnd->m_y, serverWnd->m_w, serverWnd->m_h);
     state->setServerSelectedIndex(GetSelectedClientInfoIndex());
@@ -365,15 +375,24 @@ void PopulateServerSelectState(QtUiState* state)
     state->setServerPanelData(serverPanelData);
 
     QVariantList entries;
+    QStringList labels;
+    QStringList details;
     const std::vector<ClientInfoConnection>& connections = GetClientInfoConnections();
     entries.reserve(static_cast<qsizetype>(connections.size()));
+    labels.reserve(static_cast<qsizetype>(connections.size()));
+    details.reserve(static_cast<qsizetype>(connections.size()));
     for (const ClientInfoConnection& info : connections) {
+        const QString label = ToQString((!info.display.empty() ? info.display : info.address).c_str());
+        const QString detail = ToQString((!info.desc.empty() ? info.desc : info.port).c_str());
         QVariantMap entry;
-        entry.insert(QStringLiteral("label"), ToQString((!info.display.empty() ? info.display : info.address).c_str()));
-        entry.insert(QStringLiteral("detail"), ToQString((!info.desc.empty() ? info.desc : info.port).c_str()));
+        entry.insert(QStringLiteral("label"), label);
+        entry.insert(QStringLiteral("detail"), detail);
         entries.push_back(entry);
+        labels.push_back(label);
+        details.push_back(detail);
     }
     state->setServerEntries(entries);
+    state->setServerEntryText(labels, details);
 }
 
 void PopulateLoginPanelState(QtUiState* state)
@@ -393,6 +412,8 @@ void PopulateLoginPanelState(QtUiState* state)
         return;
     }
 
+    g_windowMgr.m_loginWnd->EnsureQtLayout();
+    g_windowMgr.m_loginWnd->RefreshRememberedUserIdStorage();
     state->setLoginPanelGeometry(loginWnd->m_x, loginWnd->m_y, loginWnd->m_w, loginWnd->m_h);
     const QString userId = ToQString(loginWnd->GetLoginText());
     const QString passwordMask(loginWnd->GetPasswordLength(), QLatin1Char('*'));
@@ -446,6 +467,7 @@ void PopulateCharSelectState(QtUiState* state)
         return;
     }
 
+    g_windowMgr.m_selectCharWnd->EnsureQtLayout();
     state->setCharSelectPanelGeometry(
         selectCharWnd->m_x,
         selectCharWnd->m_y,
@@ -455,7 +477,7 @@ void PopulateCharSelectState(QtUiState* state)
         selectCharWnd->GetCurrentPage(),
         selectCharWnd->GetCurrentPageCount());
 
-    QVariantList slots;
+    QVariantList slotList;
     for (int visibleIndex = 0; visibleIndex < 3; ++visibleIndex) {
         UISelectCharWnd::VisibleSlotDisplay slotInfo{};
         if (!selectCharWnd->GetVisibleSlotDisplay(visibleIndex, &slotInfo)) {
@@ -477,9 +499,9 @@ void PopulateCharSelectState(QtUiState* state)
             slotInfo.occupied ? ToQString(slotInfo.name) : QStringLiteral("Empty Slot"));
         slot.insert(QStringLiteral("levelText"),
             slotInfo.occupied ? FormatCharacterSlotLevelText(slotInfo.level) : QString());
-        slots.push_back(slot);
+        slotList.push_back(slot);
     }
-    state->setCharSelectSlots(slots);
+    state->setCharSelectSlots(slotList);
 
     UISelectCharWnd::SelectedCharacterDisplay selected{};
     QVariantMap details;
@@ -515,6 +537,10 @@ void PopulateCharSelectState(QtUiState* state)
         }
         details.insert(QStringLiteral("fields"), fields);
     }
+    details.insert(QStringLiteral("imageRevision"), QStringLiteral("%1:%2:%3")
+        .arg(selectCharWnd->GetCurrentPage())
+        .arg(selectCharWnd->GetCurrentPageCount())
+        .arg(selectCharWnd->GetSelectedSlotNumber()));
     state->setCharSelectSelectedDetails(details);
 
     QVariantList pageButtons;
@@ -576,6 +602,7 @@ void PopulateMakeCharState(QtUiState* state)
         return;
     }
 
+    g_windowMgr.m_makeCharWnd->EnsureQtLayout();
     state->setMakeCharPanelGeometry(
         makeCharWnd->m_x,
         makeCharWnd->m_y,
@@ -595,6 +622,7 @@ void PopulateMakeCharState(QtUiState* state)
             display.hairIndex,
             display.hairColor);
         QVariantMap makeCharPanelData;
+        makeCharPanelData.insert(QStringLiteral("imageRevision"), makeCharWnd->m_stateCnt);
         makeCharPanelData.insert(QStringLiteral("previewTitle"), QStringLiteral("Preview"));
         makeCharPanelData.insert(QStringLiteral("hairText"), QStringLiteral("Hair %1").arg(display.hairIndex));
         makeCharPanelData.insert(QStringLiteral("colorText"), QStringLiteral("Color %1").arg(display.hairColor));
@@ -633,6 +661,7 @@ void PopulateMakeCharState(QtUiState* state)
             button.insert(QStringLiteral("y"), buttonDisplay.y);
             button.insert(QStringLiteral("width"), buttonDisplay.width);
             button.insert(QStringLiteral("height"), buttonDisplay.height);
+            button.insert(QStringLiteral("pressed"), buttonDisplay.pressed);
             button.insert(QStringLiteral("label"), ToQString(buttonDisplay.label));
             buttons.push_back(button);
         }
@@ -761,20 +790,20 @@ void PopulateNpcMenuState(QtUiState* state)
     RECT rect{};
     if (menuWnd->GetOkRectForQt(&rect)) {
         QVariantMap button;
-        button.insert(QStringLiteral("x"), rect.left);
-        button.insert(QStringLiteral("y"), rect.top);
-        button.insert(QStringLiteral("width"), rect.right - rect.left);
-        button.insert(QStringLiteral("height"), rect.bottom - rect.top);
+        button.insert(QStringLiteral("x"), static_cast<int>(rect.left));
+        button.insert(QStringLiteral("y"), static_cast<int>(rect.top));
+        button.insert(QStringLiteral("width"), static_cast<int>(rect.right - rect.left));
+        button.insert(QStringLiteral("height"), static_cast<int>(rect.bottom - rect.top));
         button.insert(QStringLiteral("label"), QStringLiteral("OK"));
         button.insert(QStringLiteral("pressed"), menuWnd->IsOkPressed());
         buttons.push_back(button);
     }
     if (menuWnd->GetCancelRectForQt(&rect)) {
         QVariantMap button;
-        button.insert(QStringLiteral("x"), rect.left);
-        button.insert(QStringLiteral("y"), rect.top);
-        button.insert(QStringLiteral("width"), rect.right - rect.left);
-        button.insert(QStringLiteral("height"), rect.bottom - rect.top);
+        button.insert(QStringLiteral("x"), static_cast<int>(rect.left));
+        button.insert(QStringLiteral("y"), static_cast<int>(rect.top));
+        button.insert(QStringLiteral("width"), static_cast<int>(rect.right - rect.left));
+        button.insert(QStringLiteral("height"), static_cast<int>(rect.bottom - rect.top));
         button.insert(QStringLiteral("label"), QStringLiteral("Cancel"));
         button.insert(QStringLiteral("pressed"), menuWnd->IsCancelPressed());
         buttons.push_back(button);
@@ -809,10 +838,10 @@ void PopulateSayDialogState(QtUiState* state)
     QVariantMap actionButton;
     RECT actionRect{};
     if (dialogWnd->GetActionRectForQt(&actionRect)) {
-        actionButton.insert(QStringLiteral("x"), actionRect.left);
-        actionButton.insert(QStringLiteral("y"), actionRect.top);
-        actionButton.insert(QStringLiteral("width"), actionRect.right - actionRect.left);
-        actionButton.insert(QStringLiteral("height"), actionRect.bottom - actionRect.top);
+        actionButton.insert(QStringLiteral("x"), static_cast<int>(actionRect.left));
+        actionButton.insert(QStringLiteral("y"), static_cast<int>(actionRect.top));
+        actionButton.insert(QStringLiteral("width"), static_cast<int>(actionRect.right - actionRect.left));
+        actionButton.insert(QStringLiteral("height"), static_cast<int>(actionRect.bottom - actionRect.top));
         actionButton.insert(QStringLiteral("label"), dialogWnd->IsNextAction() ? QStringLiteral("Next") : QStringLiteral("Close"));
         actionButton.insert(QStringLiteral("hovered"), dialogWnd->IsHoveringAction());
         actionButton.insert(QStringLiteral("pressed"), dialogWnd->IsPressingAction());
@@ -850,20 +879,20 @@ void PopulateNpcInputState(QtUiState* state)
     RECT rect{};
     if (inputWnd->GetOkRectForQt(&rect)) {
         QVariantMap button;
-        button.insert(QStringLiteral("x"), rect.left);
-        button.insert(QStringLiteral("y"), rect.top);
-        button.insert(QStringLiteral("width"), rect.right - rect.left);
-        button.insert(QStringLiteral("height"), rect.bottom - rect.top);
+        button.insert(QStringLiteral("x"), static_cast<int>(rect.left));
+        button.insert(QStringLiteral("y"), static_cast<int>(rect.top));
+        button.insert(QStringLiteral("width"), static_cast<int>(rect.right - rect.left));
+        button.insert(QStringLiteral("height"), static_cast<int>(rect.bottom - rect.top));
         button.insert(QStringLiteral("label"), QStringLiteral("OK"));
         button.insert(QStringLiteral("pressed"), inputWnd->IsOkPressed());
         buttons.push_back(button);
     }
     if (inputWnd->GetCancelRectForQt(&rect)) {
         QVariantMap button;
-        button.insert(QStringLiteral("x"), rect.left);
-        button.insert(QStringLiteral("y"), rect.top);
-        button.insert(QStringLiteral("width"), rect.right - rect.left);
-        button.insert(QStringLiteral("height"), rect.bottom - rect.top);
+        button.insert(QStringLiteral("x"), static_cast<int>(rect.left));
+        button.insert(QStringLiteral("y"), static_cast<int>(rect.top));
+        button.insert(QStringLiteral("width"), static_cast<int>(rect.right - rect.left));
+        button.insert(QStringLiteral("height"), static_cast<int>(rect.bottom - rect.top));
         button.insert(QStringLiteral("label"), QStringLiteral("Cancel"));
         button.insert(QStringLiteral("pressed"), inputWnd->IsCancelPressed());
         buttons.push_back(button);
@@ -1013,10 +1042,10 @@ void PopulateItemPurchaseState(QtUiState* state)
         QVariantMap button;
         RECT rect{};
         if (purchaseWnd->GetButtonRectForQt(spec.id, &rect)) {
-            button.insert(QStringLiteral("x"), rect.left);
-            button.insert(QStringLiteral("y"), rect.top);
-            button.insert(QStringLiteral("width"), rect.right - rect.left);
-            button.insert(QStringLiteral("height"), rect.bottom - rect.top);
+            button.insert(QStringLiteral("x"), static_cast<int>(rect.left));
+            button.insert(QStringLiteral("y"), static_cast<int>(rect.top));
+            button.insert(QStringLiteral("width"), static_cast<int>(rect.right - rect.left));
+            button.insert(QStringLiteral("height"), static_cast<int>(rect.bottom - rect.top));
         }
         button.insert(QStringLiteral("label"), ToQString(spec.label));
         button.insert(QStringLiteral("hot"), purchaseWnd->GetHoverButton() == spec.id);
@@ -1087,10 +1116,10 @@ void PopulateItemSellState(QtUiState* state)
         QVariantMap button;
         RECT rect{};
         if (sellWnd->GetButtonRectForQt(spec.id, &rect)) {
-            button.insert(QStringLiteral("x"), rect.left);
-            button.insert(QStringLiteral("y"), rect.top);
-            button.insert(QStringLiteral("width"), rect.right - rect.left);
-            button.insert(QStringLiteral("height"), rect.bottom - rect.top);
+            button.insert(QStringLiteral("x"), static_cast<int>(rect.left));
+            button.insert(QStringLiteral("y"), static_cast<int>(rect.top));
+            button.insert(QStringLiteral("width"), static_cast<int>(rect.right - rect.left));
+            button.insert(QStringLiteral("height"), static_cast<int>(rect.bottom - rect.top));
         }
         button.insert(QStringLiteral("label"), ToQString(spec.label));
         button.insert(QStringLiteral("hot"), sellWnd->GetHoverButton() == spec.id);
@@ -1121,8 +1150,8 @@ void PopulateShortCutState(QtUiState* state)
     state->setShortCutPage(g_session.GetShortcutPage() + 1);
     state->setShortCutHoverSlot(shortCutWnd->GetHoverSlot());
 
-    QVariantList slots;
-    slots.reserve(kShortcutSlotsPerPage);
+    QVariantList shortcutSlots;
+    shortcutSlots.reserve(kShortcutSlotsPerPage);
     for (int slotIndex = 0; slotIndex < kShortcutSlotsPerPage; ++slotIndex) {
         QVariantMap slotEntry;
         slotEntry.insert(QStringLiteral("index"), slotIndex);
@@ -1140,9 +1169,9 @@ void PopulateShortCutState(QtUiState* state)
             slotEntry.insert(QStringLiteral("label"), QString());
             slotEntry.insert(QStringLiteral("count"), 0);
         }
-        slots.push_back(slotEntry);
+        shortcutSlots.push_back(slotEntry);
     }
-    state->setShortCutSlots(slots);
+    state->setShortCutSlots(shortcutSlots);
 }
 
 void PopulateBasicInfoState(QtUiState* state)
@@ -1485,10 +1514,10 @@ void PopulateInventoryState(QtUiState* state)
         }
         data.insert(QStringLiteral("tabs"), tabs);
 
-        QVariantList slots;
-        slots.reserve(static_cast<qsizetype>(display.slots.size()));
+        QVariantList itemSlots;
+        itemSlots.reserve(static_cast<qsizetype>(display.displaySlots.size()));
         QString hoveredTooltip;
-        for (const UIItemWnd::DisplaySlot& slot : display.slots) {
+        for (const UIItemWnd::DisplaySlot& slot : display.displaySlots) {
             QVariantMap entry;
             entry.insert(QStringLiteral("x"), slot.x);
             entry.insert(QStringLiteral("y"), slot.y);
@@ -1502,10 +1531,10 @@ void PopulateInventoryState(QtUiState* state)
             if (slot.hovered && hoveredTooltip.isEmpty()) {
                 hoveredTooltip = ToQString(slot.tooltip);
             }
-            slots.push_back(entry);
+            itemSlots.push_back(entry);
         }
 
-        data.insert(QStringLiteral("slots"), slots);
+        data.insert(QStringLiteral("slots"), itemSlots);
         data.insert(QStringLiteral("hoveredTooltip"), hoveredTooltip);
     } else {
         state->setInventoryTab(0);
@@ -1556,9 +1585,9 @@ void PopulateEquipState(QtUiState* state)
         }
         data.insert(QStringLiteral("systemButtons"), systemButtons);
 
-        QVariantList slots;
-        slots.reserve(static_cast<qsizetype>(display.slots.size()));
-        for (const UIEquipWnd::DisplaySlot& slot : display.slots) {
+        QVariantList equipSlots;
+        equipSlots.reserve(static_cast<qsizetype>(display.displaySlots.size()));
+        for (const UIEquipWnd::DisplaySlot& slot : display.displaySlots) {
             QVariantMap entry;
             entry.insert(QStringLiteral("x"), slot.x);
             entry.insert(QStringLiteral("y"), slot.y);
@@ -1567,9 +1596,9 @@ void PopulateEquipState(QtUiState* state)
             entry.insert(QStringLiteral("occupied"), slot.occupied);
             entry.insert(QStringLiteral("leftColumn"), slot.leftColumn);
             entry.insert(QStringLiteral("label"), ToQString(slot.label));
-            slots.push_back(entry);
+            equipSlots.push_back(entry);
         }
-        data.insert(QStringLiteral("slots"), slots);
+        data.insert(QStringLiteral("slots"), equipSlots);
     }
     state->setEquipData(data);
 }
@@ -1981,6 +2010,36 @@ QVariantMap MakeAnchor(const QString& text,
     return anchor;
 }
 
+QVariantMap MakeCenteredAnchor(const QString& text,
+    int centerX,
+    int topY,
+    const QString& background,
+    const QString& foreground = QStringLiteral("#ffffff"),
+    bool showBubble = true,
+    int fontPixelSize = 14,
+    bool bold = true)
+{
+    QFont font;
+    font.setPixelSize(fontPixelSize);
+    font.setBold(bold);
+    const QFontMetrics metrics(font);
+    const int textWidth = (std::max)(1, metrics.horizontalAdvance(text));
+    const int textHeight = (std::max)(1, metrics.height());
+    const int bubbleWidth = textWidth + (showBubble ? 12 : 0);
+    const int bubbleHeight = textHeight + (showBubble ? 8 : 0);
+
+    QVariantMap anchor;
+    anchor.insert(QStringLiteral("text"), text);
+    anchor.insert(QStringLiteral("x"), centerX - bubbleWidth / 2);
+    anchor.insert(QStringLiteral("y"), topY);
+    anchor.insert(QStringLiteral("background"), background);
+    anchor.insert(QStringLiteral("foreground"), foreground);
+    anchor.insert(QStringLiteral("showBubble"), showBubble);
+    anchor.insert(QStringLiteral("fontPixelSize"), fontPixelSize);
+    anchor.insert(QStringLiteral("bold"), bold);
+    return anchor;
+}
+
 } // namespace
 
 QtUiStateAdapter::QtUiStateAdapter()
@@ -2152,14 +2211,6 @@ bool QtUiStateAdapter::syncGameplay(CGameMode& mode,
 
         int labelX = 0;
         int labelY = 0;
-        if (mode.m_world->GetPlayerScreenLabel(viewMatrix, cameraLongitude, &labelX, &labelY)) {
-            QString playerName = ToQString(g_session.GetPlayerName());
-            if (playerName.isEmpty()) {
-                playerName = QStringLiteral("Player");
-            }
-            anchors.push_back(MakeAnchor(playerName, labelX, labelY, QStringLiteral("#c0813cf2")));
-        }
-
         CGameActor* hoveredActor = nullptr;
         if (mode.m_world->FindHoveredActorScreen(viewMatrix,
                 cameraLongitude,
@@ -2169,9 +2220,17 @@ bool QtUiStateAdapter::syncGameplay(CGameMode& mode,
                 &labelX,
                 &labelY)) {
             if (!hoveredActor || hoveredActor->m_gid != mode.m_lastLockOnMonGid) {
-                anchors.push_back(MakeAnchor(ToQString(ResolveActorLabel(mode, hoveredActor)),
-                    labelX,
-                    labelY,
+                int anchorX = labelX;
+                int anchorY = labelY + 4;
+                if (hoveredActor == mode.m_world->m_player || hoveredActor->m_gid == g_session.m_gid) {
+                    mode.m_world->GetPlayerScreenLabel(viewMatrix, cameraLongitude, &anchorX, &anchorY);
+                } else {
+                    mode.m_world->GetActorScreenMarker(viewMatrix, cameraLongitude, hoveredActor->m_gid, &anchorX, nullptr, &anchorY);
+                    anchorY += 4;
+                }
+                anchors.push_back(MakeCenteredAnchor(ToQString(ResolveActorLabel(mode, hoveredActor)),
+                    anchorX,
+                    anchorY,
                     QStringLiteral("#c0be185d"),
                     ResolveHoverForeground(hoveredActor)));
             }
@@ -2201,7 +2260,7 @@ bool QtUiStateAdapter::syncGameplay(CGameMode& mode,
                         &labelY)) {
                     const QString lockLabel = ToQString(ResolveActorLabel(mode, actorIt->second));
                     if (!lockLabel.isEmpty()) {
-                        anchors.push_back(MakeAnchor(QStringLiteral("▼"),
+                        anchors.push_back(MakeCenteredAnchor(QStringLiteral("▼"),
                             labelX - 6,
                             labelY - 24,
                             QStringLiteral("transparent"),
@@ -2209,9 +2268,9 @@ bool QtUiStateAdapter::syncGameplay(CGameMode& mode,
                             false,
                             20,
                             true));
-                        anchors.push_back(MakeAnchor(lockLabel,
+                        anchors.push_back(MakeCenteredAnchor(lockLabel,
                             labelX,
-                            labelY,
+                            labelY + 4,
                             QStringLiteral("#c05a1620"),
                             ResolveHoverForeground(actorIt->second)));
                     }

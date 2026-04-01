@@ -119,7 +119,7 @@ QFont BuildSelectCharFontFromHdc(HDC hdc)
         ? QString::fromLocal8Bit(logFont.lfFaceName)
         : QStringLiteral("MS Sans Serif");
     QFont font(family);
-    font.setPixelSize(logFont.lfHeight != 0 ? (std::max)(1, std::abs(logFont.lfHeight)) : 13);
+    font.setPixelSize(logFont.lfHeight != 0 ? (std::max)(1, static_cast<int>(std::abs(logFont.lfHeight))) : 13);
     font.setBold(logFont.lfWeight >= FW_BOLD);
     font.setStyleStrategy(QFont::NoAntialias);
     return font;
@@ -564,6 +564,62 @@ UISelectCharWnd::~UISelectCharWnd()
     ClearAssets();
 }
 
+void UISelectCharWnd::EnsureQtLayout()
+{
+    if (!g_hMainWnd) {
+        return;
+    }
+
+    RECT clientRect{};
+    if (!GetClientRect(g_hMainWnd, &clientRect)) {
+        return;
+    }
+
+    OnCreate(clientRect.right - clientRect.left, clientRect.bottom - clientRect.top);
+}
+
+bool UISelectCharWnd::GetQtBackgroundBitmap(const unsigned int** pixels, int* width, int* height)
+{
+    if (!pixels || !width || !height) {
+        return false;
+    }
+
+    *pixels = nullptr;
+    *width = 0;
+    *height = 0;
+
+    EnsureResourceCache();
+    if (!m_backgroundBmp.IsValid() || m_backgroundBmp.pixels.empty()) {
+        return false;
+    }
+
+    *pixels = m_backgroundBmp.pixels.data();
+    *width = m_backgroundBmp.width;
+    *height = m_backgroundBmp.height;
+    return true;
+}
+
+bool UISelectCharWnd::GetQtSelectedSlotBitmap(const unsigned int** pixels, int* width, int* height)
+{
+    if (!pixels || !width || !height) {
+        return false;
+    }
+
+    *pixels = nullptr;
+    *width = 0;
+    *height = 0;
+
+    EnsureResourceCache();
+    if (!m_slotSelectedBmp.IsValid() || m_slotSelectedBmp.pixels.empty()) {
+        return false;
+    }
+
+    *pixels = m_slotSelectedBmp.pixels.data();
+    *width = m_slotSelectedBmp.width;
+    *height = m_slotSelectedBmp.height;
+    return true;
+}
+
 int UISelectCharWnd::GetCurrentPageCount() const
 {
     return GetPageCount();
@@ -823,6 +879,26 @@ bool UISelectCharWnd::HandleQtMouseDown(int x, int y)
     if (x < m_x || y < m_y || x >= m_x + m_w || y >= m_y + m_h) {
         return false;
     }
+    return true;
+}
+
+bool UISelectCharWnd::HandleQtDoubleClick(int x, int y)
+{
+    if (!HandleQtMouseDown(x, y)) {
+        return false;
+    }
+
+    const int slot = HitSlot(x, y);
+    if (slot < 0) {
+        return false;
+    }
+
+    SetSelectedSlot(slot);
+    if (FindCharacterIndexForSlot(slot) < 0) {
+        return true;
+    }
+
+    SendMsg(nullptr, 6, 118, 0, 0);
     return true;
 }
 
@@ -1243,6 +1319,44 @@ void UISelectCharWnd::DrawPreview(HDC hdc, const PreviewState& preview) const
     DrawPreviewAccessoryMotion(hdc, preview, preview.actName[3], preview.sprName[3]);
     DrawPreviewAccessoryMotion(hdc, preview, preview.actName[4], preview.sprName[4]);
 }
+
+#if RO_ENABLE_QT6_UI
+void UISelectCharWnd::DrawQtPreviews(QImage* image)
+{
+    if (!image || image->isNull()) {
+        return;
+    }
+
+    ClampSelection();
+    RebuildVisiblePreviews();
+
+    ArgbDibSurface previewSurface;
+    if (!previewSurface.EnsureSize(image->width(), image->height()) || !previewSurface.GetPixels()) {
+        return;
+    }
+
+    std::fill_n(
+        previewSurface.GetPixels(),
+        static_cast<size_t>(previewSurface.GetWidth()) * static_cast<size_t>(previewSurface.GetHeight()),
+        0u);
+
+    POINT oldOrigin{};
+    SetViewportOrgEx(previewSurface.GetDC(), -m_x, -m_y, &oldOrigin);
+    for (const PreviewState& preview : m_visiblePreviews) {
+        DrawPreview(previewSurface.GetDC(), preview);
+    }
+    SetViewportOrgEx(previewSurface.GetDC(), oldOrigin.x, oldOrigin.y, nullptr);
+
+    const QImage overlay(
+        reinterpret_cast<const uchar*>(previewSurface.GetPixels()),
+        previewSurface.GetWidth(),
+        previewSurface.GetHeight(),
+        previewSurface.GetWidth() * static_cast<int>(sizeof(unsigned int)),
+        QImage::Format_ARGB32);
+    QPainter painter(image);
+    painter.drawImage(0, 0, overlay);
+}
+#endif
 
 int UISelectCharWnd::HitSlot(int x, int y) const
 {

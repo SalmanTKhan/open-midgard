@@ -27,6 +27,9 @@ public:
     void OnKeyDown(int virtualKey);
     void SetWallpaperName(const std::string& wallpaperName);
     bool HandleQtMouseDown(int x, int y);
+    void EnsureQtLayout();
+    bool GetQtPanelBitmap(const unsigned int** pixels, int* width, int* height);
+    void RefreshRememberedUserIdStorage();
     const char* GetLoginText() const;
     int GetPasswordLength() const;
     bool IsSaveAccountChecked() const;
@@ -61,4 +64,7 @@ private:
     UICheckBox* m_saveAccountCheck;
     std::string m_requestedWallpaper;
     std::string m_wallpaperPath;
+    bool m_hasRememberedUserIdSnapshot;
+    bool m_lastRememberedUserIdEnabled;
+    std::string m_lastRememberedUserId;
 };

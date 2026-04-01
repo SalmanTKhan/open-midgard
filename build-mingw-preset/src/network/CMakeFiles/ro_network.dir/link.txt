@@ -1,0 +1,2 @@
+C:\Qt\Tools\mingw1310_64\bin\ar.exe qc libro_network.a CMakeFiles/ro_network.dir/GronPacket.cpp.obj CMakeFiles/ro_network.dir/PacketQueue.cpp.obj CMakeFiles/ro_network.dir/Connection.cpp.obj
+C:\Qt\Tools\mingw1310_64\bin\ranlib.exe libro_network.a

@@ -2,8 +2,44 @@ import QtQuick 2.15
 
 Item {
     id: root
-    width: 1280
-    height: 720
+    width: parent ? parent.width : 1280
+    height: parent ? parent.height : 720
+    property bool loginCaretVisible: true
+
+    function makeCharPanelButtonsKey() {
+        var buttons = uiState && uiState.makeCharButtons ? uiState.makeCharButtons : []
+        var key = ""
+        for (var i = 0; i < buttons.length; ++i) {
+            key += (buttons[i].id || i) + ":" + (buttons[i].pressed ? "1" : "0") + ";"
+        }
+        return key
+    }
+
+    function charSelectPanelKey() {
+        var details = uiState && uiState.charSelectSelectedDetails ? uiState.charSelectSelectedDetails : {}
+        return details.imageRevision || "0"
+    }
+
+    Timer {
+        interval: 500
+        running: uiState.loginPanelVisible || uiState.makeCharVisible
+        repeat: true
+        onTriggered: root.loginCaretVisible = !root.loginCaretVisible
+    }
+    Image {
+        anchors.fill: parent
+        visible: source !== ""
+        fillMode: Image.Stretch
+        smooth: false
+        cache: false
+        source: (uiState.loginPanelVisible
+            || uiState.serverSelectVisible
+            || uiState.charSelectVisible
+            || uiState.makeCharVisible
+            || uiState.loadingVisible)
+            ? "image://openmidgard/wallpaper"
+            : ""
+    }
 
     Rectangle {
         anchors.left: parent.left
@@ -2460,36 +2496,77 @@ Item {
             }
 
             Repeater {
-                model: uiState.serverEntries
+                model: uiState.serverEntryLabels.length
 
                 delegate: Rectangle {
-                    required property var modelData
+                    readonly property bool isSelected: index === uiState.serverSelectedIndex
+                    readonly property bool isHovered: index === uiState.serverHoverIndex
+                    readonly property int statusWidth: 64
+                    readonly property int labelLeft: isSelected ? 14 : 8
+                    readonly property string labelText: {
+                        var base = String(uiState.serverEntryLabels[index] || "")
+                        if (base.length === 0) {
+                            base = "Server " + (index + 1)
+                        }
+                        return "#" + (index + 1) + " " + base
+                    }
+                    readonly property string detailText: {
+                        if (isSelected) {
+                            return "Selected"
+                        }
+                        var value = String(uiState.serverEntryDetails[index] || "")
+                        if (value.length > 0) {
+                            return value
+                        }
+                        return ""
+                    }
 
                     width: parent ? parent.width : 0
-                    height: 22
+                    height: 24
                     radius: 2
-                    color: index === uiState.serverSelectedIndex
-                        ? "#d6e0c6"
-                        : (index === uiState.serverHoverIndex ? "#e5e9e0" : "#faf8f2")
-                    border.width: 1
-                    border.color: "#a0a0a0"
+                    color: isSelected
+                        ? "#d6e7b8"
+                        : (isHovered ? "#ecefe5" : "#faf8f2")
+                    border.width: isSelected ? 2 : 1
+                    border.color: isSelected ? "#5e7f2b" : "#a0a0a0"
+                    clip: true
 
-                    Text {
+                    Rectangle {
                         anchors.left: parent.left
-                        anchors.leftMargin: 6
-                        anchors.verticalCenter: parent.verticalCenter
-                        text: modelData.label
-                        color: "#181818"
-                        font.pixelSize: 12
+                        anchors.top: parent.top
+                        anchors.bottom: parent.bottom
+                        width: isSelected ? 8 : 0
+                        color: "#6f9630"
+                        visible: isSelected
                     }
 
                     Text {
-                        anchors.right: parent.right
-                        anchors.rightMargin: 8
+                        id: serverLabel
+                        x: labelLeft
+                        width: Math.max(1, parent.width - labelLeft - statusWidth - 12)
                         anchors.verticalCenter: parent.verticalCenter
-                        text: modelData.detail
-                        color: "#606060"
+                        text: labelText
+                        color: "#181818"
                         font.pixelSize: 12
+                        font.bold: isSelected
+                        elide: Text.ElideRight
+                        textFormat: Text.PlainText
+                        z: 1
+                    }
+
+                    Text {
+                        id: serverStatus
+                        x: parent.width - statusWidth - 8
+                        width: statusWidth
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: detailText
+                        color: isSelected ? "#3f6111" : "#606060"
+                        font.pixelSize: 12
+                        font.bold: isSelected
+                        textFormat: Text.PlainText
+                        horizontalAlignment: Text.AlignRight
+                        elide: Text.ElideRight
+                        z: 1
                     }
                 }
             }
@@ -2501,18 +2578,16 @@ Item {
         y: uiState.loginPanelY
         width: uiState.loginPanelWidth
         height: uiState.loginPanelHeight
-        color: "#ebe5dc"
-        border.width: 1
-        border.color: "#303030"
+        color: "transparent"
+        border.width: 0
         visible: uiState.loginPanelVisible
 
-        Text {
-            x: 14
-            y: 10
-            text: uiState.loginPanelLabels.title || ""
-            color: "#303030"
-            font.pixelSize: 16
-            font.bold: true
+        Image {
+            anchors.fill: parent
+            fillMode: Image.Stretch
+            smooth: false
+            cache: false
+            source: parent.visible ? "image://openmidgard/loginpanel" : ""
         }
 
         Rectangle {
@@ -2529,7 +2604,7 @@ Item {
             x: 98
             y: 31
             width: 112
-            text: uiState.loginUserId
+            text: uiState.loginUserId + (!uiState.loginPasswordFocused && root.loginCaretVisible ? "|" : "")
             color: "#202020"
             font.pixelSize: 12
             elide: Text.ElideRight
@@ -2549,7 +2624,7 @@ Item {
             x: 98
             y: 63
             width: 112
-            text: uiState.loginPasswordMask
+            text: uiState.loginPasswordMask + (uiState.loginPasswordFocused && root.loginCaretVisible ? "|" : "")
             color: "#202020"
             font.pixelSize: 12
             elide: Text.ElideRight
@@ -2560,9 +2635,17 @@ Item {
             y: 33
             width: 16
             height: 16
-            color: uiState.loginSaveAccountChecked ? "#6e8b3d" : "#ffffff"
+            color: "#ffffff"
             border.width: 1
             border.color: "#404040"
+
+            Text {
+                anchors.centerIn: parent
+                text: uiState.loginSaveAccountChecked ? "X" : ""
+                color: "#202020"
+                font.pixelSize: 11
+                font.bold: true
+            }
         }
 
         Text {
@@ -2603,47 +2686,38 @@ Item {
         y: uiState.charSelectPanelY
         width: uiState.charSelectPanelWidth
         height: uiState.charSelectPanelHeight
-        color: "#f5efe6"
-        border.width: 1
-        border.color: "#6a4c34"
+        color: "transparent"
+        border.width: 0
         visible: uiState.charSelectVisible
+
+        Image {
+            anchors.fill: parent
+            fillMode: Image.Stretch
+            smooth: false
+            cache: false
+            source: parent.visible ? ("image://openmidgard/charselectpanel?rev=" + root.charSelectPanelKey()) : ""
+        }
 
         Repeater {
             model: uiState.charSelectSlots
 
-            delegate: Rectangle {
+            delegate: Item {
                 required property var modelData
                 x: modelData.x - uiState.charSelectPanelX
                 y: modelData.y - uiState.charSelectPanelY
                 width: modelData.width
                 height: modelData.height
-                color: modelData.selected ? "#e8d9b9" : "#fffaf2"
-                border.width: 2
-                border.color: modelData.selected ? "#9a6d38" : "#b89d79"
 
-                Column {
-                    anchors.fill: parent
-                    anchors.margins: 12
-                    spacing: 8
-
-                    Text {
-                        text: modelData.displayName || ""
-                        color: "#50321e"
-                        font.pixelSize: 16
-                        font.bold: true
-                    }
-
-                    Text {
-                        text: modelData.occupied ? modelData.job : ""
-                        color: "#704c30"
-                        font.pixelSize: 13
-                    }
-
-                    Text {
-                        text: modelData.levelText || ""
-                        color: "#704c30"
-                        font.pixelSize: 13
-                    }
+                Image {
+                    x: 0
+                    y: 0
+                    width: implicitWidth
+                    height: implicitHeight
+                    fillMode: Image.Pad
+                    smooth: false
+                    cache: false
+                    visible: modelData.selected
+                    source: visible ? "image://openmidgard/charselectslotselected" : ""
                 }
             }
         }
@@ -2658,8 +2732,8 @@ Item {
                 width: modelData.width || 0
                 height: modelData.height || 0
                 text: modelData.text || ""
-                color: "#50321e"
-                font.pixelSize: 13
+                color: "#4b4b4b"
+                font.pixelSize: 11
             }
         }
 
@@ -2674,13 +2748,12 @@ Item {
                 height: modelData.height || 0
                 visible: modelData.visible || false
                 color: "transparent"
-                border.width: 1
-                border.color: "#786044"
+                border.width: 0
 
                 Text {
                     anchors.centerIn: parent
                     text: modelData.label || ""
-                    color: "#50321e"
+                    color: "#5a5448"
                     font.pixelSize: 18
                     font.bold: true
                 }
@@ -2718,10 +2791,21 @@ Item {
         y: uiState.makeCharPanelY
         width: uiState.makeCharPanelWidth
         height: uiState.makeCharPanelHeight
-        color: "#f5efe6"
-        border.width: 1
-        border.color: "#6a4c34"
+        color: "transparent"
+        border.width: 0
         visible: uiState.makeCharVisible
+
+        Image {
+            anchors.fill: parent
+            fillMode: Image.Stretch
+            smooth: false
+            cache: false
+            source: parent.visible
+                ? ("image://openmidgard/makecharpanel?rev="
+                    + ((uiState.makeCharPanelData && uiState.makeCharPanelData.imageRevision) || 0)
+                    + "&buttons=" + root.makeCharPanelButtonsKey())
+                : ""
+        }
 
         Rectangle {
             x: 62
@@ -2737,104 +2821,36 @@ Item {
             x: 68
             y: 246
             width: 88
-            text: uiState.makeCharName
+            text: uiState.makeCharName + (uiState.makeCharNameFocused && root.loginCaretVisible ? "|" : "")
             color: "#202020"
             font.pixelSize: 12
             elide: Text.ElideRight
         }
 
-        Rectangle {
-            x: 30
-            y: 72
-            width: 130
-            height: 170
-            radius: 8
-            color: "#fffaf2"
-            border.width: 1
-            border.color: "#b89d79"
-
-            Column {
-                anchors.centerIn: parent
-                spacing: 8
-
-                Text {
-                    text: uiState.makeCharPanelData.previewTitle || ""
-                    color: "#50321e"
-                    font.pixelSize: 18
-                    font.bold: true
-                }
-
-                Text {
-                    text: uiState.makeCharPanelData.hairText || ""
-                    color: "#704c30"
-                    font.pixelSize: 13
-                }
-
-                Text {
-                    text: uiState.makeCharPanelData.colorText || ""
-                    color: "#704c30"
-                    font.pixelSize: 13
-                }
-            }
-        }
-
-        Rectangle {
-            x: 190
-            y: 40
-            width: 190
-            height: 240
-            radius: 12
-            color: "#fffaf2"
-            border.width: 1
-            border.color: "#b89d79"
-        }
-
         Repeater {
             model: uiState.makeCharStatFields
 
-            delegate: Row {
+            delegate: Text {
                 required property var modelData
                 x: (modelData.x || 0) - uiState.makeCharPanelX
                 y: (modelData.y || 0) - uiState.makeCharPanelY
-                spacing: 8
-
-                Text {
-                    width: 24
-                    text: modelData.label || ""
-                    color: "#50321e"
-                    font.pixelSize: 12
-                    font.bold: true
-                }
-
-                Text {
-                    text: modelData.value !== undefined ? modelData.value : ""
-                    color: "#3c2414"
-                    font.pixelSize: 12
-                }
+                width: 30
+                text: modelData.value !== undefined ? modelData.value : ""
+                color: "#3c2414"
+                font.pixelSize: 12
+                horizontalAlignment: Text.AlignHCenter
             }
         }
 
         Repeater {
             model: uiState.makeCharButtons
 
-            delegate: Rectangle {
+            delegate: Item {
                 required property var modelData
                 x: (modelData.x || 0) - uiState.makeCharPanelX
                 y: (modelData.y || 0) - uiState.makeCharPanelY
                 width: modelData.width || 0
                 height: modelData.height || 0
-                radius: 3
-                color: "#d8d0c4"
-                border.width: 1
-                border.color: "#6f6558"
-
-                Text {
-                    anchors.centerIn: parent
-                    text: modelData.label || ""
-                    color: "#202020"
-                    font.pixelSize: 11
-                    font.bold: true
-                }
             }
         }
     }

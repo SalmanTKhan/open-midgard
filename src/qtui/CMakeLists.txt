@@ -1,5 +1,3 @@
-find_package(Qt6 REQUIRED COMPONENTS Core Gui GuiPrivate Qml Quick)
-
 add_library(ro_qtui STATIC
     QtUiRuntime.h
     QtUiSpikeBridge.h

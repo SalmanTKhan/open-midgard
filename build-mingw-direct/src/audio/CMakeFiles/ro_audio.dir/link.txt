@@ -1,0 +1,2 @@
+C:\Qt\Tools\mingw1310_64\bin\ar.exe qc libro_audio.a CMakeFiles/ro_audio.dir/Audio.cpp.obj CMakeFiles/ro_audio.dir/MilesAudioBackend.cpp.obj CMakeFiles/ro_audio.dir/MiniaudioBackend.cpp.obj CMakeFiles/ro_audio.dir/Video.cpp.obj
+C:\Qt\Tools\mingw1310_64\bin\ranlib.exe libro_audio.a

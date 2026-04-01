@@ -148,6 +148,7 @@ void LoadRememberedUserId(std::string* userId, bool* enabled)
 
     DWORD enabledValue = 0;
     DWORD enabledSize = sizeof(enabledValue);
+    bool hasEnabledValue = false;
     if (enabled && RegQueryValueExA(
             key,
             kRememberUserIdEnabledValue,
@@ -156,8 +157,10 @@ void LoadRememberedUserId(std::string* userId, bool* enabled)
             reinterpret_cast<BYTE*>(&enabledValue),
             &enabledSize) == ERROR_SUCCESS) {
         *enabled = (enabledValue != 0);
+        hasEnabledValue = true;
     }
 
+    bool hasUserIdValue = false;
     if (userId) {
         char buffer[64] = {};
         DWORD size = sizeof(buffer);
@@ -169,7 +172,12 @@ void LoadRememberedUserId(std::string* userId, bool* enabled)
                 reinterpret_cast<BYTE*>(buffer),
                 &size) == ERROR_SUCCESS) {
             *userId = buffer;
+            hasUserIdValue = true;
         }
+    }
+
+    if (enabled && hasUserIdValue && !hasEnabledValue) {
+        *enabled = true;
     }
 
     RegCloseKey(key);
@@ -406,7 +414,9 @@ UILoginWnd::UILoginWnd()
       m_login(nullptr),
       m_password(nullptr),
       m_cancelButton(nullptr),
-        m_saveAccountCheck(nullptr) {
+        m_saveAccountCheck(nullptr),
+      m_hasRememberedUserIdSnapshot(false),
+      m_lastRememberedUserIdEnabled(false) {
     m_uiAssets.fill(shopui::BitmapPixels{});
 }
 
@@ -537,6 +547,58 @@ bool UILoginWnd::HandleQtMouseDown(int x, int y)
     return false;
 }
 
+void UILoginWnd::EnsureQtLayout()
+{
+    if (!g_hMainWnd) {
+        return;
+    }
+
+    RECT clientRect{};
+    if (!GetClientRect(g_hMainWnd, &clientRect)) {
+        return;
+    }
+
+    OnCreate(clientRect.right - clientRect.left, clientRect.bottom - clientRect.top);
+}
+
+bool UILoginWnd::GetQtPanelBitmap(const unsigned int** pixels, int* width, int* height)
+{
+    if (!pixels || !width || !height) {
+        return false;
+    }
+
+    *pixels = nullptr;
+    *width = 0;
+    *height = 0;
+
+    EnsureResourceCache();
+    const shopui::BitmapPixels& panel = m_uiAssets[UiPanel];
+    if (!panel.IsValid() || panel.pixels.empty()) {
+        return false;
+    }
+
+    *pixels = panel.pixels.data();
+    *width = panel.width;
+    *height = panel.height;
+    return true;
+}
+
+void UILoginWnd::RefreshRememberedUserIdStorage()
+{
+    const bool enabled = IsSaveAccountChecked();
+    const std::string userId = m_login ? m_login->GetText() : "";
+    if (m_hasRememberedUserIdSnapshot
+        && m_lastRememberedUserIdEnabled == enabled
+        && m_lastRememberedUserId == userId) {
+        return;
+    }
+
+    StoreRememberedUserId(userId.c_str(), enabled);
+    m_hasRememberedUserIdSnapshot = true;
+    m_lastRememberedUserIdEnabled = enabled;
+    m_lastRememberedUserId = userId;
+}
+
 void UILoginWnd::OnCreate(int cx, int cy)
 {
     if (m_controlsCreated) {
@@ -614,6 +676,9 @@ void UILoginWnd::OnCreate(int cx, int cy)
     if (rememberUserId && !rememberedUserId.empty()) {
         m_login->SetText(rememberedUserId.c_str());
     }
+    m_hasRememberedUserIdSnapshot = true;
+    m_lastRememberedUserIdEnabled = rememberUserId;
+    m_lastRememberedUserId = rememberedUserId;
 
     if (!IsQtUiRuntimeEnabled()) {
         m_saveAccountCheck = new UICheckBox();

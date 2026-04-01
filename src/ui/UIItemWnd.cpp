@@ -250,7 +250,7 @@ QFont BuildItemWindowFontFromHdc(HDC hdc, const char* fallbackFamily = "MS Sans 
         ? QString::fromLocal8Bit(logFont.lfFaceName)
         : QString::fromLocal8Bit(fallbackFamily);
     QFont font(family);
-    font.setPixelSize(logFont.lfHeight != 0 ? (std::max)(1, std::abs(logFont.lfHeight)) : fallbackPixelSize);
+    font.setPixelSize(logFont.lfHeight != 0 ? (std::max)(1, static_cast<int>(std::abs(logFont.lfHeight))) : fallbackPixelSize);
     font.setBold(logFont.lfWeight >= FW_BOLD);
     font.setStyleStrategy(QFont::NoAntialias);
     return font;
@@ -1075,7 +1075,7 @@ bool UIItemWnd::GetDisplayDataForQt(DisplayData* outData) const
         const int firstIndex = m_viewOffset * columns;
         const int slotCount = columns * rows;
 
-        data.slots.reserve(static_cast<size_t>(slotCount));
+        data.displaySlots.reserve(static_cast<size_t>(slotCount));
         for (int drawIndex = 0; drawIndex < slotCount; ++drawIndex) {
             const int itemIndex = firstIndex + drawIndex;
             const int column = drawIndex % columns;
@@ -1101,7 +1101,7 @@ bool UIItemWnd::GetDisplayDataForQt(DisplayData* outData) const
                 slot.label = BuildShortItemLabel(*drawItem);
                 slot.tooltip = BuildHoverTooltipText(*drawItem);
             }
-            data.slots.push_back(slot);
+            data.displaySlots.push_back(slot);
         }
     }
 

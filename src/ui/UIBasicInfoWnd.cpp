@@ -102,7 +102,7 @@ QFont BuildBasicInfoFontFromHdc(HDC hdc, const char* fallbackFamily = "MS Sans S
         ? QString::fromLocal8Bit(logFont.lfFaceName)
         : QString::fromLocal8Bit(fallbackFamily);
     QFont font(family);
-    font.setPixelSize(logFont.lfHeight != 0 ? (std::max)(1, std::abs(logFont.lfHeight)) : fallbackPixelSize);
+    font.setPixelSize(logFont.lfHeight != 0 ? (std::max)(1, static_cast<int>(std::abs(logFont.lfHeight))) : fallbackPixelSize);
     font.setBold(logFont.lfWeight >= FW_BOLD);
     font.setStyleStrategy(QFont::NoAntialias);
     return font;

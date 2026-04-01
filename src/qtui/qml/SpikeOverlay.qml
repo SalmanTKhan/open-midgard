@@ -2,8 +2,8 @@ import QtQuick 2.15
 
 Item {
     id: root
-    width: 1280
-    height: 720
+    width: parent ? parent.width : 1280
+    height: parent ? parent.height : 720
 
     Rectangle {
         anchors.left: parent.left

@@ -20,6 +20,7 @@
 #include "res/Sprite.h"
 #include "res/WorldRes.h"
 #include "session/Session.h"
+#include "ui/UIMinimapWnd.h"
 #include "ui/UIWindow.h"
 #include "ui/UIWindowMgr.h"
 #include "render/DrawUtil.h"
@@ -271,6 +272,25 @@ void ConvertOverlayComposeBitsToAlpha(void* composeBits, int width, int height)
 }
 
 struct BootstrapWorldCache;
+COLORREF ResolveHoverNameColor(const CGameActor* actor);
+float ClampUnit(float value);
+const CAttrCell* GetAttrCellSafe(const SceneGraphNode& scene, int x, int y);
+float GetTerrainCornerHeight(const SceneGraphNode& scene, int x, int y, int corner);
+float GetTerrainAverageHeightAt(const SceneGraphNode& scene, int x, int y);
+COLORREF GetGroundTextureColor(const SceneGraphNode& scene, const BootstrapWorldCache& cache, int x, int y);
+COLORREF ColorFromVector(const vector3d& value, float scale);
+COLORREF BlendColor(COLORREF a, COLORREF b, float amount);
+COLORREF MultiplyColor(COLORREF color, float brightness);
+COLORREF ModulateColor(COLORREF color, const vector3d& lightColor);
+vector3d ComputeLightingColor(const vector3d& lightDir, const vector3d& diffuseCol, const vector3d& ambientCol, const vector3d& normal);
+vector3d ComputeCellNormal(float h1, float h2, float h3, float h4);
+POINT ProjectWorldPoint(const RECT& viewRect,
+    float localX,
+    float localY,
+    float localHeight,
+    float tileWidth,
+    float tileHeight,
+    float heightScale);
 
 #if RO_ENABLE_QT6_UI
 QFont BuildOverlayLabelFont()
@@ -7932,7 +7952,9 @@ int  CGameMode::OnRun() {
             g_overlayMovePerfStats.queueMsgMs += QpcNowMs() - msgStartMs;
         }
         QueuePlayerVitalsOverlayQuad(*this);
-        QueueHoverLabelsOverlayQuad(*this);
+        if (!IsQtUiRuntimeEnabled()) {
+            QueueHoverLabelsOverlayQuad(*this);
+        }
         const double cursorQueueStartMs = trackMovePerfFrame ? QpcNowMs() : 0.0;
         queuedCursorOverlayFrame = QueueCursorOverlayQuad(m_cursorActNum, m_mouseAnimStartTick);
         if (trackMovePerfFrame) {

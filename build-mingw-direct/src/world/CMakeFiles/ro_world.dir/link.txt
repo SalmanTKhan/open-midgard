@@ -1,0 +1,2 @@
+C:\Qt\Tools\mingw1310_64\bin\ar.exe qc libro_world.a CMakeFiles/ro_world.dir/3dActor.cpp.obj CMakeFiles/ro_world.dir/World.cpp.obj CMakeFiles/ro_world.dir/GameActor.cpp.obj CMakeFiles/ro_world.dir/RagEffect.cpp.obj CMakeFiles/ro_world.dir/MsgEffect.cpp.obj CMakeFiles/ro_world.dir/Granny.cpp.obj
+C:\Qt\Tools\mingw1310_64\bin\ranlib.exe libro_world.a

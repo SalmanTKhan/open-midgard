@@ -1,0 +1,25 @@
+{
+	"BUILD_DIR" : "D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/build-mingw-direct/src/qtui/ro_qtui_autogen",
+	"CMAKE_BINARY_DIR" : "D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/build-mingw-direct",
+	"CMAKE_CURRENT_BINARY_DIR" : "D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/build-mingw-direct/src/qtui",
+	"CMAKE_CURRENT_SOURCE_DIR" : "D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/qtui",
+	"CMAKE_SOURCE_DIR" : "D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release",
+	"CROSS_CONFIG" : false,
+	"GENERATOR" : "MinGW Makefiles",
+	"INCLUDE_DIR" : "D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/build-mingw-direct/src/qtui/ro_qtui_autogen/include",
+	"INPUTS" : 
+	[
+		"D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/qtui/qml/SpikeOverlay.qml"
+	],
+	"LOCK_FILE" : "D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/build-mingw-direct/src/qtui/CMakeFiles/ro_qtui_autogen.dir/AutoRcc_QtUiSpikeAssets_EWIEGA46WW_Lock.lock",
+	"MULTI_CONFIG" : false,
+	"OPTIONS" : [ "--no-zstd", "-name", "QtUiSpikeAssets" ],
+	"OUTPUT_CHECKSUM" : "EWIEGA46WW",
+	"OUTPUT_NAME" : "qrc_QtUiSpikeAssets.cpp",
+	"RCC_EXECUTABLE" : "C:/Qt/6.11.0/mingw_64/bin/rcc.exe",
+	"RCC_LIST_OPTIONS" : [ "--list" ],
+	"SETTINGS_FILE" : "D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/build-mingw-direct/src/qtui/CMakeFiles/ro_qtui_autogen.dir/AutoRcc_QtUiSpikeAssets_EWIEGA46WW_Used.txt",
+	"SOURCE" : "D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/qtui/QtUiSpikeAssets.qrc",
+	"USE_BETTER_GRAPH" : true,
+	"VERBOSITY" : 0
+}

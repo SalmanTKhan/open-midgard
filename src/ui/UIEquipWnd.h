@@ -34,7 +34,7 @@ public:
     };
 
     struct DisplayData {
-        std::vector<DisplaySlot> slots;
+        std::vector<DisplaySlot> displaySlots;
     };
 
     UIEquipWnd();
