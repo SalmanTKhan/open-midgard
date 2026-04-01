@@ -554,6 +554,81 @@ bool UISelectCharWnd::GetSelectedCharacterDisplay(SelectedCharacterDisplay* out)
     return true;
 }
 
+int UISelectCharWnd::GetQtActionButtonCount() const
+{
+    return 4;
+}
+
+bool UISelectCharWnd::GetQtActionButtonDisplayForQt(int index, QtButtonDisplay* out) const
+{
+    if (!out || index < 0 || index >= GetQtActionButtonCount()) {
+        return false;
+    }
+
+    const bool selectedEmpty = (FindCharacterIndexForSlot(m_selectedSlot) < 0);
+    switch (index) {
+    case 0:
+        out->id = 145;
+        out->x = m_x + kSelectCharDeleteX;
+        out->y = m_y + kSelectCharButtonY;
+        out->width = kSelectCharDeleteW;
+        out->height = kSelectCharButtonHeight;
+        out->label = "Delete";
+        out->visible = !selectedEmpty;
+        return true;
+    case 1:
+        out->id = 218;
+        out->x = m_x + kSelectCharChargeX;
+        out->y = m_y + kSelectCharButtonY;
+        out->width = kSelectCharChargeW;
+        out->height = kSelectCharButtonHeight;
+        out->label = "Charge";
+        out->visible = true;
+        return true;
+    case 2:
+        out->id = selectedEmpty ? 137 : 118;
+        out->x = m_x + kSelectCharPrimaryX;
+        out->y = m_y + kSelectCharButtonY;
+        out->width = kSelectCharPrimaryW;
+        out->height = kSelectCharButtonHeight;
+        out->label = selectedEmpty ? "Make" : "OK";
+        out->visible = true;
+        return true;
+    case 3:
+        out->id = 119;
+        out->x = m_x + kSelectCharCancelX;
+        out->y = m_y + kSelectCharButtonY;
+        out->width = kSelectCharCancelW;
+        out->height = kSelectCharButtonHeight;
+        out->label = "Cancel";
+        out->visible = true;
+        return true;
+    default:
+        return false;
+    }
+}
+
+int UISelectCharWnd::GetQtPageButtonCount() const
+{
+    return 2;
+}
+
+bool UISelectCharWnd::GetQtPageButtonDisplayForQt(int index, QtButtonDisplay* out) const
+{
+    if (!out || index < 0 || index >= GetQtPageButtonCount()) {
+        return false;
+    }
+
+    out->id = index == 0 ? -1 : 1;
+    out->x = m_x + (index == 0 ? kPageButtonXPrev : kPageButtonXNext);
+    out->y = m_y + kPageButtonY;
+    out->width = kPageButtonWidth;
+    out->height = kPageButtonHeight;
+    out->label = index == 0 ? "<" : ">";
+    out->visible = GetPageCount() > 1;
+    return true;
+}
+
 bool UISelectCharWnd::HandleQtMouseDown(int x, int y)
 {
     if (!g_hMainWnd || m_show == 0) {

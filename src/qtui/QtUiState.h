@@ -40,6 +40,8 @@ class QtUiState : public QObject {
     Q_PROPERTY(int charSelectPageCount READ charSelectPageCount NOTIFY charSelectPageChanged)
     Q_PROPERTY(QVariantList charSelectSlots READ charSelectSlots NOTIFY charSelectSlotsChanged)
     Q_PROPERTY(QVariantMap charSelectSelectedDetails READ charSelectSelectedDetails NOTIFY charSelectSelectedDetailsChanged)
+    Q_PROPERTY(QVariantList charSelectPageButtons READ charSelectPageButtons NOTIFY charSelectPageButtonsChanged)
+    Q_PROPERTY(QVariantList charSelectActionButtons READ charSelectActionButtons NOTIFY charSelectActionButtonsChanged)
     Q_PROPERTY(bool makeCharVisible READ makeCharVisible NOTIFY makeCharVisibleChanged)
     Q_PROPERTY(int makeCharPanelX READ makeCharPanelX NOTIFY makeCharPanelGeometryChanged)
     Q_PROPERTY(int makeCharPanelY READ makeCharPanelY NOTIFY makeCharPanelGeometryChanged)
@@ -235,6 +237,8 @@ public:
     int charSelectPageCount() const { return m_charSelectPageCount; }
     const QVariantList& charSelectSlots() const { return m_charSelectSlots; }
     const QVariantMap& charSelectSelectedDetails() const { return m_charSelectSelectedDetails; }
+    const QVariantList& charSelectPageButtons() const { return m_charSelectPageButtons; }
+    const QVariantList& charSelectActionButtons() const { return m_charSelectActionButtons; }
     bool makeCharVisible() const { return m_makeCharVisible; }
     int makeCharPanelX() const { return m_makeCharPanelX; }
     int makeCharPanelY() const { return m_makeCharPanelY; }
@@ -570,6 +574,22 @@ public:
     void setCharSelectSelectedDetails(const QVariantMap& value) {
         m_charSelectSelectedDetails = value;
         emit charSelectSelectedDetailsChanged();
+    }
+
+    void setCharSelectPageButtons(const QVariantList& value) {
+        if (m_charSelectPageButtons == value) {
+            return;
+        }
+        m_charSelectPageButtons = value;
+        emit charSelectPageButtonsChanged();
+    }
+
+    void setCharSelectActionButtons(const QVariantList& value) {
+        if (m_charSelectActionButtons == value) {
+            return;
+        }
+        m_charSelectActionButtons = value;
+        emit charSelectActionButtonsChanged();
     }
 
     void setMakeCharVisible(bool value) {
@@ -1324,6 +1344,8 @@ signals:
     void charSelectPageChanged();
     void charSelectSlotsChanged();
     void charSelectSelectedDetailsChanged();
+    void charSelectPageButtonsChanged();
+    void charSelectActionButtonsChanged();
     void makeCharVisibleChanged();
     void makeCharPanelGeometryChanged();
     void makeCharDataChanged();
@@ -1445,6 +1467,8 @@ private:
     int m_charSelectPageCount = 0;
     QVariantList m_charSelectSlots;
     QVariantMap m_charSelectSelectedDetails;
+    QVariantList m_charSelectPageButtons;
+    QVariantList m_charSelectActionButtons;
     bool m_makeCharVisible = false;
     int m_makeCharPanelX = 0;
     int m_makeCharPanelY = 0;

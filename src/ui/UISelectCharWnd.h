@@ -41,6 +41,16 @@ public:
         int luk = 0;
     };
 
+    struct QtButtonDisplay {
+        int id = 0;
+        int x = 0;
+        int y = 0;
+        int width = 0;
+        int height = 0;
+        std::string label;
+        bool visible = true;
+    };
+
     UISelectCharWnd();
     ~UISelectCharWnd() override;
 
@@ -76,6 +86,10 @@ public:
     int GetCurrentPageCount() const;
     bool GetVisibleSlotDisplay(int visibleIndex, VisibleSlotDisplay* out) const;
     bool GetSelectedCharacterDisplay(SelectedCharacterDisplay* out) const;
+    int GetQtActionButtonCount() const;
+    bool GetQtActionButtonDisplayForQt(int index, QtButtonDisplay* out) const;
+    int GetQtPageButtonCount() const;
+    bool GetQtPageButtonDisplayForQt(int index, QtButtonDisplay* out) const;
 
 private:
     int GetCharacterCount() const;

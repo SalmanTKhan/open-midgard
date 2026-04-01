@@ -2900,95 +2900,48 @@ Item {
             }
         }
 
-        Rectangle {
-            x: 44
-            y: 110
-            width: 12
-            height: 48
-            visible: uiState.charSelectPageCount > 1
-            color: "transparent"
-            border.width: 1
-            border.color: "#786044"
+        Repeater {
+            model: uiState.charSelectPageButtons
 
-            Text {
-                anchors.centerIn: parent
-                text: "<"
-                color: "#50321e"
-                font.pixelSize: 18
-                font.bold: true
-            }
-        }
+            delegate: Rectangle {
+                required property var modelData
+                x: (modelData.x || 0) - uiState.charSelectPanelX
+                y: (modelData.y || 0) - uiState.charSelectPanelY
+                width: modelData.width || 0
+                height: modelData.height || 0
+                visible: modelData.visible || false
+                color: "transparent"
+                border.width: 1
+                border.color: "#786044"
 
-        Rectangle {
-            x: 520
-            y: 110
-            width: 12
-            height: 48
-            visible: uiState.charSelectPageCount > 1
-            color: "transparent"
-            border.width: 1
-            border.color: "#786044"
-
-            Text {
-                anchors.centerIn: parent
-                text: ">"
-                color: "#50321e"
-                font.pixelSize: 18
-                font.bold: true
+                Text {
+                    anchors.centerIn: parent
+                    text: modelData.label || ""
+                    color: "#50321e"
+                    font.pixelSize: 18
+                    font.bold: true
+                }
             }
         }
 
         Repeater {
-            model: [
-                {
-                    x: 5,
-                    y: 318,
-                    w: 80,
-                    h: 24,
-                    text: "Delete",
-                    visible: (uiState.charSelectSelectedDetails.name || "").length > 0
-                },
-                {
-                    x: 314,
-                    y: 318,
-                    w: 85,
-                    h: 24,
-                    text: "Charge",
-                    visible: true
-                },
-                {
-                    x: 404,
-                    y: 318,
-                    w: 80,
-                    h: 24,
-                    text: (uiState.charSelectSelectedDetails.name || "").length > 0 ? "OK" : "Make",
-                    visible: true
-                },
-                {
-                    x: 484,
-                    y: 318,
-                    w: 90,
-                    h: 24,
-                    text: "Cancel",
-                    visible: true
-                }
-            ]
+            model: uiState.charSelectActionButtons
 
             delegate: Rectangle {
                 required property var modelData
-                x: modelData.x
-                y: modelData.y
-                width: modelData.w
-                height: modelData.h
+                x: (modelData.x || 0) - uiState.charSelectPanelX
+                y: (modelData.y || 0) - uiState.charSelectPanelY
+                width: modelData.width || 0
+                height: modelData.height || 0
                 radius: 3
                 color: "#d8d0c4"
                 border.width: 1
                 border.color: "#6f6558"
-                visible: modelData.visible
+                visible: modelData.visible || false
 
                 Text {
                     anchors.centerIn: parent
-                    text: modelData.text
+                    text: modelData.label || ""
                     color: "#202020"
                     font.pixelSize: 11
                     font.bold: true

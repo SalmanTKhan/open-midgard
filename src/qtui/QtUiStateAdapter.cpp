@@ -376,6 +376,8 @@ void PopulateCharSelectState(QtUiState* state)
         state->setCharSelectPageState(0, 0);
         state->setCharSelectSlots(QVariantList{});
         state->setCharSelectSelectedDetails(QVariantMap{});
+        state->setCharSelectPageButtons(QVariantList{});
+        state->setCharSelectActionButtons(QVariantList{});
         return;
     }
 
@@ -427,6 +429,46 @@ void PopulateCharSelectState(QtUiState* state)
         details.insert(QStringLiteral("luk"), selected.luk);
     }
     state->setCharSelectSelectedDetails(details);
+
+    QVariantList pageButtons;
+    pageButtons.reserve(selectCharWnd->GetQtPageButtonCount());
+    for (int index = 0; index < selectCharWnd->GetQtPageButtonCount(); ++index) {
+        UISelectCharWnd::QtButtonDisplay display{};
+        if (!selectCharWnd->GetQtPageButtonDisplayForQt(index, &display)) {
+            continue;
+        }
+
+        QVariantMap button;
+        button.insert(QStringLiteral("id"), display.id);
+        button.insert(QStringLiteral("x"), display.x);
+        button.insert(QStringLiteral("y"), display.y);
+        button.insert(QStringLiteral("width"), display.width);
+        button.insert(QStringLiteral("height"), display.height);
+        button.insert(QStringLiteral("label"), ToQString(display.label));
+        button.insert(QStringLiteral("visible"), display.visible);
+        pageButtons.push_back(button);
+    }
+    state->setCharSelectPageButtons(pageButtons);
+
+    QVariantList actionButtons;
+    actionButtons.reserve(selectCharWnd->GetQtActionButtonCount());
+    for (int index = 0; index < selectCharWnd->GetQtActionButtonCount(); ++index) {
+        UISelectCharWnd::QtButtonDisplay display{};
+        if (!selectCharWnd->GetQtActionButtonDisplayForQt(index, &display)) {
+            continue;
+        }
+
+        QVariantMap button;
+        button.insert(QStringLiteral("id"), display.id);
+        button.insert(QStringLiteral("x"), display.x);
+        button.insert(QStringLiteral("y"), display.y);
+        button.insert(QStringLiteral("width"), display.width);
+        button.insert(QStringLiteral("height"), display.height);
+        button.insert(QStringLiteral("label"), ToQString(display.label));
+        button.insert(QStringLiteral("visible"), display.visible);
+        actionButtons.push_back(button);
+    }
+    state->setCharSelectActionButtons(actionButtons);
 }
 
 void PopulateMakeCharState(QtUiState* state)
