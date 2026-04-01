@@ -1,6 +1,7 @@
 #pragma once
 
 #include "UIFrameWnd.h"
+#include "UIShopCommon.h"
 #include "render3d/GraphicsSettings.h"
 #include "render3d/RenderBackend.h"
 
@@ -169,9 +170,9 @@ private:
 
     bool m_controlsCreated;
     bool m_assetsProbed;
-    HBITMAP m_frameBitmap;
+    shopui::BitmapPixels m_frameBitmap;
     std::string m_frameBitmapPath;
-    HBITMAP m_bodyBitmap;
+    shopui::BitmapPixels m_bodyBitmap;
     std::string m_bodyBitmapPath;
     UICheckBox* m_bgmOnCheckBox;
     UICheckBox* m_soundOnCheckBox;

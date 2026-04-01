@@ -81,44 +81,39 @@ constexpr std::array<RenderBackendType, 4> kRendererEntries = {
     RenderBackendType::Vulkan,
 };
 
-HBITMAP LoadBitmapFromGameData(const char* path)
+shopui::BitmapPixels LoadBitmapPixelsFromGameData(const char* path)
 {
-    HBITMAP outBmp = nullptr;
-    LoadHBitmapFromGameData(path, &outBmp, nullptr, nullptr);
-    return outBmp;
+    return shopui::LoadBitmapPixelsFromGameData(path ? path : "", false);
 }
 
-void DrawBitmapStretched(HDC target, HBITMAP bmp, const RECT& dst)
+void DrawBitmapPixelsStretched(HDC target, const shopui::BitmapPixels& bmp, const RECT& dst)
 {
-    if (!target || !bmp) {
+    if (!target || !bmp.IsValid()) {
         return;
     }
 
-    BITMAP bm{};
-    if (!GetObjectA(bmp, sizeof(bm), &bm) || bm.bmWidth <= 0 || bm.bmHeight <= 0) {
-        return;
-    }
+    BITMAPINFO bmi{};
+    bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    bmi.bmiHeader.biWidth = bmp.width;
+    bmi.bmiHeader.biHeight = -bmp.height;
+    bmi.bmiHeader.biPlanes = 1;
+    bmi.bmiHeader.biBitCount = 32;
+    bmi.bmiHeader.biCompression = BI_RGB;
 
-    HDC srcDC = CreateCompatibleDC(target);
-    if (!srcDC) {
-        return;
-    }
-
-    HGDIOBJ old = SelectObject(srcDC, bmp);
     SetStretchBltMode(target, HALFTONE);
-    StretchBlt(target,
+    StretchDIBits(target,
         dst.left,
         dst.top,
         dst.right - dst.left,
         dst.bottom - dst.top,
-        srcDC,
         0,
         0,
-        bm.bmWidth,
-        bm.bmHeight,
+        bmp.width,
+        bmp.height,
+        bmp.pixels.data(),
+        &bmi,
+        DIB_RGB_COLORS,
         SRCCOPY);
-    SelectObject(srcDC, old);
-    DeleteDC(srcDC);
 }
 
 std::string ToLowerAscii(std::string value)
@@ -403,8 +398,8 @@ void ApplySavedAudioSettings()
 UIOptionWnd::UIOptionWnd()
     : m_controlsCreated(false),
       m_assetsProbed(false),
-      m_frameBitmap(nullptr),
-      m_bodyBitmap(nullptr),
+      m_frameBitmap(),
+      m_bodyBitmap(),
       m_bgmOnCheckBox(nullptr),
       m_soundOnCheckBox(nullptr),
       m_noCtrlCheckBox(nullptr),
@@ -444,14 +439,8 @@ UIOptionWnd::~UIOptionWnd()
 
 void UIOptionWnd::ClearResources()
 {
-    if (m_frameBitmap) {
-        DeleteObject(m_frameBitmap);
-        m_frameBitmap = nullptr;
-    }
-    if (m_bodyBitmap) {
-        DeleteObject(m_bodyBitmap);
-        m_bodyBitmap = nullptr;
-    }
+    m_frameBitmap.Clear();
+    m_bodyBitmap.Clear();
     m_frameBitmapPath.clear();
     m_bodyBitmapPath.clear();
 }
@@ -471,7 +460,7 @@ void UIOptionWnd::EnsureResources()
         "win_option_t.bmp",
     });
     if (!m_frameBitmapPath.empty()) {
-        m_frameBitmap = LoadBitmapFromGameData(m_frameBitmapPath.c_str());
+        m_frameBitmap = LoadBitmapPixelsFromGameData(m_frameBitmapPath.c_str());
     }
 
     m_bodyBitmapPath = ResolveUiAssetPath({
@@ -481,7 +470,7 @@ void UIOptionWnd::EnsureResources()
         "option_sub.bmp",
     });
     if (!m_bodyBitmapPath.empty()) {
-        m_bodyBitmap = LoadBitmapFromGameData(m_bodyBitmapPath.c_str());
+        m_bodyBitmap = LoadBitmapPixelsFromGameData(m_bodyBitmapPath.c_str());
     }
 }
 
@@ -1178,15 +1167,15 @@ void UIOptionWnd::OnDraw()
         SelectClipRgn(hdc, clipRegion);
     }
 
-    if (m_frameBitmap) {
-        DrawBitmapStretched(hdc, m_frameBitmap, titleRect);
+    if (m_frameBitmap.IsValid()) {
+        DrawBitmapPixelsStretched(hdc, m_frameBitmap, titleRect);
     } else {
         FillRectColor(hdc, titleRect, kFallbackTitleBarColor);
     }
 
     if (!m_collapsed) {
-        if (m_bodyBitmap) {
-            DrawBitmapStretched(hdc, m_bodyBitmap, bodyRect);
+        if (m_bodyBitmap.IsValid()) {
+            DrawBitmapPixelsStretched(hdc, m_bodyBitmap, bodyRect);
         } else {
             FillRectColor(hdc, bodyRect, kFallbackBodyColor);
         }
