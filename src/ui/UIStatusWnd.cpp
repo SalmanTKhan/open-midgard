@@ -318,6 +318,12 @@ void UIStatusWnd::OnCreate(int x, int y)
     m_controlsCreated = true;
     LoadAssets();
 
+    if (IsQtUiRuntimeEnabled()) {
+        LayoutChildren();
+        RefreshIncrementButtons();
+        return;
+    }
+
     struct ButtonSpec {
         const char* offName;
         const char* onName;

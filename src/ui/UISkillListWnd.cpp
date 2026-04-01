@@ -392,6 +392,11 @@ void UISkillListWnd::OnCreate(int x, int y)
     m_controlsCreated = true;
     LoadAssets();
 
+    if (IsQtUiRuntimeEnabled()) {
+        LayoutChildren();
+        return;
+    }
+
     struct ButtonSpec {
         const char* offName;
         const char* onName;

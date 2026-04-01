@@ -772,6 +772,11 @@ void UIEquipWnd::OnCreate(int x, int y)
         Resize(m_backgroundFull.width, m_fullHeight);
     }
 
+    if (IsQtUiRuntimeEnabled()) {
+        LayoutChildren();
+        return;
+    }
+
     struct ButtonSpec {
         const char* offName;
         const char* onName;
