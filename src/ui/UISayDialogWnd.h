@@ -30,6 +30,7 @@ public:
     bool IsNextAction() const;
     bool IsHoveringAction() const;
     bool IsPressingAction() const;
+    bool GetActionRectForQt(RECT* outRect) const;
 
 private:
     enum class ActionButton {

@@ -162,6 +162,15 @@ bool UISayDialogWnd::IsPressingAction() const
     return m_pressAction;
 }
 
+bool UISayDialogWnd::GetActionRectForQt(RECT* outRect) const
+{
+    if (!outRect || m_actionButton == ActionButton::None) {
+        return false;
+    }
+    *outRect = GetActionRect();
+    return true;
+}
+
 RECT UISayDialogWnd::GetActionRect() const
 {
     return MakeRect(m_x + m_w - kPadding - kButtonWidth,

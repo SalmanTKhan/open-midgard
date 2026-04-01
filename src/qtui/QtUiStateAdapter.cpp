@@ -664,6 +664,7 @@ void PopulateNpcMenuState(QtUiState* state)
         state->setNpcMenuHoverIndex(-1);
         state->setNpcMenuButtons(false, false);
         state->setNpcMenuOptions(QVariantList{});
+        state->setNpcMenuButtonsData(QVariantList{});
         return;
     }
 
@@ -679,6 +680,30 @@ void PopulateNpcMenuState(QtUiState* state)
         options.push_back(NpcColorCodesToHtml(option));
     }
     state->setNpcMenuOptions(options);
+
+    QVariantList buttons;
+    RECT rect{};
+    if (menuWnd->GetOkRectForQt(&rect)) {
+        QVariantMap button;
+        button.insert(QStringLiteral("x"), rect.left);
+        button.insert(QStringLiteral("y"), rect.top);
+        button.insert(QStringLiteral("width"), rect.right - rect.left);
+        button.insert(QStringLiteral("height"), rect.bottom - rect.top);
+        button.insert(QStringLiteral("label"), QStringLiteral("OK"));
+        button.insert(QStringLiteral("pressed"), menuWnd->IsOkPressed());
+        buttons.push_back(button);
+    }
+    if (menuWnd->GetCancelRectForQt(&rect)) {
+        QVariantMap button;
+        button.insert(QStringLiteral("x"), rect.left);
+        button.insert(QStringLiteral("y"), rect.top);
+        button.insert(QStringLiteral("width"), rect.right - rect.left);
+        button.insert(QStringLiteral("height"), rect.bottom - rect.top);
+        button.insert(QStringLiteral("label"), QStringLiteral("Cancel"));
+        button.insert(QStringLiteral("pressed"), menuWnd->IsCancelPressed());
+        buttons.push_back(button);
+    }
+    state->setNpcMenuButtonsData(buttons);
 }
 
 void PopulateSayDialogState(QtUiState* state)
@@ -694,6 +719,7 @@ void PopulateSayDialogState(QtUiState* state)
         state->setSayDialogGeometry(0, 0, 0, 0);
         state->setSayDialogText(QString());
         state->setSayDialogAction(false, QString(), false, false);
+        state->setSayDialogActionButton(QVariantMap{});
         return;
     }
 
@@ -704,6 +730,19 @@ void PopulateSayDialogState(QtUiState* state)
         dialogWnd->IsNextAction() ? QStringLiteral("Next") : QStringLiteral("Close"),
         dialogWnd->IsHoveringAction(),
         dialogWnd->IsPressingAction());
+    QVariantMap actionButton;
+    RECT actionRect{};
+    if (dialogWnd->GetActionRectForQt(&actionRect)) {
+        actionButton.insert(QStringLiteral("x"), actionRect.left);
+        actionButton.insert(QStringLiteral("y"), actionRect.top);
+        actionButton.insert(QStringLiteral("width"), actionRect.right - actionRect.left);
+        actionButton.insert(QStringLiteral("height"), actionRect.bottom - actionRect.top);
+        actionButton.insert(QStringLiteral("label"), dialogWnd->IsNextAction() ? QStringLiteral("Next") : QStringLiteral("Close"));
+        actionButton.insert(QStringLiteral("hovered"), dialogWnd->IsHoveringAction());
+        actionButton.insert(QStringLiteral("pressed"), dialogWnd->IsPressingAction());
+        actionButton.insert(QStringLiteral("visible"), dialogWnd->HasActionButton());
+    }
+    state->setSayDialogActionButton(actionButton);
 }
 
 void PopulateNpcInputState(QtUiState* state)
@@ -719,6 +758,7 @@ void PopulateNpcInputState(QtUiState* state)
         state->setNpcInputGeometry(0, 0, 0, 0);
         state->setNpcInputText(QString(), QString());
         state->setNpcInputButtons(false, false);
+        state->setNpcInputButtonsData(QVariantList{});
         return;
     }
 
@@ -729,6 +769,30 @@ void PopulateNpcInputState(QtUiState* state)
             : QStringLiteral("Enter text"),
         ToQString(inputWnd->GetInputText()));
     state->setNpcInputButtons(inputWnd->IsOkPressed(), inputWnd->IsCancelPressed());
+
+    QVariantList buttons;
+    RECT rect{};
+    if (inputWnd->GetOkRectForQt(&rect)) {
+        QVariantMap button;
+        button.insert(QStringLiteral("x"), rect.left);
+        button.insert(QStringLiteral("y"), rect.top);
+        button.insert(QStringLiteral("width"), rect.right - rect.left);
+        button.insert(QStringLiteral("height"), rect.bottom - rect.top);
+        button.insert(QStringLiteral("label"), QStringLiteral("OK"));
+        button.insert(QStringLiteral("pressed"), inputWnd->IsOkPressed());
+        buttons.push_back(button);
+    }
+    if (inputWnd->GetCancelRectForQt(&rect)) {
+        QVariantMap button;
+        button.insert(QStringLiteral("x"), rect.left);
+        button.insert(QStringLiteral("y"), rect.top);
+        button.insert(QStringLiteral("width"), rect.right - rect.left);
+        button.insert(QStringLiteral("height"), rect.bottom - rect.top);
+        button.insert(QStringLiteral("label"), QStringLiteral("Cancel"));
+        button.insert(QStringLiteral("pressed"), inputWnd->IsCancelPressed());
+        buttons.push_back(button);
+    }
+    state->setNpcInputButtonsData(buttons);
 }
 
 void PopulateChooseMenuState(QtUiState* state)

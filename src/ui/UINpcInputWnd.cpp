@@ -150,6 +150,24 @@ bool UINpcInputWnd::IsCancelPressed() const
     return m_pressedTarget == ClickTarget::Cancel;
 }
 
+bool UINpcInputWnd::GetOkRectForQt(RECT* outRect) const
+{
+    if (!outRect) {
+        return false;
+    }
+    *outRect = GetOkRect();
+    return true;
+}
+
+bool UINpcInputWnd::GetCancelRectForQt(RECT* outRect) const
+{
+    if (!outRect) {
+        return false;
+    }
+    *outRect = GetCancelRect();
+    return true;
+}
+
 void UINpcInputWnd::LayoutControls()
 {
     if (!m_editCtrl) {

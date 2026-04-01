@@ -134,6 +134,24 @@ bool UINpcMenuWnd::IsCancelPressed() const
     return m_pressedTarget == ClickTarget::Cancel;
 }
 
+bool UINpcMenuWnd::GetOkRectForQt(RECT* outRect) const
+{
+    if (!outRect) {
+        return false;
+    }
+    *outRect = GetOkRect();
+    return true;
+}
+
+bool UINpcMenuWnd::GetCancelRectForQt(RECT* outRect) const
+{
+    if (!outRect) {
+        return false;
+    }
+    *outRect = GetCancelRect();
+    return true;
+}
+
 RECT UINpcMenuWnd::GetOptionRect(int index) const
 {
     return MakeRect(m_x + kPadding,

@@ -67,6 +67,7 @@ class QtUiState : public QObject {
     Q_PROPERTY(bool npcMenuOkPressed READ npcMenuOkPressed NOTIFY npcMenuButtonsChanged)
     Q_PROPERTY(bool npcMenuCancelPressed READ npcMenuCancelPressed NOTIFY npcMenuButtonsChanged)
     Q_PROPERTY(QVariantList npcMenuOptions READ npcMenuOptions NOTIFY npcMenuOptionsChanged)
+    Q_PROPERTY(QVariantList npcMenuButtons READ npcMenuButtons NOTIFY npcMenuButtonsChanged)
     Q_PROPERTY(bool sayDialogVisible READ sayDialogVisible NOTIFY sayDialogVisibleChanged)
     Q_PROPERTY(int sayDialogX READ sayDialogX NOTIFY sayDialogGeometryChanged)
     Q_PROPERTY(int sayDialogY READ sayDialogY NOTIFY sayDialogGeometryChanged)
@@ -77,6 +78,7 @@ class QtUiState : public QObject {
     Q_PROPERTY(QString sayDialogActionLabel READ sayDialogActionLabel NOTIFY sayDialogActionChanged)
     Q_PROPERTY(bool sayDialogActionHovered READ sayDialogActionHovered NOTIFY sayDialogActionChanged)
     Q_PROPERTY(bool sayDialogActionPressed READ sayDialogActionPressed NOTIFY sayDialogActionChanged)
+    Q_PROPERTY(QVariantMap sayDialogActionButton READ sayDialogActionButton NOTIFY sayDialogActionChanged)
     Q_PROPERTY(bool npcInputVisible READ npcInputVisible NOTIFY npcInputVisibleChanged)
     Q_PROPERTY(int npcInputX READ npcInputX NOTIFY npcInputGeometryChanged)
     Q_PROPERTY(int npcInputY READ npcInputY NOTIFY npcInputGeometryChanged)
@@ -86,6 +88,7 @@ class QtUiState : public QObject {
     Q_PROPERTY(QString npcInputText READ npcInputText NOTIFY npcInputTextChanged)
     Q_PROPERTY(bool npcInputOkPressed READ npcInputOkPressed NOTIFY npcInputButtonsChanged)
     Q_PROPERTY(bool npcInputCancelPressed READ npcInputCancelPressed NOTIFY npcInputButtonsChanged)
+    Q_PROPERTY(QVariantList npcInputButtons READ npcInputButtons NOTIFY npcInputButtonsChanged)
     Q_PROPERTY(bool chooseMenuVisible READ chooseMenuVisible NOTIFY chooseMenuVisibleChanged)
     Q_PROPERTY(int chooseMenuX READ chooseMenuX NOTIFY chooseMenuGeometryChanged)
     Q_PROPERTY(int chooseMenuY READ chooseMenuY NOTIFY chooseMenuGeometryChanged)
@@ -266,6 +269,7 @@ public:
     bool npcMenuOkPressed() const { return m_npcMenuOkPressed; }
     bool npcMenuCancelPressed() const { return m_npcMenuCancelPressed; }
     const QVariantList& npcMenuOptions() const { return m_npcMenuOptions; }
+    const QVariantList& npcMenuButtons() const { return m_npcMenuButtons; }
     bool sayDialogVisible() const { return m_sayDialogVisible; }
     int sayDialogX() const { return m_sayDialogX; }
     int sayDialogY() const { return m_sayDialogY; }
@@ -276,6 +280,7 @@ public:
     const QString& sayDialogActionLabel() const { return m_sayDialogActionLabel; }
     bool sayDialogActionHovered() const { return m_sayDialogActionHovered; }
     bool sayDialogActionPressed() const { return m_sayDialogActionPressed; }
+    const QVariantMap& sayDialogActionButton() const { return m_sayDialogActionButton; }
     bool npcInputVisible() const { return m_npcInputVisible; }
     int npcInputX() const { return m_npcInputX; }
     int npcInputY() const { return m_npcInputY; }
@@ -285,6 +290,7 @@ public:
     const QString& npcInputText() const { return m_npcInputText; }
     bool npcInputOkPressed() const { return m_npcInputOkPressed; }
     bool npcInputCancelPressed() const { return m_npcInputCancelPressed; }
+    const QVariantList& npcInputButtons() const { return m_npcInputButtons; }
     bool chooseMenuVisible() const { return m_chooseMenuVisible; }
     int chooseMenuX() const { return m_chooseMenuX; }
     int chooseMenuY() const { return m_chooseMenuY; }
@@ -722,6 +728,14 @@ public:
         emit npcMenuButtonsChanged();
     }
 
+    void setNpcMenuButtonsData(const QVariantList& value) {
+        if (m_npcMenuButtons == value) {
+            return;
+        }
+        m_npcMenuButtons = value;
+        emit npcMenuButtonsChanged();
+    }
+
     void setNpcMenuOptions(const QVariantList& value) {
         m_npcMenuOptions = value;
         emit npcMenuOptionsChanged();
@@ -773,6 +787,14 @@ public:
         emit sayDialogActionChanged();
     }
 
+    void setSayDialogActionButton(const QVariantMap& value) {
+        if (m_sayDialogActionButton == value) {
+            return;
+        }
+        m_sayDialogActionButton = value;
+        emit sayDialogActionChanged();
+    }
+
     void setNpcInputVisible(bool value) {
         if (m_npcInputVisible == value) {
             return;
@@ -808,6 +830,14 @@ public:
         }
         m_npcInputOkPressed = okPressed;
         m_npcInputCancelPressed = cancelPressed;
+        emit npcInputButtonsChanged();
+    }
+
+    void setNpcInputButtonsData(const QVariantList& value) {
+        if (m_npcInputButtons == value) {
+            return;
+        }
+        m_npcInputButtons = value;
         emit npcInputButtonsChanged();
     }
 
@@ -1516,6 +1546,7 @@ private:
     bool m_npcMenuOkPressed = false;
     bool m_npcMenuCancelPressed = false;
     QVariantList m_npcMenuOptions;
+    QVariantList m_npcMenuButtons;
     bool m_sayDialogVisible = false;
     int m_sayDialogX = 0;
     int m_sayDialogY = 0;
@@ -1526,6 +1557,7 @@ private:
     QString m_sayDialogActionLabel;
     bool m_sayDialogActionHovered = false;
     bool m_sayDialogActionPressed = false;
+    QVariantMap m_sayDialogActionButton;
     bool m_npcInputVisible = false;
     int m_npcInputX = 0;
     int m_npcInputY = 0;
@@ -1535,6 +1567,7 @@ private:
     QString m_npcInputText;
     bool m_npcInputOkPressed = false;
     bool m_npcInputCancelPressed = false;
+    QVariantList m_npcInputButtons;
     bool m_chooseMenuVisible = false;
     int m_chooseMenuX = 0;
     int m_chooseMenuY = 0;

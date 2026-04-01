@@ -269,37 +269,25 @@ Item {
             }
         }
 
-        Rectangle {
-            x: width - 10 - 68 - 8 - 68
-            y: height - 10 - 22
-            width: 68
-            height: 22
-            color: uiState.npcMenuOkPressed ? "#c4c4c4" : "#f0f0f0"
-            border.width: 1
-            border.color: "#6e6e6e"
+        Repeater {
+            model: uiState.npcMenuButtons
 
-            Text {
-                anchors.centerIn: parent
-                text: "OK"
-                color: "#000000"
-                font.pixelSize: 12
-            }
-        }
+            delegate: Rectangle {
+                required property var modelData
+                x: (modelData.x || 0) - uiState.npcMenuX
+                y: (modelData.y || 0) - uiState.npcMenuY
+                width: modelData.width || 0
+                height: modelData.height || 0
+                color: modelData.pressed ? "#c4c4c4" : "#f0f0f0"
+                border.width: 1
+                border.color: "#6e6e6e"
 
-        Rectangle {
-            x: width - 10 - 68
-            y: height - 10 - 22
-            width: 68
-            height: 22
-            color: uiState.npcMenuCancelPressed ? "#c4c4c4" : "#f0f0f0"
-            border.width: 1
-            border.color: "#6e6e6e"
-
-            Text {
-                anchors.centerIn: parent
-                text: "Cancel"
-                color: "#000000"
-                font.pixelSize: 12
+                Text {
+                    anchors.centerIn: parent
+                    text: modelData.label || ""
+                    color: "#000000"
+                    font.pixelSize: 12
+                }
             }
         }
     }
@@ -328,18 +316,18 @@ Item {
         }
 
         Rectangle {
-            x: width - 10 - 68
-            y: height - 10 - 22
-            width: 68
-            height: 22
-            visible: uiState.sayDialogHasAction
-            color: uiState.sayDialogActionPressed ? "#c4c4c4" : (uiState.sayDialogActionHovered ? "#e4e4e4" : "#f0f0f0")
+            x: (uiState.sayDialogActionButton.x || 0) - uiState.sayDialogX
+            y: (uiState.sayDialogActionButton.y || 0) - uiState.sayDialogY
+            width: uiState.sayDialogActionButton.width || 0
+            height: uiState.sayDialogActionButton.height || 0
+            visible: uiState.sayDialogActionButton.visible || false
+            color: (uiState.sayDialogActionButton.pressed || false) ? "#c4c4c4" : ((uiState.sayDialogActionButton.hovered || false) ? "#e4e4e4" : "#f0f0f0")
             border.width: 1
             border.color: "#6e6e6e"
 
             Text {
                 anchors.centerIn: parent
-                text: uiState.sayDialogActionLabel
+                text: uiState.sayDialogActionButton.label || ""
                 color: "#000000"
                 font.pixelSize: 12
             }
@@ -387,37 +375,25 @@ Item {
             }
         }
 
-        Rectangle {
-            x: width - 10 - 68 - 8 - 68
-            y: height - 10 - 22
-            width: 68
-            height: 22
-            color: uiState.npcInputOkPressed ? "#c4c4c4" : "#f0f0f0"
-            border.width: 1
-            border.color: "#6e6e6e"
+        Repeater {
+            model: uiState.npcInputButtons
 
-            Text {
-                anchors.centerIn: parent
-                text: "OK"
-                color: "#000000"
-                font.pixelSize: 12
-            }
-        }
+            delegate: Rectangle {
+                required property var modelData
+                x: (modelData.x || 0) - uiState.npcInputX
+                y: (modelData.y || 0) - uiState.npcInputY
+                width: modelData.width || 0
+                height: modelData.height || 0
+                color: modelData.pressed ? "#c4c4c4" : "#f0f0f0"
+                border.width: 1
+                border.color: "#6e6e6e"
 
-        Rectangle {
-            x: width - 10 - 68
-            y: height - 10 - 22
-            width: 68
-            height: 22
-            color: uiState.npcInputCancelPressed ? "#c4c4c4" : "#f0f0f0"
-            border.width: 1
-            border.color: "#6e6e6e"
-
-            Text {
-                anchors.centerIn: parent
-                text: "Cancel"
-                color: "#000000"
-                font.pixelSize: 12
+                Text {
+                    anchors.centerIn: parent
+                    text: modelData.label || ""
+                    color: "#000000"
+                    font.pixelSize: 12
+                }
             }
         }
     }
