@@ -5,6 +5,15 @@
 #include "gamemode/Mode.h"
 #include "main/WinMain.h"
 #include "qtui/QtUiRuntime.h"
+#include "render/DC.h"
+
+#if RO_ENABLE_QT6_UI
+#include <QFont>
+#include <QFontMetrics>
+#include <QImage>
+#include <QPainter>
+#include <QString>
+#endif
 
 #include <algorithm>
 #include <string>
@@ -39,16 +48,87 @@ void DrawBitmapPixelsTransparent(HDC target, const shopui::BitmapPixels& bitmap,
     shopui::DrawBitmapPixelsTransparent(target, bitmap, dst);
 }
 
+#if RO_ENABLE_QT6_UI
+QFont BuildChatFontFromHdc(HDC hdc)
+{
+    LOGFONTA logFont{};
+    if (hdc) {
+        if (HGDIOBJ fontObject = GetCurrentObject(hdc, OBJ_FONT)) {
+            GetObjectA(fontObject, sizeof(logFont), &logFont);
+        }
+    }
+
+    const QString family = logFont.lfFaceName[0] != '\0'
+        ? QString::fromLocal8Bit(logFont.lfFaceName)
+        : QStringLiteral("MS Sans Serif");
+    QFont font(family);
+    font.setPixelSize(logFont.lfHeight != 0 ? (std::max)(1, std::abs(logFont.lfHeight)) : 13);
+    font.setBold(logFont.lfWeight >= FW_BOLD);
+    font.setStyleStrategy(QFont::NoAntialias);
+    return font;
+}
+
+int MeasureWrappedTextHeightQt(HDC hdc, const std::string& text, int width)
+{
+    if (!hdc || width <= 0 || text.empty()) {
+        return kChatLineHeight;
+    }
+
+    const QFont font = BuildChatFontFromHdc(hdc);
+    const QFontMetrics metrics(font);
+    const QString label = QString::fromLocal8Bit(text.c_str());
+    const QRect bounds = metrics.boundingRect(QRect(0, 0, width, 4096), Qt::AlignLeft | Qt::AlignTop | Qt::TextWordWrap, label);
+    return (std::max)(kChatLineHeight, bounds.height());
+}
+
+void DrawChatTextQt(HDC hdc, const RECT& rect, const std::string& text, COLORREF color, bool wrap)
+{
+    if (!hdc || rect.right <= rect.left || rect.bottom <= rect.top) {
+        return;
+    }
+
+    QString label = QString::fromLocal8Bit(text.c_str());
+    const int width = rect.right - rect.left;
+    const int height = rect.bottom - rect.top;
+    const QFont font = BuildChatFontFromHdc(hdc);
+    if (!wrap) {
+        const QFontMetrics metrics(font);
+        label = metrics.elidedText(label, Qt::ElideRight, width);
+    }
+
+    std::vector<unsigned int> pixels(static_cast<size_t>(width) * static_cast<size_t>(height), 0u);
+    QImage image(reinterpret_cast<uchar*>(pixels.data()), width, height, width * static_cast<int>(sizeof(unsigned int)), QImage::Format_ARGB32);
+    if (image.isNull()) {
+        return;
+    }
+
+    QPainter painter(&image);
+    painter.setRenderHint(QPainter::Antialiasing, false);
+    painter.setRenderHint(QPainter::TextAntialiasing, false);
+    painter.setFont(font);
+    painter.setPen(QColor(GetRValue(color), GetGValue(color), GetBValue(color)));
+    const int flags = wrap
+        ? (Qt::AlignLeft | Qt::AlignTop | Qt::TextWordWrap)
+        : (Qt::AlignLeft | Qt::AlignVCenter | Qt::TextSingleLine);
+    painter.drawText(QRect(0, 0, width, height), flags, label);
+    AlphaBlendArgbToHdc(hdc, rect.left, rect.top, width, height, pixels.data(), width, height);
+}
+#endif
+
 int MeasureWrappedTextHeight(HDC hdc, const std::string& text, int width)
 {
     if (!hdc || width <= 0 || text.empty()) {
         return kChatLineHeight;
     }
 
+#if RO_ENABLE_QT6_UI
+    return MeasureWrappedTextHeightQt(hdc, text, width);
+#else
     RECT calcRect{ 0, 0, width, 0 };
     DrawTextA(hdc, text.c_str(), -1, &calcRect, DT_LEFT | DT_TOP | DT_WORDBREAK | DT_EDITCONTROL | DT_CALCRECT | DT_NOPREFIX);
     const int measuredHeight = calcRect.bottom - calcRect.top;
     return (std::max)(kChatLineHeight, measuredHeight);
+#endif
 }
 
 HFONT GetChatUiFont()
@@ -291,7 +371,11 @@ void UINewChatWnd::OnDraw()
             lineY + textHeight
         };
         SetTextColor(hdc, ToColorRef(line.color));
+#if RO_ENABLE_QT6_UI
+        DrawChatTextQt(hdc, textRc, line.text, ToColorRef(line.color), true);
+#else
         DrawTextA(hdc, line.text.c_str(), -1, &textRc, DT_LEFT | DT_TOP | DT_WORDBREAK | DT_EDITCONTROL | DT_NOPREFIX);
+#endif
         lineY += textHeight + kChatMessageGap;
     }
     RestoreDC(hdc, historyClipDc);
@@ -307,7 +391,11 @@ void UINewChatWnd::OnDraw()
 
     RECT inputTextRc = { inputRc.left + 4, inputRc.top + 2, inputRc.right - 2, inputRc.bottom - 2 };
     SetTextColor(hdc, RGB(16, 16, 16));
+#if RO_ENABLE_QT6_UI
+    DrawChatTextQt(hdc, inputTextRc, drawText, RGB(16, 16, 16), false);
+#else
     DrawTextA(hdc, drawText.c_str(), -1, &inputTextRc, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+#endif
 
     RestoreDC(hdc, savedDc);
     ReleaseDrawTarget(hdc);
