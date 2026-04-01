@@ -8,12 +8,21 @@
 #include "item/Item.h"
 #include "main/WinMain.h"
 #include "qtui/QtUiRuntime.h"
+#include "render/DC.h"
 #include "res/Bitmap.h"
 #include "render/DrawUtil.h"
 #include "session/Session.h"
 #include "ui/UIWindow.h"
 
 #include <windows.h>
+
+#if RO_ENABLE_QT6_UI
+#include <QFont>
+#include <QFontMetrics>
+#include <QImage>
+#include <QPainter>
+#include <QString>
+#endif
 
 #include <algorithm>
 #include <array>
@@ -227,6 +236,91 @@ void FillRectAlpha(HDC target, const RECT& rect, COLORREF color, BYTE alpha)
         height);
 }
 
+#if RO_ENABLE_QT6_UI
+QFont BuildItemWindowFontFromHdc(HDC hdc, const char* fallbackFamily = "MS Sans Serif", int fallbackPixelSize = 13)
+{
+    LOGFONTA logFont{};
+    if (hdc) {
+        if (HGDIOBJ fontObject = GetCurrentObject(hdc, OBJ_FONT)) {
+            GetObjectA(fontObject, sizeof(logFont), &logFont);
+        }
+    }
+
+    const QString family = logFont.lfFaceName[0] != '\0'
+        ? QString::fromLocal8Bit(logFont.lfFaceName)
+        : QString::fromLocal8Bit(fallbackFamily);
+    QFont font(family);
+    font.setPixelSize(logFont.lfHeight != 0 ? (std::max)(1, std::abs(logFont.lfHeight)) : fallbackPixelSize);
+    font.setBold(logFont.lfWeight >= FW_BOLD);
+    font.setStyleStrategy(QFont::NoAntialias);
+    return font;
+}
+
+Qt::Alignment ToQtItemTextAlignment(UINT format)
+{
+    Qt::Alignment alignment = Qt::AlignLeft | Qt::AlignTop;
+    if (format & DT_CENTER) {
+        alignment &= ~Qt::AlignLeft;
+        alignment |= Qt::AlignHCenter;
+    } else if (format & DT_RIGHT) {
+        alignment &= ~Qt::AlignLeft;
+        alignment |= Qt::AlignRight;
+    }
+
+    if (format & DT_VCENTER) {
+        alignment &= ~Qt::AlignTop;
+        alignment |= Qt::AlignVCenter;
+    } else if (format & DT_BOTTOM) {
+        alignment &= ~Qt::AlignTop;
+        alignment |= Qt::AlignBottom;
+    }
+
+    return alignment;
+}
+
+void DrawItemWindowTextQt(HDC hdc, const RECT& rect, const std::string& text, COLORREF color, UINT format)
+{
+    if (!hdc || text.empty() || rect.right <= rect.left || rect.bottom <= rect.top) {
+        return;
+    }
+
+    QString label = QString::fromLocal8Bit(text.c_str());
+    if (label.isEmpty()) {
+        return;
+    }
+
+    const int width = rect.right - rect.left;
+    const int height = rect.bottom - rect.top;
+    const QFont font = BuildItemWindowFontFromHdc(hdc);
+    if (format & DT_END_ELLIPSIS) {
+        const QFontMetrics metrics(font);
+        label = metrics.elidedText(label, Qt::ElideRight, width);
+    }
+
+    std::vector<unsigned int> pixels(static_cast<size_t>(width) * static_cast<size_t>(height), 0u);
+    QImage image(reinterpret_cast<uchar*>(pixels.data()), width, height, width * static_cast<int>(sizeof(unsigned int)), QImage::Format_ARGB32);
+    if (image.isNull()) {
+        return;
+    }
+
+    QPainter painter(&image);
+    painter.setRenderHint(QPainter::Antialiasing, false);
+    painter.setRenderHint(QPainter::TextAntialiasing, false);
+    painter.setFont(font);
+    painter.setPen(QColor(GetRValue(color), GetGValue(color), GetBValue(color)));
+    painter.drawText(QRect(0, 0, width, height), ToQtItemTextAlignment(format) | Qt::TextSingleLine, label);
+    AlphaBlendArgbToHdc(hdc, rect.left, rect.top, width, height, pixels.data(), width, height);
+}
+
+QFont BuildItemTooltipFont()
+{
+    QFont font(QStringLiteral("MS Sans Serif"));
+    font.setPixelSize(14);
+    font.setStyleStrategy(QFont::NoAntialias);
+    return font;
+}
+#endif
+
 void DrawWindowText(HDC hdc, int x, int y, const std::string& text, COLORREF color, UINT format = DT_LEFT | DT_TOP | DT_SINGLELINE)
 {
     if (!hdc || text.empty()) {
@@ -237,7 +331,11 @@ void DrawWindowText(HDC hdc, int x, int y, const std::string& text, COLORREF col
     SetTextColor(hdc, color);
     RECT rect{ x, y, x + 240, y + 24 };
     HGDIOBJ oldFont = SelectObject(hdc, GetStockObject(DEFAULT_GUI_FONT));
+#if RO_ENABLE_QT6_UI
+    DrawItemWindowTextQt(hdc, rect, text, color, format);
+#else
     DrawTextA(hdc, text.c_str(), -1, &rect, format);
+#endif
     SelectObject(hdc, oldFont);
 }
 
@@ -270,7 +368,11 @@ void DrawWindowTextRect(HDC hdc, const RECT& rect, const std::string& text, COLO
     SetBkMode(hdc, TRANSPARENT);
     SetTextColor(hdc, color);
     HGDIOBJ oldFont = SelectObject(hdc, s_sharpUiFont ? s_sharpUiFont : GetStockObject(DEFAULT_GUI_FONT));
+#if RO_ENABLE_QT6_UI
+    DrawItemWindowTextQt(hdc, drawRect, text, color, format);
+#else
     DrawTextA(hdc, text.c_str(), -1, &drawRect, format);
+#endif
     SelectObject(hdc, oldFont);
 }
 
@@ -394,17 +496,30 @@ void DrawItemSlot(HDC hdc,
 void DrawItemHoverTooltip(HDC hdc, const RECT& clientRect, const RECT& itemRect, const ITEM_INFO& item)
 {
     const std::string tooltipText = BuildHoverTooltipText(item);
+#if RO_ENABLE_QT6_UI
+    const QFont font = BuildItemTooltipFont();
+    const QString label = QString::fromLocal8Bit(tooltipText.c_str());
+    const QFontMetrics metrics(font);
+    const int textWidth = metrics.horizontalAdvance(label);
+    const int textHeight = metrics.height();
+#else
     DrawDC drawDc(hdc);
     drawDc.SetFont(FONT_DEFAULT, 14, 0);
     SetBkMode(hdc, TRANSPARENT);
 
     SIZE textSize{};
     drawDc.GetTextExtentPoint32A(tooltipText.c_str(), static_cast<int>(tooltipText.size()), &textSize);
+#endif
 
     const int tooltipPaddingX = 8;
     const int tooltipPaddingY = 6;
+#if RO_ENABLE_QT6_UI
+    const int tooltipHeight = textHeight + tooltipPaddingY * 2;
+    const int tooltipWidth = textWidth + tooltipPaddingX * 2;
+#else
     const int tooltipHeight = textSize.cy + tooltipPaddingY * 2;
     const int tooltipWidth = textSize.cx + tooltipPaddingX * 2;
+#endif
     int tooltipLeft = itemRect.left + ((itemRect.right - itemRect.left) - tooltipWidth) / 2;
     int tooltipTop = itemRect.top - tooltipHeight + 2;
     const int minTooltipLeft = static_cast<int>(clientRect.left) + 2;
@@ -417,11 +532,29 @@ void DrawItemHoverTooltip(HDC hdc, const RECT& clientRect, const RECT& itemRect,
     RECT tooltipRect{ tooltipLeft, tooltipTop, tooltipLeft + tooltipWidth, tooltipTop + tooltipHeight };
     FillRectAlpha(hdc, tooltipRect, RGB(48, 48, 48), 180);
     FrameRectColor(hdc, tooltipRect, RGB(96, 96, 96));
+#if RO_ENABLE_QT6_UI
+    const int width = tooltipRect.right - tooltipRect.left;
+    const int height = tooltipRect.bottom - tooltipRect.top;
+    std::vector<unsigned int> pixels(static_cast<size_t>(width) * static_cast<size_t>(height), 0u);
+    QImage image(reinterpret_cast<uchar*>(pixels.data()), width, height, width * static_cast<int>(sizeof(unsigned int)), QImage::Format_ARGB32);
+    if (image.isNull()) {
+        return;
+    }
+
+    QPainter painter(&image);
+    painter.setRenderHint(QPainter::Antialiasing, false);
+    painter.setRenderHint(QPainter::TextAntialiasing, false);
+    painter.setFont(font);
+    painter.setPen(QColor(255, 255, 255));
+    painter.drawText(tooltipPaddingX, tooltipPaddingY + metrics.ascent(), label);
+    AlphaBlendArgbToHdc(hdc, tooltipRect.left, tooltipRect.top, width, height, pixels.data(), width, height);
+#else
     drawDc.SetTextColor(RGB(255, 255, 255));
     drawDc.TextOutA(tooltipRect.left + tooltipPaddingX,
         tooltipRect.top + tooltipPaddingY,
         tooltipText.c_str(),
         static_cast<int>(tooltipText.size()));
+#endif
 }
 
 std::vector<std::string> BuildItemIconCandidates(const ITEM_INFO& item)
