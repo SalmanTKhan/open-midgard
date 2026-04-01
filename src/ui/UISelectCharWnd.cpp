@@ -629,6 +629,103 @@ bool UISelectCharWnd::GetQtPageButtonDisplayForQt(int index, QtButtonDisplay* ou
     return true;
 }
 
+int UISelectCharWnd::GetQtSelectedDetailFieldCount() const
+{
+    return 12;
+}
+
+bool UISelectCharWnd::GetQtSelectedDetailFieldDisplayForQt(int index, QtDetailFieldDisplay* out) const
+{
+    if (!out || index < 0 || index >= GetQtSelectedDetailFieldCount()) {
+        return false;
+    }
+
+    SelectedCharacterDisplay selected{};
+    if (!GetSelectedCharacterDisplay(&selected) || !selected.valid) {
+        return false;
+    }
+
+    *out = QtDetailFieldDisplay{};
+    out->width = 140;
+    out->height = 14;
+
+    char value[64]{};
+    switch (index) {
+    case 0:
+        out->x = m_x + 69;
+        out->y = m_y + 206;
+        out->text = selected.name;
+        return true;
+    case 1:
+        out->x = m_x + 69;
+        out->y = m_y + 222;
+        out->text = selected.job;
+        return true;
+    case 2:
+        out->x = m_x + 69;
+        out->y = m_y + 238;
+        std::snprintf(value, sizeof(value), "%d", selected.level);
+        out->text = value;
+        return true;
+    case 3:
+        out->x = m_x + 69;
+        out->y = m_y + 254;
+        std::snprintf(value, sizeof(value), "%u", selected.exp);
+        out->text = value;
+        return true;
+    case 4:
+        out->x = m_x + 69;
+        out->y = m_y + 270;
+        std::snprintf(value, sizeof(value), "%d", selected.hp);
+        out->text = value;
+        return true;
+    case 5:
+        out->x = m_x + 69;
+        out->y = m_y + 286;
+        std::snprintf(value, sizeof(value), "%d", selected.sp);
+        out->text = value;
+        return true;
+    case 6:
+        out->x = m_x + 213;
+        out->y = m_y + 206;
+        std::snprintf(value, sizeof(value), "%d", selected.str);
+        out->text = value;
+        return true;
+    case 7:
+        out->x = m_x + 213;
+        out->y = m_y + 222;
+        std::snprintf(value, sizeof(value), "%d", selected.agi);
+        out->text = value;
+        return true;
+    case 8:
+        out->x = m_x + 213;
+        out->y = m_y + 238;
+        std::snprintf(value, sizeof(value), "%d", selected.vit);
+        out->text = value;
+        return true;
+    case 9:
+        out->x = m_x + 213;
+        out->y = m_y + 254;
+        std::snprintf(value, sizeof(value), "%d", selected.intStat);
+        out->text = value;
+        return true;
+    case 10:
+        out->x = m_x + 213;
+        out->y = m_y + 270;
+        std::snprintf(value, sizeof(value), "%d", selected.dex);
+        out->text = value;
+        return true;
+    case 11:
+        out->x = m_x + 213;
+        out->y = m_y + 286;
+        std::snprintf(value, sizeof(value), "%d", selected.luk);
+        out->text = value;
+        return true;
+    default:
+        return false;
+    }
+}
+
 bool UISelectCharWnd::HandleQtMouseDown(int x, int y)
 {
     if (!g_hMainWnd || m_show == 0) {

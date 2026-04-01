@@ -2689,43 +2689,16 @@ Item {
             }
         }
 
-        Text {
-            x: 69
-            y: 206
-            text: uiState.charSelectSelectedDetails.name || ""
-            color: "#50321e"
-            font.pixelSize: 13
-        }
-
-        Text {
-            x: 69
-            y: 222
-            text: uiState.charSelectSelectedDetails.job || ""
-            color: "#50321e"
-            font.pixelSize: 13
-        }
-
         Repeater {
-            model: [
-                { x: 69, y: 238, key: "level" },
-                { x: 69, y: 254, key: "exp" },
-                { x: 69, y: 270, key: "hp" },
-                { x: 69, y: 286, key: "sp" },
-                { x: 213, y: 206, key: "str" },
-                { x: 213, y: 222, key: "agi" },
-                { x: 213, y: 238, key: "vit" },
-                { x: 213, y: 254, key: "int" },
-                { x: 213, y: 270, key: "dex" },
-                { x: 213, y: 286, key: "luk" }
-            ]
+            model: uiState.charSelectSelectedDetails.fields || []
 
             delegate: Text {
                 required property var modelData
-                x: modelData.x
-                y: modelData.y
-                text: uiState.charSelectSelectedDetails[modelData.key] !== undefined
-                    ? uiState.charSelectSelectedDetails[modelData.key]
-                    : ""
+                x: (modelData.x || 0) - uiState.charSelectPanelX
+                y: (modelData.y || 0) - uiState.charSelectPanelY
+                width: modelData.width || 0
+                height: modelData.height || 0
+                text: modelData.text || ""
                 color: "#50321e"
                 font.pixelSize: 13
             }

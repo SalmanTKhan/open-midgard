@@ -51,6 +51,14 @@ public:
         bool visible = true;
     };
 
+    struct QtDetailFieldDisplay {
+        int x = 0;
+        int y = 0;
+        int width = 0;
+        int height = 0;
+        std::string text;
+    };
+
     UISelectCharWnd();
     ~UISelectCharWnd() override;
 
@@ -90,6 +98,8 @@ public:
     bool GetQtActionButtonDisplayForQt(int index, QtButtonDisplay* out) const;
     int GetQtPageButtonCount() const;
     bool GetQtPageButtonDisplayForQt(int index, QtButtonDisplay* out) const;
+    int GetQtSelectedDetailFieldCount() const;
+    bool GetQtSelectedDetailFieldDisplayForQt(int index, QtDetailFieldDisplay* out) const;
 
 private:
     int GetCharacterCount() const;

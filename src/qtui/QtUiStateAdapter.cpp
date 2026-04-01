@@ -427,6 +427,24 @@ void PopulateCharSelectState(QtUiState* state)
         details.insert(QStringLiteral("int"), selected.intStat);
         details.insert(QStringLiteral("dex"), selected.dex);
         details.insert(QStringLiteral("luk"), selected.luk);
+
+        QVariantList fields;
+        fields.reserve(selectCharWnd->GetQtSelectedDetailFieldCount());
+        for (int index = 0; index < selectCharWnd->GetQtSelectedDetailFieldCount(); ++index) {
+            UISelectCharWnd::QtDetailFieldDisplay display{};
+            if (!selectCharWnd->GetQtSelectedDetailFieldDisplayForQt(index, &display)) {
+                continue;
+            }
+
+            QVariantMap field;
+            field.insert(QStringLiteral("x"), display.x);
+            field.insert(QStringLiteral("y"), display.y);
+            field.insert(QStringLiteral("width"), display.width);
+            field.insert(QStringLiteral("height"), display.height);
+            field.insert(QStringLiteral("text"), ToQString(display.text));
+            fields.push_back(field);
+        }
+        details.insert(QStringLiteral("fields"), fields);
     }
     state->setCharSelectSelectedDetails(details);
 
