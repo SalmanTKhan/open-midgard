@@ -30,21 +30,13 @@ COLORREF ToColorRef(u32 color)
     return RGB((color >> 16) & 0xFFu, (color >> 8) & 0xFFu, color & 0xFFu);
 }
 
-void DrawBitmapTransparent(HDC target, HBITMAP bitmap, int x, int y, int width, int height)
+void DrawBitmapPixelsTransparent(HDC target, const shopui::BitmapPixels& bitmap, int x, int y, int width, int height)
 {
-    if (!target || !bitmap || width <= 0 || height <= 0) {
+    if (!target || !bitmap.IsValid() || width <= 0 || height <= 0) {
         return;
     }
-
-    HDC memDc = CreateCompatibleDC(target);
-    if (!memDc) {
-        return;
-    }
-
-    HGDIOBJ oldBitmap = SelectObject(memDc, bitmap);
-    TransparentBlt(target, x, y, width, height, memDc, 0, 0, width, height, RGB(255, 0, 255));
-    SelectObject(memDc, oldBitmap);
-    DeleteDC(memDc);
+    RECT dst = { x, y, x + width, y + height };
+    shopui::DrawBitmapPixelsTransparent(target, bitmap, dst);
 }
 
 int MeasureWrappedTextHeight(HDC hdc, const std::string& text, int width)
@@ -82,35 +74,24 @@ HFONT GetChatUiFont()
     return s_chatUiFont;
 }
 
-HBITMAP GetHistoryPanelPattern()
+const shopui::BitmapPixels& GetHistoryPanelPattern()
 {
-    static HBITMAP s_pattern = nullptr;
-    if (s_pattern) {
+    static shopui::BitmapPixels s_pattern;
+    if (s_pattern.IsValid()) {
         return s_pattern;
     }
 
     constexpr int kPatternSize = 4;
-    BITMAPINFO bmi{};
-    bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-    bmi.bmiHeader.biWidth = kPatternSize;
-    bmi.bmiHeader.biHeight = -kPatternSize;
-    bmi.bmiHeader.biPlanes = 1;
-    bmi.bmiHeader.biBitCount = 32;
-    bmi.bmiHeader.biCompression = BI_RGB;
+    s_pattern.width = kPatternSize;
+    s_pattern.height = kPatternSize;
+    s_pattern.pixels.resize(static_cast<size_t>(kPatternSize) * kPatternSize);
 
-    void* bits = nullptr;
-    s_pattern = CreateDIBSection(nullptr, &bmi, DIB_RGB_COLORS, &bits, nullptr, 0);
-    if (!s_pattern || !bits) {
-        return nullptr;
-    }
-
-    auto* pixels = static_cast<u32*>(bits);
-    const u32 darkGrey = 0x00181818u;
-    const u32 transparentKey = 0x00FF00FFu;
+    const u32 darkGrey = 0xFF181818u;
+    const u32 transparent = 0x00000000u;
     for (int y = 0; y < kPatternSize; ++y) {
         for (int x = 0; x < kPatternSize; ++x) {
-            const bool transparent = ((x + y) % 4) == 0;
-            pixels[y * kPatternSize + x] = transparent ? transparentKey : darkGrey;
+            const bool useTransparentPixel = ((x + y) % 4) == 0;
+            s_pattern.pixels[static_cast<size_t>(y) * kPatternSize + x] = useTransparentPixel ? transparent : darkGrey;
         }
     }
 
@@ -123,8 +104,8 @@ void FillRectStippled(HDC target, const RECT& rect)
         return;
     }
 
-    HBITMAP pattern = GetHistoryPanelPattern();
-    if (!pattern) {
+    const shopui::BitmapPixels& pattern = GetHistoryPanelPattern();
+    if (!pattern.IsValid()) {
         HBRUSH brush = CreateSolidBrush(RGB(24, 24, 24));
         FillRect(target, &rect, brush);
         DeleteObject(brush);
@@ -136,7 +117,7 @@ void FillRectStippled(HDC target, const RECT& rect)
         for (int x = rect.left; x < rect.right; x += kPatternSize) {
             const int drawWidth = (std::min)(kPatternSize, static_cast<int>(rect.right - x));
             const int drawHeight = (std::min)(kPatternSize, static_cast<int>(rect.bottom - y));
-            DrawBitmapTransparent(target, pattern, x, y, drawWidth, drawHeight);
+            DrawBitmapPixelsTransparent(target, pattern, x, y, drawWidth, drawHeight);
         }
     }
 }

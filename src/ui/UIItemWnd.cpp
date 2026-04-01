@@ -188,48 +188,30 @@ void FillRectAlpha(HDC target, const RECT& rect, COLORREF color, BYTE alpha)
         return;
     }
 
-    HDC memDc = CreateCompatibleDC(target);
-    if (!memDc) {
+    const int width = rect.right - rect.left;
+    const int height = rect.bottom - rect.top;
+    if (width <= 0 || height <= 0) {
         return;
     }
 
-    BITMAPINFO bmi{};
-    bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-    bmi.bmiHeader.biWidth = rect.right - rect.left;
-    bmi.bmiHeader.biHeight = -(rect.bottom - rect.top);
-    bmi.bmiHeader.biPlanes = 1;
-    bmi.bmiHeader.biBitCount = 32;
-    bmi.bmiHeader.biCompression = BI_RGB;
-    void* memBits = nullptr;
-    HBITMAP memBitmap = CreateDIBSection(nullptr, &bmi, DIB_RGB_COLORS, &memBits, nullptr, 0);
-    if (!memBitmap) {
-        DeleteDC(memDc);
-        return;
-    }
+    const unsigned int red = GetRValue(color);
+    const unsigned int green = GetGValue(color);
+    const unsigned int blue = GetBValue(color);
+    const unsigned int premultipliedPixel =
+        (static_cast<unsigned int>(alpha) << 24)
+        | ((red * alpha / 255u) << 16)
+        | ((green * alpha / 255u) << 8)
+        | (blue * alpha / 255u);
+    std::vector<unsigned int> pixels(static_cast<size_t>(width) * static_cast<size_t>(height), premultipliedPixel);
 
-    HGDIOBJ oldBitmap = SelectObject(memDc, memBitmap);
-    RECT localRect{ 0, 0, rect.right - rect.left, rect.bottom - rect.top };
-    FillRectColor(memDc, localRect, color);
-
-    BLENDFUNCTION blend{};
-    blend.BlendOp = AC_SRC_OVER;
-    blend.SourceConstantAlpha = alpha;
-    blend.AlphaFormat = 0;
-    AlphaBlend(target,
+    AlphaBlendArgbToHdc(target,
         rect.left,
         rect.top,
-        rect.right - rect.left,
-        rect.bottom - rect.top,
-        memDc,
-        0,
-        0,
-        rect.right - rect.left,
-        rect.bottom - rect.top,
-        blend);
-
-    SelectObject(memDc, oldBitmap);
-    DeleteObject(memBitmap);
-    DeleteDC(memDc);
+        width,
+        height,
+        pixels.data(),
+        width,
+        height);
 }
 
 void DrawWindowText(HDC hdc, int x, int y, const std::string& text, COLORREF color, UINT format = DT_LEFT | DT_TOP | DT_SINGLELINE)
