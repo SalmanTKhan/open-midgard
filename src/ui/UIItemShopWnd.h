@@ -1,6 +1,7 @@
 #pragma once
 
 #include "UIFrameWnd.h"
+#include "UIShopCommon.h"
 #include "item/Item.h"
 
 #include <unordered_map>
@@ -28,12 +29,12 @@ private:
     int GetMaxViewOffset() const;
     RECT GetListRect() const;
     int HitTestSourceRow(int x, int y) const;
-    HBITMAP GetItemIcon(const ITEM_INFO& item);
+    const shopui::BitmapPixels* GetItemIcon(const ITEM_INFO& item);
     unsigned long long BuildDisplayStateToken() const;
 
     int m_viewOffset;
     int m_hoverRow;
-    std::unordered_map<unsigned int, HBITMAP> m_iconCache;
+    std::unordered_map<unsigned int, shopui::BitmapPixels> m_iconCache;
     unsigned long long m_lastDrawStateToken;
     bool m_hasDrawStateToken;
 };
