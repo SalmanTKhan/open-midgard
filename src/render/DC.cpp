@@ -214,6 +214,57 @@ void BlitMotionToArgb(unsigned int* dest, int destW, int destH, int baseX, int b
     }
 }
 
+bool StretchArgbToHdc(HDC hdc,
+                      int dstX,
+                      int dstY,
+                      int dstWidth,
+                      int dstHeight,
+                      const unsigned int* pixels,
+                      int pixelWidth,
+                      int pixelHeight,
+                      int srcX,
+                      int srcY,
+                      int srcWidth,
+                      int srcHeight)
+{
+    if (!hdc || !pixels || pixelWidth <= 0 || pixelHeight <= 0 || dstWidth <= 0 || dstHeight <= 0) {
+        return false;
+    }
+
+    if (srcWidth < 0) {
+        srcWidth = pixelWidth - srcX;
+    }
+    if (srcHeight < 0) {
+        srcHeight = pixelHeight - srcY;
+    }
+    if (srcX < 0 || srcY < 0 || srcWidth <= 0 || srcHeight <= 0
+        || srcX + srcWidth > pixelWidth || srcY + srcHeight > pixelHeight) {
+        return false;
+    }
+
+    BITMAPINFO bmi{};
+    bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    bmi.bmiHeader.biWidth = pixelWidth;
+    bmi.bmiHeader.biHeight = -pixelHeight;
+    bmi.bmiHeader.biPlanes = 1;
+    bmi.bmiHeader.biBitCount = 32;
+    bmi.bmiHeader.biCompression = BI_RGB;
+
+    return StretchDIBits(hdc,
+                         dstX,
+                         dstY,
+                         dstWidth,
+                         dstHeight,
+                         srcX,
+                         srcY,
+                         srcWidth,
+                         srcHeight,
+                         pixels,
+                         &bmi,
+                         DIB_RGB_COLORS,
+                         SRCCOPY) != GDI_ERROR;
+}
+
 bool AlphaBlendArgbToHdc(HDC hdc,
                          int dstX,
                          int dstY,

@@ -8,6 +8,8 @@
 void PlayUiButtonSound();
 bool LoadUiWindowPlacement(const char* windowName, int* x, int* y);
 void SaveUiWindowPlacement(const char* windowName, int x, int y);
+HDC AcquireMainWindowDrawTarget();
+void ReleaseMainWindowDrawTarget(HDC dc);
 bool BlitArgbBitsToMainWindow(const void* bits, int width, int height);
 
 struct BOXINFO {

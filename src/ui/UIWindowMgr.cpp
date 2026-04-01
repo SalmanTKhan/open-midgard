@@ -1032,7 +1032,7 @@ void UIWindowMgr::OnDraw() {
             DeleteObject(clearBrush);
         }
     } else {
-        targetDC = GetDC(g_hMainWnd);
+        targetDC = AcquireMainWindowDrawTarget();
         if (!targetDC) {
             return;
         }
@@ -1069,7 +1069,7 @@ void UIWindowMgr::OnDraw() {
             }
         }
     } else {
-        ReleaseDC(g_hMainWnd, targetDC);
+        ReleaseMainWindowDrawTarget(targetDC);
     }
 }
 

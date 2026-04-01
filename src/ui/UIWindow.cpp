@@ -260,12 +260,24 @@ HDC UIWindow::AcquireDrawTarget() const
     if (shared) {
         return shared;
     }
-    return g_hMainWnd ? GetDC(g_hMainWnd) : nullptr;
+    return AcquireMainWindowDrawTarget();
 }
 
 void UIWindow::ReleaseDrawTarget(HDC dc) const
 {
-    if (dc && dc != GetActiveUiDrawTarget() && g_hMainWnd) {
+    if (dc && dc != GetActiveUiDrawTarget()) {
+        ReleaseMainWindowDrawTarget(dc);
+    }
+}
+
+HDC AcquireMainWindowDrawTarget()
+{
+    return g_hMainWnd ? GetDC(g_hMainWnd) : nullptr;
+}
+
+void ReleaseMainWindowDrawTarget(HDC dc)
+{
+    if (dc && g_hMainWnd) {
         ReleaseDC(g_hMainWnd, dc);
     }
 }
@@ -276,33 +288,20 @@ bool BlitArgbBitsToMainWindow(const void* bits, int width, int height)
         return false;
     }
 
-    HDC targetDc = GetDC(g_hMainWnd);
+    HDC targetDc = AcquireMainWindowDrawTarget();
     if (!targetDc) {
         return false;
     }
 
-    BITMAPINFO bmi{};
-    bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-    bmi.bmiHeader.biWidth = width;
-    bmi.bmiHeader.biHeight = -height;
-    bmi.bmiHeader.biPlanes = 1;
-    bmi.bmiHeader.biBitCount = 32;
-    bmi.bmiHeader.biCompression = BI_RGB;
-
-    const bool success = StretchDIBits(targetDc,
-                                       0,
-                                       0,
-                                       width,
-                                       height,
-                                       0,
-                                       0,
-                                       width,
-                                       height,
-                                       bits,
-                                       &bmi,
-                                       DIB_RGB_COLORS,
-                                       SRCCOPY) != GDI_ERROR;
-    ReleaseDC(g_hMainWnd, targetDc);
+    const bool success = StretchArgbToHdc(targetDc,
+                                          0,
+                                          0,
+                                          width,
+                                          height,
+                                          static_cast<const unsigned int*>(bits),
+                                          width,
+                                          height);
+    ReleaseMainWindowDrawTarget(targetDc);
     return success;
 }
 
@@ -317,27 +316,14 @@ bool UIWindow::BlitArgbBitsToDrawTarget(const void* bits, int width, int height)
         return false;
     }
 
-    BITMAPINFO bmi{};
-    bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-    bmi.bmiHeader.biWidth = width;
-    bmi.bmiHeader.biHeight = -height;
-    bmi.bmiHeader.biPlanes = 1;
-    bmi.bmiHeader.biBitCount = 32;
-    bmi.bmiHeader.biCompression = BI_RGB;
-
-    const bool success = StretchDIBits(targetDc,
-                                       0,
-                                       0,
-                                       width,
-                                       height,
-                                       0,
-                                       0,
-                                       width,
-                                       height,
-                                       bits,
-                                       &bmi,
-                                       DIB_RGB_COLORS,
-                                       SRCCOPY) != GDI_ERROR;
+    const bool success = StretchArgbToHdc(targetDc,
+                                          0,
+                                          0,
+                                          width,
+                                          height,
+                                          static_cast<const unsigned int*>(bits),
+                                          width,
+                                          height);
     ReleaseDrawTarget(targetDc);
     return success;
 }
