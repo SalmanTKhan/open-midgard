@@ -1068,13 +1068,9 @@ void UIWindowMgr::OnDraw() {
         }
     }
 
-    HDC targetDC = GetDC(g_hMainWnd);
-    if (!targetDC) {
-        return;
-    }
-
-    HDC drawDC = targetDC;
     const bool useCompose = EnsureComposeSurface(clientWidth, clientHeight);
+    HDC targetDC = nullptr;
+    HDC drawDC = nullptr;
     if (useCompose) {
         drawDC = m_uiComposeDC;
         if (m_wallpaperSurface && m_wallpaperSurface->HasSoftwarePixels()) {
@@ -1084,6 +1080,12 @@ void UIWindowMgr::OnDraw() {
             FillRect(drawDC, &clientRect, clearBrush);
             DeleteObject(clearBrush);
         }
+    } else {
+        targetDC = GetDC(g_hMainWnd);
+        if (!targetDC) {
+            return;
+        }
+        drawDC = targetDC;
     }
 
     const bool qtMenuComposeFallback = useCompose && qtMenuRuntimeEnabled;
@@ -1111,11 +1113,16 @@ void UIWindowMgr::OnDraw() {
 
     if (useCompose) {
         if (!presentedModernUiFrame) {
+            targetDC = GetDC(g_hMainWnd);
+            if (!targetDC) {
+                return;
+            }
             BitBlt(targetDC, 0, 0, clientWidth, clientHeight, drawDC, 0, 0, SRCCOPY);
+            ReleaseDC(g_hMainWnd, targetDC);
         }
+    } else {
+        ReleaseDC(g_hMainWnd, targetDC);
     }
-
-    ReleaseDC(g_hMainWnd, targetDC);
 }
 
 void UIWindowMgr::OnDrawExcludingRoMapToHdc(HDC targetDC)
