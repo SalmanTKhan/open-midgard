@@ -214,36 +214,27 @@ std::string ResolveUiAssetPath(const char* fileName)
     return NormalizeSlash(fileName ? fileName : "");
 }
 
-HBITMAP LoadBitmapFromGameData(const std::string& path)
+shopui::BitmapPixels LoadBitmapPixelsFromGameData(const std::string& path)
 {
-    HBITMAP outBitmap = nullptr;
-    LoadHBitmapFromGameData(path.c_str(), &outBitmap, nullptr, nullptr);
-    return outBitmap;
+    return shopui::LoadBitmapPixelsFromGameData(path, true);
 }
 
-void DrawBitmapTransparent(HDC target, HBITMAP bitmap, int x, int y, int width = -1, int height = -1)
+void DrawBitmapPixelsTransparent(HDC target, const shopui::BitmapPixels& bitmap, int x, int y, int width = -1, int height = -1)
 {
-    if (!target || !bitmap) {
+    if (!target || !bitmap.IsValid()) {
         return;
     }
 
-    BITMAP bm{};
-    if (!GetObjectA(bitmap, sizeof(bm), &bm) || bm.bmWidth <= 0 || bm.bmHeight <= 0) {
-        return;
-    }
-
-    const int drawWidth = width > 0 ? width : bm.bmWidth;
-    const int drawHeight = height > 0 ? height : bm.bmHeight;
-
-    HDC srcDC = CreateCompatibleDC(target);
-    if (!srcDC) {
-        return;
-    }
-
-    HGDIOBJ oldBitmap = SelectObject(srcDC, bitmap);
-    TransparentBlt(target, x, y, drawWidth, drawHeight, srcDC, 0, 0, bm.bmWidth, bm.bmHeight, RGB(255, 0, 255));
-    SelectObject(srcDC, oldBitmap);
-    DeleteDC(srcDC);
+    const int drawWidth = width > 0 ? width : bitmap.width;
+    const int drawHeight = height > 0 ? height : bitmap.height;
+    AlphaBlendArgbToHdc(target,
+                        x,
+                        y,
+                        drawWidth,
+                        drawHeight,
+                        bitmap.pixels.data(),
+                        bitmap.width,
+                        bitmap.height);
 }
 
 std::string CopyCharacterName(const CHARACTER_INFO& info)
@@ -287,15 +278,15 @@ UIBasicInfoWnd::UIBasicInfoWnd()
       m_menuButtons{ nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr },
       m_baseButton(nullptr),
       m_miniButton(nullptr),
-      m_backgroundFull(nullptr),
-      m_backgroundMini(nullptr),
-      m_barBackground(nullptr),
-      m_redLeft(nullptr),
-      m_redMid(nullptr),
-      m_redRight(nullptr),
-      m_blueLeft(nullptr),
-      m_blueMid(nullptr),
-      m_blueRight(nullptr),
+      m_backgroundFull(),
+      m_backgroundMini(),
+      m_barBackground(),
+      m_redLeft(),
+      m_redMid(),
+      m_redRight(),
+      m_blueLeft(),
+      m_blueMid(),
+      m_blueRight(),
       m_lastDrawStateToken(0ull),
       m_hasDrawStateToken(false)
 {
@@ -684,19 +675,19 @@ unsigned long long UIBasicInfoWnd::BuildDisplayStateToken() const
     return hash;
 }
 
-void UIBasicInfoWnd::DrawCachedBitmap(HDC hdc, HBITMAP bitmap, int x, int y) const
+void UIBasicInfoWnd::DrawCachedBitmap(HDC hdc, const shopui::BitmapPixels& bitmap, int x, int y) const
 {
-    DrawBitmapTransparent(hdc, bitmap, x, y);
+    DrawBitmapPixelsTransparent(hdc, bitmap, x, y);
 }
 
 void UIBasicInfoWnd::DrawBar(HDC hdc, int x, int y, int percent, bool redBar) const
 {
-    DrawBitmapTransparent(hdc, m_barBackground, x, y, kBarWidth, kBarHeight);
+    DrawBitmapPixelsTransparent(hdc, m_barBackground, x, y, kBarWidth, kBarHeight);
 
-    HBITMAP left = redBar ? m_redLeft : m_blueLeft;
-    HBITMAP mid = redBar ? m_redMid : m_blueMid;
-    HBITMAP right = redBar ? m_redRight : m_blueRight;
-    if (!left || !mid || !right) {
+    const shopui::BitmapPixels& left = redBar ? m_redLeft : m_blueLeft;
+    const shopui::BitmapPixels& mid = redBar ? m_redMid : m_blueMid;
+    const shopui::BitmapPixels& right = redBar ? m_redRight : m_blueRight;
+    if (!left.IsValid() || !mid.IsValid() || !right.IsValid()) {
         return;
     }
 
@@ -705,30 +696,23 @@ void UIBasicInfoWnd::DrawBar(HDC hdc, int x, int y, int percent, bool redBar) co
         return;
     }
 
-    BITMAP leftInfo{};
-    BITMAP midInfo{};
-    BITMAP rightInfo{};
-    GetObjectA(left, sizeof(leftInfo), &leftInfo);
-    GetObjectA(mid, sizeof(midInfo), &midInfo);
-    GetObjectA(right, sizeof(rightInfo), &rightInfo);
-
-    if (fillWidth <= leftInfo.bmWidth) {
-        DrawBitmapTransparent(hdc, left, x, y, fillWidth, leftInfo.bmHeight);
+    if (fillWidth <= left.width) {
+        DrawBitmapPixelsTransparent(hdc, left, x, y, fillWidth, left.height);
         return;
     }
 
-    DrawBitmapTransparent(hdc, left, x, y, leftInfo.bmWidth, leftInfo.bmHeight);
-    int remainingWidth = fillWidth - leftInfo.bmWidth;
-    int cursorX = x + leftInfo.bmWidth;
+    DrawBitmapPixelsTransparent(hdc, left, x, y, left.width, left.height);
+    int remainingWidth = fillWidth - left.width;
+    int cursorX = x + left.width;
 
-    const int rightWidth = remainingWidth > rightInfo.bmWidth ? rightInfo.bmWidth : 0;
+    const int rightWidth = remainingWidth > right.width ? right.width : 0;
     const int midWidth = (std::max)(0, remainingWidth - rightWidth);
     if (midWidth > 0) {
-        DrawBitmapTransparent(hdc, mid, cursorX, y, midWidth, midInfo.bmHeight);
+        DrawBitmapPixelsTransparent(hdc, mid, cursorX, y, midWidth, mid.height);
         cursorX += midWidth;
     }
     if (rightWidth > 0) {
-        DrawBitmapTransparent(hdc, right, cursorX, y, rightWidth, rightInfo.bmHeight);
+        DrawBitmapPixelsTransparent(hdc, right, cursorX, y, rightWidth, right.height);
     }
 }
 
@@ -767,52 +751,44 @@ void UIBasicInfoWnd::DrawWindowText(HDC hdc, int x, int y, const char* text, COL
 
 void UIBasicInfoWnd::LoadAssets()
 {
-    if (!m_backgroundFull) {
-        m_backgroundFull = LoadBitmapFromGameData(ResolveUiAssetPath("basewin_bg.bmp"));
+    if (!m_backgroundFull.IsValid()) {
+        m_backgroundFull = LoadBitmapPixelsFromGameData(ResolveUiAssetPath("basewin_bg.bmp"));
     }
-    if (!m_backgroundMini) {
-        m_backgroundMini = LoadBitmapFromGameData(ResolveUiAssetPath("basewin_mini.bmp"));
+    if (!m_backgroundMini.IsValid()) {
+        m_backgroundMini = LoadBitmapPixelsFromGameData(ResolveUiAssetPath("basewin_mini.bmp"));
     }
-    if (!m_barBackground) {
-        m_barBackground = LoadBitmapFromGameData(ResolveUiAssetPath("GZE_BG.BMP"));
+    if (!m_barBackground.IsValid()) {
+        m_barBackground = LoadBitmapPixelsFromGameData(ResolveUiAssetPath("GZE_BG.BMP"));
     }
-    if (!m_redLeft) {
-        m_redLeft = LoadBitmapFromGameData(ResolveUiAssetPath("gzered_left.bmp"));
+    if (!m_redLeft.IsValid()) {
+        m_redLeft = LoadBitmapPixelsFromGameData(ResolveUiAssetPath("gzered_left.bmp"));
     }
-    if (!m_redMid) {
-        m_redMid = LoadBitmapFromGameData(ResolveUiAssetPath("gzered_mid.bmp"));
+    if (!m_redMid.IsValid()) {
+        m_redMid = LoadBitmapPixelsFromGameData(ResolveUiAssetPath("gzered_mid.bmp"));
     }
-    if (!m_redRight) {
-        m_redRight = LoadBitmapFromGameData(ResolveUiAssetPath("gzered_right.bmp"));
+    if (!m_redRight.IsValid()) {
+        m_redRight = LoadBitmapPixelsFromGameData(ResolveUiAssetPath("gzered_right.bmp"));
     }
-    if (!m_blueLeft) {
-        m_blueLeft = LoadBitmapFromGameData(ResolveUiAssetPath("gzeblue_left.bmp"));
+    if (!m_blueLeft.IsValid()) {
+        m_blueLeft = LoadBitmapPixelsFromGameData(ResolveUiAssetPath("gzeblue_left.bmp"));
     }
-    if (!m_blueMid) {
-        m_blueMid = LoadBitmapFromGameData(ResolveUiAssetPath("gzeblue_mid.bmp"));
+    if (!m_blueMid.IsValid()) {
+        m_blueMid = LoadBitmapPixelsFromGameData(ResolveUiAssetPath("gzeblue_mid.bmp"));
     }
-    if (!m_blueRight) {
-        m_blueRight = LoadBitmapFromGameData(ResolveUiAssetPath("gzeblue_right.bmp"));
+    if (!m_blueRight.IsValid()) {
+        m_blueRight = LoadBitmapPixelsFromGameData(ResolveUiAssetPath("gzeblue_right.bmp"));
     }
 }
 
 void UIBasicInfoWnd::ReleaseAssets()
 {
-    HBITMAP* bitmaps[] = {
-        &m_backgroundFull,
-        &m_backgroundMini,
-        &m_barBackground,
-        &m_redLeft,
-        &m_redMid,
-        &m_redRight,
-        &m_blueLeft,
-        &m_blueMid,
-        &m_blueRight,
-    };
-    for (HBITMAP* bitmap : bitmaps) {
-        if (*bitmap) {
-            DeleteObject(*bitmap);
-            *bitmap = nullptr;
-        }
-    }
+    m_backgroundFull.Clear();
+    m_backgroundMini.Clear();
+    m_barBackground.Clear();
+    m_redLeft.Clear();
+    m_redMid.Clear();
+    m_redRight.Clear();
+    m_blueLeft.Clear();
+    m_blueMid.Clear();
+    m_blueRight.Clear();
 }

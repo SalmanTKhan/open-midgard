@@ -1,6 +1,7 @@
 #pragma once
 
 #include "UIFrameWnd.h"
+#include "UIShopCommon.h"
 
 #include <array>
 #include <string>
@@ -61,7 +62,7 @@ private:
     void SetMiniMode(bool miniMode);
     DisplayData BuildDisplayData() const;
     unsigned long long BuildDisplayStateToken() const;
-    void DrawCachedBitmap(HDC hdc, HBITMAP bitmap, int x, int y) const;
+    void DrawCachedBitmap(HDC hdc, const shopui::BitmapPixels& bitmap, int x, int y) const;
     void DrawBar(HDC hdc, int x, int y, int percent, bool redBar) const;
     void DrawExpBar(HDC hdc, int x, int y, int percent) const;
     void DrawWindowText(HDC hdc, int x, int y, const char* text, COLORREF color, UINT format = DT_LEFT | DT_TOP | DT_SINGLELINE, HFONT font = nullptr, int height = 16) const;
@@ -72,15 +73,15 @@ private:
     std::array<UIBitmapButton*, 8> m_menuButtons;
     UIBitmapButton* m_baseButton;
     UIBitmapButton* m_miniButton;
-    HBITMAP m_backgroundFull;
-    HBITMAP m_backgroundMini;
-    HBITMAP m_barBackground;
-    HBITMAP m_redLeft;
-    HBITMAP m_redMid;
-    HBITMAP m_redRight;
-    HBITMAP m_blueLeft;
-    HBITMAP m_blueMid;
-    HBITMAP m_blueRight;
+    shopui::BitmapPixels m_backgroundFull;
+    shopui::BitmapPixels m_backgroundMini;
+    shopui::BitmapPixels m_barBackground;
+    shopui::BitmapPixels m_redLeft;
+    shopui::BitmapPixels m_redMid;
+    shopui::BitmapPixels m_redRight;
+    shopui::BitmapPixels m_blueLeft;
+    shopui::BitmapPixels m_blueMid;
+    shopui::BitmapPixels m_blueRight;
     unsigned long long m_lastDrawStateToken;
     bool m_hasDrawStateToken;
 };
