@@ -278,7 +278,7 @@ bool IsPointInsideWindow(const UIWindow* window, int x, int y)
 
 UIWindow::UIWindow() 
     : m_parent(nullptr), m_x(0), m_y(0), m_w(0), m_h(0), 
-      m_isDirty(0), m_dc(nullptr), m_id(0), m_state(0), m_stateCnt(0), 
+      m_isDirty(0), m_id(0), m_state(0), m_stateCnt(0), 
       m_show(1), m_trans(0), m_transTarget(0), m_transTime(0)
 {
 }

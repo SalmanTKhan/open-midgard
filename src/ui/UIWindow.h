@@ -4,8 +4,6 @@
 #include <vector>
 #include <string>
 
-class CDC;
-
 void PlayUiButtonSound();
 bool LoadUiWindowPlacement(const char* windowName, int* x, int* y);
 void SaveUiWindowPlacement(const char* windowName, int x, int y);
@@ -89,7 +87,6 @@ public:
     std::list<UIWindow*> m_children;
     int m_x, m_y, m_w, m_h;
     int m_isDirty;
-    CDC* m_dc;
     int m_id;
     int m_state;
     int m_stateCnt;
