@@ -5737,75 +5737,47 @@ bool LoadBitmapFromGameData(const std::string& dataPath, HBITMAP* outBmp, int* o
     return !dataPath.empty() && LoadHBitmapFromGameData(dataPath.c_str(), outBmp, outWidth, outHeight);
 }
 
-bool ComputeBitmapAverageColor(HBITMAP bitmap, COLORREF* outColor)
+bool ComputeBitmapAverageColor(const unsigned int* pixels, size_t pixelCount, COLORREF* outColor)
 {
-    if (!bitmap || !outColor) {
-        return false;
-    }
-
-    BITMAP bm{};
-    if (!GetObjectA(bitmap, sizeof(bm), &bm) || bm.bmWidth <= 0 || bm.bmHeight <= 0) {
-        return false;
-    }
-
-    BITMAPINFO bmi{};
-    bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-    bmi.bmiHeader.biWidth = bm.bmWidth;
-    bmi.bmiHeader.biHeight = -bm.bmHeight;
-    bmi.bmiHeader.biPlanes = 1;
-    bmi.bmiHeader.biBitCount = 32;
-    bmi.bmiHeader.biCompression = BI_RGB;
-
-    std::vector<unsigned int> pixels(static_cast<size_t>(bm.bmWidth) * static_cast<size_t>(bm.bmHeight));
-    HDC screenDC = GetDC(nullptr);
-    if (!screenDC) {
-        return false;
-    }
-
-    const int scanLines = GetDIBits(screenDC,
-        bitmap,
-        0,
-        static_cast<UINT>(bm.bmHeight),
-        pixels.data(),
-        &bmi,
-        DIB_RGB_COLORS);
-    ReleaseDC(nullptr, screenDC);
-    if (scanLines != bm.bmHeight) {
+    if (!pixels || pixelCount == 0 || !outColor) {
         return false;
     }
 
     unsigned long long totalR = 0;
     unsigned long long totalG = 0;
     unsigned long long totalB = 0;
-    const unsigned long long pixelCount = static_cast<unsigned long long>(pixels.size());
-    if (pixelCount == 0) {
-        return false;
-    }
-
-    for (unsigned int pixel : pixels) {
+    for (size_t index = 0; index < pixelCount; ++index) {
+        const unsigned int pixel = pixels[index];
         totalB += pixel & 0xFFu;
         totalG += (pixel >> 8) & 0xFFu;
         totalR += (pixel >> 16) & 0xFFu;
     }
 
     *outColor = RGB(
-        static_cast<int>(totalR / pixelCount),
-        static_cast<int>(totalG / pixelCount),
-        static_cast<int>(totalB / pixelCount));
+        static_cast<int>(totalR / static_cast<unsigned long long>(pixelCount)),
+        static_cast<int>(totalG / static_cast<unsigned long long>(pixelCount)),
+        static_cast<int>(totalB / static_cast<unsigned long long>(pixelCount)));
     return true;
 }
 
 bool LoadAverageBitmapColorFromGameData(const std::string& dataPath, COLORREF* outColor)
 {
-    HBITMAP bitmap = nullptr;
+    u32* pixels = nullptr;
     int width = 0;
     int height = 0;
-    if (!LoadBitmapFromGameData(dataPath, &bitmap, &width, &height) || !bitmap) {
+    if (!LoadBgraPixelsFromGameData(dataPath.c_str(), &pixels, &width, &height)
+        || !pixels
+        || width <= 0
+        || height <= 0) {
+        delete[] pixels;
         return false;
     }
 
-    const bool ok = ComputeBitmapAverageColor(bitmap, outColor);
-    DeleteObject(bitmap);
+    const bool ok = ComputeBitmapAverageColor(
+        pixels,
+        static_cast<size_t>(width) * static_cast<size_t>(height),
+        outColor);
+    delete[] pixels;
     return ok;
 }
 
