@@ -2922,6 +2922,64 @@ Item {
             font.pixelSize: 18
             font.bold: true
         }
+
+        Repeater {
+            model: [
+                {
+                    x: 5,
+                    y: 318,
+                    w: 80,
+                    h: 24,
+                    text: "Delete",
+                    visible: (uiState.charSelectSelectedDetails.name || "").length > 0
+                },
+                {
+                    x: 314,
+                    y: 318,
+                    w: 85,
+                    h: 24,
+                    text: "Charge",
+                    visible: true
+                },
+                {
+                    x: 404,
+                    y: 318,
+                    w: 80,
+                    h: 24,
+                    text: (uiState.charSelectSelectedDetails.name || "").length > 0 ? "OK" : "Make",
+                    visible: true
+                },
+                {
+                    x: 484,
+                    y: 318,
+                    w: 90,
+                    h: 24,
+                    text: "Cancel",
+                    visible: true
+                }
+            ]
+
+            delegate: Rectangle {
+                required property var modelData
+                x: modelData.x
+                y: modelData.y
+                width: modelData.w
+                height: modelData.h
+                radius: 3
+                color: "#d8d0c4"
+                border.width: 1
+                border.color: "#6f6558"
+                visible: modelData.visible
+
+                Text {
+                    anchors.centerIn: parent
+                    text: modelData.text
+                    color: "#202020"
+                    font.pixelSize: 11
+                    font.bold: true
+                }
+            }
+        }
     }
 
     Rectangle {
