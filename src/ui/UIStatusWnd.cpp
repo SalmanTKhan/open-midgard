@@ -61,6 +61,19 @@ constexpr std::array<int, 6> kStatRows = { 6, 22, 38, 54, 70, 86 };
 constexpr std::array<int, 6> kRightLeftRows = { 21, 37, 53, 69, 85, 101 };
 constexpr std::array<int, 4> kRightRightRows = { 21, 37, 53, 69 };
 constexpr const char* kExternalSkinDir = "D:\\Spel\\OldRO\\skin\\default\\basic_interface\\";
+constexpr int kQtButtonWidth = 12;
+constexpr int kQtButtonHeight = 11;
+
+RECT MakeStatusRect(int x, int y, int left, int top, int width, int height)
+{
+    RECT rect{ x + left, y + top, x + left + width, y + top + height };
+    return rect;
+}
+
+bool IsPointInRect(const RECT& rect, int x, int y)
+{
+    return x >= rect.left && x < rect.right && y >= rect.top && y < rect.bottom;
+}
 
 std::string ToLowerAscii(std::string value)
 {
@@ -436,6 +449,16 @@ void UIStatusWnd::OnLBtnDblClk(int x, int y)
 
 void UIStatusWnd::OnLBtnDown(int x, int y)
 {
+    if (IsQtUiRuntimeEnabled()) {
+        const RECT baseRect = MakeStatusRect(m_x, m_y, 3, 3, kQtButtonWidth, kQtButtonHeight);
+        const RECT miniRect = MakeStatusRect(m_x, m_y, 252, 3, kQtButtonWidth, kQtButtonHeight);
+        const RECT closeRect = MakeStatusRect(m_x, m_y, 266, 3, kQtButtonWidth, kQtButtonHeight);
+        if (IsPointInRect(baseRect, x, y) || IsPointInRect(miniRect, x, y) || IsPointInRect(closeRect, x, y)) {
+            UIWindow::OnLBtnDown(x, y);
+            return;
+        }
+    }
+
     if (m_h > kMiniHeight && x >= m_x && x < m_x + 20 && y >= m_y + kTitleBarHeight) {
         if (y < m_y + 43) {
             SetPage(0);
@@ -449,6 +472,60 @@ void UIStatusWnd::OnLBtnDown(int x, int y)
     } else {
         UIWindow::OnLBtnDown(x, y);
     }
+}
+
+void UIStatusWnd::OnLBtnUp(int x, int y)
+{
+    if (IsQtUiRuntimeEnabled()) {
+        const bool wasDragging = m_isDragging != 0;
+        UIFrameWnd::OnLBtnUp(x, y);
+        if (wasDragging) {
+            return;
+        }
+
+        const RECT baseRect = MakeStatusRect(m_x, m_y, 3, 3, kQtButtonWidth, kQtButtonHeight);
+        const RECT miniRect = MakeStatusRect(m_x, m_y, 252, 3, kQtButtonWidth, kQtButtonHeight);
+        const RECT closeRect = MakeStatusRect(m_x, m_y, 266, 3, kQtButtonWidth, kQtButtonHeight);
+
+        if (m_h == kMiniHeight && IsPointInRect(baseRect, x, y)) {
+            SendMsg(this, 6, kButtonIdBase, 0, 0);
+            return;
+        }
+        if (m_h > kMiniHeight && IsPointInRect(miniRect, x, y)) {
+            SendMsg(this, 6, kButtonIdMini, 0, 0);
+            return;
+        }
+        if (IsPointInRect(closeRect, x, y)) {
+            SendMsg(this, 6, kButtonIdClose, 0, 0);
+            return;
+        }
+
+        if (m_h > kMiniHeight && m_page == 0) {
+            const DisplayData data = BuildDisplayData();
+            for (size_t index = 0; index < kIncrementButtonIds.size(); ++index) {
+                if (data.statCosts[index] <= 0
+                    || data.baseStats[index] >= 99
+                    || data.statCosts[index] > data.statusPoint) {
+                    continue;
+                }
+
+                const RECT incrementRect = MakeStatusRect(
+                    m_x,
+                    m_y,
+                    92,
+                    23 + static_cast<int>(index) * 16,
+                    kQtButtonWidth,
+                    kQtButtonHeight);
+                if (IsPointInRect(incrementRect, x, y)) {
+                    SendMsg(this, 6, kIncrementButtonIds[index], 0, 0);
+                    return;
+                }
+            }
+        }
+        return;
+    }
+
+    UIFrameWnd::OnLBtnUp(x, y);
 }
 
 void UIStatusWnd::OnMouseHover(int x, int y)
