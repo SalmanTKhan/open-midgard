@@ -45,6 +45,14 @@
 #include <cstring>
 #include <vector>
 
+#if RO_ENABLE_QT6_UI
+#include <QFont>
+#include <QFontMetrics>
+#include <QImage>
+#include <QPainter>
+#include <QString>
+#endif
+
 #pragma comment(lib, "msimg32.lib")
 
 namespace {
@@ -311,6 +319,159 @@ void ConvertOverlayComposeBitsToAlpha(void* composeBits, int width, int height)
     for (size_t index = 0; index < pixelCount; ++index) {
         const unsigned int rgb = pixels[index] & 0x00FFFFFFu;
         pixels[index] = (rgb == (kOverlayTransparentKey & 0x00FFFFFFu)) ? 0u : (0xFF000000u | rgb);
+    }
+}
+
+#if RO_ENABLE_QT6_UI
+QFont BuildOverlayLabelFont()
+{
+    QFont font(QStringLiteral("Arial"));
+    font.setPixelSize(kHoverNameFontHeight);
+    font.setBold(kHoverNameFontBold != 0);
+    font.setStyleStrategy(QFont::NoAntialias);
+    return font;
+}
+
+QColor ToQColor(COLORREF color)
+{
+    return QColor(GetRValue(color), GetGValue(color), GetBValue(color));
+}
+
+bool MeasureOverlayTextQt(const std::string& text, SIZE* outSize)
+{
+    if (!outSize || text.empty()) {
+        return false;
+    }
+
+    const QString label = QString::fromLocal8Bit(text.c_str(), static_cast<int>(text.size()));
+    if (label.isEmpty()) {
+        return false;
+    }
+
+    const QFontMetrics metrics(BuildOverlayLabelFont());
+    outSize->cx = (std::max)(1, metrics.horizontalAdvance(label));
+    outSize->cy = (std::max)(1, metrics.height());
+    return true;
+}
+
+void DrawOutlinedTextQtToOverlay(
+    unsigned int* pixels,
+    int width,
+    int height,
+    int pitch,
+    int drawX,
+    int drawY,
+    const std::string& text,
+    COLORREF color)
+{
+    if (!pixels || width <= 0 || height <= 0 || pitch < width * static_cast<int>(sizeof(unsigned int)) || text.empty()) {
+        return;
+    }
+
+    QImage image(reinterpret_cast<uchar*>(pixels), width, height, pitch, QImage::Format_ARGB32);
+    if (image.isNull()) {
+        return;
+    }
+
+    const QString label = QString::fromLocal8Bit(text.c_str(), static_cast<int>(text.size()));
+    if (label.isEmpty()) {
+        return;
+    }
+
+    QPainter painter(&image);
+    painter.setRenderHint(QPainter::Antialiasing, false);
+    painter.setRenderHint(QPainter::TextAntialiasing, false);
+    painter.setFont(BuildOverlayLabelFont());
+
+    const QFontMetrics metrics(painter.font());
+    const int baselineY = drawY + metrics.ascent();
+    painter.setPen(Qt::black);
+    painter.drawText(drawX - 1, baselineY, label);
+    painter.drawText(drawX + 1, baselineY, label);
+    painter.drawText(drawX, baselineY - 1, label);
+    painter.drawText(drawX, baselineY + 1, label);
+    painter.setPen(ToQColor(color));
+    painter.drawText(drawX, baselineY, label);
+}
+#endif
+
+inline unsigned int PackOverlayRgb(COLORREF color)
+{
+    return (static_cast<unsigned int>(GetRValue(color)) << 16)
+        | (static_cast<unsigned int>(GetGValue(color)) << 8)
+        | static_cast<unsigned int>(GetBValue(color));
+}
+
+void PutOverlayPixel(unsigned int* pixels, int width, int height, int x, int y, COLORREF color)
+{
+    if (!pixels || x < 0 || y < 0 || x >= width || y >= height) {
+        return;
+    }
+
+    pixels[static_cast<size_t>(y) * static_cast<size_t>(width) + static_cast<size_t>(x)] = PackOverlayRgb(color);
+}
+
+bool PointInTriangle(const POINT& p, const POINT& a, const POINT& b, const POINT& c)
+{
+    const auto sign = [](const POINT& p0, const POINT& p1, const POINT& p2) -> long {
+        return static_cast<long>(p0.x - p2.x) * static_cast<long>(p1.y - p2.y)
+            - static_cast<long>(p1.x - p2.x) * static_cast<long>(p0.y - p2.y);
+    };
+
+    const long d1 = sign(p, a, b);
+    const long d2 = sign(p, b, c);
+    const long d3 = sign(p, c, a);
+    const bool hasNegative = d1 < 0 || d2 < 0 || d3 < 0;
+    const bool hasPositive = d1 > 0 || d2 > 0 || d3 > 0;
+    return !(hasNegative && hasPositive);
+}
+
+void FillOverlayTriangle(unsigned int* pixels, int width, int height, const POINT& a, const POINT& b, const POINT& c, COLORREF color)
+{
+    if (!pixels || width <= 0 || height <= 0) {
+        return;
+    }
+
+    const int minX = (std::max)(0, static_cast<int>((std::min)({ a.x, b.x, c.x })));
+    const int maxX = (std::min)(width - 1, static_cast<int>((std::max)({ a.x, b.x, c.x })));
+    const int minY = (std::max)(0, static_cast<int>((std::min)({ a.y, b.y, c.y })));
+    const int maxY = (std::min)(height - 1, static_cast<int>((std::max)({ a.y, b.y, c.y })));
+    for (int y = minY; y <= maxY; ++y) {
+        for (int x = minX; x <= maxX; ++x) {
+            const POINT p{ x, y };
+            if (PointInTriangle(p, a, b, c)) {
+                PutOverlayPixel(pixels, width, height, x, y, color);
+            }
+        }
+    }
+}
+
+void DrawFallbackLockedTargetArrowToPixels(unsigned int* pixels, int width, int height, int centerX, int tipY)
+{
+    if (!pixels || width <= 0 || height <= 0) {
+        return;
+    }
+
+    const POINT outerA{ centerX, tipY };
+    const POINT outerB{ centerX - 7, tipY - 11 };
+    const POINT outerC{ centerX + 7, tipY - 11 };
+    const POINT innerA{ centerX, tipY - 1 };
+    const POINT innerB{ centerX - 4, tipY - 9 };
+    const POINT innerC{ centerX + 4, tipY - 9 };
+
+    FillOverlayTriangle(pixels, width, height, outerA, outerB, outerC, RGB(255, 226, 120));
+    FillOverlayTriangle(pixels, width, height, innerA, innerB, innerC, RGB(255, 92, 92));
+
+    const COLORREF outline = RGB(32, 16, 16);
+    const POINT outlinePoints[] = {
+        outerA, outerB, outerC
+    };
+    for (const POINT& point : outlinePoints) {
+        for (int offsetY = -1; offsetY <= 1; ++offsetY) {
+            for (int offsetX = -1; offsetX <= 1; ++offsetX) {
+                PutOverlayPixel(pixels, width, height, point.x + offsetX, point.y + offsetY, outline);
+            }
+        }
     }
 }
 
@@ -867,20 +1028,28 @@ bool QueueLockedTargetOverlayQuad(CGameMode& mode)
 
     const std::string label = ResolveHoveredActorName(mode, actorIt->second);
     const bool drawLockedTargetText = !label.empty();
+    SIZE textSize{};
+    int textX = 0;
+    int textY = 0;
     if (drawLockedTargetText) {
+#if RO_ENABLE_QT6_UI
+        if (!MeasureOverlayTextQt(label, &textSize)) {
+            return false;
+        }
+#else
         HDC measureDc = CreateCompatibleDC(nullptr);
         if (!measureDc) {
             return false;
         }
         DrawDC drawDc(measureDc);
         drawDc.SetFont(FONT_DEFAULT, kHoverNameFontHeight, kHoverNameFontBold);
-        SIZE textSize{};
         drawDc.GetTextExtentPoint32A(label.c_str(), static_cast<int>(label.size()), &textSize);
-        const int textX = centerX - (textSize.cx / 2);
-        const int textY = labelY + kHoverNameTextPadding + kHoverNameVerticalOffset;
+        DeleteDC(measureDc);
+#endif
+        textX = centerX - (textSize.cx / 2);
+        textY = labelY + kHoverNameTextPadding + kHoverNameVerticalOffset;
         RECT textRect{ textX - 2, textY - 2, textX + textSize.cx + 2, textY + textSize.cy + 2 };
         UnionRect(&overlayRect, &overlayRect, &textRect);
-        DeleteDC(measureDc);
     }
 
     static bool s_arrowPixelsLoaded = false;
@@ -950,11 +1119,13 @@ bool QueueLockedTargetOverlayQuad(CGameMode& mode)
     static int s_targetTextureWidth = 0;
     static int s_targetTextureHeight = 0;
     static std::vector<unsigned int> s_targetComposePixels;
+#if !RO_ENABLE_QT6_UI
     static HDC s_targetComposeDc = nullptr;
     static HBITMAP s_targetComposeBitmap = nullptr;
     static void* s_targetComposeBits = nullptr;
     static int s_targetComposeWidth = 0;
     static int s_targetComposeHeight = 0;
+#endif
     if (!s_targetTexture || s_targetTextureWidth != width || s_targetTextureHeight != height) {
         delete s_targetTexture;
         s_targetTexture = new CTexture();
@@ -972,8 +1143,31 @@ bool QueueLockedTargetOverlayQuad(CGameMode& mode)
         s_targetComposePixels.assign(static_cast<size_t>(width) * static_cast<size_t>(height), kOverlayTransparentKey);
     }
 
-    const bool needComposeSurface = drawLockedTargetText || !hasArrowBitmap;
     unsigned int* targetPixels = nullptr;
+#if RO_ENABLE_QT6_UI
+    std::fill(s_targetComposePixels.begin(), s_targetComposePixels.end(), kOverlayTransparentKey);
+    targetPixels = s_targetComposePixels.data();
+    if (drawLockedTargetText) {
+        DrawOutlinedTextQtToOverlay(targetPixels,
+            width,
+            height,
+            width * static_cast<int>(sizeof(unsigned int)),
+            textX - clippedRect.left,
+            textY - clippedRect.top,
+            label,
+            ResolveHoverNameColor(actorIt->second));
+    }
+    if (!hasArrowBitmap) {
+        const int tipY = labelY - kLockedTargetArrowBaseLift - bounce;
+        DrawFallbackLockedTargetArrowToPixels(
+            targetPixels,
+            width,
+            height,
+            centerX - clippedRect.left,
+            tipY - clippedRect.top);
+    }
+#else
+    const bool needComposeSurface = drawLockedTargetText || !hasArrowBitmap;
     if (needComposeSurface) {
         const bool composeReady = EnsureOverlayComposeSurface(width, height,
             &s_targetComposeDc, &s_targetComposeBitmap, &s_targetComposeBits, &s_targetComposeWidth, &s_targetComposeHeight);
@@ -999,6 +1193,7 @@ bool QueueLockedTargetOverlayQuad(CGameMode& mode)
         std::fill(s_targetComposePixels.begin(), s_targetComposePixels.end(), kOverlayTransparentKey);
         targetPixels = s_targetComposePixels.data();
     }
+#endif
 
     if (hasArrowBitmap) {
         for (int destY = 0; destY < arrowScaledHeight; ++destY) {
