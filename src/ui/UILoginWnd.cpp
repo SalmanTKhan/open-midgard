@@ -42,11 +42,9 @@ constexpr LoginButtonHitArea kQtLoginButtonAreas[] = {
     { 155, 234, 96, 40, 20 },
 };
 
-HBITMAP LoadBitmapFromGameData(const char* path)
+shopui::BitmapPixels LoadBitmapPixelsFromGameData(const char* path)
 {
-    HBITMAP outBmp = nullptr;
-    LoadHBitmapFromGameData(path, &outBmp, nullptr, nullptr);
-    return outBmp;
+    return shopui::LoadBitmapPixelsFromGameData(path ? path : "", false);
 }
 
 bool ContainsPoint(int left, int top, int width, int height, int x, int y)
@@ -54,37 +52,35 @@ bool ContainsPoint(int left, int top, int width, int height, int x, int y)
     return x >= left && x < left + width && y >= top && y < top + height;
 }
 
-void DrawBitmapStretched(HDC target, HBITMAP bmp, const RECT& dst)
+void DrawBitmapPixelsStretched(HDC target, const shopui::BitmapPixels& bmp, const RECT& dst)
 {
-    if (!target || !bmp) {
+    if (!target || !bmp.IsValid() || dst.right <= dst.left || dst.bottom <= dst.top) {
         return;
     }
 
-    BITMAP bm{};
-    if (!GetObjectA(bmp, sizeof(bm), &bm) || bm.bmWidth <= 0 || bm.bmHeight <= 0) {
-        return;
-    }
+    BITMAPINFO bmi{};
+    bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    bmi.bmiHeader.biWidth = bmp.width;
+    bmi.bmiHeader.biHeight = -bmp.height;
+    bmi.bmiHeader.biPlanes = 1;
+    bmi.bmiHeader.biBitCount = 32;
+    bmi.bmiHeader.biCompression = BI_RGB;
 
-    HDC srcDC = CreateCompatibleDC(target);
-    if (!srcDC) {
-        return;
-    }
-
-    HGDIOBJ old = SelectObject(srcDC, bmp);
-    SetStretchBltMode(target, HALFTONE);
-    StretchBlt(target,
+    const int oldStretchMode = SetStretchBltMode(target, HALFTONE);
+    StretchDIBits(target,
         dst.left,
         dst.top,
         dst.right - dst.left,
         dst.bottom - dst.top,
-        srcDC,
         0,
         0,
-        bm.bmWidth,
-        bm.bmHeight,
+        bmp.width,
+        bmp.height,
+        bmp.pixels.data(),
+        &bmi,
+        DIB_RGB_COLORS,
         SRCCOPY);
-    SelectObject(srcDC, old);
-    DeleteDC(srcDC);
+    SetStretchBltMode(target, oldStretchMode);
 }
 
 std::string ToLowerAscii(std::string value)
@@ -369,18 +365,18 @@ std::vector<std::string> BuildUiAssetCandidates(const char* fileName)
     return out;
 }
 
-HBITMAP LoadFirstBitmapFromCandidates(const std::vector<std::string>& candidates, std::string* outPath)
+shopui::BitmapPixels LoadFirstBitmapPixelsFromCandidates(const std::vector<std::string>& candidates, std::string* outPath)
 {
     for (const std::string& candidate : candidates) {
-        HBITMAP bmp = LoadBitmapFromGameData(candidate.c_str());
-        if (bmp) {
+        shopui::BitmapPixels bmp = LoadBitmapPixelsFromGameData(candidate.c_str());
+        if (bmp.IsValid()) {
             if (outPath) {
                 *outPath = candidate;
             }
             return bmp;
         }
     }
-    return nullptr;
+    return {};
 }
 
 std::string ResolveUiAssetPath(const char* fileName)
@@ -403,7 +399,7 @@ std::string ResolveUiAssetPath(const char* fileName)
 UILoginWnd::UILoginWnd()
     : m_controlsCreated(false),
       m_assetsProbed(false),
-      m_wallpaperBmp(nullptr),
+      m_wallpaperBmp(),
       m_composeDC(nullptr),
       m_composeBitmap(nullptr),
       m_composeBits(nullptr),
@@ -414,7 +410,7 @@ UILoginWnd::UILoginWnd()
       m_password(nullptr),
       m_cancelButton(nullptr),
         m_saveAccountCheck(nullptr) {
-    m_uiAssets.fill(nullptr);
+    m_uiAssets.fill(shopui::BitmapPixels{});
 }
 
 UILoginWnd::~UILoginWnd()
@@ -619,15 +615,9 @@ void UILoginWnd::OnCreate(int cx, int cy)
 
 void UILoginWnd::ClearUiAssets()
 {
-    if (m_wallpaperBmp) {
-        DeleteObject(m_wallpaperBmp);
-        m_wallpaperBmp = nullptr;
-    }
-    for (HBITMAP& bmp : m_uiAssets) {
-        if (bmp) {
-            DeleteObject(bmp);
-            bmp = nullptr;
-        }
+    m_wallpaperBmp.Clear();
+    for (shopui::BitmapPixels& bmp : m_uiAssets) {
+        bmp.Clear();
     }
     for (std::string& path : m_uiAssetPaths) {
         path.clear();
@@ -702,8 +692,8 @@ void UILoginWnd::EnsureResourceCache()
 
     const std::vector<std::string> candidates = BuildWallpaperCandidates(m_requestedWallpaper);
     for (const std::string& candidate : candidates) {
-        HBITMAP bmp = LoadBitmapFromGameData(candidate.c_str());
-        if (bmp) {
+        shopui::BitmapPixels bmp = LoadBitmapPixelsFromGameData(candidate.c_str());
+        if (bmp.IsValid()) {
             m_wallpaperBmp = bmp;
             m_wallpaperPath = candidate;
             break;
@@ -718,11 +708,11 @@ void UILoginWnd::EnsureResourceCache()
         "win_msgbox.bmp",
         nullptr
     };
-    for (int i = 0; panelNames[i] && !m_uiAssets[UiPanel]; ++i) {
-        m_uiAssets[UiPanel] = LoadFirstBitmapFromCandidates(
+    for (int i = 0; panelNames[i] && !m_uiAssets[UiPanel].IsValid(); ++i) {
+        m_uiAssets[UiPanel] = LoadFirstBitmapPixelsFromCandidates(
             BuildUiAssetCandidates(panelNames[i]), &m_uiAssetPaths[UiPanel]);
     }
-    if (m_uiAssets[UiPanel]) {
+    if (m_uiAssets[UiPanel].IsValid()) {
         DbgLog("[LoginUIAsset] PANEL HIT: %s\n", m_uiAssetPaths[UiPanel].c_str());
     } else {
         DbgLog("[LoginUIAsset] PANEL MISS\n");
@@ -735,11 +725,11 @@ void UILoginWnd::EnsureResourceCache()
         "ad_title.jpg",
         nullptr
     };
-    for (int i = 0; logoNames[i] && !m_uiAssets[UiLogo]; ++i) {
-        m_uiAssets[UiLogo] = LoadFirstBitmapFromCandidates(
+    for (int i = 0; logoNames[i] && !m_uiAssets[UiLogo].IsValid(); ++i) {
+        m_uiAssets[UiLogo] = LoadFirstBitmapPixelsFromCandidates(
             BuildUiAssetCandidates(logoNames[i]), &m_uiAssetPaths[UiLogo]);
     }
-    if (m_uiAssets[UiLogo]) {
+    if (m_uiAssets[UiLogo].IsValid()) {
         DbgLog("[LoginUIAsset] LOGO HIT: %s\n", m_uiAssetPaths[UiLogo].c_str());
     } else {
         DbgLog("[LoginUIAsset] LOGO MISS\n");
@@ -753,11 +743,11 @@ void UILoginWnd::EnsureResourceCache()
         "btn_ok.bmp",
         nullptr
     };
-    for (int i = 0; buttonNames[i] && !m_uiAssets[UiButton]; ++i) {
-        m_uiAssets[UiButton] = LoadFirstBitmapFromCandidates(
+    for (int i = 0; buttonNames[i] && !m_uiAssets[UiButton].IsValid(); ++i) {
+        m_uiAssets[UiButton] = LoadFirstBitmapPixelsFromCandidates(
             BuildUiAssetCandidates(buttonNames[i]), &m_uiAssetPaths[UiButton]);
     }
-    if (m_uiAssets[UiButton]) {
+    if (m_uiAssets[UiButton].IsValid()) {
         DbgLog("[LoginUIAsset] BUTTON HIT: %s\n", m_uiAssetPaths[UiButton].c_str());
     } else {
         DbgLog("[LoginUIAsset] BUTTON MISS\n");
@@ -768,11 +758,11 @@ void UILoginWnd::EnsureResourceCache()
         "btn_edit_a.bmp",
         nullptr
     };
-    for (int i = 0; fieldNames[i] && !m_uiAssets[UiField]; ++i) {
-        m_uiAssets[UiField] = LoadFirstBitmapFromCandidates(
+    for (int i = 0; fieldNames[i] && !m_uiAssets[UiField].IsValid(); ++i) {
+        m_uiAssets[UiField] = LoadFirstBitmapPixelsFromCandidates(
             BuildUiAssetCandidates(fieldNames[i]), &m_uiAssetPaths[UiField]);
     }
-    if (m_uiAssets[UiField]) {
+    if (m_uiAssets[UiField].IsValid()) {
         DbgLog("[LoginUIAsset] FIELD HIT: %s\n", m_uiAssetPaths[UiField].c_str());
     } else {
         DbgLog("[LoginUIAsset] FIELD MISS\n");
@@ -817,18 +807,15 @@ void UILoginWnd::OnDraw()
         drawDC = targetDC;
     }
 
-    if (m_wallpaperBmp) {
-        DrawBitmapStretched(drawDC, m_wallpaperBmp, rcClient);
+    if (m_wallpaperBmp.IsValid()) {
+        DrawBitmapPixelsStretched(drawDC, m_wallpaperBmp, rcClient);
     }
 
-    BITMAP bm{};
     RECT rcPanel = { m_x, m_y, m_x + m_w, m_y + m_h };
-    if (m_uiAssets[UiPanel]) {
-        if (GetObjectA(m_uiAssets[UiPanel], sizeof(bm), &bm) && bm.bmWidth > 0 && bm.bmHeight > 0) {
-            rcPanel.right = rcPanel.left + bm.bmWidth;
-            rcPanel.bottom = rcPanel.top + bm.bmHeight;
-        }
-        DrawBitmapStretched(drawDC, m_uiAssets[UiPanel], rcPanel);
+    if (m_uiAssets[UiPanel].IsValid()) {
+        rcPanel.right = rcPanel.left + m_uiAssets[UiPanel].width;
+        rcPanel.bottom = rcPanel.top + m_uiAssets[UiPanel].height;
+        DrawBitmapPixelsStretched(drawDC, m_uiAssets[UiPanel], rcPanel);
     } else {
         HBRUSH panelBg = CreateSolidBrush(RGB(235, 235, 228));
         FillRect(drawDC, &rcPanel, panelBg);
