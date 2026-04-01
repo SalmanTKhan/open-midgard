@@ -2920,30 +2920,42 @@ Item {
             }
         }
 
-        Text {
+        Rectangle {
             x: 44
             y: 110
             width: 12
             height: 48
-            text: uiState.charSelectPageCount > 1 ? "<" : ""
-            horizontalAlignment: Text.AlignHCenter
-            verticalAlignment: Text.AlignVCenter
-            color: "#50321e"
-            font.pixelSize: 18
-            font.bold: true
+            visible: uiState.charSelectPageCount > 1
+            color: "transparent"
+            border.width: 1
+            border.color: "#786044"
+
+            Text {
+                anchors.centerIn: parent
+                text: "<"
+                color: "#50321e"
+                font.pixelSize: 18
+                font.bold: true
+            }
         }
 
-        Text {
+        Rectangle {
             x: 520
             y: 110
             width: 12
             height: 48
-            text: uiState.charSelectPageCount > 1 ? ">" : ""
-            horizontalAlignment: Text.AlignHCenter
-            verticalAlignment: Text.AlignVCenter
-            color: "#50321e"
-            font.pixelSize: 18
-            font.bold: true
+            visible: uiState.charSelectPageCount > 1
+            color: "transparent"
+            border.width: 1
+            border.color: "#786044"
+
+            Text {
+                anchors.centerIn: parent
+                text: ">"
+                color: "#50321e"
+                font.pixelSize: 18
+                font.bold: true
+            }
         }
 
         Repeater {
