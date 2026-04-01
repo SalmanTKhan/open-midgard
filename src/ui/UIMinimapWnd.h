@@ -2,6 +2,7 @@
 
 #include "UIFrameWnd.h"
 #include "UIShopCommon.h"
+#include "render/DC.h"
 
 #include <array>
 #include <string>
@@ -72,12 +73,7 @@ private:
     UIBitmapButton* m_closeButton;
     shopui::BitmapPixels m_titleBarBitmap;
     shopui::BitmapPixels m_bodyBitmap;
-    HDC m_renderCacheDC;
-    HBITMAP m_renderCacheBitmap;
-    HBITMAP m_renderCacheOldBitmap;
-    void* m_renderCacheBits;
-    int m_renderCacheWidth;
-    int m_renderCacheHeight;
+    ArgbDibSurface m_renderCacheSurface;
     bool m_renderCacheDirty;
     int m_mapBitmapWidth;
     int m_mapBitmapHeight;

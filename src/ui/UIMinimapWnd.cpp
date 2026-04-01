@@ -410,12 +410,7 @@ UIRoMapWnd::UIRoMapWnd()
       m_closeButton(nullptr),
       m_titleBarBitmap(),
       m_bodyBitmap(),
-      m_renderCacheDC(nullptr),
-      m_renderCacheBitmap(nullptr),
-      m_renderCacheOldBitmap(nullptr),
-      m_renderCacheBits(nullptr),
-      m_renderCacheWidth(0),
-      m_renderCacheHeight(0),
+      m_renderCacheSurface(),
       m_renderCacheDirty(true),
       m_mapBitmapWidth(0),
       m_mapBitmapHeight(0),
@@ -760,13 +755,13 @@ void UIRoMapWnd::DrawToHdc(HDC hdc, int drawX, int drawY)
     }
 
     EnsureRenderCache();
-    if (m_renderCacheDC && m_renderCacheBitmap) {
+    if (m_renderCacheSurface.IsValid()) {
         if (m_renderCacheDirty) {
-            DrawWindowContents(m_renderCacheDC, 0, 0);
+            DrawWindowContents(m_renderCacheSurface.GetDC(), 0, 0);
             m_renderCacheDirty = false;
         }
-        if (!BlitArgbCacheToHdc(hdc, drawX, drawY, m_w, m_h, m_renderCacheBits)) {
-            BitBlt(hdc, drawX, drawY, m_w, m_h, m_renderCacheDC, 0, 0, SRCCOPY);
+        if (!BlitArgbCacheToHdc(hdc, drawX, drawY, m_w, m_h, m_renderCacheSurface.GetBits())) {
+            BitBlt(hdc, drawX, drawY, m_w, m_h, m_renderCacheSurface.GetDC(), 0, 0, SRCCOPY);
         }
     } else {
         DrawWindowContents(hdc, drawX, drawY);
@@ -1087,53 +1082,22 @@ void UIRoMapWnd::EnsureRenderCache()
     if (m_w <= 0 || m_h <= 0) {
         return;
     }
-    if (m_renderCacheDC && m_renderCacheBitmap && m_renderCacheWidth == m_w && m_renderCacheHeight == m_h) {
+    if (m_renderCacheSurface.IsValid()
+        && m_renderCacheSurface.GetWidth() == m_w
+        && m_renderCacheSurface.GetHeight() == m_h) {
         return;
     }
 
     ReleaseRenderCache();
-
-    m_renderCacheDC = CreateCompatibleDC(nullptr);
-    if (!m_renderCacheDC) {
+    if (!m_renderCacheSurface.EnsureSize(m_w, m_h)) {
         return;
     }
-
-    BITMAPINFO bmi{};
-    bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-    bmi.bmiHeader.biWidth = m_w;
-    bmi.bmiHeader.biHeight = -m_h;
-    bmi.bmiHeader.biPlanes = 1;
-    bmi.bmiHeader.biBitCount = 32;
-    bmi.bmiHeader.biCompression = BI_RGB;
-    m_renderCacheBitmap = CreateDIBSection(nullptr, &bmi, DIB_RGB_COLORS, &m_renderCacheBits, nullptr, 0);
-    if (!m_renderCacheBitmap || !m_renderCacheBits) {
-        ReleaseRenderCache();
-        return;
-    }
-
-    m_renderCacheOldBitmap = static_cast<HBITMAP>(SelectObject(m_renderCacheDC, m_renderCacheBitmap));
-    m_renderCacheWidth = m_w;
-    m_renderCacheHeight = m_h;
     m_renderCacheDirty = true;
 }
 
 void UIRoMapWnd::ReleaseRenderCache()
 {
-    if (m_renderCacheDC && m_renderCacheOldBitmap) {
-        SelectObject(m_renderCacheDC, m_renderCacheOldBitmap);
-    }
-    m_renderCacheOldBitmap = nullptr;
-    if (m_renderCacheBitmap) {
-        DeleteObject(m_renderCacheBitmap);
-        m_renderCacheBitmap = nullptr;
-    }
-    m_renderCacheBits = nullptr;
-    if (m_renderCacheDC) {
-        DeleteDC(m_renderCacheDC);
-        m_renderCacheDC = nullptr;
-    }
-    m_renderCacheWidth = 0;
-    m_renderCacheHeight = 0;
+    m_renderCacheSurface.Release();
     m_renderCacheDirty = true;
 }
 

@@ -297,8 +297,7 @@ bool DrawPreviewLayer(HDC hdc, const UIMakeCharWnd::PreviewState& preview, int l
 
 UIMakeCharWnd::UIMakeCharWnd()
     : m_controlsCreated(false), m_assetsProbed(false), m_backgroundBmp(),
-            m_composeDC(nullptr), m_composeBitmap(nullptr), m_composeBits(nullptr),
-      m_composeWidth(0), m_composeHeight(0),
+      m_composeSurface(),
       m_nameEditCtrl(nullptr), m_okButton(nullptr), m_cancelButton(nullptr),
       m_stats{5, 5, 5, 5, 5, 5}, m_hairIdx(1), m_hairColor(0),
       m_statBtns{nullptr, nullptr, nullptr, nullptr, nullptr, nullptr},
@@ -408,53 +407,12 @@ void UIMakeCharWnd::ClearAssets()
 
 void UIMakeCharWnd::ReleaseComposeSurface()
 {
-    if (m_composeBitmap) {
-        DeleteObject(m_composeBitmap);
-        m_composeBitmap = nullptr;
-    }
-    if (m_composeDC) {
-        DeleteDC(m_composeDC);
-        m_composeDC = nullptr;
-    }
-    m_composeBits = nullptr;
-    m_composeWidth = 0;
-    m_composeHeight = 0;
+    m_composeSurface.Release();
 }
 
 bool UIMakeCharWnd::EnsureComposeSurface(int width, int height)
 {
-    if (width <= 0 || height <= 0) {
-        return false;
-    }
-
-    if (m_composeDC && m_composeBitmap && m_composeWidth == width && m_composeHeight == height) {
-        return true;
-    }
-
-    ReleaseComposeSurface();
-
-    m_composeDC = CreateCompatibleDC(nullptr);
-    if (!m_composeDC) {
-        return false;
-    }
-
-    BITMAPINFO bmi{};
-    bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-    bmi.bmiHeader.biWidth = width;
-    bmi.bmiHeader.biHeight = -height;
-    bmi.bmiHeader.biPlanes = 1;
-    bmi.bmiHeader.biBitCount = 32;
-    bmi.bmiHeader.biCompression = BI_RGB;
-    m_composeBitmap = CreateDIBSection(nullptr, &bmi, DIB_RGB_COLORS, &m_composeBits, nullptr, 0);
-    if (!m_composeBitmap) {
-        ReleaseComposeSurface();
-        return false;
-    }
-
-    SelectObject(m_composeDC, m_composeBitmap);
-    m_composeWidth = width;
-    m_composeHeight = height;
-    return true;
+    return m_composeSurface.EnsureSize(width, height);
 }
 
 void UIMakeCharWnd::EnsureResourceCache()
@@ -750,9 +708,9 @@ void UIMakeCharWnd::OnDraw()
     HDC targetDC = nullptr;
     HDC hdc = nullptr;
     if (useCompose) {
-        PatBlt(m_composeDC, 0, 0, clientW, clientH, BLACKNESS);
-        g_windowMgr.DrawWallpaperToDC(m_composeDC, clientW, clientH);
-        hdc = m_composeDC;
+        PatBlt(m_composeSurface.GetDC(), 0, 0, clientW, clientH, BLACKNESS);
+        g_windowMgr.DrawWallpaperToDC(m_composeSurface.GetDC(), clientW, clientH);
+        hdc = m_composeSurface.GetDC();
     } else {
         targetDC = AcquireDrawTarget();
         if (!targetDC) {
@@ -810,7 +768,7 @@ void UIMakeCharWnd::OnDraw()
     DrawChildrenToHdc(hdc);
 
     if (useCompose) {
-        if (!BlitArgbBitsToDrawTarget(m_composeBits, clientW, clientH)) {
+        if (!BlitArgbBitsToDrawTarget(m_composeSurface.GetBits(), clientW, clientH)) {
             return;
         }
     } else {

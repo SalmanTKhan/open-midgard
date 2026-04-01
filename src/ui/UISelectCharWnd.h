@@ -2,6 +2,7 @@
 
 #include "UIFrameWnd.h"
 #include "UIShopCommon.h"
+#include "render/DC.h"
 
 #include <array>
 #include <string>
@@ -111,11 +112,7 @@ private:
     std::string m_backgroundPath;
     shopui::BitmapPixels m_slotBmp;
     shopui::BitmapPixels m_slotSelectedBmp;
-    HDC m_composeDC;
-    HBITMAP m_composeBitmap;
-    void* m_composeBits;
-    int m_composeWidth;
-    int m_composeHeight;
+    ArgbDibSurface m_composeSurface;
     UIBitmapButton* m_okButton;
     UIBitmapButton* m_cancelButton;
     UIBitmapButton* m_makeButton;

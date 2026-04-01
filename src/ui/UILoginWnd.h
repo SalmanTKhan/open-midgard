@@ -2,6 +2,7 @@
 
 #include "UIFrameWnd.h"
 #include "UIShopCommon.h"
+#include "render/DC.h"
 #include <string>
 #include <windows.h>
 #include <array>
@@ -41,11 +42,7 @@ private:
     shopui::BitmapPixels m_wallpaperBmp;
     std::array<shopui::BitmapPixels, UiAssetCount> m_uiAssets;
     std::array<std::string, UiAssetCount> m_uiAssetPaths;
-    HDC m_composeDC;
-    HBITMAP m_composeBitmap;
-    void* m_composeBits;
-    int m_composeWidth;
-    int m_composeHeight;
+    ArgbDibSurface m_composeSurface;
     bool m_saveAccountChecked;
     UIEditCtrl* m_login;
     UIEditCtrl* m_password;

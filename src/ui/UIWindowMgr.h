@@ -1,4 +1,5 @@
 #pragma once
+#include "render/DC.h"
 #include "UIWindow.h"
 #include <map>
 
@@ -187,11 +188,7 @@ public:
     std::string m_loginWallpaper;
     std::string m_loadedWallpaperPath;
     CSurface* m_wallpaperSurface;
-    HDC m_uiComposeDC;
-    HBITMAP m_uiComposeBitmap;
-    void* m_uiComposeBits;
-    int m_uiComposeWidth;
-    int m_uiComposeHeight;
+    ArgbDibSurface m_uiComposeSurface;
 
     std::vector<UIChatEvent> m_chatEvents;
 

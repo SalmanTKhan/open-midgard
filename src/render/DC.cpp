@@ -7,6 +7,104 @@
 
 #pragma comment(lib, "msimg32.lib")
 
+ArgbDibSurface::ArgbDibSurface()
+    : m_dc(nullptr), m_bitmap(nullptr), m_oldBitmap(nullptr), m_bits(nullptr), m_width(0), m_height(0)
+{
+}
+
+ArgbDibSurface::~ArgbDibSurface()
+{
+    Release();
+}
+
+bool ArgbDibSurface::EnsureSize(int width, int height)
+{
+    if (width <= 0 || height <= 0) {
+        return false;
+    }
+    if (IsValid() && m_width == width && m_height == height) {
+        return true;
+    }
+
+    Release();
+
+    m_dc = CreateCompatibleDC(nullptr);
+    if (!m_dc) {
+        return false;
+    }
+
+    BITMAPINFO bmi{};
+    bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    bmi.bmiHeader.biWidth = width;
+    bmi.bmiHeader.biHeight = -height;
+    bmi.bmiHeader.biPlanes = 1;
+    bmi.bmiHeader.biBitCount = 32;
+    bmi.bmiHeader.biCompression = BI_RGB;
+
+    m_bitmap = CreateDIBSection(nullptr, &bmi, DIB_RGB_COLORS, &m_bits, nullptr, 0);
+    if (!m_bitmap || !m_bits) {
+        Release();
+        return false;
+    }
+
+    m_oldBitmap = SelectObject(m_dc, m_bitmap);
+    m_width = width;
+    m_height = height;
+    return true;
+}
+
+void ArgbDibSurface::Release()
+{
+    if (m_dc && m_oldBitmap) {
+        SelectObject(m_dc, m_oldBitmap);
+    }
+    m_oldBitmap = nullptr;
+
+    if (m_bitmap) {
+        DeleteObject(m_bitmap);
+        m_bitmap = nullptr;
+    }
+    m_bits = nullptr;
+
+    if (m_dc) {
+        DeleteDC(m_dc);
+        m_dc = nullptr;
+    }
+
+    m_width = 0;
+    m_height = 0;
+}
+
+bool ArgbDibSurface::IsValid() const
+{
+    return m_dc != nullptr && m_bitmap != nullptr && m_bits != nullptr && m_width > 0 && m_height > 0;
+}
+
+HDC ArgbDibSurface::GetDC() const
+{
+    return m_dc;
+}
+
+void* ArgbDibSurface::GetBits() const
+{
+    return m_bits;
+}
+
+unsigned int* ArgbDibSurface::GetPixels() const
+{
+    return static_cast<unsigned int*>(m_bits);
+}
+
+int ArgbDibSurface::GetWidth() const
+{
+    return m_width;
+}
+
+int ArgbDibSurface::GetHeight() const
+{
+    return m_height;
+}
+
 unsigned int PremultiplyColor(unsigned int color)
 {
     const unsigned int alpha = (color >> 24) & 0xFFu;

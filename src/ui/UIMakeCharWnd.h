@@ -2,6 +2,7 @@
 
 #include "UIFrameWnd.h"
 #include "UIShopCommon.h"
+#include "render/DC.h"
 
 #include "res/ActRes.h"
 #include "res/ImfRes.h"
@@ -70,11 +71,7 @@ private:
     bool m_assetsProbed;
     shopui::BitmapPixels m_backgroundBmp;
     std::string m_backgroundPath;
-    HDC m_composeDC;
-    HBITMAP m_composeBitmap;
-    void* m_composeBits;
-    int m_composeWidth;
-    int m_composeHeight;
+    ArgbDibSurface m_composeSurface;
     UIEditCtrl* m_nameEditCtrl;
     UIBitmapButton* m_okButton;
     UIBitmapButton* m_cancelButton;

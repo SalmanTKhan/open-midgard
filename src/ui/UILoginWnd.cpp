@@ -400,11 +400,7 @@ UILoginWnd::UILoginWnd()
     : m_controlsCreated(false),
       m_assetsProbed(false),
       m_wallpaperBmp(),
-      m_composeDC(nullptr),
-      m_composeBitmap(nullptr),
-      m_composeBits(nullptr),
-      m_composeWidth(0),
-      m_composeHeight(0),
+      m_composeSurface(),
       m_saveAccountChecked(false),
       m_login(nullptr),
       m_password(nullptr),
@@ -634,53 +630,12 @@ void UILoginWnd::SetWallpaperName(const std::string& wallpaperName)
 
 void UILoginWnd::ReleaseComposeSurface()
 {
-    if (m_composeBitmap) {
-        DeleteObject(m_composeBitmap);
-        m_composeBitmap = nullptr;
-    }
-    if (m_composeDC) {
-        DeleteDC(m_composeDC);
-        m_composeDC = nullptr;
-    }
-    m_composeBits = nullptr;
-    m_composeWidth = 0;
-    m_composeHeight = 0;
+    m_composeSurface.Release();
 }
 
 bool UILoginWnd::EnsureComposeSurface(int width, int height)
 {
-    if (width <= 0 || height <= 0) {
-        return false;
-    }
-
-    if (m_composeDC && m_composeBitmap && m_composeWidth == width && m_composeHeight == height) {
-        return true;
-    }
-
-    ReleaseComposeSurface();
-
-    m_composeDC = CreateCompatibleDC(nullptr);
-    if (!m_composeDC) {
-        return false;
-    }
-
-    BITMAPINFO bmi{};
-    bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-    bmi.bmiHeader.biWidth = width;
-    bmi.bmiHeader.biHeight = -height;
-    bmi.bmiHeader.biPlanes = 1;
-    bmi.bmiHeader.biBitCount = 32;
-    bmi.bmiHeader.biCompression = BI_RGB;
-    m_composeBitmap = CreateDIBSection(nullptr, &bmi, DIB_RGB_COLORS, &m_composeBits, nullptr, 0);
-    if (!m_composeBitmap) {
-        ReleaseComposeSurface();
-        return false;
-    }
-
-    SelectObject(m_composeDC, m_composeBitmap);
-    m_composeWidth = width;
-    m_composeHeight = height;
-    return true;
+    return m_composeSurface.EnsureSize(width, height);
 }
 
 void UILoginWnd::EnsureResourceCache()
@@ -798,7 +753,7 @@ void UILoginWnd::OnDraw()
     HDC targetDC = nullptr;
     HDC drawDC = nullptr;
     if (useCompose) {
-        drawDC = m_composeDC;
+        drawDC = m_composeSurface.GetDC();
     } else {
         targetDC = AcquireDrawTarget();
         if (!targetDC) {
@@ -826,7 +781,7 @@ void UILoginWnd::OnDraw()
     DrawChildrenToHdc(drawDC);
 
     if (useCompose) {
-        if (!BlitArgbBitsToDrawTarget(m_composeBits, clientW, clientH)) {
+        if (!BlitArgbBitsToDrawTarget(m_composeSurface.GetBits(), clientW, clientH)) {
             return;
         }
     } else {

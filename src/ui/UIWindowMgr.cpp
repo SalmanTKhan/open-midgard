@@ -254,7 +254,7 @@ UIWindowMgr::UIWindowMgr()
       m_captureWindow(nullptr), m_editWindow(nullptr), m_modalWindow(nullptr), m_lastHitWindow(nullptr),
       m_loadingWnd(nullptr), m_roMapWnd(nullptr), m_minimapZoomWnd(nullptr), m_statusWnd(nullptr), m_sayDialogWnd(nullptr), m_npcMenuWnd(nullptr), m_npcInputWnd(nullptr), m_chooseSellBuyWnd(nullptr), m_itemShopWnd(nullptr), m_itemPurchaseWnd(nullptr), m_itemSellWnd(nullptr), m_shortCutWnd(nullptr), m_chatWnd(nullptr),
     m_loginWnd(nullptr), m_selectServerWnd(nullptr), m_selectCharWnd(nullptr), m_makeCharWnd(nullptr), m_waitWnd(nullptr), m_chooseWnd(nullptr), m_optionWnd(nullptr), m_itemWnd(nullptr), m_questWnd(nullptr), m_basicInfoWnd(nullptr), m_notifyLevelUpWnd(nullptr), m_notifyJobLevelUpWnd(nullptr), m_equipWnd(nullptr), m_skillListWnd(nullptr),
-      m_wallpaperSurface(nullptr), m_uiComposeDC(nullptr), m_uiComposeBitmap(nullptr), m_uiComposeBits(nullptr), m_uiComposeWidth(0), m_uiComposeHeight(0)
+      m_wallpaperSurface(nullptr), m_uiComposeSurface()
 {
     m_loginStatus = "Login: idle";
 }
@@ -409,53 +409,12 @@ void UIWindowMgr::CloseNpcShopWindows()
 
 void UIWindowMgr::ReleaseComposeSurface()
 {
-    if (m_uiComposeBitmap) {
-        DeleteObject(m_uiComposeBitmap);
-        m_uiComposeBitmap = nullptr;
-    }
-    if (m_uiComposeDC) {
-        DeleteDC(m_uiComposeDC);
-        m_uiComposeDC = nullptr;
-    }
-    m_uiComposeWidth = 0;
-    m_uiComposeHeight = 0;
-    m_uiComposeBits = nullptr;
+    m_uiComposeSurface.Release();
 }
 
 bool UIWindowMgr::EnsureComposeSurface(int width, int height)
 {
-    if (width <= 0 || height <= 0) {
-        return false;
-    }
-
-    if (m_uiComposeDC && m_uiComposeBitmap && m_uiComposeWidth == width && m_uiComposeHeight == height) {
-        return true;
-    }
-
-    ReleaseComposeSurface();
-
-    m_uiComposeDC = CreateCompatibleDC(nullptr);
-    if (!m_uiComposeDC) {
-        return false;
-    }
-
-    BITMAPINFO bmi{};
-    bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-    bmi.bmiHeader.biWidth = width;
-    bmi.bmiHeader.biHeight = -height;
-    bmi.bmiHeader.biPlanes = 1;
-    bmi.bmiHeader.biBitCount = 32;
-    bmi.bmiHeader.biCompression = BI_RGB;
-    m_uiComposeBitmap = CreateDIBSection(nullptr, &bmi, DIB_RGB_COLORS, &m_uiComposeBits, nullptr, 0);
-    if (!m_uiComposeBitmap || !m_uiComposeBits) {
-        ReleaseComposeSurface();
-        return false;
-    }
-
-    SelectObject(m_uiComposeDC, m_uiComposeBitmap);
-    m_uiComposeWidth = width;
-    m_uiComposeHeight = height;
-    return true;
+    return m_uiComposeSurface.EnsureSize(width, height);
 }
 
 bool UIWindowMgr::Init() {
@@ -1069,7 +1028,7 @@ void UIWindowMgr::OnDraw() {
     HDC targetDC = nullptr;
     HDC drawDC = nullptr;
     if (useCompose) {
-        drawDC = m_uiComposeDC;
+        drawDC = m_uiComposeSurface.GetDC();
         if (m_wallpaperSurface && m_wallpaperSurface->HasSoftwarePixels()) {
             DrawWallpaperToDC(drawDC, clientWidth, clientHeight);
         } else {
@@ -1091,15 +1050,15 @@ void UIWindowMgr::OnDraw() {
     } else {
         ClearDirtyVisualState();
         CompositeQtUiMenuOverlay(
-            m_uiComposeBits,
+            m_uiComposeSurface.GetBits(),
             clientWidth,
             clientHeight,
             clientWidth * static_cast<int>(sizeof(unsigned int)));
     }
     bool presentedModernUiFrame = false;
-    if (useCompose && hasModernBackend && m_uiComposeBits) {
+    if (useCompose && hasModernBackend && m_uiComposeSurface.GetBits()) {
         presentedModernUiFrame = GetRenderDevice().UpdateBackBufferFromMemory(
-            m_uiComposeBits,
+            m_uiComposeSurface.GetBits(),
             clientWidth,
             clientHeight,
             clientWidth * static_cast<int>(sizeof(unsigned int)));
@@ -1110,7 +1069,7 @@ void UIWindowMgr::OnDraw() {
 
     if (useCompose) {
         if (!presentedModernUiFrame) {
-            if (!BlitArgbBitsToMainWindow(m_uiComposeBits, clientWidth, clientHeight)) {
+            if (!BlitArgbBitsToMainWindow(m_uiComposeSurface.GetBits(), clientWidth, clientHeight)) {
                 return;
             }
         }
