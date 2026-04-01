@@ -511,8 +511,8 @@ void UISkillListWnd::OnDraw()
         if (skill) {
             const bool isDraggedSource = hideDraggedSkill && skill->SKID == gameMode->m_dragInfo.skillId;
             if (!isDraggedSource) {
-                if (HBITMAP icon = GetSkillIcon(skill->SKID)) {
-                    DrawBitmapTransparent(hdc, icon, iconRect);
+                if (const shopui::BitmapPixels* icon = GetSkillIcon(skill->SKID)) {
+                    shopui::DrawBitmapPixelsTransparent(hdc, *icon, iconRect);
                 }
             }
 
@@ -861,11 +861,6 @@ void UISkillListWnd::ReleaseAssets()
     releaseBitmap(m_mesBtnMidBitmap);
     releaseBitmap(m_mesBtnRightBitmap);
 
-    for (auto& entry : m_iconCache) {
-        if (entry.second) {
-            DeleteObject(entry.second);
-        }
-    }
     m_iconCache.clear();
 }
 
@@ -1067,18 +1062,21 @@ int UISkillListWnd::GetMaxViewOffset(int skillCount) const
     return std::max(0, skillCount - visibleRows);
 }
 
-HBITMAP UISkillListWnd::GetSkillIcon(int skillId)
+const shopui::BitmapPixels* UISkillListWnd::GetSkillIcon(int skillId)
 {
     const auto existing = m_iconCache.find(skillId);
     if (existing != m_iconCache.end()) {
-        return existing->second;
+        return existing->second.IsValid() ? &existing->second : nullptr;
     }
 
     const SkillMetadata* metadata = g_skillMgr.GetSkillMetadata(skillId);
     std::string path = metadata ? ResolveSkillIconPath(*metadata) : g_skillMgr.GetSkillIconPath(skillId);
-    HBITMAP bitmap = path.empty() ? nullptr : LoadBitmapFromGameData(path);
-    m_iconCache[skillId] = bitmap;
-    return bitmap;
+    shopui::BitmapPixels bitmap;
+    if (!path.empty()) {
+        bitmap = shopui::LoadBitmapPixelsFromGameData(path, true);
+    }
+    auto inserted = m_iconCache.emplace(skillId, std::move(bitmap));
+    return inserted.first->second.IsValid() ? &inserted.first->second : nullptr;
 }
 
 const PLAYER_SKILL_INFO* UISkillListWnd::GetSelectedSkill() const

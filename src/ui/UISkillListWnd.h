@@ -1,6 +1,7 @@
 #pragma once
 
 #include "UIFrameWnd.h"
+#include "UIShopCommon.h"
 
 #include <array>
 #include <string>
@@ -103,7 +104,7 @@ private:
     void UpdateScrollFromThumbPosition(int globalY, int skillCount);
     std::vector<const PLAYER_SKILL_INFO*> GetSortedSkills() const;
     int GetMaxViewOffset(int skillCount) const;
-    HBITMAP GetSkillIcon(int skillId);
+    const shopui::BitmapPixels* GetSkillIcon(int skillId);
     const PLAYER_SKILL_INFO* GetSelectedSkill() const;
     unsigned long long BuildVisualStateToken() const;
 
@@ -138,7 +139,7 @@ private:
     HBITMAP m_mesBtnLeftBitmap;
     HBITMAP m_mesBtnMidBitmap;
     HBITMAP m_mesBtnRightBitmap;
-    std::unordered_map<int, HBITMAP> m_iconCache;
+    std::unordered_map<int, shopui::BitmapPixels> m_iconCache;
     std::vector<VisibleSkill> m_visibleSkills;
     unsigned long long m_lastVisualStateToken;
     bool m_hasVisualStateToken;
