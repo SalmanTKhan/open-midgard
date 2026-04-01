@@ -490,11 +490,13 @@ void PopulateShopChoiceState(QtUiState* state)
     state->setShopChoiceVisible(visible);
     if (!visible) {
         state->setShopChoiceGeometry(0, 0, 0, 0);
+        state->setShopChoiceText(QString(), QString());
         state->setShopChoiceButtons(QVariantList{});
         return;
     }
 
     state->setShopChoiceGeometry(shopWnd->m_x, shopWnd->m_y, shopWnd->m_w, shopWnd->m_h);
+    state->setShopChoiceText(QStringLiteral("Shop"), QStringLiteral("Choose a transaction type."));
 
     QVariantList buttons;
     struct ButtonSpec {
@@ -1552,6 +1554,7 @@ bool QtUiStateAdapter::syncMenu(RenderBackendType activeBackend,
     m_state->setBasicInfoData(QVariantMap{});
     m_state->setShopChoiceVisible(false);
     m_state->setShopChoiceGeometry(0, 0, 0, 0);
+    m_state->setShopChoiceText(QString(), QString());
     m_state->setShopChoiceButtons(QVariantList{});
     m_state->setNotifications(QVariantList{});
     m_state->setAnchors(QVariantList{});

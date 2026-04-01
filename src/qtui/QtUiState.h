@@ -188,6 +188,8 @@ class QtUiState : public QObject {
     Q_PROPERTY(int shopChoiceY READ shopChoiceY NOTIFY shopChoiceGeometryChanged)
     Q_PROPERTY(int shopChoiceWidth READ shopChoiceWidth NOTIFY shopChoiceGeometryChanged)
     Q_PROPERTY(int shopChoiceHeight READ shopChoiceHeight NOTIFY shopChoiceGeometryChanged)
+    Q_PROPERTY(QString shopChoiceTitle READ shopChoiceTitle NOTIFY shopChoiceTextChanged)
+    Q_PROPERTY(QString shopChoicePrompt READ shopChoicePrompt NOTIFY shopChoiceTextChanged)
     Q_PROPERTY(QVariantList shopChoiceButtons READ shopChoiceButtons NOTIFY shopChoiceButtonsChanged)
     Q_PROPERTY(QVariantList notifications READ notifications NOTIFY notificationsChanged)
     Q_PROPERTY(QVariantList anchors READ anchors NOTIFY anchorsChanged)
@@ -380,6 +382,8 @@ public:
     int shopChoiceY() const { return m_shopChoiceY; }
     int shopChoiceWidth() const { return m_shopChoiceWidth; }
     int shopChoiceHeight() const { return m_shopChoiceHeight; }
+    const QString& shopChoiceTitle() const { return m_shopChoiceTitle; }
+    const QString& shopChoicePrompt() const { return m_shopChoicePrompt; }
     const QVariantList& shopChoiceButtons() const { return m_shopChoiceButtons; }
     const QVariantList& notifications() const { return m_notifications; }
     const QVariantList& anchors() const { return m_anchors; }
@@ -1264,6 +1268,15 @@ public:
         emit shopChoiceGeometryChanged();
     }
 
+    void setShopChoiceText(const QString& title, const QString& prompt) {
+        if (m_shopChoiceTitle == title && m_shopChoicePrompt == prompt) {
+            return;
+        }
+        m_shopChoiceTitle = title;
+        m_shopChoicePrompt = prompt;
+        emit shopChoiceTextChanged();
+    }
+
     void setShopChoiceButtons(const QVariantList& value) {
         m_shopChoiceButtons = value;
         emit shopChoiceButtonsChanged();
@@ -1381,6 +1394,7 @@ signals:
     void minimapDataChanged();
     void shopChoiceVisibleChanged();
     void shopChoiceGeometryChanged();
+    void shopChoiceTextChanged();
     void shopChoiceButtonsChanged();
     void notificationsChanged();
     void anchorsChanged();
@@ -1568,6 +1582,8 @@ private:
     int m_shopChoiceY = 0;
     int m_shopChoiceWidth = 0;
     int m_shopChoiceHeight = 0;
+    QString m_shopChoiceTitle;
+    QString m_shopChoicePrompt;
     QVariantList m_shopChoiceButtons;
     QVariantList m_notifications;
     QVariantList m_anchors;

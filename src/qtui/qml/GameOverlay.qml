@@ -2618,7 +2618,7 @@ Item {
         Text {
             x: 12
             y: 10
-            text: "Shop"
+            text: uiState.shopChoiceTitle
             color: "#2a2a2a"
             font.pixelSize: 15
             font.bold: true
@@ -2628,7 +2628,7 @@ Item {
             x: 14
             y: 28
             width: parent.width - 28
-            text: "Choose a transaction type."
+            text: uiState.shopChoicePrompt
             color: "#343434"
             font.pixelSize: 12
             horizontalAlignment: Text.AlignHCenter
