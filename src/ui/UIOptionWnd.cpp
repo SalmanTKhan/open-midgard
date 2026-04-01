@@ -1278,7 +1278,7 @@ void UIOptionWnd::OnDraw()
     SelectObject(hdc, oldPen);
     DeleteObject(borderPen);
 
-    DrawChildrenToCurrentTarget(hdc, useShared);
+    DrawChildrenToHdc(hdc);
     ReleaseDrawTarget(hdc, useShared);
 }
 

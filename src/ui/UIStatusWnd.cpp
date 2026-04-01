@@ -461,7 +461,7 @@ void UIStatusWnd::OnDraw()
         }
     }
 
-    DrawChildrenToCurrentTarget(hdc, useShared);
+    DrawChildrenToHdc(hdc);
     ReleaseDrawTarget(hdc, useShared);
 
     m_lastDrawStateToken = BuildDisplayStateToken();

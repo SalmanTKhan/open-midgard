@@ -64,6 +64,6 @@ void UIRechargeGage::OnDraw()
         }
     }
 
-    DrawChildrenToCurrentTarget(hdc, useShared);
+    DrawChildrenToHdc(hdc);
     ReleaseDrawTarget(hdc, useShared);
 }

@@ -508,7 +508,7 @@ void UIBasicInfoWnd::OnDraw()
         DrawWindowText(hdc, m_x + 107, m_y + 103, text, RGB(0, 0, 0));
     }
 
-    DrawChildrenToCurrentTarget(hdc, useShared);
+    DrawChildrenToHdc(hdc);
     ReleaseDrawTarget(hdc, useShared);
     m_lastDrawStateToken = BuildDisplayStateToken();
     m_hasDrawStateToken = true;

@@ -709,7 +709,7 @@ void UIItemWnd::OnDraw()
         FrameRectColor(hdc, thumbRect, RGB(63, 86, 132));
     }
 
-    DrawChildrenToCurrentTarget(hdc, useShared);
+    DrawChildrenToHdc(hdc);
     ReleaseDrawTarget(hdc, useShared);
 
     m_lastVisualStateToken = BuildVisualStateToken();

@@ -547,7 +547,7 @@ void UISkillListWnd::OnDraw()
         DrawBottomButton(hdc, button);
     }
 
-    DrawChildrenToCurrentTarget(hdc, useShared);
+    DrawChildrenToHdc(hdc);
 
     SelectObject(hdc, oldFont);
 

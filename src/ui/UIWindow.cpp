@@ -335,18 +335,6 @@ void UIWindow::ReleaseDrawTarget(HDC dc, bool useShared) const
     }
 }
 
-void UIWindow::DrawChildrenToCurrentTarget(HDC dc, bool useShared)
-{
-    if (!dc) {
-        return;
-    }
-    if (useShared) {
-        DrawChildren();
-    } else {
-        DrawChildrenToHdc(dc);
-    }
-}
-
     void PlayUiButtonSound()
     {
         const std::string path = ResolveUiButtonSoundPath();
@@ -669,7 +657,7 @@ void UIBitmapButton::OnDraw()
             DrawBitmapTransparent(hdc, drawBmp, dst);
         }
     }
-    DrawChildrenToCurrentTarget(hdc, useShared);
+    DrawChildrenToHdc(hdc);
     ReleaseDrawTarget(hdc, useShared);
 }
 
@@ -842,7 +830,7 @@ void UIEditCtrl::OnDraw()
     RECT textRc = { m_x + m_xOffset, m_y + m_yOffset, m_x + m_w - 2, m_y + m_h - 2 };
     DrawTextA(hdc, drawText.c_str(), -1, &textRc, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
 
-    DrawChildrenToCurrentTarget(hdc, useShared);
+    DrawChildrenToHdc(hdc);
     ReleaseDrawTarget(hdc, useShared);
 }
 
@@ -951,7 +939,7 @@ void UICheckBox::OnDraw()
             DeleteObject(pen);
         }
     }
-    DrawChildrenToCurrentTarget(hdc, useShared);
+    DrawChildrenToHdc(hdc);
     ReleaseDrawTarget(hdc, useShared);
 }
 

@@ -1032,7 +1032,7 @@ void UIEquipWnd::OnDraw()
         }
     }
 
-    DrawChildrenToCurrentTarget(hdc, useShared);
+    DrawChildrenToHdc(hdc);
     ReleaseDrawTarget(hdc, useShared);
 
     m_lastVisualStateToken = BuildVisualStateToken();
