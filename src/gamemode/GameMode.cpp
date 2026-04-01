@@ -226,6 +226,7 @@ void DrawHoveredActorName(CGameMode& mode, HDC hdc);
 void DrawLockedTargetName(CGameMode& mode, HDC hdc);
 void DrawLockedTargetArrow(CGameMode& mode, HDC hdc);
 bool QueueLockedTargetOverlayQuad(CGameMode& mode);
+bool QueueHoverLabelsOverlayQuad(CGameMode& mode);
 bool QueueMsgEffectsOverlayQuad();
 bool QueuePlayerVitalsOverlayQuad(CGameMode& mode);
 void ApplyEnemyCursorMagnet(CGameMode& mode, POINT* cursorPos);
@@ -675,7 +676,9 @@ bool QueueModernOverlayQuad(CGameMode& mode, int cursorActNum, u32 mouseAnimStar
 
                 ClearOverlayComposeBits(s_overlayComposeBits, clientWidth, clientHeight);
                 const double overlayDrawStartMs = trackMovePerf ? QpcNowMs() : 0.0;
+#if !RO_ENABLE_QT6_UI
                 DrawGameplayOverlayToHdc(mode, s_overlayComposeDc);
+#endif
                 if (trackMovePerf) {
                     g_overlayMovePerfStats.modernOverlayDrawMs += QpcNowMs() - overlayDrawStartMs;
                 }
@@ -1283,6 +1286,166 @@ bool QueueMsgEffectsOverlayQuad()
 {
     return QueueQueuedMsgEffectsQuads();
 }
+
+#if RO_ENABLE_QT6_UI
+bool QueueHoverLabelsOverlayQuad(CGameMode& mode)
+{
+    if (!g_hMainWnd || !mode.m_world || !mode.m_view) {
+        return false;
+    }
+
+    std::string label;
+    COLORREF textColor = RGB(255, 255, 255);
+    int drawX = 0;
+    int drawY = 0;
+
+    CItem* hoveredItem = nullptr;
+    int labelX = 0;
+    int labelY = 0;
+    if (mode.m_world->FindHoveredGroundItemScreen(mode.m_view->GetViewMatrix(),
+            mode.m_oldMouseX,
+            mode.m_oldMouseY,
+            &hoveredItem,
+            &labelX,
+            &labelY)
+        && hoveredItem) {
+        label = ResolveGroundItemHoverLabel(hoveredItem);
+        if (label.empty()) {
+            return false;
+        }
+
+        SIZE textSize{};
+        if (!MeasureOverlayTextQt(label, &textSize)) {
+            return false;
+        }
+        drawX = labelX - (textSize.cx / 2);
+        drawY = labelY - textSize.cy - kHoverNameTextPadding;
+    } else {
+        CGameActor* hoveredActor = nullptr;
+        if (!mode.m_world->FindHoveredActorScreen(mode.m_view->GetViewMatrix(),
+                mode.m_view->GetCameraLongitude(),
+                mode.m_oldMouseX,
+                mode.m_oldMouseY,
+                &hoveredActor,
+                &labelX,
+                &labelY)
+            || !hoveredActor
+            || hoveredActor->m_gid == mode.m_lastLockOnMonGid) {
+            return false;
+        }
+
+        label = ResolveHoveredActorName(mode, hoveredActor);
+        if (label.empty()) {
+            return false;
+        }
+
+        SIZE textSize{};
+        if (!MeasureOverlayTextQt(label, &textSize)) {
+            return false;
+        }
+        drawX = labelX - (textSize.cx / 2);
+        drawY = labelY + kHoverNameTextPadding + kHoverNameVerticalOffset;
+        if (hoveredActor == mode.m_world->m_player || hoveredActor->m_gid == g_session.m_gid) {
+            drawY += kPlayerVitalsBarHeight * 2 + kPlayerVitalsBorderThickness * 3 + kPlayerVitalsNameTopPadding - 10;
+        }
+        textColor = ResolveHoverNameColor(hoveredActor);
+    }
+
+    SIZE finalTextSize{};
+    if (!MeasureOverlayTextQt(label, &finalTextSize)) {
+        return false;
+    }
+
+    RECT clientRect{};
+    GetClientRect(g_hMainWnd, &clientRect);
+    RECT overlayRect{ drawX - 2, drawY - 2, drawX + finalTextSize.cx + 2, drawY + finalTextSize.cy + 2 };
+    RECT clippedRect{};
+    IntersectRect(&clippedRect, &overlayRect, &clientRect);
+    const int width = clippedRect.right - clippedRect.left;
+    const int height = clippedRect.bottom - clippedRect.top;
+    if (width <= 0 || height <= 0) {
+        return false;
+    }
+
+    static CTexture* s_hoverTextTexture = nullptr;
+    static int s_hoverTextTextureWidth = 0;
+    static int s_hoverTextTextureHeight = 0;
+    static std::vector<unsigned int> s_hoverTextPixels;
+    if (!s_hoverTextTexture || s_hoverTextTextureWidth != width || s_hoverTextTextureHeight != height) {
+        delete s_hoverTextTexture;
+        s_hoverTextTexture = new CTexture();
+        if (!s_hoverTextTexture || !s_hoverTextTexture->Create(width, height, PF_A8R8G8B8, false)) {
+            delete s_hoverTextTexture;
+            s_hoverTextTexture = nullptr;
+            s_hoverTextTextureWidth = 0;
+            s_hoverTextTextureHeight = 0;
+            return false;
+        }
+        s_hoverTextTextureWidth = width;
+        s_hoverTextTextureHeight = height;
+        s_hoverTextPixels.assign(static_cast<size_t>(width) * static_cast<size_t>(height), kOverlayTransparentKey);
+    } else if (s_hoverTextPixels.size() != static_cast<size_t>(width) * static_cast<size_t>(height)) {
+        s_hoverTextPixels.assign(static_cast<size_t>(width) * static_cast<size_t>(height), kOverlayTransparentKey);
+    }
+
+    std::fill(s_hoverTextPixels.begin(), s_hoverTextPixels.end(), kOverlayTransparentKey);
+    DrawOutlinedTextQtToOverlay(s_hoverTextPixels.data(),
+        width,
+        height,
+        width * static_cast<int>(sizeof(unsigned int)),
+        drawX - clippedRect.left,
+        drawY - clippedRect.top,
+        label,
+        textColor);
+    ConvertOverlayComposeBitsToAlpha(s_hoverTextPixels.data(), width, height);
+    s_hoverTextTexture->Update(0,
+        0,
+        width,
+        height,
+        s_hoverTextPixels.data(),
+        true,
+        width * static_cast<int>(sizeof(unsigned int)));
+
+    RPFace* face = g_renderer.BorrowNullRP();
+    if (!face) {
+        return false;
+    }
+
+    const float left = static_cast<float>(clippedRect.left) - 0.5f;
+    const float top = static_cast<float>(clippedRect.top) - 0.5f;
+    const float right = static_cast<float>(clippedRect.right) - 0.5f;
+    const float bottom = static_cast<float>(clippedRect.bottom) - 0.5f;
+    const unsigned int overlayContentWidth = s_hoverTextTexture->m_surfaceUpdateWidth > 0 ? s_hoverTextTexture->m_surfaceUpdateWidth : static_cast<unsigned int>(width);
+    const unsigned int overlayContentHeight = s_hoverTextTexture->m_surfaceUpdateHeight > 0 ? s_hoverTextTexture->m_surfaceUpdateHeight : static_cast<unsigned int>(height);
+    const float maxU = s_hoverTextTexture->m_w != 0 ? static_cast<float>(overlayContentWidth) / static_cast<float>(s_hoverTextTexture->m_w) : 1.0f;
+    const float maxV = s_hoverTextTexture->m_h != 0 ? static_cast<float>(overlayContentHeight) / static_cast<float>(s_hoverTextTexture->m_h) : 1.0f;
+
+    face->primType = D3DPT_TRIANGLESTRIP;
+    face->verts = face->m_verts;
+    face->numVerts = 4;
+    face->indices = nullptr;
+    face->numIndices = 0;
+    face->tex = s_hoverTextTexture;
+    face->mtPreset = 0;
+    face->cullMode = D3DCULL_NONE;
+    face->srcAlphaMode = D3DBLEND_SRCALPHA;
+    face->destAlphaMode = D3DBLEND_INVSRCALPHA;
+    face->alphaSortKey = 1.55f;
+
+    face->m_verts[0] = { left, top, 0.0f, 1.0f, 0xFFFFFFFFu, 0xFF000000u, 0.0f, 0.0f };
+    face->m_verts[1] = { right, top, 0.0f, 1.0f, 0xFFFFFFFFu, 0xFF000000u, maxU, 0.0f };
+    face->m_verts[2] = { left, bottom, 0.0f, 1.0f, 0xFFFFFFFFu, 0xFF000000u, 0.0f, maxV };
+    face->m_verts[3] = { right, bottom, 0.0f, 1.0f, 0xFFFFFFFFu, 0xFF000000u, maxU, maxV };
+    g_renderer.AddRP(face, 1 | 8);
+    return true;
+}
+#else
+bool QueueHoverLabelsOverlayQuad(CGameMode& mode)
+{
+    (void)mode;
+    return false;
+}
+#endif
 
 bool QueuePlayerVitalsOverlayQuad(CGameMode& mode)
 {
@@ -7311,6 +7474,7 @@ int  CGameMode::OnRun() {
             g_overlayMovePerfStats.queueMsgMs += QpcNowMs() - msgStartMs;
         }
         QueuePlayerVitalsOverlayQuad(*this);
+        QueueHoverLabelsOverlayQuad(*this);
         const double cursorQueueStartMs = trackMovePerfFrame ? QpcNowMs() : 0.0;
         QueueCursorOverlayQuad(m_cursorActNum, m_mouseAnimStartTick);
         if (trackMovePerfFrame) {
