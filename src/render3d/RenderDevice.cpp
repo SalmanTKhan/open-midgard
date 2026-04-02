@@ -22,6 +22,7 @@
 #include <dxgi1_4.h>
 #endif
 #include <algorithm>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -52,6 +53,85 @@
 #endif
 
 namespace {
+
+double VulkanNowMs()
+{
+    using Clock = std::chrono::steady_clock;
+    const Clock::time_point now = Clock::now();
+    return std::chrono::duration<double, std::milli>(now.time_since_epoch()).count();
+}
+
+#if RO_HAS_VULKAN
+constexpr std::uint64_t kVulkanPerfLogIntervalFrames = 120ull;
+
+struct VulkanPerfStats {
+    std::uint64_t presentedFrames = 0;
+    double frameFenceWaitMs = 0.0;
+    double frameReleaseTransferMs = 0.0;
+    double frameResetFenceMs = 0.0;
+    double frameResetDescriptorPoolMs = 0.0;
+    double frameAcquireImageMs = 0.0;
+    double frameResetCommandBufferMs = 0.0;
+    double frameBeginCommandBufferMs = 0.0;
+    double presentSubmitMs = 0.0;
+    double presentQueuePresentMs = 0.0;
+    std::uint64_t backBufferUploads = 0;
+    double backBufferUploadMs = 0.0;
+    double backBufferStageAllocMs = 0.0;
+    double backBufferMapCopyMs = 0.0;
+    std::uint64_t textureUploads = 0;
+    double textureUploadMs = 0.0;
+    double textureStageAllocMs = 0.0;
+    double textureMapCopyMs = 0.0;
+    std::uint64_t immediateCommandBuffers = 0;
+    double immediateFrameFenceWaitMs = 0.0;
+    double immediateFenceWaitMs = 0.0;
+    double immediateSubmitWaitMs = 0.0;
+    std::uint64_t immediateDetailedLogs = 0;
+};
+
+VulkanPerfStats g_vulkanPerfStats;
+
+void MaybeLogVulkanPerfStats()
+{
+    if (g_vulkanPerfStats.presentedFrames == 0
+        || (g_vulkanPerfStats.presentedFrames % kVulkanPerfLogIntervalFrames) != 0) {
+        return;
+    }
+
+    const double frameCount = static_cast<double>((std::max)(std::uint64_t{1}, g_vulkanPerfStats.presentedFrames));
+    const double backBufferUploads = static_cast<double>((std::max)(std::uint64_t{1}, g_vulkanPerfStats.backBufferUploads));
+    const double textureUploads = static_cast<double>((std::max)(std::uint64_t{1}, g_vulkanPerfStats.textureUploads));
+    const double immediateCount = static_cast<double>((std::max)(std::uint64_t{1}, g_vulkanPerfStats.immediateCommandBuffers));
+
+    DbgLog(
+        "[Render][VulkanPerf] frames=%llu frameWait=%.3fms release=%.3fms resetFence=%.3fms resetDesc=%.3fms acquire=%.3fms resetCmd=%.3fms beginCmd=%.3fms submit=%.3fms present=%.3fms backUploads=%llu upload=%.3fms stage=%.3fms mapcopy=%.3fms texUploads=%llu upload=%.3fms stage=%.3fms mapcopy=%.3fms immediate=%llu frameWait=%.3fms fenceWait=%.3fms submitWait=%.3fms\n",
+        static_cast<unsigned long long>(g_vulkanPerfStats.presentedFrames),
+        g_vulkanPerfStats.frameFenceWaitMs / frameCount,
+        g_vulkanPerfStats.frameReleaseTransferMs / frameCount,
+        g_vulkanPerfStats.frameResetFenceMs / frameCount,
+        g_vulkanPerfStats.frameResetDescriptorPoolMs / frameCount,
+        g_vulkanPerfStats.frameAcquireImageMs / frameCount,
+        g_vulkanPerfStats.frameResetCommandBufferMs / frameCount,
+        g_vulkanPerfStats.frameBeginCommandBufferMs / frameCount,
+        g_vulkanPerfStats.presentSubmitMs / frameCount,
+        g_vulkanPerfStats.presentQueuePresentMs / frameCount,
+        static_cast<unsigned long long>(g_vulkanPerfStats.backBufferUploads),
+        g_vulkanPerfStats.backBufferUploadMs / backBufferUploads,
+        g_vulkanPerfStats.backBufferStageAllocMs / backBufferUploads,
+        g_vulkanPerfStats.backBufferMapCopyMs / backBufferUploads,
+        static_cast<unsigned long long>(g_vulkanPerfStats.textureUploads),
+        g_vulkanPerfStats.textureUploadMs / textureUploads,
+        g_vulkanPerfStats.textureStageAllocMs / textureUploads,
+        g_vulkanPerfStats.textureMapCopyMs / textureUploads,
+        static_cast<unsigned long long>(g_vulkanPerfStats.immediateCommandBuffers),
+        g_vulkanPerfStats.immediateFrameFenceWaitMs / immediateCount,
+        g_vulkanPerfStats.immediateFenceWaitMs / immediateCount,
+        g_vulkanPerfStats.immediateSubmitWaitMs / immediateCount);
+
+    g_vulkanPerfStats = VulkanPerfStats{};
+}
+#endif
 
 QtUiRenderTargetInfo MakeUnavailableQtUiRenderTargetInfo(RenderBackendType backend, int width, int height)
 {
@@ -4798,7 +4878,7 @@ public:
                                         m_descriptorPool(VK_NULL_HANDLE), m_sampler(VK_NULL_HANDLE), m_postSampler(VK_NULL_HANDLE),
                                                                                 m_pipelineLayout(VK_NULL_HANDLE), m_postPipelineLayout(VK_NULL_HANDLE), m_postPipeline(VK_NULL_HANDLE), m_postSmaaEdgePipeline(VK_NULL_HANDLE), m_postSmaaBlendWeightPipeline(VK_NULL_HANDLE), m_postSmaaNeighborhoodPipeline(VK_NULL_HANDLE), m_vertexShaderTlModule(VK_NULL_HANDLE),
                                                                                 m_vertexShaderLmModule(VK_NULL_HANDLE), m_fragmentShaderModule(VK_NULL_HANDLE), m_postVertexShaderModule(VK_NULL_HANDLE), m_postFxaaFragmentShaderModule(VK_NULL_HANDLE), m_postSmaaEdgeFragmentShaderModule(VK_NULL_HANDLE), m_postSmaaBlendWeightFragmentShaderModule(VK_NULL_HANDLE), m_postSmaaNeighborhoodFragmentShaderModule(VK_NULL_HANDLE),
-                    m_commandPool(VK_NULL_HANDLE), m_immediateCommandPool(VK_NULL_HANDLE),
+                    m_commandPool(VK_NULL_HANDLE), m_immediateCommandPool(VK_NULL_HANDLE), m_pendingImmediateUploadCommandBuffer(VK_NULL_HANDLE),
           m_imageAvailableSemaphore(VK_NULL_HANDLE), m_renderFinishedSemaphore(VK_NULL_HANDLE),
           m_inFlightFence(VK_NULL_HANDLE), m_immediateFence(VK_NULL_HANDLE), m_graphicsQueueFamilyIndex(kInvalidQueueFamilyIndex),
           m_presentQueueFamilyIndex(kInvalidQueueFamilyIndex), m_currentImageIndex(0),
@@ -4990,6 +5070,8 @@ public:
             vkDeviceWaitIdle(m_device);
         }
 
+        DiscardPendingImmediateUploadBatch();
+
         ReleaseUploadPages(m_vertexUploadPages);
         ReleaseUploadPages(m_indexUploadPages);
         ReleaseAllTrackedTextures();
@@ -5096,7 +5178,7 @@ public:
         m_pendingClearColor.float32[1] = static_cast<float>((color >> 8) & 0xFFu) / 255.0f;
         m_pendingClearColor.float32[2] = static_cast<float>(color & 0xFFu) / 255.0f;
         m_pendingClearColor.float32[3] = static_cast<float>((color >> 24) & 0xFFu) / 255.0f;
-        return EnsureFrameStarted() ? 0 : -1;
+        return EnsureTransferFrameStarted() ? 0 : -1;
     }
 
     int ClearDepth() override
@@ -5176,7 +5258,9 @@ public:
         submitInfo.signalSemaphoreCount = 1;
         submitInfo.pSignalSemaphores = &m_renderFinishedSemaphore;
 
+        const double submitStartMs = VulkanNowMs();
         VkResult result = vkQueueSubmit(m_graphicsQueue, 1, &submitInfo, m_inFlightFence);
+        g_vulkanPerfStats.presentSubmitMs += VulkanNowMs() - submitStartMs;
         if (result != VK_SUCCESS) {
             DbgLog("[Render][Vulkan] vkQueueSubmit failed: %d\n", static_cast<int>(result));
             m_bootstrap.initHr = static_cast<int>(result);
@@ -5191,13 +5275,17 @@ public:
         presentInfo.swapchainCount = 1;
         presentInfo.pSwapchains = &m_swapChain;
         presentInfo.pImageIndices = &m_currentImageIndex;
+        const double presentStartMs = VulkanNowMs();
         result = vkQueuePresentKHR(m_presentQueue, &presentInfo);
+        g_vulkanPerfStats.presentQueuePresentMs += VulkanNowMs() - presentStartMs;
 
         m_frameBegun = false;
         m_pendingDepthClear = false;
         m_overlayPassPrepared = false;
 
         if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR) {
+            g_vulkanPerfStats.presentedFrames += 1;
+            MaybeLogVulkanPerfStats();
             ResizeSwapChain();
             return 0;
         }
@@ -5211,11 +5299,15 @@ public:
             ResizeSwapChain();
         }
 
+        g_vulkanPerfStats.presentedFrames += 1;
+        MaybeLogVulkanPerfStats();
+
         return vertSync ? 1 : 0;
     }
 
     bool UpdateBackBufferFromMemory(const void* bgraPixels, int width, int height, int pitch) override
     {
+        const double uploadStartMs = VulkanNowMs();
         if (!bgraPixels || width <= 0 || height <= 0 || pitch <= 0) {
             return false;
         }
@@ -5229,10 +5321,13 @@ public:
         const VkDeviceSize uploadSize = static_cast<VkDeviceSize>(width) * static_cast<VkDeviceSize>(height) * sizeof(unsigned int);
         VkBuffer stagingBuffer = VK_NULL_HANDLE;
         VkDeviceMemory stagingMemory = VK_NULL_HANDLE;
+        const double stageAllocStartMs = VulkanNowMs();
         if (!CreateStagingBuffer(uploadSize, &stagingBuffer, &stagingMemory)) {
             return false;
         }
+        g_vulkanPerfStats.backBufferStageAllocMs += VulkanNowMs() - stageAllocStartMs;
 
+        const double mapCopyStartMs = VulkanNowMs();
         void* mapped = nullptr;
         VkResult result = vkMapMemory(m_device, stagingMemory, 0, uploadSize, 0, &mapped);
         if (result != VK_SUCCESS || !mapped) {
@@ -5252,6 +5347,7 @@ public:
             std::memcpy(dstBytes + static_cast<size_t>(row) * dstPitch, srcRow, dstPitch);
         }
         vkUnmapMemory(m_device, stagingMemory);
+        g_vulkanPerfStats.backBufferMapCopyMs += VulkanNowMs() - mapCopyStartMs;
 
         if (!TransitionCurrentSwapChainImage(
                 VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
@@ -5293,6 +5389,8 @@ public:
 
         m_pendingReleaseBuffers.push_back(stagingBuffer);
         m_pendingReleaseMemory.push_back(stagingMemory);
+        g_vulkanPerfStats.backBufferUploads += 1;
+        g_vulkanPerfStats.backBufferUploadMs += VulkanNowMs() - uploadStartMs;
         return true;
     }
 
@@ -5498,13 +5596,31 @@ public:
                 h);
             return false;
         }
-        if (!UploadTextureRegion(textureHandle, x, y, w, h, data, skipColorKey, pitch, true)) {
-            DbgLog("[Render][Vulkan] UploadTextureRegion failed tex=%p update=%d,%d %dx%d immediate=1 frameBegun=%d renderPass=%d hr=%d\n",
+
+        const bool immediate = !m_frameBegun || m_renderPassActive;
+        if (immediate && g_vulkanPerfStats.immediateDetailedLogs < 16) {
+            const char* textureName = (texture && texture->m_texName[0] != '\0') ? texture->m_texName : "(unnamed)";
+            DbgLog("[Render][VulkanPerf][ImmediateUpload] name='%s' tex=%p update=%d,%d %dx%d frameBegun=%d renderPass=%d\n",
+                textureName,
                 static_cast<void*>(texture),
                 x,
                 y,
                 w,
                 h,
+                m_frameBegun ? 1 : 0,
+                m_renderPassActive ? 1 : 0);
+            g_vulkanPerfStats.immediateDetailedLogs += 1;
+        }
+
+        const char* textureName = (texture && texture->m_texName[0] != '\0') ? texture->m_texName : nullptr;
+        if (!UploadTextureRegion(textureHandle, x, y, w, h, data, skipColorKey, pitch, immediate, textureName)) {
+            DbgLog("[Render][Vulkan] UploadTextureRegion failed tex=%p update=%d,%d %dx%d immediate=%d frameBegun=%d renderPass=%d hr=%d\n",
+                static_cast<void*>(texture),
+                x,
+                y,
+                w,
+                h,
+                immediate ? 1 : 0,
                 m_frameBegun ? 1 : 0,
                 m_renderPassActive ? 1 : 0,
                 m_bootstrap.initHr);
@@ -5869,7 +5985,7 @@ private:
         }
 
         const unsigned int whitePixel = 0xFFFFFFFFu;
-        if (!UploadTextureRegion(m_defaultTexture, 0, 0, 1, 1, &whitePixel, true, sizeof(unsigned int), true)) {
+        if (!UploadTextureRegion(m_defaultTexture, 0, 0, 1, 1, &whitePixel, true, sizeof(unsigned int), true, "__default_white__")) {
             DestroyPipelineResources();
             return false;
         }
@@ -6525,9 +6641,18 @@ private:
             return false;
         }
 
+        if (m_pendingImmediateUploadCommandBuffer != VK_NULL_HANDLE) {
+            if (!FlushPendingImmediateUploadBatch()) {
+                return false;
+            }
+        }
+
         *outCommandBuffer = VK_NULL_HANDLE;
+        g_vulkanPerfStats.immediateCommandBuffers += 1;
         if (!m_frameBegun && m_inFlightFence != VK_NULL_HANDLE) {
+            const double frameFenceWaitStartMs = VulkanNowMs();
             VkResult result = vkWaitForFences(m_device, 1, &m_inFlightFence, VK_TRUE, UINT64_MAX);
+            g_vulkanPerfStats.immediateFrameFenceWaitMs += VulkanNowMs() - frameFenceWaitStartMs;
             if (result != VK_SUCCESS) {
                 m_bootstrap.initHr = static_cast<int>(result);
                 return false;
@@ -6535,7 +6660,9 @@ private:
             ReleasePendingTransferResources();
         }
 
+        const double immediateFenceWaitStartMs = VulkanNowMs();
         VkResult result = vkWaitForFences(m_device, 1, &m_immediateFence, VK_TRUE, UINT64_MAX);
+        g_vulkanPerfStats.immediateFenceWaitMs += VulkanNowMs() - immediateFenceWaitStartMs;
         if (result != VK_SUCCESS) {
             m_bootstrap.initHr = static_cast<int>(result);
             return false;
@@ -6585,7 +6712,9 @@ private:
             result = vkQueueSubmit(m_graphicsQueue, 1, &submitInfo, m_immediateFence);
         }
         if (result == VK_SUCCESS) {
+            const double immediateSubmitWaitStartMs = VulkanNowMs();
             result = vkWaitForFences(m_device, 1, &m_immediateFence, VK_TRUE, UINT64_MAX);
+            g_vulkanPerfStats.immediateSubmitWaitMs += VulkanNowMs() - immediateSubmitWaitStartMs;
         }
         vkFreeCommandBuffers(m_device, m_immediateCommandPool, 1, &commandBuffer);
         if (result != VK_SUCCESS) {
@@ -6593,6 +6722,48 @@ private:
             return false;
         }
 
+        return true;
+    }
+
+    bool FlushPendingImmediateUploadBatch()
+    {
+        if (m_pendingImmediateUploadCommandBuffer == VK_NULL_HANDLE) {
+            return true;
+        }
+
+        const VkCommandBuffer commandBuffer = m_pendingImmediateUploadCommandBuffer;
+        m_pendingImmediateUploadCommandBuffer = VK_NULL_HANDLE;
+        return EndImmediateCommandBuffer(commandBuffer);
+    }
+
+    void DiscardPendingImmediateUploadBatch()
+    {
+        if (m_pendingImmediateUploadCommandBuffer == VK_NULL_HANDLE) {
+            return;
+        }
+
+        if (m_device != VK_NULL_HANDLE && m_immediateCommandPool != VK_NULL_HANDLE) {
+            vkFreeCommandBuffers(m_device, m_immediateCommandPool, 1, &m_pendingImmediateUploadCommandBuffer);
+        }
+        m_pendingImmediateUploadCommandBuffer = VK_NULL_HANDLE;
+    }
+
+    bool BeginOrReuseImmediateUploadBatch(VkCommandBuffer* outCommandBuffer)
+    {
+        if (!outCommandBuffer) {
+            return false;
+        }
+
+        if (m_pendingImmediateUploadCommandBuffer != VK_NULL_HANDLE) {
+            *outCommandBuffer = m_pendingImmediateUploadCommandBuffer;
+            return true;
+        }
+
+        if (!BeginImmediateCommandBuffer(&m_pendingImmediateUploadCommandBuffer)) {
+            return false;
+        }
+
+        *outCommandBuffer = m_pendingImmediateUploadCommandBuffer;
         return true;
     }
 
@@ -6646,8 +6817,9 @@ private:
     }
 
     bool UploadTextureRegion(VulkanTextureHandle* textureHandle, int x, int y, int w, int h,
-        const unsigned int* data, bool skipColorKey, int pitch, bool immediate)
+        const unsigned int* data, bool skipColorKey, int pitch, bool immediate, const char* textureName)
     {
+        const double uploadStartMs = VulkanNowMs();
         if (!textureHandle || !data || w <= 0 || h <= 0) {
             return false;
         }
@@ -6669,10 +6841,13 @@ private:
         const VkDeviceSize uploadSize = static_cast<VkDeviceSize>(w) * static_cast<VkDeviceSize>(h) * sizeof(unsigned int);
         VkBuffer stagingBuffer = VK_NULL_HANDLE;
         VkDeviceMemory stagingMemory = VK_NULL_HANDLE;
+        const double stageAllocStartMs = VulkanNowMs();
         if (!CreateStagingBuffer(uploadSize, &stagingBuffer, &stagingMemory)) {
             return false;
         }
+        g_vulkanPerfStats.textureStageAllocMs += VulkanNowMs() - stageAllocStartMs;
 
+        const double mapCopyStartMs = VulkanNowMs();
         void* mapped = nullptr;
         VkResult result = vkMapMemory(m_device, stagingMemory, 0, uploadSize, 0, &mapped);
         if (result != VK_SUCCESS || !mapped) {
@@ -6687,10 +6862,28 @@ private:
 
         std::memcpy(mapped, uploadPixels.data(), static_cast<size_t>(uploadSize));
         vkUnmapMemory(m_device, stagingMemory);
+    g_vulkanPerfStats.textureMapCopyMs += VulkanNowMs() - mapCopyStartMs;
 
+        const bool isLightmapAtlasUpload = textureHandle != nullptr
+            && textureName != nullptr
+            && std::strncmp(textureName, "__lightmap_atlas_", 17) == 0;
+        const bool isCachedFileTextureUpload = textureHandle != nullptr
+            && textureName != nullptr
+            && (std::strncmp(textureName, "@ck:", 4) == 0 || std::strncmp(textureName, "@bk:", 4) == 0);
+        const bool isBillboardUpload = textureHandle != nullptr
+            && textureName != nullptr
+            && (std::strncmp(textureName, "__actor_billboard__", 19) == 0
+                || std::strncmp(textureName, "__item_billboard__", 18) == 0);
+        const bool batchedImmediate = immediate
+            && !m_frameBegun
+            && !m_renderPassActive
+            && (isLightmapAtlasUpload || isCachedFileTextureUpload || isBillboardUpload);
         VkCommandBuffer commandBuffer = immediate ? VK_NULL_HANDLE : GetCurrentCommandBuffer();
         if (immediate) {
-            if (!BeginImmediateCommandBuffer(&commandBuffer)) {
+            const bool beganImmediate = batchedImmediate
+                ? BeginOrReuseImmediateUploadBatch(&commandBuffer)
+                : BeginImmediateCommandBuffer(&commandBuffer);
+            if (!beganImmediate) {
                 vkDestroyBuffer(m_device, stagingBuffer, nullptr);
                 vkFreeMemory(m_device, stagingMemory, nullptr);
                 return false;
@@ -6755,15 +6948,21 @@ private:
 
         textureHandle->m_layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
-        if (immediate) {
+        if (immediate && !batchedImmediate) {
             const bool submitted = EndImmediateCommandBuffer(commandBuffer);
             vkDestroyBuffer(m_device, stagingBuffer, nullptr);
             vkFreeMemory(m_device, stagingMemory, nullptr);
+            if (submitted) {
+                g_vulkanPerfStats.textureUploads += 1;
+                g_vulkanPerfStats.textureUploadMs += VulkanNowMs() - uploadStartMs;
+            }
             return submitted;
         }
 
         m_pendingReleaseBuffers.push_back(stagingBuffer);
         m_pendingReleaseMemory.push_back(stagingMemory);
+        g_vulkanPerfStats.textureUploads += 1;
+        g_vulkanPerfStats.textureUploadMs += VulkanNowMs() - uploadStartMs;
         return true;
     }
 
@@ -8457,21 +8656,33 @@ private:
 
     VkResult BeginFrame()
     {
+        if (!FlushPendingImmediateUploadBatch()) {
+            return static_cast<VkResult>(m_bootstrap.initHr);
+        }
+
+        const double frameFenceWaitStartMs = VulkanNowMs();
         VkResult result = vkWaitForFences(m_device, 1, &m_inFlightFence, VK_TRUE, UINT64_MAX);
+        g_vulkanPerfStats.frameFenceWaitMs += VulkanNowMs() - frameFenceWaitStartMs;
         if (result != VK_SUCCESS) {
             DbgLog("[Render][Vulkan] vkWaitForFences(frame) failed: %d\n", static_cast<int>(result));
             m_bootstrap.initHr = static_cast<int>(result);
             return result;
         }
+        const double releaseStartMs = VulkanNowMs();
         ReleasePendingTransferResources();
+        g_vulkanPerfStats.frameReleaseTransferMs += VulkanNowMs() - releaseStartMs;
+        const double resetFenceStartMs = VulkanNowMs();
         result = vkResetFences(m_device, 1, &m_inFlightFence);
+        g_vulkanPerfStats.frameResetFenceMs += VulkanNowMs() - resetFenceStartMs;
         if (result != VK_SUCCESS) {
             DbgLog("[Render][Vulkan] vkResetFences(frame) failed: %d\n", static_cast<int>(result));
             m_bootstrap.initHr = static_cast<int>(result);
             return result;
         }
         if (m_descriptorPool != VK_NULL_HANDLE) {
+            const double resetDescriptorPoolStartMs = VulkanNowMs();
             result = vkResetDescriptorPool(m_device, m_descriptorPool, 0);
+            g_vulkanPerfStats.frameResetDescriptorPoolMs += VulkanNowMs() - resetDescriptorPoolStartMs;
             if (result != VK_SUCCESS) {
                 DbgLog("[Render][Vulkan] vkResetDescriptorPool failed: %d\n", static_cast<int>(result));
                 m_bootstrap.initHr = static_cast<int>(result);
@@ -8483,7 +8694,9 @@ private:
         ResetUploadPageCursors(m_indexUploadPages);
         m_overlayPassPrepared = false;
 
+        const double acquireImageStartMs = VulkanNowMs();
         result = vkAcquireNextImageKHR(m_device, m_swapChain, UINT64_MAX, m_imageAvailableSemaphore, VK_NULL_HANDLE, &m_currentImageIndex);
+        g_vulkanPerfStats.frameAcquireImageMs += VulkanNowMs() - acquireImageStartMs;
         if (result == VK_ERROR_OUT_OF_DATE_KHR) {
             ResizeSwapChain();
             return result;
@@ -8495,7 +8708,9 @@ private:
         }
 
         VkCommandBuffer commandBuffer = GetCurrentCommandBuffer();
+        const double resetCommandBufferStartMs = VulkanNowMs();
         result = vkResetCommandBuffer(commandBuffer, 0);
+        g_vulkanPerfStats.frameResetCommandBufferMs += VulkanNowMs() - resetCommandBufferStartMs;
         if (result != VK_SUCCESS) {
             DbgLog("[Render][Vulkan] vkResetCommandBuffer failed: %d\n", static_cast<int>(result));
             m_bootstrap.initHr = static_cast<int>(result);
@@ -8504,7 +8719,9 @@ private:
 
         VkCommandBufferBeginInfo beginInfo{};
         beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+        const double beginCommandBufferStartMs = VulkanNowMs();
         result = vkBeginCommandBuffer(commandBuffer, &beginInfo);
+        g_vulkanPerfStats.frameBeginCommandBufferMs += VulkanNowMs() - beginCommandBufferStartMs;
         if (result != VK_SUCCESS) {
             DbgLog("[Render][Vulkan] vkBeginCommandBuffer failed: %d\n", static_cast<int>(result));
             m_bootstrap.initHr = static_cast<int>(result);
@@ -8674,6 +8891,7 @@ private:
     VkShaderModule m_postSmaaNeighborhoodFragmentShaderModule;
     VkCommandPool m_commandPool;
     VkCommandPool m_immediateCommandPool;
+    VkCommandBuffer m_pendingImmediateUploadCommandBuffer;
     VkSemaphore m_imageAvailableSemaphore;
     VkSemaphore m_renderFinishedSemaphore;
     VkFence m_inFlightFence;

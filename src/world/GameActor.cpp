@@ -26,9 +26,42 @@
 #include <cstdio>
 #include <cstring>
 #include <map>
+#include <set>
 #include <vector>
 
 namespace {
+
+void SetTextureDebugName(CTexture* texture, const char* name)
+{
+    if (!texture || !name || name[0] == '\0') {
+        return;
+    }
+
+    std::strncpy(texture->m_texName, name, sizeof(texture->m_texName) - 1);
+    texture->m_texName[sizeof(texture->m_texName) - 1] = '\0';
+}
+
+void SetActorBillboardDebugName(CTexture* texture,
+    const CPc& actor,
+    int displayJob,
+    int bodyAction,
+    int headMotion,
+    bool playerStyle)
+{
+    if (!texture) {
+        return;
+    }
+
+    std::snprintf(texture->m_texName,
+        sizeof(texture->m_texName),
+        "__actor_billboard__:gid=%u:job=%d:act=%d:mot=%d:pc=%d",
+        static_cast<unsigned int>(actor.m_gid),
+        displayJob,
+        bodyAction,
+        headMotion,
+        playerStyle ? 1 : 0);
+    texture->m_texName[sizeof(texture->m_texName) - 1] = '\0';
+}
 
 float g_runtimeActorCameraLongitude = 0.0f;
 
@@ -36,6 +69,7 @@ constexpr int kPlayerBillboardComposeWidth = 128;
 constexpr int kPlayerBillboardComposeHeight = 128;
 constexpr int kPlayerBillboardAnchorX = 64;
 constexpr int kPlayerBillboardAnchorY = 110;
+constexpr int kSharedNonPcWarmupMotionLimit = 32;
 constexpr int kItemBillboardComposeWidth = 96;
 constexpr int kItemBillboardComposeHeight = 96;
 constexpr int kItemBillboardAnchorX = 48;
@@ -809,10 +843,281 @@ struct SharedNonPcBillboardValue {
     int anchorY = kPlayerBillboardAnchorY;
 };
 
+struct SharedNonPcBillboardStripKey {
+    int job = 0;
+
+    bool operator<(const SharedNonPcBillboardStripKey& other) const
+    {
+        return job < other.job;
+    }
+};
+
 std::map<SharedNonPcBillboardKey, SharedNonPcBillboardValue>& GetSharedNonPcBillboardCache()
 {
     static std::map<SharedNonPcBillboardKey, SharedNonPcBillboardValue> cache;
     return cache;
+}
+
+std::set<SharedNonPcBillboardStripKey>& GetPrimedNonPcBillboardStrips()
+{
+    static std::set<SharedNonPcBillboardStripKey> strips;
+    return strips;
+}
+
+struct SharedPlayerBillboardKey {
+    int job = 0;
+    int sex = 0;
+    int head = 0;
+    int bodyPalette = 0;
+    int headPalette = 0;
+    int accessoryBottom = 0;
+    int accessoryMid = 0;
+    int accessoryTop = 0;
+    int action = 0;
+    int motion = 0;
+
+    bool operator<(const SharedPlayerBillboardKey& other) const
+    {
+        if (job != other.job) {
+            return job < other.job;
+        }
+        if (sex != other.sex) {
+            return sex < other.sex;
+        }
+        if (head != other.head) {
+            return head < other.head;
+        }
+        if (bodyPalette != other.bodyPalette) {
+            return bodyPalette < other.bodyPalette;
+        }
+        if (headPalette != other.headPalette) {
+            return headPalette < other.headPalette;
+        }
+        if (accessoryBottom != other.accessoryBottom) {
+            return accessoryBottom < other.accessoryBottom;
+        }
+        if (accessoryMid != other.accessoryMid) {
+            return accessoryMid < other.accessoryMid;
+        }
+        if (accessoryTop != other.accessoryTop) {
+            return accessoryTop < other.accessoryTop;
+        }
+        if (action != other.action) {
+            return action < other.action;
+        }
+        return motion < other.motion;
+    }
+};
+
+using SharedPlayerBillboardValue = SharedNonPcBillboardValue;
+
+bool FindOpaqueBounds(const unsigned int* pixels, int width, int height, tagRECT* outBounds);
+void UnpremultiplyPixels(std::vector<unsigned int>& pixels);
+bool DrawPcBillboard(BillboardComposeSurface& bitmap,
+    const CPc& actor,
+    int drawX,
+    int drawY,
+    int bodyAction,
+    int headMotion,
+    int* outJob,
+    int* outHead,
+    int* outSex,
+    int* outBodyPalette,
+    int* outHeadPalette);
+
+struct SharedPlayerBillboardStripKey {
+    int job = 0;
+    int sex = 0;
+    int head = 0;
+    int bodyPalette = 0;
+    int headPalette = 0;
+    int accessoryBottom = 0;
+    int accessoryMid = 0;
+    int accessoryTop = 0;
+    int action = 0;
+
+    bool operator<(const SharedPlayerBillboardStripKey& other) const
+    {
+        if (job != other.job) {
+            return job < other.job;
+        }
+        if (sex != other.sex) {
+            return sex < other.sex;
+        }
+        if (head != other.head) {
+            return head < other.head;
+        }
+        if (bodyPalette != other.bodyPalette) {
+            return bodyPalette < other.bodyPalette;
+        }
+        if (headPalette != other.headPalette) {
+            return headPalette < other.headPalette;
+        }
+        if (accessoryBottom != other.accessoryBottom) {
+            return accessoryBottom < other.accessoryBottom;
+        }
+        if (accessoryMid != other.accessoryMid) {
+            return accessoryMid < other.accessoryMid;
+        }
+        if (accessoryTop != other.accessoryTop) {
+            return accessoryTop < other.accessoryTop;
+        }
+        return action < other.action;
+    }
+};
+
+std::map<SharedPlayerBillboardKey, SharedPlayerBillboardValue>& GetSharedPlayerBillboardCache()
+{
+    static std::map<SharedPlayerBillboardKey, SharedPlayerBillboardValue> cache;
+    return cache;
+}
+
+std::set<SharedPlayerBillboardStripKey>& GetPrimedPlayerBillboardStrips()
+{
+    static std::set<SharedPlayerBillboardStripKey> strips;
+    return strips;
+}
+
+SharedPlayerBillboardKey BuildSharedPlayerBillboardKey(const CPc& actor, int displayJob, int sex)
+{
+    return SharedPlayerBillboardKey{
+        displayJob,
+        sex,
+        actor.m_head,
+        actor.m_bodyPalette,
+        actor.m_headPalette,
+        actor.m_accessory,
+        actor.m_accessory3,
+        actor.m_accessory2,
+        0,
+        0,
+    };
+}
+
+bool PopulateSharedPlayerBillboardFrame(CPc& actor,
+    const SharedPlayerBillboardKey& sharedPlayerKey,
+    int displayJob,
+    int sex,
+    int bodyAction,
+    int motionIndex)
+{
+    SharedPlayerBillboardKey frameKey = sharedPlayerKey;
+    frameKey.action = bodyAction;
+    frameKey.motion = motionIndex;
+
+    auto& sharedCache = GetSharedPlayerBillboardCache();
+    if (sharedCache.find(frameKey) != sharedCache.end()) {
+        return true;
+    }
+
+    BillboardComposeSurface stripSurface(kPlayerBillboardComposeWidth, kPlayerBillboardComposeHeight);
+    stripSurface.Clear(0x00000000u);
+
+    int stripResolvedJob = -1;
+    int stripResolvedHead = -1;
+    int stripResolvedSex = -1;
+    int stripResolvedBodyPalette = -1;
+    int stripResolvedHeadPalette = -1;
+    if (!DrawPcBillboard(stripSurface,
+            actor,
+            kPlayerBillboardAnchorX,
+            kPlayerBillboardAnchorY,
+            bodyAction,
+            motionIndex,
+            &stripResolvedJob,
+            &stripResolvedHead,
+            &stripResolvedSex,
+            &stripResolvedBodyPalette,
+            &stripResolvedHeadPalette)) {
+        return false;
+    }
+
+    tagRECT stripOpaqueBounds{};
+    if (!FindOpaqueBounds(stripSurface.GetImageData(),
+            static_cast<int>(stripSurface.GetWidth()),
+            static_cast<int>(stripSurface.GetHeight()),
+            &stripOpaqueBounds)) {
+        return false;
+    }
+
+    std::vector<unsigned int> stripPixels(stripSurface.GetImageData(),
+        stripSurface.GetImageData() + static_cast<size_t>(stripSurface.GetWidth()) * static_cast<size_t>(stripSurface.GetHeight()));
+    UnpremultiplyPixels(stripPixels);
+
+    CTexture* stripTexture = new CTexture();
+    if (!stripTexture) {
+        return false;
+    }
+    if (!stripTexture->Create(kPlayerBillboardComposeWidth, kPlayerBillboardComposeHeight, PF_A8R8G8B8, false)) {
+        delete stripTexture;
+        return false;
+    }
+
+    SetActorBillboardDebugName(stripTexture,
+        actor,
+        displayJob,
+        bodyAction,
+        motionIndex,
+        true);
+    stripTexture->Update(0,
+        0,
+        kPlayerBillboardComposeWidth,
+        kPlayerBillboardComposeHeight,
+        stripPixels.data(),
+        true,
+        kPlayerBillboardComposeWidth * static_cast<int>(sizeof(unsigned int)));
+
+    SharedPlayerBillboardValue stripValue{};
+    stripValue.texture = stripTexture;
+    stripValue.opaqueBounds = stripOpaqueBounds;
+    stripValue.width = kPlayerBillboardComposeWidth;
+    stripValue.height = kPlayerBillboardComposeHeight;
+    stripValue.anchorX = kPlayerBillboardAnchorX;
+    stripValue.anchorY = kPlayerBillboardAnchorY;
+    sharedCache[frameKey] = stripValue;
+    return true;
+}
+
+void PrimePlayerBillboardStrip(CPc& actor,
+    const SharedPlayerBillboardKey& sharedPlayerKey,
+    int displayJob,
+    int sex,
+    int bodyAction)
+{
+    char bodyAct[260] = {};
+    const std::string bodyActName = g_session.GetJobActName(displayJob, sex, bodyAct);
+    CActRes* bodyActRes = g_resMgr.GetAs<CActRes>(bodyActName.c_str());
+    const int motionCount = bodyActRes ? bodyActRes->GetMotionCount(bodyAction) : 0;
+    if (motionCount <= 1 || motionCount > 8) {
+        return;
+    }
+
+    SharedPlayerBillboardStripKey stripKey{
+        sharedPlayerKey.job,
+        sharedPlayerKey.sex,
+        sharedPlayerKey.head,
+        sharedPlayerKey.bodyPalette,
+        sharedPlayerKey.headPalette,
+        sharedPlayerKey.accessoryBottom,
+        sharedPlayerKey.accessoryMid,
+        sharedPlayerKey.accessoryTop,
+        bodyAction,
+    };
+
+    std::set<SharedPlayerBillboardStripKey>& primedStrips = GetPrimedPlayerBillboardStrips();
+    const bool inserted = primedStrips.insert(stripKey).second;
+    if (!inserted) {
+        SharedPlayerBillboardKey firstFrameKey = sharedPlayerKey;
+        firstFrameKey.action = bodyAction;
+        firstFrameKey.motion = 0;
+        if (GetSharedPlayerBillboardCache().find(firstFrameKey) != GetSharedPlayerBillboardCache().end()) {
+            return;
+        }
+    }
+
+    for (int motionIndex = 0; motionIndex < motionCount; ++motionIndex) {
+        PopulateSharedPlayerBillboardFrame(actor, sharedPlayerKey, displayJob, sex, bodyAction, motionIndex);
+    }
 }
 
 struct SharedItemBillboardKey {
@@ -1696,6 +2001,102 @@ bool DrawNonPcBillboard(BillboardComposeSurface& bitmap,
         *outJob = ResolveDisplayJob(actor);
     }
     return drawOk;
+}
+
+bool PopulateSharedNonPcBillboardFrame(CPc& actor, int displayJob, int bodyAction, int motion)
+{
+    SharedNonPcBillboardKey frameKey{ displayJob, bodyAction, motion };
+    auto& sharedCache = GetSharedNonPcBillboardCache();
+    if (sharedCache.find(frameKey) != sharedCache.end()) {
+        return true;
+    }
+
+    BillboardComposeSurface composeSurface(kPlayerBillboardComposeWidth, kPlayerBillboardComposeHeight);
+    composeSurface.Clear(0x00000000u);
+
+    int resolvedJob = -1;
+    if (!DrawNonPcBillboard(composeSurface,
+            actor,
+            kPlayerBillboardAnchorX,
+            kPlayerBillboardAnchorY,
+            bodyAction,
+            motion,
+            &resolvedJob)) {
+        return false;
+    }
+
+    tagRECT opaqueBounds{};
+    if (!FindOpaqueBounds(composeSurface.GetImageData(),
+            static_cast<int>(composeSurface.GetWidth()),
+            static_cast<int>(composeSurface.GetHeight()),
+            &opaqueBounds)) {
+        return false;
+    }
+
+    std::vector<unsigned int> pixels(composeSurface.GetImageData(),
+        composeSurface.GetImageData() + static_cast<size_t>(composeSurface.GetWidth()) * static_cast<size_t>(composeSurface.GetHeight()));
+    UnpremultiplyPixels(pixels);
+
+    CTexture* texture = new CTexture();
+    if (!texture) {
+        return false;
+    }
+    if (!texture->Create(kPlayerBillboardComposeWidth, kPlayerBillboardComposeHeight, PF_A8R8G8B8, false)) {
+        delete texture;
+        return false;
+    }
+
+    SetActorBillboardDebugName(texture,
+        actor,
+        displayJob,
+        bodyAction,
+        motion,
+        false);
+    texture->Update(0,
+        0,
+        kPlayerBillboardComposeWidth,
+        kPlayerBillboardComposeHeight,
+        pixels.data(),
+        true,
+        kPlayerBillboardComposeWidth * static_cast<int>(sizeof(unsigned int)));
+
+    SharedNonPcBillboardValue value{};
+    value.texture = texture;
+    value.opaqueBounds = opaqueBounds;
+    value.width = kPlayerBillboardComposeWidth;
+    value.height = kPlayerBillboardComposeHeight;
+    value.anchorX = kPlayerBillboardAnchorX;
+    value.anchorY = kPlayerBillboardAnchorY;
+    sharedCache[frameKey] = value;
+    return true;
+}
+
+void PrimeNonPcBillboardStrip(CPc& actor, int displayJob, int bodyAction)
+{
+    CActRes* actRes = nullptr;
+    CSprRes* sprRes = nullptr;
+    if (!ResolveCachedNonPcResourcesForActor(actor, &actRes, &sprRes) || !actRes || !sprRes) {
+        return;
+    }
+
+    SharedNonPcBillboardStripKey stripKey{ displayJob };
+    std::set<SharedNonPcBillboardStripKey>& primedStrips = GetPrimedNonPcBillboardStrips();
+    const bool inserted = primedStrips.insert(stripKey).second;
+    if (!inserted) {
+        return;
+    }
+
+    const int actionCount = static_cast<int>(actRes->actions.size());
+    for (int actionIndex = 0; actionIndex < actionCount; ++actionIndex) {
+        const int motionCount = actRes->GetMotionCount(actionIndex);
+        if (motionCount <= 1 || motionCount > kSharedNonPcWarmupMotionLimit) {
+            continue;
+        }
+
+        for (int motion = 0; motion < motionCount; ++motion) {
+            PopulateSharedNonPcBillboardFrame(actor, displayJob, actionIndex, motion);
+        }
+    }
 }
 
 bool FindOpaqueBounds(const unsigned int* pixels, int width, int height, tagRECT* outBounds)
@@ -2979,6 +3380,7 @@ bool EnsureItemBillboardTexture(CItem& item)
             ReleaseItemBillboardTexture(item);
             return false;
         }
+        SetTextureDebugName(item.m_billboardTexture, "__item_billboard__");
         item.m_billboardTextureOwned = 1;
         item.m_billboardTextureWidth = kItemBillboardComposeWidth;
         item.m_billboardTextureHeight = kItemBillboardComposeHeight;
@@ -3343,6 +3745,7 @@ bool CPc::EnsureBillboardTexture(float cameraLongitude)
     const bool usePlayerStyleBillboard = isPlayerStyleActor;
     const int displayJob = ResolveDisplayJob(*this);
     const int sex = m_sex != 0 ? 1 : 0;
+    const SharedPlayerBillboardKey sharedPlayerKey = BuildSharedPlayerBillboardKey(*this, displayJob, sex);
     const int baseBodyAction = m_isSitting ? 16 : (m_isMoving ? 8 : 0);
     int previousDir = -1;
     if (m_cachedBillboardBodyAction >= baseBodyAction && m_cachedBillboardBodyAction < baseBodyAction + 8) {
@@ -3391,6 +3794,8 @@ bool CPc::EnsureBillboardTexture(float cameraLongitude)
     }
 
     if (isVulkanBackend && !usePlayerStyleBillboard) {
+        PrimeNonPcBillboardStrip(*this, displayJob, bodyAction);
+
         const SharedNonPcBillboardKey sharedKey{ displayJob, bodyAction, headMotion };
         const auto& sharedCache = GetSharedNonPcBillboardCache();
         const auto sharedIt = sharedCache.find(sharedKey);
@@ -3412,6 +3817,36 @@ bool CPc::EnsureBillboardTexture(float cameraLongitude)
             m_cachedBillboardSex = sex;
             m_cachedBillboardBodyPalette = 0;
             m_cachedBillboardHeadPalette = 0;
+            return true;
+        }
+    }
+
+    if (isVulkanBackend && usePlayerStyleBillboard) {
+        PrimePlayerBillboardStrip(*this, sharedPlayerKey, displayJob, sex, bodyAction);
+
+        SharedPlayerBillboardKey sharedKey = sharedPlayerKey;
+        sharedKey.action = bodyAction;
+        sharedKey.motion = headMotion;
+        const auto& sharedCache = GetSharedPlayerBillboardCache();
+        const auto sharedIt = sharedCache.find(sharedKey);
+        if (sharedIt != sharedCache.end() && sharedIt->second.texture) {
+            if (m_billboardTexture != sharedIt->second.texture) {
+                ReleaseActorBillboardTexture(*this);
+            }
+            m_billboardTexture = sharedIt->second.texture;
+            m_billboardTextureOwned = 0;
+            m_billboardTextureWidth = sharedIt->second.width;
+            m_billboardTextureHeight = sharedIt->second.height;
+            m_billboardAnchorX = sharedIt->second.anchorX;
+            m_billboardAnchorY = sharedIt->second.anchorY;
+            m_billboardOpaqueBounds = sharedIt->second.opaqueBounds;
+            m_cachedBillboardBodyAction = bodyAction;
+            m_cachedBillboardHeadMotion = headMotion;
+            m_cachedBillboardJob = displayJob;
+            m_cachedBillboardHead = m_head;
+            m_cachedBillboardSex = sex;
+            m_cachedBillboardBodyPalette = m_bodyPalette;
+            m_cachedBillboardHeadPalette = m_headPalette;
             return true;
         }
     }
@@ -3501,6 +3936,13 @@ bool CPc::EnsureBillboardTexture(float cameraLongitude)
         m_billboardTextureHeight = kPlayerBillboardComposeHeight;
     }
 
+    SetActorBillboardDebugName(m_billboardTexture,
+        *this,
+        displayJob,
+        bodyAction,
+        headMotion,
+        usePlayerStyleBillboard);
+
     m_billboardTexture->Update(0,
         0,
         kPlayerBillboardComposeWidth,
@@ -3533,7 +3975,41 @@ bool CPc::EnsureBillboardTexture(float cameraLongitude)
         m_billboardTextureOwned = 0;
     }
 
+    if (isVulkanBackend && usePlayerStyleBillboard && m_billboardTexture) {
+        SharedPlayerBillboardValue value{};
+        value.texture = m_billboardTexture;
+        value.opaqueBounds = opaqueBounds;
+        value.width = m_billboardTextureWidth;
+        value.height = m_billboardTextureHeight;
+        value.anchorX = m_billboardAnchorX;
+        value.anchorY = m_billboardAnchorY;
+
+        SharedPlayerBillboardKey sharedKey = sharedPlayerKey;
+        sharedKey.action = bodyAction;
+        sharedKey.motion = headMotion;
+        GetSharedPlayerBillboardCache()[sharedKey] = value;
+        m_billboardTextureOwned = 0;
+    }
+
     return true;
+}
+
+void CPc::WarmupCommonBillboardCache()
+{
+    if (m_isPc == 0 || GetRenderDevice().GetBackendType() != RenderBackendType::Vulkan) {
+        return;
+    }
+
+    const int displayJob = ResolveDisplayJob(*this);
+    const int sex = m_sex != 0 ? 1 : 0;
+    const SharedPlayerBillboardKey sharedPlayerKey = BuildSharedPlayerBillboardKey(*this, displayJob, sex);
+    const std::array<int, 3> baseActions{ 0, 8, 16 };
+
+    for (const int baseAction : baseActions) {
+        for (int dir = 0; dir < 8; ++dir) {
+            PrimePlayerBillboardStrip(*this, sharedPlayerKey, displayJob, sex, baseAction + dir);
+        }
+    }
 }
 
 CPlayer::CPlayer()

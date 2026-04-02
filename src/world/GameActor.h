@@ -347,6 +347,7 @@ public:
 
     void InvalidateBillboard();
     bool EnsureBillboardTexture(float cameraLongitude);
+    void WarmupCommonBillboardCache();
 
     std::string m_imfName;
     int m_honor, m_virtue, m_headDir, m_head, m_headPalette, m_weapon;

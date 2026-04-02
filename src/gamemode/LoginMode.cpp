@@ -339,6 +339,8 @@ bool QueueLoginUiQuad()
     const bool needUiRefresh = !s_uiTextureValid || uiDirty || uiStateToken != s_uiStateToken;
     if (needUiRefresh) {
         const bool qtMenuRuntimeEnabled = IsQtUiRuntimeEnabled();
+        const bool allowQtCpuBridge = qtMenuRuntimeEnabled
+            && GetRenderDevice().GetBackendType() != RenderBackendType::Vulkan;
         bool renderedQtMenuOverlay = false;
         if (qtMenuRuntimeEnabled && s_qtUiOverlayTexture) {
             renderedQtMenuOverlay = RenderQtUiMenuOverlayTexture(
@@ -349,10 +351,10 @@ bool QueueLoginUiQuad()
 
         {
             static int s_lastLoggedMenuPath = -1;
-            const int menuPath = renderedQtMenuOverlay ? 2 : (qtMenuRuntimeEnabled ? 1 : 0);
+            const int menuPath = renderedQtMenuOverlay ? 2 : (allowQtCpuBridge ? 1 : 0);
             if (menuPath != s_lastLoggedMenuPath) {
                 DbgLog("[LoginMode] menu overlay path=%s qtEnabled=%d texture=%p size=%dx%d\n",
-                    renderedQtMenuOverlay ? "native_texture" : (qtMenuRuntimeEnabled ? "cpu_bridge" : "legacy_gdi"),
+                    renderedQtMenuOverlay ? "native_texture" : (allowQtCpuBridge ? "cpu_bridge" : "legacy_gdi"),
                     qtMenuRuntimeEnabled ? 1 : 0,
                     s_qtUiOverlayTexture,
                     clientWidth,
@@ -365,7 +367,7 @@ bool QueueLoginUiQuad()
             g_windowMgr.ClearDirtyVisualState();
             s_uiTextureValid = false;
         } else {
-            if (!qtMenuRuntimeEnabled) {
+            if (!allowQtCpuBridge) {
                 const bool composeReady = EnsureOverlayComposeSurface(clientWidth, clientHeight, &s_uiComposeSurface);
                 if (!composeReady) {
                     return false;
@@ -385,7 +387,7 @@ bool QueueLoginUiQuad()
             }
 
             unsigned int* overlayPixels = nullptr;
-            if (qtMenuRuntimeEnabled) {
+            if (allowQtCpuBridge) {
                 const size_t pixelCount = static_cast<size_t>(clientWidth) * static_cast<size_t>(clientHeight);
                 if (s_qtUiComposePixels.size() != pixelCount) {
                     s_qtUiComposePixels.assign(pixelCount, 0u);
@@ -397,11 +399,13 @@ bool QueueLoginUiQuad()
                 ConvertOverlayComposeBitsToAlpha(s_uiComposeSurface.GetBits(), clientWidth, clientHeight);
                 overlayPixels = s_uiComposeSurface.GetPixels();
             }
-            CompositeQtUiMenuOverlay(
-                overlayPixels,
-                clientWidth,
-                clientHeight,
-                clientWidth * static_cast<int>(sizeof(unsigned int)));
+            if (allowQtCpuBridge) {
+                CompositeQtUiMenuOverlay(
+                    overlayPixels,
+                    clientWidth,
+                    clientHeight,
+                    clientWidth * static_cast<int>(sizeof(unsigned int)));
+            }
             s_uiTexture->Update(0,
                 0,
                 clientWidth,

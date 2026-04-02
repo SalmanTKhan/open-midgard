@@ -24,6 +24,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdio>
 #include <cstring>
 #include <cctype>
 #include <map>
@@ -3227,16 +3228,28 @@ bool CLightmapMgr::Create(const CGndRes& gnd)
             lightmap.coor[3] = vector2d{ u1, v1 };
         }
 
-        CTexture* atlasTexture = g_texMgr.CreateTexture(
-            kLightmapAtlasEdge,
-            kLightmapAtlasEdge,
-            atlasPixels.data(),
-            PF_A8R8G8B8,
-            false);
+        CTexture* atlasTexture = new CTexture();
         if (!atlasTexture) {
             Reset();
             return false;
         }
+        char atlasName[64]{};
+        std::snprintf(atlasName, sizeof(atlasName), "__lightmap_atlas_%d__", atlasIndex);
+        std::strncpy(atlasTexture->m_texName, atlasName, sizeof(atlasTexture->m_texName) - 1);
+        atlasTexture->m_texName[sizeof(atlasTexture->m_texName) - 1] = '\0';
+        if (!atlasTexture->Create(kLightmapAtlasEdge, kLightmapAtlasEdge, PF_A8R8G8B8, false)) {
+            delete atlasTexture;
+            Reset();
+            return false;
+        }
+        atlasTexture->Update(
+            0,
+            0,
+            kLightmapAtlasEdge,
+            kLightmapAtlasEdge,
+            atlasPixels.data(),
+            false,
+            kLightmapAtlasEdge * static_cast<int>(sizeof(unsigned int)));
         m_lmSurfaces.push_back(atlasTexture);
     }
 

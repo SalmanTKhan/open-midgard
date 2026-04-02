@@ -59,6 +59,16 @@
 namespace {
 CGameModePacketRouter g_gameModePacketRouter;
 
+void SetTextureDebugName(CTexture* texture, const char* name)
+{
+    if (!texture || !name || name[0] == '\0') {
+        return;
+    }
+
+    std::strncpy(texture->m_texName, name, sizeof(texture->m_texName) - 1);
+    texture->m_texName[sizeof(texture->m_texName) - 1] = '\0';
+}
+
 constexpr char kGameModeBuildMarker[] = "2026-03-23 20:14 actor-trace-f";
 constexpr u32 kFramePerfLogIntervalFrames = 120;
 constexpr u32 kLoadingScreenMinShowMs = 700;
@@ -662,16 +672,18 @@ bool QueueModernOverlayQuad(CGameMode& mode, int cursorActNum, u32 mouseAnimStar
 
     if (needOverlayRefresh) {
         const double refreshStartMs = trackMovePerf ? QpcNowMs() : 0.0;
+        const bool allowQtCpuBridge = qtGameplayRuntimeEnabled
+            && GetRenderDevice().GetBackendType() != RenderBackendType::Vulkan;
         s_qtOverlayTextureValid = qtGameplayRuntimeEnabled
             && s_qtOverlayTexture
             && RenderQtUiGameplayOverlayTexture(mode, s_qtOverlayTexture, clientWidth, clientHeight);
 
         {
             static int s_lastLoggedGameplayPath = -1;
-            const int gameplayPath = s_qtOverlayTextureValid ? 2 : (qtGameplayRuntimeEnabled ? 1 : 0);
+            const int gameplayPath = s_qtOverlayTextureValid ? 2 : (allowQtCpuBridge ? 1 : 0);
             if (gameplayPath != s_lastLoggedGameplayPath) {
                 DbgLog("[GameMode] gameplay overlay path=%s qtEnabled=%d texture=%p size=%dx%d\n",
-                    s_qtOverlayTextureValid ? "native_texture" : (qtGameplayRuntimeEnabled ? "cpu_bridge" : "legacy_gdi"),
+                    s_qtOverlayTextureValid ? "native_texture" : (allowQtCpuBridge ? "cpu_bridge" : "legacy_gdi"),
                     qtGameplayRuntimeEnabled ? 1 : 0,
                     s_qtOverlayTexture,
                     clientWidth,
@@ -684,7 +696,7 @@ bool QueueModernOverlayQuad(CGameMode& mode, int cursorActNum, u32 mouseAnimStar
             g_windowMgr.ClearDirtyVisualState();
             s_overlayTextureValid = false;
         } else {
-            if (!qtGameplayRuntimeEnabled) {
+            if (!allowQtCpuBridge) {
                 const bool composeReady = EnsureOverlayComposeSurface(clientWidth, clientHeight, &s_overlayComposeSurface);
                 if (!composeReady) {
                     return false;
@@ -701,7 +713,7 @@ bool QueueModernOverlayQuad(CGameMode& mode, int cursorActNum, u32 mouseAnimStar
             }
 
             const double uiDrawStartMs = trackMovePerf ? QpcNowMs() : 0.0;
-            if (!qtGameplayRuntimeEnabled) {
+            if (!allowQtCpuBridge) {
                 g_windowMgr.OnDrawExcludingRoMapToHdc(s_overlayComposeSurface.GetDC());
             } else {
                 g_windowMgr.ClearDirtyVisualState();
@@ -711,7 +723,7 @@ bool QueueModernOverlayQuad(CGameMode& mode, int cursorActNum, u32 mouseAnimStar
             }
 
             unsigned int* overlayPixels = nullptr;
-            if (qtGameplayRuntimeEnabled) {
+            if (allowQtCpuBridge) {
                 const size_t pixelCount = static_cast<size_t>(clientWidth) * static_cast<size_t>(clientHeight);
                 if (s_qtOverlayComposePixels.size() != pixelCount) {
                     s_qtOverlayComposePixels.assign(pixelCount, 0u);
@@ -727,11 +739,13 @@ bool QueueModernOverlayQuad(CGameMode& mode, int cursorActNum, u32 mouseAnimStar
                 }
                 overlayPixels = s_overlayComposeSurface.GetPixels();
             }
-            CompositeQtUiGameplayOverlay(mode,
-                overlayPixels,
-                clientWidth,
-                clientHeight,
-                clientWidth * static_cast<int>(sizeof(unsigned int)));
+            if (allowQtCpuBridge) {
+                CompositeQtUiGameplayOverlay(mode,
+                    overlayPixels,
+                    clientWidth,
+                    clientHeight,
+                    clientWidth * static_cast<int>(sizeof(unsigned int)));
+            }
 
             const double textureUpdateStartMs = trackMovePerf ? QpcNowMs() : 0.0;
             s_overlayTexture->Update(0,
@@ -982,6 +996,7 @@ bool QueueCursorOverlayQuad(int cursorActNum, u32 mouseAnimStartTick)
             s_cursorTextureHeight = 0;
             return false;
         }
+        SetTextureDebugName(s_cursorTexture, "__overlay_cursor__");
         s_cursorTextureWidth = textureWidth;
         s_cursorTextureHeight = textureHeight;
         s_cursorComposePixels.assign(static_cast<size_t>(textureWidth) * static_cast<size_t>(textureHeight), 0u);
@@ -1084,9 +1099,12 @@ bool QueueLockedTargetOverlayQuad(CGameMode& mode)
 
     RECT overlayRect{};
     SetRectEmpty(&overlayRect);
+    RECT textRect{};
+    SetRectEmpty(&textRect);
 
     const std::string label = ResolveHoveredActorName(mode, actorIt->second);
     const bool drawLockedTargetText = !label.empty();
+    const COLORREF lockedTargetTextColor = ResolveHoverNameColor(actorIt->second);
     SIZE textSize{};
     int textX = 0;
     int textY = 0;
@@ -1106,7 +1124,7 @@ bool QueueLockedTargetOverlayQuad(CGameMode& mode)
 #endif
         textX = centerX - (textSize.cx / 2);
         textY = labelY + kHoverNameTextPadding + kHoverNameVerticalOffset;
-        RECT textRect{ textX - 2, textY - 2, textX + textSize.cx + 2, textY + textSize.cy + 2 };
+        textRect = { textX - 2, textY - 2, textX + textSize.cx + 2, textY + textSize.cy + 2 };
         UnionRect(&overlayRect, &overlayRect, &textRect);
     }
 
@@ -1114,6 +1132,7 @@ bool QueueLockedTargetOverlayQuad(CGameMode& mode)
     static std::vector<unsigned int> s_arrowPixels;
     static int s_arrowWidth = 0;
     static int s_arrowHeight = 0;
+    static CTexture* s_targetArrowTexture = nullptr;
     if (!s_arrowPixelsLoaded) {
         s_arrowPixelsLoaded = true;
         std::string bitmapPath = ResolveDataPath(kLockedTargetArrowBitmapName, "bmp", {
@@ -1161,6 +1180,146 @@ bool QueueLockedTargetOverlayQuad(CGameMode& mode)
         const int tipY = labelY - kLockedTargetArrowBaseLift - bounce;
         arrowRect = { centerX - 9, tipY - 13, centerX + 9, tipY + 2 };
     }
+
+    if (hasArrowBitmap && !s_targetArrowTexture) {
+        s_targetArrowTexture = new CTexture();
+        if (!s_targetArrowTexture || !s_targetArrowTexture->Create(s_arrowWidth, s_arrowHeight, PF_A8R8G8B8, false)) {
+            delete s_targetArrowTexture;
+            s_targetArrowTexture = nullptr;
+        } else {
+            SetTextureDebugName(s_targetArrowTexture, "__overlay_target_arrow__");
+            s_targetArrowTexture->Update(
+                0,
+                0,
+                s_arrowWidth,
+                s_arrowHeight,
+                s_arrowPixels.data(),
+                false,
+                s_arrowWidth * static_cast<int>(sizeof(unsigned int)));
+        }
+    }
+
+    auto queueOverlayTextureQuad = [&](CTexture* texture, float left, float top, float right, float bottom) -> bool {
+        if (!texture) {
+            return false;
+        }
+
+        RPFace* face = g_renderer.BorrowNullRP();
+        if (!face) {
+            return false;
+        }
+
+        const unsigned int overlayContentWidth = texture->m_surfaceUpdateWidth > 0 ? texture->m_surfaceUpdateWidth : texture->m_w;
+        const unsigned int overlayContentHeight = texture->m_surfaceUpdateHeight > 0 ? texture->m_surfaceUpdateHeight : texture->m_h;
+        const float maxU = texture->m_w != 0 ? static_cast<float>(overlayContentWidth) / static_cast<float>(texture->m_w) : 1.0f;
+        const float maxV = texture->m_h != 0 ? static_cast<float>(overlayContentHeight) / static_cast<float>(texture->m_h) : 1.0f;
+
+        face->primType = D3DPT_TRIANGLESTRIP;
+        face->verts = face->m_verts;
+        face->numVerts = 4;
+        face->indices = nullptr;
+        face->numIndices = 0;
+        face->tex = texture;
+        face->mtPreset = 0;
+        face->cullMode = D3DCULL_NONE;
+        face->srcAlphaMode = D3DBLEND_SRCALPHA;
+        face->destAlphaMode = D3DBLEND_INVSRCALPHA;
+        face->alphaSortKey = 1.5f;
+
+        face->m_verts[0] = { left, top, 0.0f, 1.0f, 0xFFFFFFFFu, 0xFF000000u, 0.0f, 0.0f };
+        face->m_verts[1] = { right, top, 0.0f, 1.0f, 0xFFFFFFFFu, 0xFF000000u, maxU, 0.0f };
+        face->m_verts[2] = { left, bottom, 0.0f, 1.0f, 0xFFFFFFFFu, 0xFF000000u, 0.0f, maxV };
+        face->m_verts[3] = { right, bottom, 0.0f, 1.0f, 0xFFFFFFFFu, 0xFF000000u, maxU, maxV };
+        g_renderer.AddRP(face, 1 | 8);
+        return true;
+    };
+
+    if (hasArrowBitmap && s_targetArrowTexture) {
+        bool queuedAny = false;
+
+        if (drawLockedTargetText) {
+            static CTexture* s_targetLabelTexture = nullptr;
+            static int s_targetLabelTextureWidth = 0;
+            static int s_targetLabelTextureHeight = 0;
+            static std::vector<unsigned int> s_targetLabelPixels;
+            static bool s_targetLabelTextureValid = false;
+            static std::uint64_t s_targetLabelStateToken = 0ull;
+            const int labelWidth = (std::max)(1, static_cast<int>(textRect.right - textRect.left));
+            const int labelHeight = (std::max)(1, static_cast<int>(textRect.bottom - textRect.top));
+
+            if (!s_targetLabelTexture || s_targetLabelTextureWidth != labelWidth || s_targetLabelTextureHeight != labelHeight) {
+                delete s_targetLabelTexture;
+                s_targetLabelTexture = new CTexture();
+                if (!s_targetLabelTexture || !s_targetLabelTexture->Create(labelWidth, labelHeight, PF_A8R8G8B8, false)) {
+                    delete s_targetLabelTexture;
+                    s_targetLabelTexture = nullptr;
+                    s_targetLabelTextureWidth = 0;
+                    s_targetLabelTextureHeight = 0;
+                } else {
+                    SetTextureDebugName(s_targetLabelTexture, "__overlay_target_label__");
+                    s_targetLabelTextureWidth = labelWidth;
+                    s_targetLabelTextureHeight = labelHeight;
+                    s_targetLabelPixels.assign(static_cast<size_t>(labelWidth) * static_cast<size_t>(labelHeight), kOverlayTransparentKey);
+                    s_targetLabelTextureValid = false;
+                    s_targetLabelStateToken = 0ull;
+                }
+            } else if (s_targetLabelPixels.size() != static_cast<size_t>(labelWidth) * static_cast<size_t>(labelHeight)) {
+                s_targetLabelPixels.assign(static_cast<size_t>(labelWidth) * static_cast<size_t>(labelHeight), kOverlayTransparentKey);
+                s_targetLabelTextureValid = false;
+            }
+
+            if (s_targetLabelTexture) {
+                std::uint64_t labelStateToken = 1469598103934665603ull;
+                HashTokenString(&labelStateToken, label);
+                HashTokenValue(&labelStateToken, static_cast<std::uint64_t>(static_cast<std::uint32_t>(lockedTargetTextColor)));
+                HashTokenValue(&labelStateToken, static_cast<std::uint64_t>(static_cast<std::uint32_t>(labelWidth)));
+                HashTokenValue(&labelStateToken, static_cast<std::uint64_t>(static_cast<std::uint32_t>(labelHeight)));
+
+                if (!s_targetLabelTextureValid || labelStateToken != s_targetLabelStateToken) {
+                    std::fill(s_targetLabelPixels.begin(), s_targetLabelPixels.end(), kOverlayTransparentKey);
+                    DrawOutlinedTextQtToOverlay(
+                        s_targetLabelPixels.data(),
+                        labelWidth,
+                        labelHeight,
+                        labelWidth * static_cast<int>(sizeof(unsigned int)),
+                        2,
+                        2,
+                        label,
+                        lockedTargetTextColor);
+                    ConvertOverlayComposeBitsToAlpha(s_targetLabelPixels.data(), labelWidth, labelHeight);
+                    s_targetLabelTexture->Update(
+                        0,
+                        0,
+                        labelWidth,
+                        labelHeight,
+                        s_targetLabelPixels.data(),
+                        true,
+                        labelWidth * static_cast<int>(sizeof(unsigned int)));
+                    s_targetLabelTextureValid = true;
+                    s_targetLabelStateToken = labelStateToken;
+                }
+
+                queuedAny = queueOverlayTextureQuad(
+                    s_targetLabelTexture,
+                    static_cast<float>(textRect.left) - 0.5f,
+                    static_cast<float>(textRect.top) - 0.5f,
+                    static_cast<float>(textRect.right) - 0.5f,
+                    static_cast<float>(textRect.bottom) - 0.5f) || queuedAny;
+            }
+        }
+
+        queuedAny = queueOverlayTextureQuad(
+            s_targetArrowTexture,
+            static_cast<float>(arrowDrawX) - 0.5f,
+            static_cast<float>(arrowDrawY) - 0.5f,
+            static_cast<float>(arrowDrawX + arrowScaledWidth) - 0.5f,
+            static_cast<float>(arrowDrawY + arrowScaledHeight) - 0.5f) || queuedAny;
+
+        if (queuedAny) {
+            return true;
+        }
+    }
+
     UnionRect(&overlayRect, &overlayRect, &arrowRect);
 
     InflateRect(&overlayRect, 4, 4);
@@ -1190,6 +1349,7 @@ bool QueueLockedTargetOverlayQuad(CGameMode& mode)
             s_targetTextureHeight = 0;
             return false;
         }
+        SetTextureDebugName(s_targetTexture, "__overlay_target_composite__");
         s_targetTextureWidth = width;
         s_targetTextureHeight = height;
         s_targetComposePixels.assign(static_cast<size_t>(width) * static_cast<size_t>(height), kOverlayTransparentKey);
@@ -1209,7 +1369,7 @@ bool QueueLockedTargetOverlayQuad(CGameMode& mode)
             textX - clippedRect.left,
             textY - clippedRect.top,
             label,
-            ResolveHoverNameColor(actorIt->second));
+            lockedTargetTextColor);
     }
     if (!hasArrowBitmap) {
         const int tipY = labelY - kLockedTargetArrowBaseLift - bounce;
@@ -1435,6 +1595,7 @@ bool QueueHoverLabelsOverlayQuad(CGameMode& mode)
             s_hoverTextTextureHeight = 0;
             return false;
         }
+        SetTextureDebugName(s_hoverTextTexture, "__overlay_hover_label__");
         s_hoverTextTextureWidth = width;
         s_hoverTextTextureHeight = height;
         s_hoverTextPixels.assign(static_cast<size_t>(width) * static_cast<size_t>(height), kOverlayTransparentKey);
@@ -1546,6 +1707,8 @@ bool QueuePlayerVitalsOverlayQuad(CGameMode& mode)
     static int s_vitalsTextureWidth = 0;
     static int s_vitalsTextureHeight = 0;
     static std::vector<unsigned int> s_vitalsComposePixels;
+    static bool s_vitalsTextureValid = false;
+    static std::uint64_t s_vitalsStateToken = 0ull;
     if (!s_vitalsTexture || s_vitalsTextureWidth != width || s_vitalsTextureHeight != height) {
         delete s_vitalsTexture;
         s_vitalsTexture = new CTexture();
@@ -1556,14 +1719,30 @@ bool QueuePlayerVitalsOverlayQuad(CGameMode& mode)
             s_vitalsTextureHeight = 0;
             return false;
         }
+        SetTextureDebugName(s_vitalsTexture, "__overlay_player_vitals__");
         s_vitalsTextureWidth = width;
         s_vitalsTextureHeight = height;
         s_vitalsComposePixels.assign(static_cast<size_t>(width) * static_cast<size_t>(height), 0u);
+        s_vitalsTextureValid = false;
+        s_vitalsStateToken = 0ull;
     } else if (s_vitalsComposePixels.size() != static_cast<size_t>(width) * static_cast<size_t>(height)) {
         s_vitalsComposePixels.assign(static_cast<size_t>(width) * static_cast<size_t>(height), 0u);
+        s_vitalsTextureValid = false;
     }
 
-    std::fill(s_vitalsComposePixels.begin(), s_vitalsComposePixels.end(), 0u);
+    std::uint64_t vitalsStateToken = 1469598103934665603ull;
+    HashTokenValue(&vitalsStateToken, static_cast<std::uint64_t>(player->m_gid));
+    HashTokenValue(&vitalsStateToken, static_cast<std::uint64_t>(static_cast<std::uint32_t>(player->m_Hp)));
+    HashTokenValue(&vitalsStateToken, static_cast<std::uint64_t>(static_cast<std::uint32_t>(player->m_MaxHp)));
+    HashTokenValue(&vitalsStateToken, static_cast<std::uint64_t>(static_cast<std::uint32_t>(player->m_Sp)));
+    HashTokenValue(&vitalsStateToken, static_cast<std::uint64_t>(static_cast<std::uint32_t>(player->m_MaxSp)));
+    HashTokenValue(&vitalsStateToken, static_cast<std::uint64_t>(static_cast<std::uint32_t>(labelX)));
+    HashTokenValue(&vitalsStateToken, static_cast<std::uint64_t>(static_cast<std::uint32_t>(labelY)));
+    HashTokenValue(&vitalsStateToken, static_cast<std::uint64_t>(static_cast<std::uint32_t>(width)));
+    HashTokenValue(&vitalsStateToken, static_cast<std::uint64_t>(static_cast<std::uint32_t>(height)));
+
+    if (!s_vitalsTextureValid || vitalsStateToken != s_vitalsStateToken) {
+        std::fill(s_vitalsComposePixels.begin(), s_vitalsComposePixels.end(), 0u);
     const int localOuterLeft = outerLeft - clippedRect.left;
     const int localOuterTop = labelY - clippedRect.top;
     RECT outerRect{
@@ -1610,13 +1789,16 @@ bool QueuePlayerVitalsOverlayQuad(CGameMode& mode)
         }
     }
 
-    s_vitalsTexture->Update(0,
-        0,
-        width,
-        height,
-        s_vitalsComposePixels.data(),
-        true,
-        width * static_cast<int>(sizeof(unsigned int)));
+        s_vitalsTexture->Update(0,
+            0,
+            width,
+            height,
+            s_vitalsComposePixels.data(),
+            true,
+            width * static_cast<int>(sizeof(unsigned int)));
+        s_vitalsTextureValid = true;
+        s_vitalsStateToken = vitalsStateToken;
+    }
 
     RPFace* face = g_renderer.BorrowNullRP();
     if (!face) {
@@ -5614,6 +5796,7 @@ void EnsureBootstrapSelfActor(CGameMode& mode)
         pc->m_accessory = g_session.m_playerAccessory;
         pc->m_accessory2 = g_session.m_playerAccessory2;
         pc->m_accessory3 = g_session.m_playerAccessory3;
+        pc->WarmupCommonBillboardCache();
     }
 
     if (const CHARACTER_INFO* info = g_session.GetSelectedCharacterInfo()) {

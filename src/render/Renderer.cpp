@@ -290,8 +290,24 @@ CTexture* CTexMgr::GetTexture(const char* name, bool b) {
         skipColorKey = true;
     }
 
-    CTexture* tex = CreateTexture(bitmap->m_width, bitmap->m_height,
-        const_cast<unsigned int*>(reinterpret_cast<const unsigned int*>(textureData)), PF_A8R8G8B8, skipColorKey);
+    CTexture* tex = new CTexture();
+    if (tex) {
+        std::strncpy(tex->m_texName, cacheKey.c_str(), sizeof(tex->m_texName) - 1);
+        tex->m_texName[sizeof(tex->m_texName) - 1] = '\0';
+        if (!tex->Create(static_cast<unsigned int>(bitmap->m_width), static_cast<unsigned int>(bitmap->m_height), PF_A8R8G8B8)) {
+            delete tex;
+            tex = nullptr;
+        } else {
+            tex->Update(
+                0,
+                0,
+                bitmap->m_width,
+                bitmap->m_height,
+                const_cast<unsigned int*>(reinterpret_cast<const unsigned int*>(textureData)),
+                skipColorKey,
+                bitmap->m_width * static_cast<int>(sizeof(unsigned int)));
+        }
+    }
     if (!tex) {
         static int failedTextureCreateLogCount = 0;
         if (failedTextureCreateLogCount < 16) {
@@ -326,8 +342,6 @@ CTexture* CTexMgr::GetTexture(const char* name, bool b) {
         LogUploadedTerrainSurfaceSamples(tex, name);
     }
 
-    std::strncpy(tex->m_texName, cacheKey.c_str(), sizeof(tex->m_texName) - 1);
-    tex->m_texName[sizeof(tex->m_texName) - 1] = '\0';
     tex->m_timeStamp = GetTickCount();
     m_texTable[tex->m_texName] = tex;
     return tex;

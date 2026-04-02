@@ -22,6 +22,8 @@
 #include "world/World.h"
 
 #include <algorithm>
+#include <array>
+#include <chrono>
 #include <cstdlib>
 #include <string>
 #include <vector>
@@ -95,6 +97,198 @@ int GetWheelDelta(RoWindowWParam wParam)
 RenderBackendType GetCurrentUiRenderBackend()
 {
     return GetRenderDevice().GetBackendType();
+}
+
+constexpr std::uint64_t kQtUiPerfLogIntervalFrames = 120ull;
+
+double QtUiNowMs()
+{
+    using Clock = std::chrono::steady_clock;
+    const Clock::time_point now = Clock::now();
+    return std::chrono::duration<double, std::milli>(now.time_since_epoch()).count();
+}
+
+enum class QtUiImageRequestKind {
+    Minimap = 0,
+    Wallpaper,
+    Item,
+    Skill,
+    Panel,
+    EquipPreview,
+    Other,
+    Count,
+};
+
+struct QtUiPerfStats {
+    std::uint64_t totalFrames = 0;
+    std::uint64_t menuCpuFrames = 0;
+    std::uint64_t menuNativeFrames = 0;
+    std::uint64_t gameplayCpuFrames = 0;
+    std::uint64_t gameplayNativeFrames = 0;
+    double menuCpuUpdateMs = 0.0;
+    double menuCpuRenderMs = 0.0;
+    double menuCpuBlendMs = 0.0;
+    double menuNativeUpdateMs = 0.0;
+    double menuNativeRenderMs = 0.0;
+    double gameplayCpuUpdateMs = 0.0;
+    double gameplayCpuRenderMs = 0.0;
+    double gameplayCpuBlendMs = 0.0;
+    double gameplayNativeUpdateMs = 0.0;
+    double gameplayNativeRenderMs = 0.0;
+    std::uint64_t imageRequestTotal = 0;
+    double imageRequestTotalMs = 0.0;
+    std::array<std::uint64_t, static_cast<size_t>(QtUiImageRequestKind::Count)> imageRequestCounts{};
+    std::array<double, static_cast<size_t>(QtUiImageRequestKind::Count)> imageRequestMs{};
+};
+
+QtUiPerfStats g_qtUiPerfStats;
+
+QtUiImageRequestKind CategorizeQtUiImageRequest(const QString& baseId)
+{
+    if (baseId == QStringLiteral("minimap")) {
+        return QtUiImageRequestKind::Minimap;
+    }
+    if (baseId == QStringLiteral("wallpaper")) {
+        return QtUiImageRequestKind::Wallpaper;
+    }
+    if (baseId.startsWith(QStringLiteral("item/"))) {
+        return QtUiImageRequestKind::Item;
+    }
+    if (baseId.startsWith(QStringLiteral("skill/"))) {
+        return QtUiImageRequestKind::Skill;
+    }
+    if (baseId == QStringLiteral("equippreview")) {
+        return QtUiImageRequestKind::EquipPreview;
+    }
+    if (baseId == QStringLiteral("makecharpanel")
+        || baseId == QStringLiteral("charselectpanel")
+        || baseId == QStringLiteral("charselectslotselected")
+        || baseId == QStringLiteral("loginpanel")
+        || baseId.startsWith(QStringLiteral("makecharbutton/"))) {
+        return QtUiImageRequestKind::Panel;
+    }
+    return QtUiImageRequestKind::Other;
+}
+
+const char* GetQtUiImageRequestKindName(QtUiImageRequestKind kind)
+{
+    switch (kind) {
+    case QtUiImageRequestKind::Minimap:
+        return "minimap";
+    case QtUiImageRequestKind::Wallpaper:
+        return "wallpaper";
+    case QtUiImageRequestKind::Item:
+        return "item";
+    case QtUiImageRequestKind::Skill:
+        return "skill";
+    case QtUiImageRequestKind::Panel:
+        return "panel";
+    case QtUiImageRequestKind::EquipPreview:
+        return "equip";
+    case QtUiImageRequestKind::Other:
+    case QtUiImageRequestKind::Count:
+    default:
+        return "other";
+    }
+}
+
+void RecordQtUiImageRequest(QtUiImageRequestKind kind, double elapsedMs)
+{
+    const size_t index = static_cast<size_t>(kind);
+    if (index >= g_qtUiPerfStats.imageRequestCounts.size()) {
+        return;
+    }
+
+    g_qtUiPerfStats.imageRequestTotal += 1;
+    g_qtUiPerfStats.imageRequestTotalMs += elapsedMs;
+    g_qtUiPerfStats.imageRequestCounts[index] += 1;
+    g_qtUiPerfStats.imageRequestMs[index] += elapsedMs;
+}
+
+void MaybeLogQtUiPerfStats()
+{
+    if (g_qtUiPerfStats.totalFrames == 0 || (g_qtUiPerfStats.totalFrames % kQtUiPerfLogIntervalFrames) != 0) {
+        return;
+    }
+
+    const double menuCpuFrames = static_cast<double>((std::max)(std::uint64_t{1}, g_qtUiPerfStats.menuCpuFrames));
+    const double menuNativeFrames = static_cast<double>((std::max)(std::uint64_t{1}, g_qtUiPerfStats.menuNativeFrames));
+    const double gameplayCpuFrames = static_cast<double>((std::max)(std::uint64_t{1}, g_qtUiPerfStats.gameplayCpuFrames));
+    const double gameplayNativeFrames = static_cast<double>((std::max)(std::uint64_t{1}, g_qtUiPerfStats.gameplayNativeFrames));
+    const double imageRequestTotal = static_cast<double>((std::max)(std::uint64_t{1}, g_qtUiPerfStats.imageRequestTotal));
+
+    DbgLog(
+        "[QtUiPerf] frames=%llu menuCpu=%llu update=%.3fms render=%.3fms blend=%.3fms menuNative=%llu update=%.3fms render=%.3fms gameplayCpu=%llu update=%.3fms render=%.3fms blend=%.3fms gameplayNative=%llu update=%.3fms render=%.3fms imgReq=%llu avg=%.3fms %s=%llu/%.3fms %s=%llu/%.3fms %s=%llu/%.3fms %s=%llu/%.3fms %s=%llu/%.3fms %s=%llu/%.3fms %s=%llu/%.3fms\n",
+        static_cast<unsigned long long>(g_qtUiPerfStats.totalFrames),
+        static_cast<unsigned long long>(g_qtUiPerfStats.menuCpuFrames),
+        g_qtUiPerfStats.menuCpuUpdateMs / menuCpuFrames,
+        g_qtUiPerfStats.menuCpuRenderMs / menuCpuFrames,
+        g_qtUiPerfStats.menuCpuBlendMs / menuCpuFrames,
+        static_cast<unsigned long long>(g_qtUiPerfStats.menuNativeFrames),
+        g_qtUiPerfStats.menuNativeUpdateMs / menuNativeFrames,
+        g_qtUiPerfStats.menuNativeRenderMs / menuNativeFrames,
+        static_cast<unsigned long long>(g_qtUiPerfStats.gameplayCpuFrames),
+        g_qtUiPerfStats.gameplayCpuUpdateMs / gameplayCpuFrames,
+        g_qtUiPerfStats.gameplayCpuRenderMs / gameplayCpuFrames,
+        g_qtUiPerfStats.gameplayCpuBlendMs / gameplayCpuFrames,
+        static_cast<unsigned long long>(g_qtUiPerfStats.gameplayNativeFrames),
+        g_qtUiPerfStats.gameplayNativeUpdateMs / gameplayNativeFrames,
+        g_qtUiPerfStats.gameplayNativeRenderMs / gameplayNativeFrames,
+        static_cast<unsigned long long>(g_qtUiPerfStats.imageRequestTotal),
+        g_qtUiPerfStats.imageRequestTotalMs / imageRequestTotal,
+        GetQtUiImageRequestKindName(QtUiImageRequestKind::Minimap),
+        static_cast<unsigned long long>(g_qtUiPerfStats.imageRequestCounts[static_cast<size_t>(QtUiImageRequestKind::Minimap)]),
+        g_qtUiPerfStats.imageRequestMs[static_cast<size_t>(QtUiImageRequestKind::Minimap)],
+        GetQtUiImageRequestKindName(QtUiImageRequestKind::Wallpaper),
+        static_cast<unsigned long long>(g_qtUiPerfStats.imageRequestCounts[static_cast<size_t>(QtUiImageRequestKind::Wallpaper)]),
+        g_qtUiPerfStats.imageRequestMs[static_cast<size_t>(QtUiImageRequestKind::Wallpaper)],
+        GetQtUiImageRequestKindName(QtUiImageRequestKind::Item),
+        static_cast<unsigned long long>(g_qtUiPerfStats.imageRequestCounts[static_cast<size_t>(QtUiImageRequestKind::Item)]),
+        g_qtUiPerfStats.imageRequestMs[static_cast<size_t>(QtUiImageRequestKind::Item)],
+        GetQtUiImageRequestKindName(QtUiImageRequestKind::Skill),
+        static_cast<unsigned long long>(g_qtUiPerfStats.imageRequestCounts[static_cast<size_t>(QtUiImageRequestKind::Skill)]),
+        g_qtUiPerfStats.imageRequestMs[static_cast<size_t>(QtUiImageRequestKind::Skill)],
+        GetQtUiImageRequestKindName(QtUiImageRequestKind::Panel),
+        static_cast<unsigned long long>(g_qtUiPerfStats.imageRequestCounts[static_cast<size_t>(QtUiImageRequestKind::Panel)]),
+        g_qtUiPerfStats.imageRequestMs[static_cast<size_t>(QtUiImageRequestKind::Panel)],
+        GetQtUiImageRequestKindName(QtUiImageRequestKind::EquipPreview),
+        static_cast<unsigned long long>(g_qtUiPerfStats.imageRequestCounts[static_cast<size_t>(QtUiImageRequestKind::EquipPreview)]),
+        g_qtUiPerfStats.imageRequestMs[static_cast<size_t>(QtUiImageRequestKind::EquipPreview)],
+        GetQtUiImageRequestKindName(QtUiImageRequestKind::Other),
+        static_cast<unsigned long long>(g_qtUiPerfStats.imageRequestCounts[static_cast<size_t>(QtUiImageRequestKind::Other)]),
+        g_qtUiPerfStats.imageRequestMs[static_cast<size_t>(QtUiImageRequestKind::Other)]);
+
+    g_qtUiPerfStats = QtUiPerfStats{};
+}
+
+void RecordQtUiOverlayPerf(bool gameplay, bool nativePath, double updateMs, double renderMs, double blendMs)
+{
+    g_qtUiPerfStats.totalFrames += 1;
+    if (gameplay) {
+        if (nativePath) {
+            g_qtUiPerfStats.gameplayNativeFrames += 1;
+            g_qtUiPerfStats.gameplayNativeUpdateMs += updateMs;
+            g_qtUiPerfStats.gameplayNativeRenderMs += renderMs;
+        } else {
+            g_qtUiPerfStats.gameplayCpuFrames += 1;
+            g_qtUiPerfStats.gameplayCpuUpdateMs += updateMs;
+            g_qtUiPerfStats.gameplayCpuRenderMs += renderMs;
+            g_qtUiPerfStats.gameplayCpuBlendMs += blendMs;
+        }
+    } else {
+        if (nativePath) {
+            g_qtUiPerfStats.menuNativeFrames += 1;
+            g_qtUiPerfStats.menuNativeUpdateMs += updateMs;
+            g_qtUiPerfStats.menuNativeRenderMs += renderMs;
+        } else {
+            g_qtUiPerfStats.menuCpuFrames += 1;
+            g_qtUiPerfStats.menuCpuUpdateMs += updateMs;
+            g_qtUiPerfStats.menuCpuRenderMs += renderMs;
+            g_qtUiPerfStats.menuCpuBlendMs += blendMs;
+        }
+    }
+
+    MaybeLogQtUiPerfStats();
 }
 
 bool TryBuildItemIconImage(unsigned int itemId, QImage* outImage)
@@ -208,11 +402,13 @@ public:
 
     QImage requestImage(const QString& id, QSize* size, const QSize& requestedSize) override
     {
+        const double requestStartMs = QtUiNowMs();
         QString baseId = id;
         const int queryPos = baseId.indexOf(QLatin1Char('?'));
         if (queryPos >= 0) {
             baseId.truncate(queryPos);
         }
+        const QtUiImageRequestKind requestKind = CategorizeQtUiImageRequest(baseId);
 
         QImage image;
         if (baseId == QStringLiteral("minimap")) {
@@ -401,6 +597,7 @@ public:
         if (size) {
             *size = image.size();
         }
+        RecordQtUiImageRequest(requestKind, QtUiNowMs() - requestStartMs);
         return image;
     }
 };
@@ -744,15 +941,25 @@ public:
                 break;
             }
         }
-        if (!updateMenuState() || !renderToImage(width, height)) {
+        const double updateStartMs = QtUiNowMs();
+        if (!updateMenuState()) {
             return false;
         }
+        const double updateMs = QtUiNowMs() - updateStartMs;
+
+        const double renderStartMs = QtUiNowMs();
+        if (!renderToImage(width, height)) {
+            return false;
+        }
+        const double renderMs = QtUiNowMs() - renderStartMs;
 
         if (!m_loggedMenuCpuBridge) {
             DbgLog("[QtUi] Menu overlay using CPU bridge fallback (%dx%d).\n", width, height);
             m_loggedMenuCpuBridge = true;
         }
+        const double blendStartMs = QtUiNowMs();
         BlendQtImageOntoBgraBuffer(m_renderImage, bgraPixels, width, height, pitch);
+        RecordQtUiOverlayPerf(false, false, updateMs, renderMs, QtUiNowMs() - blendStartMs);
         return true;
     }
 
@@ -761,9 +968,11 @@ public:
         if (!m_active || !texture || width <= 0 || height <= 0) {
             return false;
         }
+        const double updateStartMs = QtUiNowMs();
         if (!updateMenuState()) {
             return false;
         }
+        const double updateMs = QtUiNowMs() - updateStartMs;
 
         QtUiRenderTargetInfo targetInfo{};
         if (!GetRenderDevice().GetQtUiTextureTargetInfo(texture, &targetInfo) || !targetInfo.available) {
@@ -779,6 +988,7 @@ public:
         const int targetWidth = targetInfo.width > 0 ? static_cast<int>(targetInfo.width) : width;
         const int targetHeight = targetInfo.height > 0 ? static_cast<int>(targetInfo.height) : height;
         bool rendered = false;
+        const double renderStartMs = QtUiNowMs();
         switch (targetInfo.backend) {
         case RenderBackendType::Direct3D11:
 #if RO_HAS_NATIVE_D3D11
@@ -797,6 +1007,7 @@ public:
             rendered = false;
             break;
         }
+        const double renderMs = QtUiNowMs() - renderStartMs;
 
         if (!rendered) {
             if (!m_loggedNativeOverlayFailure) {
@@ -814,6 +1025,7 @@ public:
             m_loggedNativeOverlaySuccess = true;
         }
         m_nativeOverlayBackend = targetInfo.backend;
+        RecordQtUiOverlayPerf(false, true, updateMs, renderMs, 0.0);
         return true;
     }
 
@@ -833,15 +1045,25 @@ public:
                 break;
             }
         }
-        if (!updateState(mode) || !renderToImage(width, height)) {
+        const double updateStartMs = QtUiNowMs();
+        if (!updateState(mode)) {
             return false;
         }
+        const double updateMs = QtUiNowMs() - updateStartMs;
+
+        const double renderStartMs = QtUiNowMs();
+        if (!renderToImage(width, height)) {
+            return false;
+        }
+        const double renderMs = QtUiNowMs() - renderStartMs;
 
         if (!m_loggedGameplayCpuBridge) {
             DbgLog("[QtUi] Gameplay overlay using CPU bridge fallback (%dx%d).\n", width, height);
             m_loggedGameplayCpuBridge = true;
         }
+        const double blendStartMs = QtUiNowMs();
         BlendQtImageOntoBgraBuffer(m_renderImage, bgraPixels, width, height, pitch);
+        RecordQtUiOverlayPerf(true, false, updateMs, renderMs, QtUiNowMs() - blendStartMs);
         return true;
     }
 
@@ -850,9 +1072,11 @@ public:
         if (!m_active || !texture || width <= 0 || height <= 0) {
             return false;
         }
+        const double updateStartMs = QtUiNowMs();
         if (!updateState(mode)) {
             return false;
         }
+        const double updateMs = QtUiNowMs() - updateStartMs;
 
         QtUiRenderTargetInfo targetInfo{};
         if (!GetRenderDevice().GetQtUiTextureTargetInfo(texture, &targetInfo) || !targetInfo.available) {
@@ -868,6 +1092,7 @@ public:
         const int targetWidth = targetInfo.width > 0 ? static_cast<int>(targetInfo.width) : width;
         const int targetHeight = targetInfo.height > 0 ? static_cast<int>(targetInfo.height) : height;
         bool rendered = false;
+        const double renderStartMs = QtUiNowMs();
         switch (targetInfo.backend) {
         case RenderBackendType::Direct3D11:
 #if RO_HAS_NATIVE_D3D11
@@ -886,6 +1111,7 @@ public:
             rendered = false;
             break;
         }
+        const double renderMs = QtUiNowMs() - renderStartMs;
 
         if (!rendered) {
             if (!m_loggedNativeOverlayFailure) {
@@ -903,6 +1129,7 @@ public:
             m_loggedNativeOverlaySuccess = true;
         }
         m_nativeOverlayBackend = targetInfo.backend;
+        RecordQtUiOverlayPerf(true, true, updateMs, renderMs, 0.0);
         return true;
     }
 
