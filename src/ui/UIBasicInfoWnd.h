@@ -91,6 +91,7 @@ private:
     UIBitmapButton* m_miniButton;
     shopui::BitmapPixels m_backgroundFull;
     shopui::BitmapPixels m_backgroundMini;
+    shopui::BitmapPixels m_titleBarBitmap;
     shopui::BitmapPixels m_barBackground;
     shopui::BitmapPixels m_redLeft;
     shopui::BitmapPixels m_redMid;

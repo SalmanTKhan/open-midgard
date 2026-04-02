@@ -381,6 +381,7 @@ UIBasicInfoWnd::UIBasicInfoWnd()
       m_miniButton(nullptr),
       m_backgroundFull(),
       m_backgroundMini(),
+    m_titleBarBitmap(),
       m_barBackground(),
       m_redLeft(),
       m_redMid(),
@@ -551,10 +552,16 @@ void UIBasicInfoWnd::OnDraw()
     if (m_h == kMiniHeight) {
         DrawCachedBitmap(hdc, m_backgroundMini, m_x, m_y);
 
-        DrawWindowText(hdc, m_x + 17, m_y + 3, data.name.c_str(), RGB(0, 0, 0));
+        if (m_titleBarBitmap.IsValid()) {
+            DrawBitmapPixelsTransparent(hdc, m_titleBarBitmap, m_x, m_y, m_w, kTitleBarHeight);
+        }
+
+        DrawWindowText(hdc, m_x + 18, m_y + 3, data.name.c_str(), RGB(255, 255, 255));
+        DrawWindowText(hdc, m_x + 17, m_y + 2, data.name.c_str(), RGB(0, 0, 0));
 
         char topLine[128] = {};
         std::snprintf(topLine, sizeof(topLine), "Lv. %2d / %s / Exp. %d %%", data.level, data.jobName.c_str(), data.expPercent);
+        DrawWindowText(hdc, m_x + 265, m_y + 3, topLine, RGB(255, 255, 255), DT_RIGHT | DT_TOP | DT_SINGLELINE);
         DrawWindowText(hdc, m_x + 264, m_y + 2, topLine, RGB(0, 0, 0), DT_RIGHT | DT_TOP | DT_SINGLELINE);
 
         const std::string zenyText = FormatNumber(data.money);
@@ -570,6 +577,10 @@ void UIBasicInfoWnd::OnDraw()
         DrawWindowText(hdc, m_x + 275, m_y + 18, bottomLine, RGB(0, 0, 0), DT_RIGHT | DT_TOP | DT_SINGLELINE);
     } else {
         DrawCachedBitmap(hdc, m_backgroundFull, m_x, m_y);
+
+        if (m_titleBarBitmap.IsValid()) {
+            DrawBitmapPixelsTransparent(hdc, m_titleBarBitmap, m_x, m_y, m_w, kTitleBarHeight);
+        }
 
         DrawWindowText(hdc, m_x + 18, m_y + 3, "Basic Info", RGB(255, 255, 255));
         DrawWindowText(hdc, m_x + 17, m_y + 2, "Basic Info", RGB(0, 0, 0));
@@ -983,6 +994,9 @@ void UIBasicInfoWnd::LoadAssets()
     if (!m_backgroundMini.IsValid()) {
         m_backgroundMini = LoadBitmapPixelsFromGameData(ResolveUiAssetPath("basewin_mini.bmp"));
     }
+    if (!m_titleBarBitmap.IsValid()) {
+        m_titleBarBitmap = LoadBitmapPixelsFromGameData(ResolveUiAssetPath("titlebar_fix.bmp"));
+    }
     if (!m_barBackground.IsValid()) {
         m_barBackground = LoadBitmapPixelsFromGameData(ResolveUiAssetPath("GZE_BG.BMP"));
     }
@@ -1010,6 +1024,7 @@ void UIBasicInfoWnd::ReleaseAssets()
 {
     m_backgroundFull.Clear();
     m_backgroundMini.Clear();
+    m_titleBarBitmap.Clear();
     m_barBackground.Clear();
     m_redLeft.Clear();
     m_redMid.Clear();

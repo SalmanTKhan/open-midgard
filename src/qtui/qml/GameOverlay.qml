@@ -985,11 +985,22 @@ Item {
         border.color: "#6b675f"
         visible: uiState.basicInfoVisible
 
+        Rectangle {
+            x: 1
+            y: 1
+            width: parent.width - 2
+            height: 16
+            radius: 3
+            color: "#6e8194"
+            border.width: 1
+            border.color: "#4e5d6c"
+        }
+
         Text {
-            x: 9
-            y: uiState.basicInfoMini ? 3 : 5
+            x: uiState.basicInfoMini ? 9 : 17
+            y: 3
             text: uiState.basicInfoMini ? (uiState.basicInfoData.name || "") : "Basic Info"
-            color: uiState.basicInfoMini ? "#000000" : "#ffffff"
+            color: "#ffffff"
             font.pixelSize: 12
             font.bold: true
         }
