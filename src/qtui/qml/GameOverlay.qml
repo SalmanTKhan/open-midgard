@@ -1734,32 +1734,40 @@ Item {
             }
 
             Item {
-                width: 13
-                height: 13
+                property real headingAngle: ((uiState.minimapData.playerDirection || 0) % 8) * (Math.PI / 4)
+
+                width: 17
+                height: 17
                 visible: uiState.minimapData.playerVisible || false
                 x: (uiState.minimapData.playerX || 0) - (uiState.minimapData.mapX || 0) - width / 2
                 y: (uiState.minimapData.playerY || 0) - (uiState.minimapData.mapY || 0) - height / 2
-                transform: Rotation {
-                    origin.x: 6.5
-                    origin.y: 6.5
-                    angle: ((uiState.minimapData.playerDirection || 0) % 8) * 45
-                }
 
                 Canvas {
                     anchors.fill: parent
                     antialiasing: false
 
+                    Connections {
+                        target: parent
+
+                        function onHeadingAngleChanged() {
+                            parent.requestPaint()
+                        }
+                    }
+
                     onPaint: {
                         var ctx = getContext("2d")
                         ctx.reset()
+                        ctx.translate(width / 2, height / 2)
+                        ctx.rotate(parent.headingAngle)
+                        ctx.translate(-width / 2, -height / 2)
                         ctx.fillStyle = "#ffffff"
                         ctx.strokeStyle = "#000000"
                         ctx.lineWidth = 1
                         ctx.beginPath()
                         ctx.moveTo(width / 2, 0.5)
-                        ctx.lineTo(width - 1.5, height - 1.5)
-                        ctx.lineTo(width / 2, height - 4.5)
-                        ctx.lineTo(1.5, height - 1.5)
+                        ctx.lineTo(width - 1.5, height - 3.5)
+                        ctx.lineTo(width / 2, height - 6.5)
+                        ctx.lineTo(1.5, height - 3.5)
                         ctx.closePath()
                         ctx.fill()
                         ctx.stroke()

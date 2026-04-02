@@ -1403,6 +1403,11 @@ void UIRoMapWnd::UpdateMinimapBitmap()
         if (LoadBgraPixelsFromGameData(resolvedPath.c_str(), &pixels, &m_mapBitmapWidth, &m_mapBitmapHeight) && pixels) {
             const size_t pixelCount = static_cast<size_t>(m_mapBitmapWidth) * static_cast<size_t>(m_mapBitmapHeight);
             m_mapPixels.assign(pixels, pixels + pixelCount);
+            for (u32& pixel : m_mapPixels) {
+                if ((pixel & 0x00FFFFFFu) == 0x00FF00FFu) {
+                    pixel = 0u;
+                }
+            }
         }
         delete[] pixels;
     }
