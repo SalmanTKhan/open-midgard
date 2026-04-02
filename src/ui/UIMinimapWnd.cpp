@@ -15,6 +15,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <limits>
@@ -190,6 +191,32 @@ std::string ResolveMinimapPath(const std::string& bitmapName)
         }
     }
     return std::string();
+}
+
+float NormalizeAngle360(float angle)
+{
+    while (angle < 0.0f) {
+        angle += 360.0f;
+    }
+    while (angle >= 360.0f) {
+        angle -= 360.0f;
+    }
+    return angle;
+}
+
+int ResolveFacingDirFromRotationDegrees(float rotationDegrees)
+{
+    return static_cast<int>((NormalizeAngle360(rotationDegrees) + 22.5f) / 45.0f) & 7;
+}
+
+int ResolveDisplayedPlayerDir()
+{
+    if (g_world.m_player && std::isfinite(g_world.m_player->m_roty)) {
+        return ResolveFacingDirFromRotationDegrees(g_world.m_player->m_roty);
+    }
+
+    // Match the actor-facing convention used by PacketDirToRotationDegrees.
+    return ((g_session.m_playerDir & 7) + 4) & 7;
 }
 
 shopui::BitmapPixels LoadBitmapPixelsFromGameData(const std::string& path)
@@ -665,7 +692,7 @@ void UIRoMapWnd::OnProcess()
 
     const int playerX = g_session.m_playerPosX;
     const int playerY = g_session.m_playerPosY;
-    const int playerDir = g_session.m_playerDir;
+    const int playerDir = ResolveDisplayedPlayerDir();
     if (playerX == m_lastPlayerX && playerY == m_lastPlayerY && playerDir == m_lastPlayerDir) {
         return;
     }
@@ -1050,7 +1077,7 @@ bool UIRoMapWnd::GetDisplayDataForQt(DisplayData* outData) const
         data.playerVisible = true;
         data.playerX = playerPoint.x;
         data.playerY = playerPoint.y;
-        data.playerDirection = g_session.m_playerDir & 7;
+        data.playerDirection = ResolveDisplayedPlayerDir();
     }
 
     *outData = std::move(data);
