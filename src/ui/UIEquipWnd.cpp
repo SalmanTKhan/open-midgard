@@ -709,7 +709,7 @@ bool DrawEquipPreviewPlayerSpriteFitted(HDC hdc, const RECT& previewArea)
 
     constexpr int kComposeWidth = 160;
     constexpr int kComposeHeight = 260;
-    constexpr int kComposeAnchorBottomPadding = 90;
+    constexpr int kComposeAnchorBottomPadding = 84;
     constexpr float kPreviewScaleBoost = 1.02f;
     constexpr int kPreviewSidePadding = 2;
     constexpr int kPreviewTopPadding = 4;
