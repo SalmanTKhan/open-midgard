@@ -1,2 +1,0 @@
-C:\Qt\Tools\mingw1310_64\bin\ar.exe qc libro_main.a CMakeFiles/ro_main.dir/WinMain.cpp.obj
-C:\Qt\Tools\mingw1310_64\bin\ranlib.exe libro_main.a

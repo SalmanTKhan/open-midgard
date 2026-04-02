@@ -1,3 +1,0 @@
-src/lua/CMakeFiles/ro_lua.dir/LuaBridge.cpp.obj: \
- D:\Spel\RoRebuild\Ragnarok___Win32_HighPriest2008_Release\src\lua\LuaBridge.cpp \
- D:\Spel\RoRebuild\Ragnarok___Win32_HighPriest2008_Release\src\lua\LuaBridge.h

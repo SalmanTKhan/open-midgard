@@ -1,3 +1,0 @@
-src/input/CMakeFiles/ro_input.dir/Input.cpp.obj: \
- D:\Spel\RoRebuild\Ragnarok___Win32_HighPriest2008_Release\src\input\Input.cpp \
- D:\Spel\RoRebuild\Ragnarok___Win32_HighPriest2008_Release\src\input\Input.h

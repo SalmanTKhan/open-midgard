@@ -6,4 +6,9 @@ HighPriest.exe.utf8.h
 .vscode/
 build/
 build64/
+build-mingw-direct/
 build-mingw-preset/
+build-mingw-qt/
+build-mingw-qt-ninja/
+build-wsl-perm-test/
+build-wsl-smoke/

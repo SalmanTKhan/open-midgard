@@ -1,2 +1,0 @@
-C:\Qt\Tools\mingw1310_64\bin\ar.exe qc libro_res.a CMakeFiles/ro_res.dir/Bitmap.cpp.obj CMakeFiles/ro_res.dir/EzEffectRes.cpp.obj CMakeFiles/ro_res.dir/GndRes.cpp.obj CMakeFiles/ro_res.dir/ImfRes.cpp.obj CMakeFiles/ro_res.dir/ModelRes.cpp.obj CMakeFiles/ro_res.dir/PaletteRes.cpp.obj CMakeFiles/ro_res.dir/Res.cpp.obj CMakeFiles/ro_res.dir/Sprite.cpp.obj CMakeFiles/ro_res.dir/Texture.cpp.obj CMakeFiles/ro_res.dir/WorldRes.cpp.obj CMakeFiles/ro_res.dir/Ijl.cpp.obj
-C:\Qt\Tools\mingw1310_64\bin\ranlib.exe libro_res.a

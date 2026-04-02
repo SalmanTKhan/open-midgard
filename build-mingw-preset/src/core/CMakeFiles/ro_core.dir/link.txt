@@ -1,2 +1,0 @@
-C:\Qt\Tools\mingw1310_64\bin\ar.exe qc libro_core.a CMakeFiles/ro_core.dir/Timer.cpp.obj CMakeFiles/ro_core.dir/Hash.cpp.obj CMakeFiles/ro_core.dir/GPak.cpp.obj CMakeFiles/ro_core.dir/File.cpp.obj CMakeFiles/ro_core.dir/Globals.cpp.obj CMakeFiles/ro_core.dir/Locale.cpp.obj CMakeFiles/ro_core.dir/Xml.cpp.obj CMakeFiles/ro_core.dir/DllMgr.cpp.obj
-C:\Qt\Tools\mingw1310_64\bin\ranlib.exe libro_core.a
