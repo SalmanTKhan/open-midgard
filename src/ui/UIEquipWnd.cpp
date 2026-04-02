@@ -708,8 +708,9 @@ bool DrawEquipPreviewPlayerSpriteFitted(HDC hdc, const RECT& previewArea)
     }
 
     constexpr int kComposeWidth = 160;
-    constexpr int kComposeHeight = 220;
-    constexpr float kPreviewScaleBoost = 1.06f;
+    constexpr int kComposeHeight = 260;
+    constexpr int kComposeAnchorBottomPadding = 96;
+    constexpr float kPreviewScaleBoost = 1.02f;
     constexpr int kPreviewSidePadding = 2;
     constexpr int kPreviewTopPadding = 4;
     constexpr int kPreviewBottomPadding = 14;
@@ -721,7 +722,10 @@ bool DrawEquipPreviewPlayerSpriteFitted(HDC hdc, const RECT& previewArea)
 
     std::memset(composeSurface.GetBits(), 0, static_cast<size_t>(kComposeWidth) * static_cast<size_t>(kComposeHeight) * sizeof(unsigned int));
 
-    const bool drew = DrawEquipPreviewPlayerSprite(composeSurface.GetDC(), kComposeWidth / 2, kComposeHeight - 48);
+    const bool drew = DrawEquipPreviewPlayerSprite(
+        composeSurface.GetDC(),
+        kComposeWidth / 2,
+        kComposeHeight - kComposeAnchorBottomPadding);
     RECT srcBounds{};
     const bool hasBounds = FindOpaqueBounds(static_cast<const unsigned int*>(composeSurface.GetBits()), kComposeWidth, kComposeHeight, &srcBounds);
 
