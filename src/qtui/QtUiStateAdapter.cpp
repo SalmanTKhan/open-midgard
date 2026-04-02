@@ -1987,6 +1987,27 @@ std::string ResolveGroundItemLabel(const CItem* item)
                 : std::string();
 }
 
+QString ResolveHoverBackground(const CGameActor* actor)
+{
+    if (!actor) {
+        return QStringLiteral("#c05a1620");
+    }
+
+    if (IsMonsterLikeHoverActor(actor)) {
+        return QStringLiteral("#c05a1620");
+    }
+
+    if (actor->m_isPc) {
+        return QStringLiteral("#c05c2a86");
+    }
+
+    if (actor->m_objectType == 6) {
+        return QStringLiteral("#c0204f9a");
+    }
+
+    return QStringLiteral("#c05a1620");
+}
+
 QString ResolveHoverForeground(const CGameActor* actor)
 {
     if (!actor) {
@@ -2282,7 +2303,7 @@ bool QtUiStateAdapter::syncGameplay(CGameMode& mode,
                 anchors.push_back(MakeCenteredAnchor(ToQString(ResolveActorLabel(mode, hoveredActor)),
                     anchorX,
                     anchorY,
-                    QStringLiteral("#c0be185d"),
+                    ResolveHoverBackground(hoveredActor),
                     ResolveHoverForeground(hoveredActor)));
             }
         } else if (!hasUiItemHover && !blocksWorldHover) {
@@ -2322,7 +2343,7 @@ bool QtUiStateAdapter::syncGameplay(CGameMode& mode,
                         anchors.push_back(MakeCenteredAnchor(lockLabel,
                             labelX,
                             labelY + kQtActorLabelVerticalOffset,
-                            QStringLiteral("#c05a1620"),
+                            ResolveHoverBackground(actorIt->second),
                             ResolveHoverForeground(actorIt->second)));
                     }
                 }
