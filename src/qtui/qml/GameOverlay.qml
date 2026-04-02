@@ -2062,8 +2062,15 @@ Item {
                 border.color: "#9d9488"
 
                 Image {
-                    anchors.fill: parent
-                    anchors.margins: 3
+                    id: equipPreviewImage
+                    anchors.centerIn: parent
+                    readonly property real availableWidth: Math.max(1, parent.width - 6)
+                    readonly property real availableHeight: Math.max(1, parent.height - 6)
+                    readonly property real sourceAspectRatio: (status === Image.Ready && sourceSize.height > 0)
+                        ? (sourceSize.width / sourceSize.height)
+                        : 1.0
+                    width: Math.min(availableWidth, availableHeight * sourceAspectRatio)
+                    height: Math.min(availableHeight, availableWidth / Math.max(0.001, sourceAspectRatio))
                     fillMode: Image.PreserveAspectFit
                     smooth: false
                     cache: false
