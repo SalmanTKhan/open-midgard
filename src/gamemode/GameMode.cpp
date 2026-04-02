@@ -84,6 +84,7 @@ constexpr int kPlayerVitalsBarHeight = 4;
 constexpr int kPlayerVitalsBorderThickness = 1;
 constexpr int kPlayerVitalsNameTopPadding = 3;
 constexpr int kPlayerVitalsVerticalOffset = 10;
+constexpr float kPlayerVitalsOverlaySortKey = 0.95f;
 constexpr char kLockedTargetArrowBitmapName[] = "scroll0down.bmp";
 constexpr int kLockedTargetArrowBaseLift = 56;
 constexpr float kLockedTargetArrowScale = 1.25f;
@@ -1641,7 +1642,7 @@ bool QueuePlayerVitalsOverlayQuad(CGameMode& mode)
     face->cullMode = D3DCULL_NONE;
     face->srcAlphaMode = D3DBLEND_SRCALPHA;
     face->destAlphaMode = D3DBLEND_INVSRCALPHA;
-    face->alphaSortKey = 1.6f;
+    face->alphaSortKey = kPlayerVitalsOverlaySortKey;
 
     face->m_verts[0] = { left, top, 0.0f, 1.0f, 0xFFFFFFFFu, 0xFF000000u, 0.0f, 0.0f };
     face->m_verts[1] = { right, top, 0.0f, 1.0f, 0xFFFFFFFFu, 0xFF000000u, maxU, 0.0f };

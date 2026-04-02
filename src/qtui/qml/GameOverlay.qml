@@ -1734,10 +1734,10 @@ Item {
             }
 
             Item {
-                property real headingDegrees: ((uiState.minimapData.playerDirection || 0) % 8) * 45
+                    property real headingDegrees: ((180 - (((uiState.minimapData.playerDirection || 0) % 8) * 45)) + 360) % 360
 
-                width: 17
-                height: 17
+                    width: 19
+                    height: 19
                 visible: uiState.minimapData.playerVisible || false
                 x: (uiState.minimapData.playerX || 0) - (uiState.minimapData.mapX || 0) - width / 2
                 y: (uiState.minimapData.playerY || 0) - (uiState.minimapData.mapY || 0) - height / 2
