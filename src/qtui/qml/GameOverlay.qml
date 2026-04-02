@@ -1891,7 +1891,7 @@ Item {
                 x: 98
                 y: 15
                 width: Math.max(1, 182 - 98)
-                height: Math.max(1, 188 - 32)
+                height: Math.max(1, parent.height - y - 12)
                 color: "#d8d0c2"
                 border.width: 1
                 border.color: "#9d9488"
@@ -1904,7 +1904,7 @@ Item {
                     required property var modelData
                     x: modelData.x - uiState.equipX
                     y: modelData.y - uiState.equipY - 17
-                    width: modelData.leftColumn ? 114 : 84
+                    width: modelData.leftColumn ? (modelData.width + 90) : (modelData.width + 60)
                     height: modelData.height
 
                     Rectangle {

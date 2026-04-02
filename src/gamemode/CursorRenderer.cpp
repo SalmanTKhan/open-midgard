@@ -42,7 +42,7 @@ struct CursorResCache
     std::string actName;
 };
 
-constexpr int kDragPreviewSize = 24;
+constexpr int kDragPreviewSize = 28;
 constexpr int kDragPreviewOffsetX = 0;
 constexpr int kDragPreviewOffsetY = 0;
 

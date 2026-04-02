@@ -45,7 +45,7 @@
 namespace {
 
 constexpr int kWindowWidth = 280;
-constexpr int kWindowHeight = 206;
+constexpr int kWindowHeight = 232;
 constexpr int kMiniHeight = 34;
 constexpr int kTitleBarHeight = 17;
 constexpr int kQtButtonWidth = 12;
@@ -58,11 +58,11 @@ constexpr const char* kUiKorPrefix =
     "\xC0\xAF\xC0\xFA\xC0\xCE\xC5\xCD\xC6\xE4\xC0\xCC\xBD\xBA"
     "\\";
 
-constexpr int kSlotIconSize = 24;
+constexpr int kSlotIconSize = 32;
 constexpr int kCenterPanelLeft = 98;
 constexpr int kCenterPanelRight = 182;
 constexpr int kCenterPanelTop = 32;
-constexpr int kCenterPanelBottom = 188;
+constexpr int kCenterPanelBottom = 204;
 
 struct EquipSlotDefLocal {
     int wearMask;
@@ -72,15 +72,15 @@ struct EquipSlotDefLocal {
 
 constexpr std::array<EquipSlotDefLocal, 10> kEquipSlots = {{
     { 256, 8, 19 },    // head upper
-    { 1, 8, 45 },      // head lower
-    { 4, 8, 97 },      // garment
-    { 8, 8, 123 },     // accessory left
-    { 512, 248, 19 },  // head mid
-    { 16, 248, 45 },   // armor
-    { 32, 248, 71 },   // shield
-    { 64, 248, 97 },   // shoes
-    { 128, 248, 123 }, // accessory right
-    { 2, 8, 71 },      // weapon
+    { 1, 8, 51 },      // head lower
+    { 4, 8, 115 },     // garment
+    { 8, 8, 147 },     // accessory left
+    { 512, 240, 19 },  // head mid
+    { 16, 240, 51 },   // armor
+    { 32, 240, 83 },   // shield
+    { 64, 240, 115 },  // shoes
+    { 128, 240, 147 }, // accessory right
+    { 2, 8, 83 },      // weapon
 }};
 
 std::string ToLowerAscii(std::string value)
@@ -874,14 +874,16 @@ void UIEquipWnd::OnCreate(int x, int y)
     m_controlsCreated = true;
     LoadAssets();
 
+    if (IsQtUiRuntimeEnabled()) {
+        m_fullHeight = kWindowHeight;
+        Resize(kWindowWidth, m_fullHeight);
+        LayoutChildren();
+        return;
+    }
+
     if (m_backgroundFull.IsValid()) {
         m_fullHeight = kTitleBarHeight + m_backgroundFull.height;
         Resize(m_backgroundFull.width, m_fullHeight);
-    }
-
-    if (IsQtUiRuntimeEnabled()) {
-        LayoutChildren();
-        return;
     }
 
     struct ButtonSpec {
