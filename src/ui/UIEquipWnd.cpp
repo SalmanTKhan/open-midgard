@@ -709,7 +709,10 @@ bool DrawEquipPreviewPlayerSpriteFitted(HDC hdc, const RECT& previewArea)
 
     constexpr int kComposeWidth = 160;
     constexpr int kComposeHeight = 180;
-    constexpr float kPreviewScaleBoost = 1.18f;
+    constexpr float kPreviewScaleBoost = 1.12f;
+    constexpr int kPreviewSidePadding = 2;
+    constexpr int kPreviewTopPadding = 4;
+    constexpr int kPreviewBottomPadding = 14;
 
     ArgbDibSurface composeSurface;
     if (!composeSurface.EnsureSize(kComposeWidth, kComposeHeight)) {
@@ -727,22 +730,28 @@ bool DrawEquipPreviewPlayerSpriteFitted(HDC hdc, const RECT& previewArea)
         const int srcH = srcBounds.bottom - srcBounds.top;
         const int areaW = previewArea.right - previewArea.left;
         const int areaH = previewArea.bottom - previewArea.top;
+        const int fitAreaLeft = previewArea.left + kPreviewSidePadding;
+        const int fitAreaTop = previewArea.top + kPreviewTopPadding;
+        const int fitAreaRight = previewArea.right - kPreviewSidePadding;
+        const int fitAreaBottom = previewArea.bottom - kPreviewBottomPadding;
+        const int fitAreaW = (std::max)(1, fitAreaRight - fitAreaLeft);
+        const int fitAreaH = (std::max)(1, fitAreaBottom - fitAreaTop);
 
         int drawW = srcW;
         int drawH = srcH;
-        if (drawW > areaW || drawH > areaH) {
-            const float scaleX = static_cast<float>(areaW) / static_cast<float>((std::max)(1, srcW));
-            const float scaleY = static_cast<float>(areaH) / static_cast<float>((std::max)(1, srcH));
+        if (drawW > fitAreaW || drawH > fitAreaH) {
+            const float scaleX = static_cast<float>(fitAreaW) / static_cast<float>((std::max)(1, srcW));
+            const float scaleY = static_cast<float>(fitAreaH) / static_cast<float>((std::max)(1, srcH));
             const float scale = (std::min)(scaleX, scaleY);
             drawW = (std::max)(1, static_cast<int>(static_cast<float>(srcW) * scale));
             drawH = (std::max)(1, static_cast<int>(static_cast<float>(srcH) * scale));
         }
 
-        drawW = (std::min)(areaW, (std::max)(1, static_cast<int>(static_cast<float>(drawW) * kPreviewScaleBoost)));
-        drawH = (std::min)(areaH, (std::max)(1, static_cast<int>(static_cast<float>(drawH) * kPreviewScaleBoost)));
+        drawW = (std::min)(fitAreaW, (std::max)(1, static_cast<int>(static_cast<float>(drawW) * kPreviewScaleBoost)));
+        drawH = (std::min)(fitAreaH, (std::max)(1, static_cast<int>(static_cast<float>(drawH) * kPreviewScaleBoost)));
 
-        const int dstX = previewArea.left + (areaW - drawW) / 2;
-        const int dstY = previewArea.top + (areaH - drawH) / 2;
+        const int dstX = fitAreaLeft + (fitAreaW - drawW) / 2;
+        const int dstY = fitAreaTop + (fitAreaH - drawH) / 2;
 
         if (drawW == srcW && drawH == srcH) {
             AlphaBlendArgbToHdc(hdc,
