@@ -1689,8 +1689,6 @@ Item {
         border.color: "#394256"
         visible: uiState.minimapVisible
 
-        readonly property var minimapData: uiState.minimapData || ({})
-
         Rectangle {
             x: 1
             y: 1
@@ -1702,10 +1700,10 @@ Item {
 
         Rectangle {
             id: minimapMapFrame
-            x: minimapData.mapX - parent.x
-            y: minimapData.mapY - parent.y
-            width: minimapData.mapWidth || 0
-            height: minimapData.mapHeight || 0
+            x: (uiState.minimapData.mapX || 0) - parent.x
+            y: (uiState.minimapData.mapY || 0) - parent.y
+            width: uiState.minimapData.mapWidth || 0
+            height: uiState.minimapData.mapHeight || 0
             color: "#12161d"
             border.width: 1
             border.color: "#485060"
@@ -1716,16 +1714,16 @@ Item {
                 fillMode: Image.Stretch
                 smooth: false
                 cache: false
-                source: parent.visible ? ("image://openmidgard/minimap?rev=" + (minimapData.imageRevision || 0)) : ""
+                source: parent.visible ? ("image://openmidgard/minimap?rev=" + (uiState.minimapData.imageRevision || 0)) : ""
             }
 
             Repeater {
-                model: minimapData.markers || []
+                model: uiState.minimapData.markers || []
 
                 delegate: Rectangle {
                     required property var modelData
-                    x: modelData.x - (minimapData.mapX || 0) - modelData.radius
-                    y: modelData.y - (minimapData.mapY || 0) - modelData.radius
+                    x: modelData.x - (uiState.minimapData.mapX || 0) - modelData.radius
+                    y: modelData.y - (uiState.minimapData.mapY || 0) - modelData.radius
                     width: modelData.radius * 2 + 1
                     height: modelData.radius * 2 + 1
                     radius: width / 2
@@ -1738,13 +1736,13 @@ Item {
             Item {
                 width: 13
                 height: 13
-                visible: minimapData.playerVisible || false
-                x: (minimapData.playerX || 0) - (minimapData.mapX || 0) - width / 2
-                y: (minimapData.playerY || 0) - (minimapData.mapY || 0) - height / 2
+                visible: uiState.minimapData.playerVisible || false
+                x: (uiState.minimapData.playerX || 0) - (uiState.minimapData.mapX || 0) - width / 2
+                y: (uiState.minimapData.playerY || 0) - (uiState.minimapData.mapY || 0) - height / 2
                 transform: Rotation {
                     origin.x: 6.5
                     origin.y: 6.5
-                    angle: ((minimapData.playerDirection || 0) % 8) * 45
+                    angle: ((uiState.minimapData.playerDirection || 0) % 8) * 45
                 }
 
                 Canvas {
@@ -1774,7 +1772,7 @@ Item {
             x: 18
             y: 2
             width: Math.max(0, parent.width - 40)
-            text: minimapData.title || ""
+            text: uiState.minimapData.title || ""
             color: "#ffffff"
             font.pixelSize: 12
             font.bold: true
@@ -1782,29 +1780,29 @@ Item {
         }
 
         Text {
-            x: (minimapData.coordsX || 0) - parent.x
-            y: (minimapData.coordsY || 0) - parent.y
-            width: Math.max(0, minimapData.coordsWidth || 0)
+            x: (uiState.minimapData.coordsX || 0) - parent.x
+            y: (uiState.minimapData.coordsY || 0) - parent.y
+            width: Math.max(0, uiState.minimapData.coordsWidth || 0)
             horizontalAlignment: Text.AlignRight
-            text: minimapData.coordsText || ""
+            text: uiState.minimapData.coordsText || ""
             color: "#101010"
             font.pixelSize: 11
             elide: Text.ElideRight
         }
 
         Rectangle {
-            x: (minimapData.closeX || 0) - parent.x
-            y: (minimapData.closeY || 0) - parent.y
-            width: Math.max(10, minimapData.closeWidth || 0)
-            height: Math.max(10, minimapData.closeHeight || 0)
+            x: (uiState.minimapData.closeX || 0) - parent.x
+            y: (uiState.minimapData.closeY || 0) - parent.y
+            width: Math.max(10, uiState.minimapData.closeWidth || 0)
+            height: Math.max(10, uiState.minimapData.closeHeight || 0)
             radius: 2
-            color: minimapData.closePressed ? "#b8c7da" : "#dde4ef"
+            color: uiState.minimapData.closePressed ? "#b8c7da" : "#dde4ef"
             border.width: 1
             border.color: "#4d5662"
 
             Text {
                 anchors.centerIn: parent
-                text: minimapData.closeLabel || ""
+                text: uiState.minimapData.closeLabel || ""
                 color: "#18202a"
                 font.pixelSize: 10
                 font.bold: true
