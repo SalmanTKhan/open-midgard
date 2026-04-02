@@ -25,6 +25,7 @@
 #include <array>
 #include <chrono>
 #include <cstdlib>
+#include <unordered_map>
 #include <string>
 #include <vector>
 
@@ -297,6 +298,13 @@ bool TryBuildItemIconImage(unsigned int itemId, QImage* outImage)
         return false;
     }
 
+    static std::unordered_map<unsigned int, QImage> s_itemIconCache;
+    const auto cached = s_itemIconCache.find(itemId);
+    if (cached != s_itemIconCache.end()) {
+        *outImage = cached->second;
+        return !outImage->isNull();
+    }
+
     const ITEM_INFO* item = g_session.GetInventoryItemByItemId(itemId);
     ITEM_INFO fallbackItem;
     if (!item) {
@@ -317,6 +325,9 @@ bool TryBuildItemIconImage(unsigned int itemId, QImage* outImage)
         bitmap.width * static_cast<int>(sizeof(unsigned int)),
         QImage::Format_ARGB32);
     *outImage = source.copy();
+    if (!outImage->isNull()) {
+        s_itemIconCache[itemId] = *outImage;
+    }
     return !outImage->isNull();
 }
 
@@ -345,6 +356,13 @@ bool TryBuildSkillIconImage(int skillId, QImage* outImage)
         return false;
     }
 
+    static std::unordered_map<int, QImage> s_skillIconCache;
+    const auto cached = s_skillIconCache.find(skillId);
+    if (cached != s_skillIconCache.end()) {
+        *outImage = cached->second;
+        return !outImage->isNull();
+    }
+
     const std::string path = ResolveQtSkillIconPath(skillId);
     if (path.empty()) {
         return false;
@@ -362,6 +380,9 @@ bool TryBuildSkillIconImage(int skillId, QImage* outImage)
         bitmap.width * static_cast<int>(sizeof(unsigned int)),
         QImage::Format_ARGB32);
     *outImage = source.copy();
+    if (!outImage->isNull()) {
+        s_skillIconCache[skillId] = *outImage;
+    }
     return !outImage->isNull();
 }
 

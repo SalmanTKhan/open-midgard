@@ -1115,6 +1115,9 @@ public:
     }
 
     void setShortCutSlots(const QVariantList& value) {
+        if (m_shortCutSlots == value) {
+            return;
+        }
         m_shortCutSlots = value;
         emit shortCutSlotsChanged();
     }
@@ -1300,6 +1303,9 @@ public:
     }
 
     void setInventoryData(const QVariantMap& value) {
+        if (m_inventoryData == value) {
+            return;
+        }
         m_inventoryData = value;
         emit inventoryDataChanged();
     }
@@ -1333,6 +1339,9 @@ public:
     }
 
     void setEquipData(const QVariantMap& value) {
+        if (m_equipData == value) {
+            return;
+        }
         m_equipData = value;
         emit equipDataChanged();
     }
@@ -1358,6 +1367,9 @@ public:
     }
 
     void setSkillListData(const QVariantMap& value) {
+        if (m_skillListData == value) {
+            return;
+        }
         m_skillListData = value;
         emit skillListDataChanged();
     }
