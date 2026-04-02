@@ -376,6 +376,8 @@ src/render/CMakeFiles/ro_render.dir/DC.cpp.obj: D:/Spel/RoRebuild/Ragnarok___Win
   C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/wtypesbase.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/Types.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/core/Hash.h \
+  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/platform/WindowsCompat.h \
+  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render3d/Dx7Compat.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/res/ActRes.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/res/Res.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/res/Sprite.h \
@@ -983,7 +985,9 @@ src/render/CMakeFiles/ro_render.dir/DrawUtil.cpp.obj: D:/Spel/RoRebuild/Ragnarok
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/Types.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/core/Globals.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/core/Xml.h \
+  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/platform/WindowsCompat.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render3d/D3dutil.h \
+  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render3d/Dx7Compat.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/res/Texture.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render/DC.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render/DrawUtil.h \
@@ -1314,6 +1318,7 @@ src/render/CMakeFiles/ro_render.dir/Prim.cpp.obj: D:/Spel/RoRebuild/Ragnarok___W
   C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/wtypes.h \
   C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/wtypesbase.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/Types.h \
+  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/platform/WindowsCompat.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render/Prim.h
 
 src/render/CMakeFiles/ro_render.dir/Renderer.cpp.obj: D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render/Renderer.cpp \
@@ -1718,8 +1723,10 @@ src/render/CMakeFiles/ro_render.dir/Renderer.cpp.obj: D:/Spel/RoRebuild/Ragnarok
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/core/Globals.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/core/Hash.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/core/Xml.h \
+  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/platform/WindowsCompat.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render3d/D3dutil.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render3d/Device.h \
+  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render3d/Dx7Compat.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render3d/RenderBackend.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render3d/RenderDevice.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/res/Bitmap.h \
@@ -1745,6 +1752,8 @@ C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/avx512vbmiint
 C:/Qt/6.11.0/mingw_64/include/QtCore/qstringmatcher.h:
 
 C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/commdlg.h:
+
+D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/platform/WindowsCompat.h:
 
 D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render3d/D3dutil.h:
 
@@ -2504,8 +2513,6 @@ C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/oaidl.h:
 
 C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/objidl.h:
 
-C:/Qt/6.11.0/mingw_64/include/QtGui/qpixmap.h:
-
 C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/objidlbase.h:
 
 C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/ole2.h:
@@ -2533,6 +2540,8 @@ C:/Qt/6.11.0/mingw_64/include/QtCore/qcontainertools_impl.h:
 C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/profileapi.h:
 
 C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/sdks/_mingw_ddk.h:
+
+D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render3d/Dx7Compat.h:
 
 C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/propidl.h:
 
@@ -2823,6 +2832,8 @@ C:/Qt/6.11.0/mingw_64/include/QtGui/qwindowdefs.h:
 C:/Qt/6.11.0/mingw_64/include/QtGui/qfontvariableaxis.h:
 
 C:/Qt/6.11.0/mingw_64/include/QtGui/qpainter.h:
+
+C:/Qt/6.11.0/mingw_64/include/QtGui/qpixmap.h:
 
 C:/Qt/6.11.0/mingw_64/include/QtGui/qpolygon.h:
 

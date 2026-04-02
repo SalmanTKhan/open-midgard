@@ -3,7 +3,7 @@
 #include "UIFrameWnd.h"
 
 #include <vector>
-#include <windows.h>
+#include "platform/WindowsCompat.h"
 
 class UISelectServerWnd : public UIFrameWnd {
 public:

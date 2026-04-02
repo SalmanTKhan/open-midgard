@@ -629,12 +629,14 @@ CMakeFiles/open_midgard.dir/src/main/WinMain.cpp.obj
  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/item/Item.h
  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/network/Connection.h
  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/network/PacketQueue.h
+ D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/platform/WindowsCompat.h
  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/qtui/QtUiRuntime.h
  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render/DC.h
  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render/Prim.h
  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render/Renderer.h
  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render3d/D3dutil.h
  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render3d/Device.h
+ D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render3d/Dx7Compat.h
  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render3d/GraphicsSettings.h
  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render3d/RenderBackend.h
  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render3d/RenderDevice.h

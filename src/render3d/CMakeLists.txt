@@ -2,9 +2,7 @@
 
 add_library(ro_render3d STATIC
     D3dutil.h
-    D3dutil.cpp
     Device.h
-    Device.cpp
     GraphicsSettings.h
     GraphicsSettings.cpp
     ModernRenderState.h
@@ -12,8 +10,19 @@ add_library(ro_render3d STATIC
     RenderBackend.h
     RenderBackend.cpp
     RenderDevice.h
-    RenderDevice.cpp
 )
+
+if(WIN32)
+    target_sources(ro_render3d PRIVATE
+        D3dutil.cpp
+        Device.cpp
+        RenderDevice.cpp
+    )
+else()
+    target_sources(ro_render3d PRIVATE
+        RenderDevice_stub.cpp
+    )
+endif()
 
 target_include_directories(ro_render3d PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(ro_render3d PUBLIC

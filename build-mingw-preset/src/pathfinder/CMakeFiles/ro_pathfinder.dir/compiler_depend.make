@@ -406,6 +406,8 @@ src/pathfinder/CMakeFiles/ro_pathfinder.dir/PathFinder.cpp.obj: D:/Spel/RoRebuil
   C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/wtypesbase.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/Types.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/core/Hash.h \
+  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/platform/WindowsCompat.h \
+  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render3d/Dx7Compat.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/res/ActRes.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/res/Res.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/res/Sprite.h \
@@ -435,6 +437,8 @@ C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/c++/bits/invo
 C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/adxintrin.h:
 
 C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/c++/bit:
+
+D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/platform/WindowsCompat.h:
 
 C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/commdlg.h:
 
@@ -1131,6 +1135,8 @@ C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/poppack.h:
 C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/processenv.h:
 
 C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/processthreadsapi.h:
+
+D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render3d/Dx7Compat.h:
 
 C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/sdks/_mingw_ddk.h:
 

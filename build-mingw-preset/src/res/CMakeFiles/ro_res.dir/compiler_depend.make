@@ -415,6 +415,7 @@ src/res/CMakeFiles/ro_res.dir/Bitmap.cpp.obj: D:/Spel/RoRebuild/Ragnarok___Win32
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/Types.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/core/File.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/core/Hash.h \
+  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/platform/WindowsCompat.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/res/Bitmap.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/res/Res.h
 
@@ -804,8 +805,10 @@ src/res/CMakeFiles/ro_res.dir/EzEffectRes.cpp.obj: D:/Spel/RoRebuild/Ragnarok___
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/Types.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/core/File.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/core/Hash.h \
+  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/platform/WindowsCompat.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render/Renderer.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render3d/D3dutil.h \
+  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render3d/Dx7Compat.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/res/EzEffectRes.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/res/Res.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/res/Texture.h
@@ -1170,6 +1173,7 @@ src/res/CMakeFiles/ro_res.dir/GndRes.cpp.obj: D:/Spel/RoRebuild/Ragnarok___Win32
   C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/wtypesbase.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/Types.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/core/Hash.h \
+  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/platform/WindowsCompat.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/res/GndRes.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/res/Res.h
 
@@ -1534,6 +1538,7 @@ src/res/CMakeFiles/ro_res.dir/Ijl.cpp.obj: D:/Spel/RoRebuild/Ragnarok___Win32_Hi
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/Types.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/core/DllMgr.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/core/DllProtos.h \
+  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/platform/WindowsCompat.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/res/Ijl.h
 
 src/res/CMakeFiles/ro_res.dir/ImfRes.cpp.obj: D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/res/ImfRes.cpp \
@@ -1906,6 +1911,7 @@ src/res/CMakeFiles/ro_res.dir/ImfRes.cpp.obj: D:/Spel/RoRebuild/Ragnarok___Win32
   C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/wtypesbase.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/Types.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/core/Hash.h \
+  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/platform/WindowsCompat.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/res/ImfRes.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/res/Res.h
 
@@ -2299,6 +2305,7 @@ src/res/CMakeFiles/ro_res.dir/ModelRes.cpp.obj: D:/Spel/RoRebuild/Ragnarok___Win
   C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/wtypesbase.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/Types.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/core/Hash.h \
+  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/platform/WindowsCompat.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/res/ModelRes.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/res/Res.h
 
@@ -2669,6 +2676,7 @@ src/res/CMakeFiles/ro_res.dir/PaletteRes.cpp.obj: D:/Spel/RoRebuild/Ragnarok___W
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/Types.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/core/File.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/core/Hash.h \
+  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/platform/WindowsCompat.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/res/PaletteRes.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/res/Res.h
 
@@ -3049,6 +3057,7 @@ src/res/CMakeFiles/ro_res.dir/Res.cpp.obj: D:/Spel/RoRebuild/Ragnarok___Win32_Hi
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/Types.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/core/File.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/core/Hash.h \
+  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/platform/WindowsCompat.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/res/Res.h
 
 src/res/CMakeFiles/ro_res.dir/Sprite.cpp.obj: D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/res/Sprite.cpp \
@@ -3432,9 +3441,11 @@ src/res/CMakeFiles/ro_res.dir/Sprite.cpp.obj: D:/Spel/RoRebuild/Ragnarok___Win32
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/DebugLog.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/Types.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/core/Hash.h \
+  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/platform/WindowsCompat.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render/Renderer.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render3d/D3dutil.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render3d/Device.h \
+  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render3d/Dx7Compat.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/res/Res.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/res/Sprite.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/res/Texture.h
@@ -3835,9 +3846,11 @@ src/res/CMakeFiles/ro_res.dir/Texture.cpp.obj: D:/Spel/RoRebuild/Ragnarok___Win3
   C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/wtypesbase.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/DebugLog.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/Types.h \
+  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/platform/WindowsCompat.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render/Renderer.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render3d/D3dutil.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render3d/Device.h \
+  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render3d/Dx7Compat.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render3d/GraphicsSettings.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render3d/RenderBackend.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render3d/RenderDevice.h \
@@ -4233,6 +4246,7 @@ src/res/CMakeFiles/ro_res.dir/WorldRes.cpp.obj: D:/Spel/RoRebuild/Ragnarok___Win
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/DebugLog.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/Types.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/core/Hash.h \
+  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/platform/WindowsCompat.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render/Prim.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/res/Res.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/res/WorldRes.h
@@ -4259,6 +4273,8 @@ C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/c++/bits/invo
 C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/adxintrin.h:
 
 C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/c++/bit:
+
+D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/platform/WindowsCompat.h:
 
 C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/commdlg.h:
 
@@ -4999,6 +5015,8 @@ C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/process.h:
 C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/processenv.h:
 
 C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/processthreadsapi.h:
+
+D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render3d/Dx7Compat.h:
 
 C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/sdks/_mingw_ddk.h:
 

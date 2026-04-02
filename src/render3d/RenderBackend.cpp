@@ -10,6 +10,11 @@
 #include <d3d12.h>
 #include <dxgi1_4.h>
 #endif
+#if RO_PLATFORM_WINDOWS
+#include <windows.h>
+#else
+#include <dlfcn.h>
+#endif
 #include <algorithm>
 #include <cctype>
 #include <cstring>
@@ -25,8 +30,10 @@
 
 namespace {
 
+#if RO_PLATFORM_WINDOWS
 constexpr char kRenderBackendRegPath[] = "Software\\Gravity Soft\\Ragnarok Online";
 constexpr char kRenderBackendValueName[] = "RenderBackend";
+#endif
 #if RO_HAS_NATIVE_D3D11
 constexpr RenderBackendType kDefaultConfiguredBackend = RenderBackendType::Direct3D11;
 #elif RO_HAS_VULKAN
@@ -91,6 +98,46 @@ struct RenderBackendSupportCache {
 };
 
 RenderBackendSupportCache g_supportCache = { -1, -1, -1 };
+
+#if RO_PLATFORM_WINDOWS
+using DynamicLibraryHandle = HMODULE;
+
+DynamicLibraryHandle LoadDynamicLibrary(const char* path)
+{
+    return LoadLibraryA(path);
+}
+
+void* LoadDynamicSymbol(DynamicLibraryHandle library, const char* name)
+{
+    return reinterpret_cast<void*>(GetProcAddress(library, name));
+}
+
+void UnloadDynamicLibrary(DynamicLibraryHandle library)
+{
+    if (library) {
+        FreeLibrary(library);
+    }
+}
+#else
+using DynamicLibraryHandle = void*;
+
+DynamicLibraryHandle LoadDynamicLibrary(const char* path)
+{
+    return dlopen(path, RTLD_LAZY | RTLD_LOCAL);
+}
+
+void* LoadDynamicSymbol(DynamicLibraryHandle library, const char* name)
+{
+    return library ? dlsym(library, name) : nullptr;
+}
+
+void UnloadDynamicLibrary(DynamicLibraryHandle library)
+{
+    if (library) {
+        dlclose(library);
+    }
+}
+#endif
 
 RenderBackendType ParseRenderBackendName(const char* value)
 {
@@ -205,15 +252,33 @@ bool ProbeD3D12Support()
 bool ProbeVulkanSupport()
 {
 #if RO_HAS_VULKAN
-    HMODULE module = LoadLibraryA("vulkan-1.dll");
-    if (!module) {
-        return false;
+    static const char* const kVulkanLoaderCandidates[] = {
+#if RO_PLATFORM_WINDOWS
+        "vulkan-1.dll",
+#elif defined(__APPLE__)
+        "libvulkan.1.dylib",
+        "libMoltenVK.dylib",
+#else
+        "libvulkan.so.1",
+        "libvulkan.so",
+#endif
+    };
+
+    for (const char* candidate : kVulkanLoaderCandidates) {
+        DynamicLibraryHandle module = LoadDynamicLibrary(candidate);
+        if (!module) {
+            continue;
+        }
+
+        const void* getInstanceProcAddr = LoadDynamicSymbol(module, "vkGetInstanceProcAddr");
+        const void* createInstance = LoadDynamicSymbol(module, "vkCreateInstance");
+        UnloadDynamicLibrary(module);
+        if (getInstanceProcAddr && createInstance) {
+            return true;
+        }
     }
 
-    const FARPROC getInstanceProcAddr = GetProcAddress(module, "vkGetInstanceProcAddr");
-    const FARPROC createInstance = GetProcAddress(module, "vkCreateInstance");
-    FreeLibrary(module);
-    return getInstanceProcAddr != nullptr && createInstance != nullptr;
+    return false;
 #else
     return false;
 #endif
@@ -295,6 +360,9 @@ bool IsRenderBackendSupported(RenderBackendType backend)
 
 RenderBackendType GetConfiguredRenderBackend()
 {
+#if !RO_PLATFORM_WINDOWS
+    return kDefaultConfiguredBackend;
+#else
     HKEY key = nullptr;
     if (RegOpenKeyExA(HKEY_CURRENT_USER, kRenderBackendRegPath, 0, KEY_READ, &key) != ERROR_SUCCESS) {
         return kDefaultConfiguredBackend;
@@ -316,10 +384,15 @@ RenderBackendType GetConfiguredRenderBackend()
     }
 
     return NormalizeBackendForCurrentBuild(static_cast<RenderBackendType>(rawValue));
+#endif
 }
 
 bool SetConfiguredRenderBackend(RenderBackendType backend)
 {
+#if !RO_PLATFORM_WINDOWS
+    (void)backend;
+    return false;
+#else
     HKEY key = nullptr;
     if (RegCreateKeyExA(HKEY_CURRENT_USER, kRenderBackendRegPath, 0, nullptr, 0, KEY_SET_VALUE, nullptr, &key, nullptr) != ERROR_SUCCESS) {
         return false;
@@ -336,6 +409,7 @@ bool SetConfiguredRenderBackend(RenderBackendType backend)
         sizeof(rawValue));
     RegCloseKey(key);
     return status == ERROR_SUCCESS;
+#endif
 }
 
 RenderBackendType GetRequestedRenderBackend()
@@ -348,7 +422,7 @@ RenderBackendType GetRequestedRenderBackend()
     return NormalizeBackendForCurrentBuild(ParseRenderBackendName(buffer));
 }
 
-bool InitializeRenderBackend(HWND hwnd, RenderBackendBootstrapResult* outResult)
+bool InitializeRenderBackend(RoNativeWindowHandle hwnd, RenderBackendBootstrapResult* outResult)
 {
     return GetRenderDevice().Initialize(hwnd, outResult);
 }

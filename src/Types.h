@@ -3,11 +3,10 @@
 // Types.h  –  Ragnarok Online client common type definitions
 // Clean C++17 rewrite of the HighPriest 2008 client.
 //===========================================================================
-// Do NOT define WIN32_LEAN_AND_MEAN here.  The project already defines NOMINMAX
-// via CMakeLists.txt to prevent min/max collisions.  The lean macro breaks
-// the UCRT locale header chain on MSVC v14.44 (VS2022 latest), causing
-// 'struct lconv' to be missing when <clocale> does 'using ::lconv'.
-#include <windows.h>
+// Do NOT define WIN32_LEAN_AND_MEAN here. The project already defines NOMINMAX
+// via CMakeLists.txt to prevent min/max collisions. On non-Windows builds,
+// this header falls back to a minimal compatibility layer.
+#include "platform/WindowsCompat.h"
 #include <cstdint>
 #include <cstddef>
 #include <cstring>

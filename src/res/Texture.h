@@ -1,8 +1,6 @@
 #pragma once
 
-#include <windows.h>
-#include <ddraw.h>
-#include <d3d.h>
+#include "render3d/Dx7Compat.h"
 #include <vector>
 
 enum PixelFormat {

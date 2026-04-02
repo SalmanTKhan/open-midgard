@@ -322,14 +322,15 @@ src/main/CMakeFiles/ro_main.dir/WinMain.cpp.obj: \
  C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/qos.h \
  C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/windowsx.h \
  D:\Spel\RoRebuild\Ragnarok___Win32_HighPriest2008_Release\src\main\WinMain.h \
- D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render3d/RenderBackend.h \
  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/Types.h \
+ D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/platform/WindowsCompat.h \
  C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/c++/cstdint \
  C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/stdint.h \
  C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/stdint.h \
  C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/c++/cstring \
  C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/c++/cassert \
  C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/assert.h \
+ D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render3d/RenderBackend.h \
  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/core/Timer.h \
  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/core/File.h \
  C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/c++/list \
@@ -632,6 +633,7 @@ src/main/CMakeFiles/ro_main.dir/WinMain.cpp.obj: \
  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render3d/GraphicsSettings.h \
  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/ui/UIWindowMgr.h \
  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render3d/Device.h \
+ D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render3d/Dx7Compat.h \
  C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/ddraw.h \
  C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/_mingw_dxhelper.h \
  C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/d3d.h \

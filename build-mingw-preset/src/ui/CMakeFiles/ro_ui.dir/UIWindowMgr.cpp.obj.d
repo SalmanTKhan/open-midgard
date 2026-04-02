@@ -2,6 +2,7 @@ src/ui/CMakeFiles/ro_ui.dir/UIWindowMgr.cpp.obj: \
  D:\Spel\RoRebuild\Ragnarok___Win32_HighPriest2008_Release\src\ui\UIWindowMgr.cpp \
  D:\Spel\RoRebuild\Ragnarok___Win32_HighPriest2008_Release\src\ui\UIWindowMgr.h \
  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render/DC.h \
+ D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/platform/WindowsCompat.h \
  C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/windows.h \
  C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/_mingw.h \
  C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/_mingw_mac.h \
@@ -633,6 +634,7 @@ src/ui/CMakeFiles/ro_ui.dir/UIWindowMgr.cpp.obj: \
  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/res/ImfRes.h \
  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/res/Sprite.h \
  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/res/Texture.h \
+ D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render3d/Dx7Compat.h \
  C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/ddraw.h \
  C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/_mingw_dxhelper.h \
  C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/d3d.h \

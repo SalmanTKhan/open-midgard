@@ -2,6 +2,7 @@ src/network/CMakeFiles/ro_network.dir/GronPacket.cpp.obj: \
  D:\Spel\RoRebuild\Ragnarok___Win32_HighPriest2008_Release\src\network\GronPacket.cpp \
  D:\Spel\RoRebuild\Ragnarok___Win32_HighPriest2008_Release\src\network\GronPacket.h \
  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/Types.h \
+ D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/platform/WindowsCompat.h \
  C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/windows.h \
  C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/_mingw.h \
  C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/_mingw_mac.h \

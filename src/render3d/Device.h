@@ -1,8 +1,6 @@
 #pragma once
 
-#include <windows.h>
-#include <ddraw.h>
-#include <d3d.h>
+#include "Dx7Compat.h"
 #include <stdio.h>
 #include "render/Renderer.h"
 #include "res/Texture.h"

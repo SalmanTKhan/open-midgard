@@ -377,6 +377,7 @@ src/network/CMakeFiles/ro_network.dir/Connection.cpp.obj: D:/Spel/RoRebuild/Ragn
   C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/wtypesbase.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/DebugLog.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/Types.h \
+  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/platform/WindowsCompat.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/network/Connection.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/network/GronPacket.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/network/PacketQueue.h
@@ -720,6 +721,7 @@ src/network/CMakeFiles/ro_network.dir/GronPacket.cpp.obj: D:/Spel/RoRebuild/Ragn
   C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/wtypes.h \
   C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/wtypesbase.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/Types.h \
+  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/platform/WindowsCompat.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/network/GronPacket.h
 
 src/network/CMakeFiles/ro_network.dir/PacketQueue.cpp.obj: D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/network/PacketQueue.cpp \
@@ -824,6 +826,8 @@ C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/adxintrin.h:
 C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/c++/bit:
 
 C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/c++/bits/invoke.h:
+
+D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/platform/WindowsCompat.h:
 
 C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/commdlg.h:
 

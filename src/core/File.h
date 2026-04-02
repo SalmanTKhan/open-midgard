@@ -8,7 +8,6 @@
 #include <string>
 #include <utility>
 #include "Types.h"
-#include <windows.h>
 
 // Forward declarations
 class CGPak;

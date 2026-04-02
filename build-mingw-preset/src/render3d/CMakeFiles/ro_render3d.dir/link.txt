@@ -1,2 +1,2 @@
-C:\Qt\Tools\mingw1310_64\bin\ar.exe qc libro_render3d.a CMakeFiles/ro_render3d.dir/D3dutil.cpp.obj CMakeFiles/ro_render3d.dir/Device.cpp.obj CMakeFiles/ro_render3d.dir/GraphicsSettings.cpp.obj CMakeFiles/ro_render3d.dir/ModernRenderState.cpp.obj CMakeFiles/ro_render3d.dir/RenderBackend.cpp.obj CMakeFiles/ro_render3d.dir/RenderDevice.cpp.obj
+C:\Qt\Tools\mingw1310_64\bin\ar.exe qc libro_render3d.a CMakeFiles/ro_render3d.dir/GraphicsSettings.cpp.obj CMakeFiles/ro_render3d.dir/ModernRenderState.cpp.obj CMakeFiles/ro_render3d.dir/RenderBackend.cpp.obj CMakeFiles/ro_render3d.dir/D3dutil.cpp.obj CMakeFiles/ro_render3d.dir/Device.cpp.obj CMakeFiles/ro_render3d.dir/RenderDevice.cpp.obj
 C:\Qt\Tools\mingw1310_64\bin\ranlib.exe libro_render3d.a

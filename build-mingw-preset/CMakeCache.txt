@@ -449,6 +449,12 @@ RO_ENABLE_IJL:BOOL=OFF
 //Enable Miles Sound System runtime loading
 RO_ENABLE_MILES_AUDIO:BOOL=OFF
 
+//Enable the native Direct3D 11 backend when supported
+RO_ENABLE_NATIVE_D3D11:BOOL=ON
+
+//Enable the native Direct3D 12 backend when supported
+RO_ENABLE_NATIVE_D3D12:BOOL=ON
+
 //Enable the Qt 6 / QML GPU UI runtime
 RO_ENABLE_QT6_UI:BOOL=ON
 

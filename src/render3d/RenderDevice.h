@@ -1,9 +1,16 @@
 #pragma once
 
 #include <cstdint>
+
+#if RO_PLATFORM_WINDOWS
 #include <windows.h>
 #include <ddraw.h>
 #include <d3d.h>
+using RoDword = DWORD;
+#else
+#include "Dx7Compat.h"
+using RoDword = DWORD;
+#endif
 
 #include "RenderBackend.h"
 
@@ -35,13 +42,13 @@ public:
     virtual ~IRenderDevice() = default;
 
     virtual RenderBackendType GetBackendType() const = 0;
-    virtual bool Initialize(HWND hwnd, RenderBackendBootstrapResult* outResult) = 0;
+    virtual bool Initialize(RoNativeWindowHandle hwnd, RenderBackendBootstrapResult* outResult) = 0;
     virtual void Shutdown() = 0;
     virtual void RefreshRenderSize() = 0;
 
     virtual int GetRenderWidth() const = 0;
     virtual int GetRenderHeight() const = 0;
-    virtual HWND GetWindowHandle() const = 0;
+    virtual RoNativeWindowHandle GetWindowHandle() const = 0;
     virtual IDirect3DDevice7* GetLegacyDevice() const = 0;
 
     virtual int ClearColor(unsigned int color) = 0;
@@ -53,14 +60,14 @@ public:
     virtual bool PrepareOverlayPass() = 0;
     virtual void EndScene() = 0;
     virtual void SetTransform(D3DTRANSFORMSTATETYPE state, const D3DMATRIX* matrix) = 0;
-    virtual void SetRenderState(D3DRENDERSTATETYPE state, DWORD value) = 0;
-    virtual void SetTextureStageState(DWORD stage, D3DTEXTURESTAGESTATETYPE type, DWORD value) = 0;
-    virtual void BindTexture(DWORD stage, CTexture* texture) = 0;
-    virtual void DrawPrimitive(D3DPRIMITIVETYPE primitiveType, DWORD vertexFormat,
-        const void* vertices, DWORD vertexCount, DWORD flags) = 0;
-    virtual void DrawIndexedPrimitive(D3DPRIMITIVETYPE primitiveType, DWORD vertexFormat,
-        const void* vertices, DWORD vertexCount, const unsigned short* indices,
-        DWORD indexCount, DWORD flags) = 0;
+    virtual void SetRenderState(D3DRENDERSTATETYPE state, RoDword value) = 0;
+    virtual void SetTextureStageState(RoDword stage, D3DTEXTURESTAGESTATETYPE type, RoDword value) = 0;
+    virtual void BindTexture(RoDword stage, CTexture* texture) = 0;
+    virtual void DrawPrimitive(D3DPRIMITIVETYPE primitiveType, RoDword vertexFormat,
+        const void* vertices, RoDword vertexCount, RoDword flags) = 0;
+    virtual void DrawIndexedPrimitive(D3DPRIMITIVETYPE primitiveType, RoDword vertexFormat,
+        const void* vertices, RoDword vertexCount, const unsigned short* indices,
+        RoDword indexCount, RoDword flags) = 0;
 
     virtual void AdjustTextureSize(unsigned int* width, unsigned int* height) = 0;
     virtual void ReleaseTextureResource(CTexture* texture) = 0;

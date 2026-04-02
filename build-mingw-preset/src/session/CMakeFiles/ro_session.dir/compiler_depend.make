@@ -451,6 +451,7 @@ src/session/CMakeFiles/ro_session.dir/Session.cpp.obj: D:/Spel/RoRebuild/Ragnaro
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/core/ClientInfoLocale.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/core/Xml.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/item/Item.h \
+  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/platform/WindowsCompat.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/skill/Skill.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/session/JobNameTable.generated.inc \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/session/Session.h
@@ -530,6 +531,8 @@ C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/c++/bits/invo
 C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/adxintrin.h:
 
 C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/c++/bit:
+
+D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/platform/WindowsCompat.h:
 
 C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/commdlg.h:
 

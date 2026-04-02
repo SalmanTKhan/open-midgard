@@ -71,41 +71,11 @@ include src/render3d/CMakeFiles/ro_render3d.dir/flags.make
 src/render3d/CMakeFiles/ro_render3d.dir/codegen:
 .PHONY : src/render3d/CMakeFiles/ro_render3d.dir/codegen
 
-src/render3d/CMakeFiles/ro_render3d.dir/D3dutil.cpp.obj: src/render3d/CMakeFiles/ro_render3d.dir/flags.make
-src/render3d/CMakeFiles/ro_render3d.dir/D3dutil.cpp.obj: src/render3d/CMakeFiles/ro_render3d.dir/includes_CXX.rsp
-src/render3d/CMakeFiles/ro_render3d.dir/D3dutil.cpp.obj: D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render3d/D3dutil.cpp
-src/render3d/CMakeFiles/ro_render3d.dir/D3dutil.cpp.obj: src/render3d/CMakeFiles/ro_render3d.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=D:\Spel\RoRebuild\Ragnarok___Win32_HighPriest2008_Release\build-mingw-preset\CMakeFiles --progress-num=$(CMAKE_PROGRESS_1) "Building CXX object src/render3d/CMakeFiles/ro_render3d.dir/D3dutil.cpp.obj"
-	cd /d D:\Spel\RoRebuild\Ragnarok___Win32_HighPriest2008_Release\build-mingw-preset\src\render3d && C:\Qt\Tools\mingw1310_64\bin\g++.exe $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT src/render3d/CMakeFiles/ro_render3d.dir/D3dutil.cpp.obj -MF CMakeFiles\ro_render3d.dir\D3dutil.cpp.obj.d -o CMakeFiles\ro_render3d.dir\D3dutil.cpp.obj -c D:\Spel\RoRebuild\Ragnarok___Win32_HighPriest2008_Release\src\render3d\D3dutil.cpp
-
-src/render3d/CMakeFiles/ro_render3d.dir/D3dutil.cpp.i: cmake_force
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/ro_render3d.dir/D3dutil.cpp.i"
-	cd /d D:\Spel\RoRebuild\Ragnarok___Win32_HighPriest2008_Release\build-mingw-preset\src\render3d && C:\Qt\Tools\mingw1310_64\bin\g++.exe $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E D:\Spel\RoRebuild\Ragnarok___Win32_HighPriest2008_Release\src\render3d\D3dutil.cpp > CMakeFiles\ro_render3d.dir\D3dutil.cpp.i
-
-src/render3d/CMakeFiles/ro_render3d.dir/D3dutil.cpp.s: cmake_force
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/ro_render3d.dir/D3dutil.cpp.s"
-	cd /d D:\Spel\RoRebuild\Ragnarok___Win32_HighPriest2008_Release\build-mingw-preset\src\render3d && C:\Qt\Tools\mingw1310_64\bin\g++.exe $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S D:\Spel\RoRebuild\Ragnarok___Win32_HighPriest2008_Release\src\render3d\D3dutil.cpp -o CMakeFiles\ro_render3d.dir\D3dutil.cpp.s
-
-src/render3d/CMakeFiles/ro_render3d.dir/Device.cpp.obj: src/render3d/CMakeFiles/ro_render3d.dir/flags.make
-src/render3d/CMakeFiles/ro_render3d.dir/Device.cpp.obj: src/render3d/CMakeFiles/ro_render3d.dir/includes_CXX.rsp
-src/render3d/CMakeFiles/ro_render3d.dir/Device.cpp.obj: D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render3d/Device.cpp
-src/render3d/CMakeFiles/ro_render3d.dir/Device.cpp.obj: src/render3d/CMakeFiles/ro_render3d.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=D:\Spel\RoRebuild\Ragnarok___Win32_HighPriest2008_Release\build-mingw-preset\CMakeFiles --progress-num=$(CMAKE_PROGRESS_2) "Building CXX object src/render3d/CMakeFiles/ro_render3d.dir/Device.cpp.obj"
-	cd /d D:\Spel\RoRebuild\Ragnarok___Win32_HighPriest2008_Release\build-mingw-preset\src\render3d && C:\Qt\Tools\mingw1310_64\bin\g++.exe $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT src/render3d/CMakeFiles/ro_render3d.dir/Device.cpp.obj -MF CMakeFiles\ro_render3d.dir\Device.cpp.obj.d -o CMakeFiles\ro_render3d.dir\Device.cpp.obj -c D:\Spel\RoRebuild\Ragnarok___Win32_HighPriest2008_Release\src\render3d\Device.cpp
-
-src/render3d/CMakeFiles/ro_render3d.dir/Device.cpp.i: cmake_force
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/ro_render3d.dir/Device.cpp.i"
-	cd /d D:\Spel\RoRebuild\Ragnarok___Win32_HighPriest2008_Release\build-mingw-preset\src\render3d && C:\Qt\Tools\mingw1310_64\bin\g++.exe $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E D:\Spel\RoRebuild\Ragnarok___Win32_HighPriest2008_Release\src\render3d\Device.cpp > CMakeFiles\ro_render3d.dir\Device.cpp.i
-
-src/render3d/CMakeFiles/ro_render3d.dir/Device.cpp.s: cmake_force
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/ro_render3d.dir/Device.cpp.s"
-	cd /d D:\Spel\RoRebuild\Ragnarok___Win32_HighPriest2008_Release\build-mingw-preset\src\render3d && C:\Qt\Tools\mingw1310_64\bin\g++.exe $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S D:\Spel\RoRebuild\Ragnarok___Win32_HighPriest2008_Release\src\render3d\Device.cpp -o CMakeFiles\ro_render3d.dir\Device.cpp.s
-
 src/render3d/CMakeFiles/ro_render3d.dir/GraphicsSettings.cpp.obj: src/render3d/CMakeFiles/ro_render3d.dir/flags.make
 src/render3d/CMakeFiles/ro_render3d.dir/GraphicsSettings.cpp.obj: src/render3d/CMakeFiles/ro_render3d.dir/includes_CXX.rsp
 src/render3d/CMakeFiles/ro_render3d.dir/GraphicsSettings.cpp.obj: D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render3d/GraphicsSettings.cpp
 src/render3d/CMakeFiles/ro_render3d.dir/GraphicsSettings.cpp.obj: src/render3d/CMakeFiles/ro_render3d.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=D:\Spel\RoRebuild\Ragnarok___Win32_HighPriest2008_Release\build-mingw-preset\CMakeFiles --progress-num=$(CMAKE_PROGRESS_3) "Building CXX object src/render3d/CMakeFiles/ro_render3d.dir/GraphicsSettings.cpp.obj"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=D:\Spel\RoRebuild\Ragnarok___Win32_HighPriest2008_Release\build-mingw-preset\CMakeFiles --progress-num=$(CMAKE_PROGRESS_1) "Building CXX object src/render3d/CMakeFiles/ro_render3d.dir/GraphicsSettings.cpp.obj"
 	cd /d D:\Spel\RoRebuild\Ragnarok___Win32_HighPriest2008_Release\build-mingw-preset\src\render3d && C:\Qt\Tools\mingw1310_64\bin\g++.exe $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT src/render3d/CMakeFiles/ro_render3d.dir/GraphicsSettings.cpp.obj -MF CMakeFiles\ro_render3d.dir\GraphicsSettings.cpp.obj.d -o CMakeFiles\ro_render3d.dir\GraphicsSettings.cpp.obj -c D:\Spel\RoRebuild\Ragnarok___Win32_HighPriest2008_Release\src\render3d\GraphicsSettings.cpp
 
 src/render3d/CMakeFiles/ro_render3d.dir/GraphicsSettings.cpp.i: cmake_force
@@ -120,7 +90,7 @@ src/render3d/CMakeFiles/ro_render3d.dir/ModernRenderState.cpp.obj: src/render3d/
 src/render3d/CMakeFiles/ro_render3d.dir/ModernRenderState.cpp.obj: src/render3d/CMakeFiles/ro_render3d.dir/includes_CXX.rsp
 src/render3d/CMakeFiles/ro_render3d.dir/ModernRenderState.cpp.obj: D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render3d/ModernRenderState.cpp
 src/render3d/CMakeFiles/ro_render3d.dir/ModernRenderState.cpp.obj: src/render3d/CMakeFiles/ro_render3d.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=D:\Spel\RoRebuild\Ragnarok___Win32_HighPriest2008_Release\build-mingw-preset\CMakeFiles --progress-num=$(CMAKE_PROGRESS_4) "Building CXX object src/render3d/CMakeFiles/ro_render3d.dir/ModernRenderState.cpp.obj"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=D:\Spel\RoRebuild\Ragnarok___Win32_HighPriest2008_Release\build-mingw-preset\CMakeFiles --progress-num=$(CMAKE_PROGRESS_2) "Building CXX object src/render3d/CMakeFiles/ro_render3d.dir/ModernRenderState.cpp.obj"
 	cd /d D:\Spel\RoRebuild\Ragnarok___Win32_HighPriest2008_Release\build-mingw-preset\src\render3d && C:\Qt\Tools\mingw1310_64\bin\g++.exe $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT src/render3d/CMakeFiles/ro_render3d.dir/ModernRenderState.cpp.obj -MF CMakeFiles\ro_render3d.dir\ModernRenderState.cpp.obj.d -o CMakeFiles\ro_render3d.dir\ModernRenderState.cpp.obj -c D:\Spel\RoRebuild\Ragnarok___Win32_HighPriest2008_Release\src\render3d\ModernRenderState.cpp
 
 src/render3d/CMakeFiles/ro_render3d.dir/ModernRenderState.cpp.i: cmake_force
@@ -135,7 +105,7 @@ src/render3d/CMakeFiles/ro_render3d.dir/RenderBackend.cpp.obj: src/render3d/CMak
 src/render3d/CMakeFiles/ro_render3d.dir/RenderBackend.cpp.obj: src/render3d/CMakeFiles/ro_render3d.dir/includes_CXX.rsp
 src/render3d/CMakeFiles/ro_render3d.dir/RenderBackend.cpp.obj: D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render3d/RenderBackend.cpp
 src/render3d/CMakeFiles/ro_render3d.dir/RenderBackend.cpp.obj: src/render3d/CMakeFiles/ro_render3d.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=D:\Spel\RoRebuild\Ragnarok___Win32_HighPriest2008_Release\build-mingw-preset\CMakeFiles --progress-num=$(CMAKE_PROGRESS_5) "Building CXX object src/render3d/CMakeFiles/ro_render3d.dir/RenderBackend.cpp.obj"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=D:\Spel\RoRebuild\Ragnarok___Win32_HighPriest2008_Release\build-mingw-preset\CMakeFiles --progress-num=$(CMAKE_PROGRESS_3) "Building CXX object src/render3d/CMakeFiles/ro_render3d.dir/RenderBackend.cpp.obj"
 	cd /d D:\Spel\RoRebuild\Ragnarok___Win32_HighPriest2008_Release\build-mingw-preset\src\render3d && C:\Qt\Tools\mingw1310_64\bin\g++.exe $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT src/render3d/CMakeFiles/ro_render3d.dir/RenderBackend.cpp.obj -MF CMakeFiles\ro_render3d.dir\RenderBackend.cpp.obj.d -o CMakeFiles\ro_render3d.dir\RenderBackend.cpp.obj -c D:\Spel\RoRebuild\Ragnarok___Win32_HighPriest2008_Release\src\render3d\RenderBackend.cpp
 
 src/render3d/CMakeFiles/ro_render3d.dir/RenderBackend.cpp.i: cmake_force
@@ -145,6 +115,36 @@ src/render3d/CMakeFiles/ro_render3d.dir/RenderBackend.cpp.i: cmake_force
 src/render3d/CMakeFiles/ro_render3d.dir/RenderBackend.cpp.s: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/ro_render3d.dir/RenderBackend.cpp.s"
 	cd /d D:\Spel\RoRebuild\Ragnarok___Win32_HighPriest2008_Release\build-mingw-preset\src\render3d && C:\Qt\Tools\mingw1310_64\bin\g++.exe $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S D:\Spel\RoRebuild\Ragnarok___Win32_HighPriest2008_Release\src\render3d\RenderBackend.cpp -o CMakeFiles\ro_render3d.dir\RenderBackend.cpp.s
+
+src/render3d/CMakeFiles/ro_render3d.dir/D3dutil.cpp.obj: src/render3d/CMakeFiles/ro_render3d.dir/flags.make
+src/render3d/CMakeFiles/ro_render3d.dir/D3dutil.cpp.obj: src/render3d/CMakeFiles/ro_render3d.dir/includes_CXX.rsp
+src/render3d/CMakeFiles/ro_render3d.dir/D3dutil.cpp.obj: D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render3d/D3dutil.cpp
+src/render3d/CMakeFiles/ro_render3d.dir/D3dutil.cpp.obj: src/render3d/CMakeFiles/ro_render3d.dir/compiler_depend.ts
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=D:\Spel\RoRebuild\Ragnarok___Win32_HighPriest2008_Release\build-mingw-preset\CMakeFiles --progress-num=$(CMAKE_PROGRESS_4) "Building CXX object src/render3d/CMakeFiles/ro_render3d.dir/D3dutil.cpp.obj"
+	cd /d D:\Spel\RoRebuild\Ragnarok___Win32_HighPriest2008_Release\build-mingw-preset\src\render3d && C:\Qt\Tools\mingw1310_64\bin\g++.exe $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT src/render3d/CMakeFiles/ro_render3d.dir/D3dutil.cpp.obj -MF CMakeFiles\ro_render3d.dir\D3dutil.cpp.obj.d -o CMakeFiles\ro_render3d.dir\D3dutil.cpp.obj -c D:\Spel\RoRebuild\Ragnarok___Win32_HighPriest2008_Release\src\render3d\D3dutil.cpp
+
+src/render3d/CMakeFiles/ro_render3d.dir/D3dutil.cpp.i: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/ro_render3d.dir/D3dutil.cpp.i"
+	cd /d D:\Spel\RoRebuild\Ragnarok___Win32_HighPriest2008_Release\build-mingw-preset\src\render3d && C:\Qt\Tools\mingw1310_64\bin\g++.exe $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E D:\Spel\RoRebuild\Ragnarok___Win32_HighPriest2008_Release\src\render3d\D3dutil.cpp > CMakeFiles\ro_render3d.dir\D3dutil.cpp.i
+
+src/render3d/CMakeFiles/ro_render3d.dir/D3dutil.cpp.s: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/ro_render3d.dir/D3dutil.cpp.s"
+	cd /d D:\Spel\RoRebuild\Ragnarok___Win32_HighPriest2008_Release\build-mingw-preset\src\render3d && C:\Qt\Tools\mingw1310_64\bin\g++.exe $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S D:\Spel\RoRebuild\Ragnarok___Win32_HighPriest2008_Release\src\render3d\D3dutil.cpp -o CMakeFiles\ro_render3d.dir\D3dutil.cpp.s
+
+src/render3d/CMakeFiles/ro_render3d.dir/Device.cpp.obj: src/render3d/CMakeFiles/ro_render3d.dir/flags.make
+src/render3d/CMakeFiles/ro_render3d.dir/Device.cpp.obj: src/render3d/CMakeFiles/ro_render3d.dir/includes_CXX.rsp
+src/render3d/CMakeFiles/ro_render3d.dir/Device.cpp.obj: D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render3d/Device.cpp
+src/render3d/CMakeFiles/ro_render3d.dir/Device.cpp.obj: src/render3d/CMakeFiles/ro_render3d.dir/compiler_depend.ts
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=D:\Spel\RoRebuild\Ragnarok___Win32_HighPriest2008_Release\build-mingw-preset\CMakeFiles --progress-num=$(CMAKE_PROGRESS_5) "Building CXX object src/render3d/CMakeFiles/ro_render3d.dir/Device.cpp.obj"
+	cd /d D:\Spel\RoRebuild\Ragnarok___Win32_HighPriest2008_Release\build-mingw-preset\src\render3d && C:\Qt\Tools\mingw1310_64\bin\g++.exe $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT src/render3d/CMakeFiles/ro_render3d.dir/Device.cpp.obj -MF CMakeFiles\ro_render3d.dir\Device.cpp.obj.d -o CMakeFiles\ro_render3d.dir\Device.cpp.obj -c D:\Spel\RoRebuild\Ragnarok___Win32_HighPriest2008_Release\src\render3d\Device.cpp
+
+src/render3d/CMakeFiles/ro_render3d.dir/Device.cpp.i: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/ro_render3d.dir/Device.cpp.i"
+	cd /d D:\Spel\RoRebuild\Ragnarok___Win32_HighPriest2008_Release\build-mingw-preset\src\render3d && C:\Qt\Tools\mingw1310_64\bin\g++.exe $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E D:\Spel\RoRebuild\Ragnarok___Win32_HighPriest2008_Release\src\render3d\Device.cpp > CMakeFiles\ro_render3d.dir\Device.cpp.i
+
+src/render3d/CMakeFiles/ro_render3d.dir/Device.cpp.s: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/ro_render3d.dir/Device.cpp.s"
+	cd /d D:\Spel\RoRebuild\Ragnarok___Win32_HighPriest2008_Release\build-mingw-preset\src\render3d && C:\Qt\Tools\mingw1310_64\bin\g++.exe $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S D:\Spel\RoRebuild\Ragnarok___Win32_HighPriest2008_Release\src\render3d\Device.cpp -o CMakeFiles\ro_render3d.dir\Device.cpp.s
 
 src/render3d/CMakeFiles/ro_render3d.dir/RenderDevice.cpp.obj: src/render3d/CMakeFiles/ro_render3d.dir/flags.make
 src/render3d/CMakeFiles/ro_render3d.dir/RenderDevice.cpp.obj: src/render3d/CMakeFiles/ro_render3d.dir/includes_CXX.rsp
@@ -163,21 +163,21 @@ src/render3d/CMakeFiles/ro_render3d.dir/RenderDevice.cpp.s: cmake_force
 
 # Object files for target ro_render3d
 ro_render3d_OBJECTS = \
-"CMakeFiles/ro_render3d.dir/D3dutil.cpp.obj" \
-"CMakeFiles/ro_render3d.dir/Device.cpp.obj" \
 "CMakeFiles/ro_render3d.dir/GraphicsSettings.cpp.obj" \
 "CMakeFiles/ro_render3d.dir/ModernRenderState.cpp.obj" \
 "CMakeFiles/ro_render3d.dir/RenderBackend.cpp.obj" \
+"CMakeFiles/ro_render3d.dir/D3dutil.cpp.obj" \
+"CMakeFiles/ro_render3d.dir/Device.cpp.obj" \
 "CMakeFiles/ro_render3d.dir/RenderDevice.cpp.obj"
 
 # External object files for target ro_render3d
 ro_render3d_EXTERNAL_OBJECTS =
 
-src/render3d/libro_render3d.a: src/render3d/CMakeFiles/ro_render3d.dir/D3dutil.cpp.obj
-src/render3d/libro_render3d.a: src/render3d/CMakeFiles/ro_render3d.dir/Device.cpp.obj
 src/render3d/libro_render3d.a: src/render3d/CMakeFiles/ro_render3d.dir/GraphicsSettings.cpp.obj
 src/render3d/libro_render3d.a: src/render3d/CMakeFiles/ro_render3d.dir/ModernRenderState.cpp.obj
 src/render3d/libro_render3d.a: src/render3d/CMakeFiles/ro_render3d.dir/RenderBackend.cpp.obj
+src/render3d/libro_render3d.a: src/render3d/CMakeFiles/ro_render3d.dir/D3dutil.cpp.obj
+src/render3d/libro_render3d.a: src/render3d/CMakeFiles/ro_render3d.dir/Device.cpp.obj
 src/render3d/libro_render3d.a: src/render3d/CMakeFiles/ro_render3d.dir/RenderDevice.cpp.obj
 src/render3d/libro_render3d.a: src/render3d/CMakeFiles/ro_render3d.dir/build.make
 src/render3d/libro_render3d.a: src/render3d/CMakeFiles/ro_render3d.dir/link.txt

@@ -5,7 +5,7 @@
 #include "render/DC.h"
 #include "res/Bitmap.h"
 
-#include <windows.h>
+#include "platform/WindowsCompat.h"
 
 #if RO_ENABLE_QT6_UI
 #include <QFont>
@@ -21,7 +21,9 @@
 #include <string>
 #include <vector>
 
+#if RO_PLATFORM_WINDOWS
 #pragma comment(lib, "msimg32.lib")
+#endif
 
 namespace shopui {
 
@@ -184,20 +186,33 @@ inline void DrawBitmapPixelsTransparent(HDC target, const BitmapPixels& bitmap, 
 
 inline void FillRectColor(HDC hdc, const RECT& rect, COLORREF color)
 {
+#if RO_PLATFORM_WINDOWS
     HBRUSH brush = CreateSolidBrush(color);
     FillRect(hdc, &rect, brush);
     DeleteObject(brush);
+#else
+    (void)hdc;
+    (void)rect;
+    (void)color;
+#endif
 }
 
 inline void FrameRectColor(HDC hdc, const RECT& rect, COLORREF color)
 {
+#if RO_PLATFORM_WINDOWS
     HBRUSH brush = CreateSolidBrush(color);
     FrameRect(hdc, &rect, brush);
     DeleteObject(brush);
+#else
+    (void)hdc;
+    (void)rect;
+    (void)color;
+#endif
 }
 
 inline HFONT GetUiFont()
 {
+#if RO_PLATFORM_WINDOWS
     static HFONT s_font = CreateFontA(
         -11,
         0,
@@ -214,17 +229,27 @@ inline HFONT GetUiFont()
         DEFAULT_PITCH | FF_DONTCARE,
         "MS Sans Serif");
     return s_font;
+#else
+    return nullptr;
+#endif
 }
 
 #if RO_ENABLE_QT6_UI
 inline QFont BuildUiFontFromHdc(HDC hdc)
 {
     LOGFONTA logFont{};
+#if RO_PLATFORM_WINDOWS
     if (hdc) {
         if (HGDIOBJ fontObject = GetCurrentObject(hdc, OBJ_FONT)) {
             GetObjectA(fontObject, sizeof(logFont), &logFont);
         }
     }
+#else
+    (void)hdc;
+    std::strncpy(logFont.lfFaceName, "MS Sans Serif", LF_FACESIZE - 1);
+    logFont.lfHeight = -11;
+    logFont.lfWeight = FW_NORMAL;
+#endif
 
     const QString family = logFont.lfFaceName[0] != '\0'
         ? QString::fromLocal8Bit(logFont.lfFaceName)
@@ -299,6 +324,7 @@ inline void DrawWindowTextRect(HDC hdc, const RECT& rect, const std::string& tex
         return;
     }
 
+#if RO_PLATFORM_WINDOWS
     RECT drawRect = rect;
     SetBkMode(hdc, TRANSPARENT);
     SetTextColor(hdc, color);
@@ -309,6 +335,12 @@ inline void DrawWindowTextRect(HDC hdc, const RECT& rect, const std::string& tex
     DrawTextA(hdc, text.c_str(), -1, &drawRect, format);
 #endif
     SelectObject(hdc, oldFont);
+#elif RO_ENABLE_QT6_UI
+    DrawWindowTextRectQt(hdc, rect, text, color, format);
+#else
+    (void)color;
+    (void)format;
+#endif
 }
 
 inline RECT MakeRect(int x, int y, int w, int h)

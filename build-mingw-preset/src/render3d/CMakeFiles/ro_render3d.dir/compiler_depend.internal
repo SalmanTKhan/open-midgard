@@ -63,8 +63,12 @@ src/render3d/CMakeFiles/ro_render3d.dir/D3dutil.cpp.obj
  C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/c++/bits/stl_iterator_base_types.h
  C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/c++/bits/stl_pair.h
  C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/c++/bits/utility.h
+ C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/c++/cassert
  C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/c++/cmath
+ C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/c++/cstddef
+ C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/c++/cstdint
  C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/c++/cstdlib
+ C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/c++/cstring
  C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/c++/debug/assertions.h
  C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/c++/debug/debug.h
  C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/c++/ext/numeric_traits.h
@@ -131,6 +135,7 @@ src/render3d/CMakeFiles/ro_render3d.dir/D3dutil.cpp.obj
  C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/smmintrin.h
  C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/stdarg.h
  C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/stddef.h
+ C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/stdint.h
  C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/syslimits.h
  C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/tbmintrin.h
  C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/tmmintrin.h
@@ -161,6 +166,7 @@ src/render3d/CMakeFiles/ro_render3d.dir/D3dutil.cpp.obj
  C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/_timeval.h
  C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/apiset.h
  C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/apisetcconv.h
+ C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/assert.h
  C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/basetsd.h
  C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/bcrypt.h
  C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/bemapiset.h
@@ -274,6 +280,7 @@ src/render3d/CMakeFiles/ro_render3d.dir/D3dutil.cpp.obj
  C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/specstrings.h
  C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/stdarg.h
  C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/stddef.h
+ C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/stdint.h
  C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/stdio.h
  C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/stdlib.h
  C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/stralign.h
@@ -320,7 +327,10 @@ src/render3d/CMakeFiles/ro_render3d.dir/D3dutil.cpp.obj
  C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/wow64apiset.h
  C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/wtypes.h
  C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/wtypesbase.h
+ D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/Types.h
+ D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/platform/WindowsCompat.h
  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render3d/D3dutil.h
+ D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render3d/Dx7Compat.h
 
 src/render3d/CMakeFiles/ro_render3d.dir/Device.cpp.obj
  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render3d/Device.cpp
@@ -694,11 +704,13 @@ src/render3d/CMakeFiles/ro_render3d.dir/Device.cpp.obj
  C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/wtypesbase.h
  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/Types.h
  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/main/WinMain.h
+ D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/platform/WindowsCompat.h
  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render/Renderer.h
  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render3d/D3dutil.h
  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render3d/RenderBackend.h
  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/res/Texture.h
  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render3d/Device.h
+ D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render3d/Dx7Compat.h
 
 src/render3d/CMakeFiles/ro_render3d.dir/GraphicsSettings.cpp.obj
  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render3d/GraphicsSettings.cpp
@@ -1109,8 +1121,11 @@ src/render3d/CMakeFiles/ro_render3d.dir/ModernRenderState.cpp.obj
  C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/c++/bits/uses_allocator_args.h
  C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/c++/bits/utility.h
  C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/c++/bits/vector.tcc
+ C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/c++/cassert
  C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/c++/cstddef
+ C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/c++/cstdint
  C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/c++/cstdlib
+ C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/c++/cstring
  C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/c++/debug/assertions.h
  C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/c++/debug/debug.h
  C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/c++/ext/alloc_traits.h
@@ -1169,6 +1184,7 @@ src/render3d/CMakeFiles/ro_render3d.dir/ModernRenderState.cpp.obj
  C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/smmintrin.h
  C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/stdarg.h
  C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/stddef.h
+ C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/stdint.h
  C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/syslimits.h
  C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/tbmintrin.h
  C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/tmmintrin.h
@@ -1198,6 +1214,7 @@ src/render3d/CMakeFiles/ro_render3d.dir/ModernRenderState.cpp.obj
  C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/_timeval.h
  C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/apiset.h
  C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/apisetcconv.h
+ C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/assert.h
  C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/basetsd.h
  C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/bcrypt.h
  C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/bemapiset.h
@@ -1308,6 +1325,7 @@ src/render3d/CMakeFiles/ro_render3d.dir/ModernRenderState.cpp.obj
  C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/specstrings.h
  C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/stdarg.h
  C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/stddef.h
+ C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/stdint.h
  C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/stdlib.h
  C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/stralign.h
  C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/string.h
@@ -1352,6 +1370,9 @@ src/render3d/CMakeFiles/ro_render3d.dir/ModernRenderState.cpp.obj
  C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/wow64apiset.h
  C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/wtypes.h
  C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/wtypesbase.h
+ D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/Types.h
+ D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/platform/WindowsCompat.h
+ D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render3d/Dx7Compat.h
  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render3d/ModernRenderState.h
 
 src/render3d/CMakeFiles/ro_render3d.dir/RenderBackend.cpp.obj
@@ -1748,6 +1769,7 @@ src/render3d/CMakeFiles/ro_render3d.dir/RenderBackend.cpp.obj
  C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/wtypes.h
  C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/wtypesbase.h
  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/DebugLog.h
+ D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/platform/WindowsCompat.h
  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render3d/RenderBackend.h
  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render3d/RenderDevice.h
 
@@ -2149,10 +2171,12 @@ src/render3d/CMakeFiles/ro_render3d.dir/RenderDevice.cpp.obj
  C:/VulkanSDK/1.4.341.1/include/vulkan/vulkan_win32.h
  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/DebugLog.h
  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/Types.h
+ D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/platform/WindowsCompat.h
  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render/Renderer.h
  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render3d/D3dutil.h
  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/res/Texture.h
  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render3d/Device.h
+ D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render3d/Dx7Compat.h
  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render3d/GraphicsSettings.h
  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render3d/ModernRenderState.h
  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render3d/RenderBackend.h

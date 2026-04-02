@@ -775,8 +775,9 @@ src/qtui/CMakeFiles/ro_qtui.dir/QtUiSpikeBridge.cpp.obj: D:/Spel/RoRebuild/Ragna
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/gamemode/Mode.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/gamemode/View.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/item/Item.h \
-  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/main/WinMain.h \
+  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/platform/WindowsCompat.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render/DC.h \
+  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render3d/Dx7Compat.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render3d/RenderBackend.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render3d/RenderDevice.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/res/ActRes.h \
@@ -787,6 +788,7 @@ src/qtui/CMakeFiles/ro_qtui.dir/QtUiSpikeBridge.cpp.obj: D:/Spel/RoRebuild/Ragna
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/res/Texture.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/session/Session.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/skill/Skill.h \
+  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/ui/UIEquipWnd.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/ui/UIFrameWnd.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/ui/UILoginWnd.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/ui/UIMakeCharWnd.h \
@@ -1457,7 +1459,9 @@ src/qtui/CMakeFiles/ro_qtui.dir/QtUiStateAdapter.cpp.obj: D:/Spel/RoRebuild/Ragn
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/network/Connection.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/network/Packet.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/network/PacketQueue.h \
+  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/platform/WindowsCompat.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render/DC.h \
+  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render3d/Dx7Compat.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render3d/GraphicsSettings.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render3d/RenderBackend.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render3d/RenderDevice.h \
@@ -3250,6 +3254,8 @@ C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/assert.h:
 
 C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/cderr.h:
 
+D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/platform/WindowsCompat.h:
+
 C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/commdlg.h:
 
 C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/corecrt.h:
@@ -3357,6 +3363,8 @@ C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/processenv.h:
 C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/processthreadsapi.h:
 
 C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/processtopologyapi.h:
+
+D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render3d/Dx7Compat.h:
 
 C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/sdks/_mingw_ddk.h:
 

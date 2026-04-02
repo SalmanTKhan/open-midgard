@@ -449,6 +449,7 @@ src/audio/CMakeFiles/ro_audio.dir/Audio.cpp.obj: D:/Spel/RoRebuild/Ragnarok___Wi
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/Types.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/core/File.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/core/Hash.h \
+  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/platform/WindowsCompat.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/res/Res.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/audio/Audio.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/audio/AudioBackend.h
@@ -857,6 +858,7 @@ src/audio/CMakeFiles/ro_audio.dir/MilesAudioBackend.cpp.obj: D:/Spel/RoRebuild/R
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/core/DllMgr.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/core/DllProtos.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/core/Hash.h \
+  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/platform/WindowsCompat.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/res/Res.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/audio/Audio.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/audio/AudioBackend.h
@@ -1289,6 +1291,7 @@ src/audio/CMakeFiles/ro_audio.dir/MiniaudioBackend.cpp.obj: D:/Spel/RoRebuild/Ra
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/Types.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/core/File.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/core/Hash.h \
+  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/platform/WindowsCompat.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/res/Res.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/audio/Audio.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/audio/AudioBackend.h \
@@ -1650,6 +1653,7 @@ src/audio/CMakeFiles/ro_audio.dir/Video.cpp.obj: D:/Spel/RoRebuild/Ragnarok___Wi
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/Types.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/core/DllMgr.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/core/DllProtos.h \
+  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/platform/WindowsCompat.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/audio/Video.h
 
 
@@ -1668,6 +1672,8 @@ C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/c++/bits/invo
 C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/adxintrin.h:
 
 C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/c++/bit:
+
+D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/platform/WindowsCompat.h:
 
 C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/commdlg.h:
 

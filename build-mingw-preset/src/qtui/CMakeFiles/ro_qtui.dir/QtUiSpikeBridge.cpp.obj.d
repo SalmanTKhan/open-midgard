@@ -1,16 +1,26 @@
 src/qtui/CMakeFiles/ro_qtui.dir/QtUiSpikeBridge.cpp.obj: \
  D:\Spel\RoRebuild\Ragnarok___Win32_HighPriest2008_Release\src\qtui\QtUiSpikeBridge.cpp \
  D:\Spel\RoRebuild\Ragnarok___Win32_HighPriest2008_Release\src\qtui\QtUiRuntime.h \
- C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/windows.h \
+ C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/c++/cstdint \
+ C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/c++/x86_64-w64-mingw32/bits/c++config.h \
+ C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/c++/x86_64-w64-mingw32/bits/os_defines.h \
+ C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/c++/x86_64-w64-mingw32/bits/cpu_defines.h \
+ C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/c++/pstl/pstl_config.h \
+ C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/stdint.h \
+ C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/stdint.h \
+ C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/crtdefs.h \
+ C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/corecrt.h \
  C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/_mingw.h \
  C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/_mingw_mac.h \
  C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/_mingw_secapi.h \
  C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/vadefs.h \
  C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/sdks/_mingw_ddk.h \
+ C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/stddef.h \
+ C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/stddef.h \
+ D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render3d/RenderBackend.h \
+ C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/windows.h \
  C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/sdkddkver.h \
  C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/excpt.h \
- C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/crtdefs.h \
- C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/corecrt.h \
  C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/stdarg.h \
  C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/stdarg.h \
  C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/_mingw_stdarg.h \
@@ -33,8 +43,6 @@ src/qtui/CMakeFiles/ro_qtui.dir/QtUiSpikeBridge.cpp.obj: \
  C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/x86intrin.h \
  C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/x86gprintrin.h \
  C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/ia32intrin.h \
- C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/stddef.h \
- C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/stddef.h \
  C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/adxintrin.h \
  C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/bmiintrin.h \
  C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/bmi2intrin.h \
@@ -77,10 +85,6 @@ src/qtui/CMakeFiles/ro_qtui.dir/QtUiSpikeBridge.cpp.obj: \
  C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/mm_malloc.h \
  C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/c++/stdlib.h \
  C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/c++/cstdlib \
- C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/c++/x86_64-w64-mingw32/bits/c++config.h \
- C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/c++/x86_64-w64-mingw32/bits/os_defines.h \
- C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/c++/x86_64-w64-mingw32/bits/cpu_defines.h \
- C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/c++/pstl/pstl_config.h \
  C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/stdlib.h \
  C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/corecrt_wstdlib.h \
  C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/limits.h \
@@ -286,9 +290,6 @@ src/qtui/CMakeFiles/ro_qtui.dir/QtUiSpikeBridge.cpp.obj: \
  C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/c++/bits/move.h \
  C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/c++/bits/utility.h \
  C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/c++/initializer_list \
- C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/c++/cstdint \
- C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/stdint.h \
- C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/stdint.h \
  C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/assert.h \
  C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/stdbool.h \
  C:/Qt/6.11.0/mingw_64/include/QtCore/qtcoreglobal.h \
@@ -524,6 +525,7 @@ src/qtui/CMakeFiles/ro_qtui.dir/QtUiSpikeBridge.cpp.obj: \
  C:/Qt/6.11.0/mingw_64/include/QtCore/qstringconverter.h \
  C:/Qt/6.11.0/mingw_64/include/QtCore/qstringconverter_base.h \
  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/DebugLog.h \
+ D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/platform/WindowsCompat.h \
  C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/c++/cstdarg \
  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/gamemode/GameMode.h \
  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/gamemode/Mode.h \
@@ -540,8 +542,6 @@ src/qtui/CMakeFiles/ro_qtui.dir/QtUiSpikeBridge.cpp.obj: \
  C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/c++/bits/stl_list.h \
  C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/c++/bits/list.tcc \
  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/gamemode/View.h \
- D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/main/WinMain.h \
- D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render3d/RenderBackend.h \
  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render3d/RenderDevice.h \
  C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/ddraw.h \
  C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/_mingw_dxhelper.h \
@@ -555,7 +555,7 @@ src/qtui/CMakeFiles/ro_qtui.dir/QtUiSpikeBridge.cpp.obj: \
  C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/c++/unordered_set \
  C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/c++/bits/unordered_set.h \
  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/skill/Skill.h \
- D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/ui/UILoginWnd.h \
+ D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/ui/UIEquipWnd.h \
  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/ui/UIFrameWnd.h \
  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/ui/UIWindow.h \
  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/ui/UIShopCommon.h \
@@ -627,11 +627,13 @@ src/qtui/CMakeFiles/ro_qtui.dir/QtUiSpikeBridge.cpp.obj: \
  C:/Qt/6.11.0/mingw_64/include/QtGui/qbrush.h \
  C:/Qt/6.11.0/mingw_64/include/QtGui/qfontinfo.h \
  C:/Qt/6.11.0/mingw_64/include/QtGui/qfontvariableaxis.h \
+ D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/ui/UILoginWnd.h \
  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/ui/UIMakeCharWnd.h \
  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/res/ActRes.h \
  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/res/ImfRes.h \
  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/res/Sprite.h \
  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/res/Texture.h \
+ D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render3d/Dx7Compat.h \
  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/ui/UIMinimapWnd.h \
  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/ui/UINotifyLevelUpWnd.h \
  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/ui/UISelectCharWnd.h \

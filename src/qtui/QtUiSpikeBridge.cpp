@@ -5,7 +5,6 @@
 #include "DebugLog.h"
 #include "gamemode/GameMode.h"
 #include "gamemode/View.h"
-#include "main/WinMain.h"
 #include "render3d/RenderBackend.h"
 #include "render3d/RenderDevice.h"
 #include "session/Session.h"
@@ -61,6 +60,11 @@ void EnsureQtUiResourcesInitialized()
 }
 
 namespace {
+
+RenderBackendType GetCurrentUiRenderBackend()
+{
+    return GetRenderDevice().GetBackendType();
+}
 
 bool TryBuildItemIconImage(unsigned int itemId, QImage* outImage)
 {
@@ -362,7 +366,7 @@ void BlendQtImageOntoBgraBuffer(const QImage& source, void* bgraPixels, int widt
 
 class QtUiRuntimeHost {
 public:
-    bool initialize(HWND mainWindow)
+    bool initialize(RoNativeWindowHandle mainWindow)
     {
         if (m_active) {
             return true;
@@ -442,8 +446,9 @@ public:
         QCoreApplication::processEvents(QEventLoop::AllEvents, 0);
     }
 
-    void notifyWindowMessage(UINT msg, WPARAM wParam, LPARAM lParam)
+    void notifyWindowMessage(RoWindowMessage msg, RoWindowWParam wParam, RoWindowLParam lParam)
     {
+#if RO_PLATFORM_WINDOWS
         switch (msg) {
         case WM_MOUSEMOVE:
             m_mouseX = static_cast<int>(static_cast<short>(LOWORD(lParam)));
@@ -475,15 +480,26 @@ public:
         if (m_stateAdapter && !m_lastInput.isEmpty()) {
             m_stateAdapter->setLastInput(m_lastInput);
         }
+#else
+        (void)msg;
+        (void)wParam;
+        (void)lParam;
+#endif
     }
 
-    bool handleWindowMessage(UINT msg, WPARAM wParam, LPARAM lParam)
+    bool handleWindowMessage(RoWindowMessage msg, RoWindowWParam wParam, RoWindowLParam lParam)
     {
         notifyWindowMessage(msg, wParam, lParam);
         if (!m_active) {
             return false;
         }
 
+#if !RO_PLATFORM_WINDOWS
+        (void)msg;
+        (void)wParam;
+        (void)lParam;
+        return false;
+#else
         switch (msg) {
         case WM_MOUSEMOVE:
             if (g_windowMgr.m_selectServerWnd && g_windowMgr.m_selectServerWnd->m_show != 0) {
@@ -621,6 +637,7 @@ public:
         default:
             return false;
         }
+#endif
     }
 
     bool compositeMenuOverlay(void* bgraPixels, int width, int height, int pitch)
@@ -676,10 +693,14 @@ public:
         bool rendered = false;
         switch (targetInfo.backend) {
         case RenderBackendType::Direct3D11:
+#if RO_HAS_NATIVE_D3D11
             rendered = renderToD3D11Texture(targetInfo, targetWidth, targetHeight);
+#endif
             break;
         case RenderBackendType::Direct3D12:
+#if RO_HAS_NATIVE_D3D12
             rendered = renderToD3D12Texture(targetInfo, targetWidth, targetHeight);
+#endif
             break;
         case RenderBackendType::Vulkan:
             rendered = renderToVulkanTexture(targetInfo, targetWidth, targetHeight);
@@ -761,10 +782,14 @@ public:
         bool rendered = false;
         switch (targetInfo.backend) {
         case RenderBackendType::Direct3D11:
+#if RO_HAS_NATIVE_D3D11
             rendered = renderToD3D11Texture(targetInfo, targetWidth, targetHeight);
+#endif
             break;
         case RenderBackendType::Direct3D12:
+#if RO_HAS_NATIVE_D3D12
             rendered = renderToD3D12Texture(targetInfo, targetWidth, targetHeight);
+#endif
             break;
         case RenderBackendType::Vulkan:
             rendered = renderToVulkanTexture(targetInfo, targetWidth, targetHeight);
@@ -801,13 +826,21 @@ private:
             return m_application != nullptr;
         }
 
-        if (GetActiveRenderBackend() == RenderBackendType::Vulkan) {
+        const RenderBackendType backend = GetCurrentUiRenderBackend();
+        if (backend == RenderBackendType::Vulkan) {
             QQuickWindow::setGraphicsApi(QSGRendererInterface::Vulkan);
-        } else if (GetActiveRenderBackend() == RenderBackendType::Direct3D11) {
+        }
+#if RO_HAS_NATIVE_D3D11
+        else if (backend == RenderBackendType::Direct3D11) {
             QQuickWindow::setGraphicsApi(QSGRendererInterface::Direct3D11);
-        } else if (GetActiveRenderBackend() == RenderBackendType::Direct3D12) {
+        }
+#endif
+#if RO_HAS_NATIVE_D3D12
+        else if (backend == RenderBackendType::Direct3D12) {
             QQuickWindow::setGraphicsApi(QSGRendererInterface::Direct3D12);
-        } else {
+        }
+#endif
+        else {
             QQuickWindow::setGraphicsApi(QSGRendererInterface::Software);
         }
         m_application = new QGuiApplication(m_argc, m_argv);
@@ -863,7 +896,7 @@ private:
         }
         return m_stateAdapter->syncGameplay(
             mode,
-            GetActiveRenderBackend(),
+            GetCurrentUiRenderBackend(),
             m_nativeOverlayBackend,
             m_mouseX,
             m_mouseY);
@@ -875,7 +908,7 @@ private:
             return false;
         }
         return m_stateAdapter->syncMenu(
-            GetActiveRenderBackend(),
+            GetCurrentUiRenderBackend(),
             m_nativeOverlayBackend);
     }
 
@@ -942,6 +975,7 @@ private:
         return true;
     }
 
+#if RO_HAS_NATIVE_D3D11
     bool ensureD3D11Renderer(const QtUiRenderTargetInfo& targetInfo)
     {
         if (m_nativeGraphicsInitialized) {
@@ -965,7 +999,9 @@ private:
         m_nativeGraphicsBackend = RenderBackendType::Direct3D11;
         return true;
     }
+#endif
 
+#if RO_HAS_NATIVE_D3D12
     bool ensureD3D12Renderer(const QtUiRenderTargetInfo& targetInfo)
     {
         if (m_nativeGraphicsInitialized) {
@@ -1000,6 +1036,7 @@ private:
         m_nativeGraphicsBackend = RenderBackendType::Direct3D12;
         return true;
     }
+#endif
 
     bool renderToVulkanTexture(const QtUiRenderTargetInfo& targetInfo, int width, int height)
     {
@@ -1035,6 +1072,7 @@ private:
         return true;
     }
 
+#if RO_HAS_NATIVE_D3D11
     bool renderToD3D11Texture(const QtUiRenderTargetInfo& targetInfo, int width, int height)
     {
         if (!m_renderControl || !m_quickWindow || !m_rootItem || width <= 0 || height <= 0
@@ -1067,7 +1105,9 @@ private:
         m_renderControl->endFrame();
         return true;
     }
+#endif
 
+#if RO_HAS_NATIVE_D3D12
     bool renderToD3D12Texture(const QtUiRenderTargetInfo& targetInfo, int width, int height)
     {
         if (!m_renderControl || !m_quickWindow || !m_rootItem || width <= 0 || height <= 0
@@ -1101,6 +1141,7 @@ private:
         m_renderControl->endFrame();
         return true;
     }
+#endif
 
     bool m_active = false;
     bool m_ownedApplication = false;
@@ -1112,7 +1153,7 @@ private:
     bool m_loggedGameplayCpuBridge = false;
     bool m_loggedMenuTextureUnavailable = false;
     bool m_loggedGameplayTextureUnavailable = false;
-    HWND m_mainWindow = nullptr;
+    RoNativeWindowHandle m_mainWindow = nullptr;
     int m_mouseX = 0;
     int m_mouseY = 0;
     MenuPointerCaptureTarget m_menuPointerCaptureTarget = MenuPointerCaptureTarget::None;
@@ -1163,7 +1204,7 @@ bool IsQtUiRuntimeEnabled()
 #endif
 }
 
-void InitializeQtUiRuntime(HWND mainWindow)
+void InitializeQtUiRuntime(RoNativeWindowHandle mainWindow)
 {
 #if RO_ENABLE_QT6_UI
     Runtime().initialize(mainWindow);
@@ -1186,7 +1227,7 @@ void ProcessQtUiRuntimeEvents()
 #endif
 }
 
-void NotifyQtUiRuntimeWindowMessage(UINT msg, WPARAM wParam, LPARAM lParam)
+void NotifyQtUiRuntimeWindowMessage(RoWindowMessage msg, RoWindowWParam wParam, RoWindowLParam lParam)
 {
 #if RO_ENABLE_QT6_UI
     Runtime().notifyWindowMessage(msg, wParam, lParam);
@@ -1197,7 +1238,7 @@ void NotifyQtUiRuntimeWindowMessage(UINT msg, WPARAM wParam, LPARAM lParam)
 #endif
 }
 
-bool HandleQtUiRuntimeWindowMessage(UINT msg, WPARAM wParam, LPARAM lParam)
+bool HandleQtUiRuntimeWindowMessage(RoWindowMessage msg, RoWindowWParam wParam, RoWindowLParam lParam)
 {
 #if RO_ENABLE_QT6_UI
     return Runtime().handleWindowMessage(msg, wParam, lParam);

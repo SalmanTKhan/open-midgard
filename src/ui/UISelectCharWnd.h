@@ -6,7 +6,7 @@
 
 #include <array>
 #include <string>
-#include <windows.h>
+#include "platform/WindowsCompat.h"
 
 class UIBitmapButton;
 class QImage;

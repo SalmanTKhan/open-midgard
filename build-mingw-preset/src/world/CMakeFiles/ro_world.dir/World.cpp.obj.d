@@ -2,6 +2,7 @@ src/world/CMakeFiles/ro_world.dir/World.cpp.obj: \
  D:\Spel\RoRebuild\Ragnarok___Win32_HighPriest2008_Release\src\world\World.cpp \
  D:\Spel\RoRebuild\Ragnarok___Win32_HighPriest2008_Release\src\world\World.h \
  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/Types.h \
+ D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/platform/WindowsCompat.h \
  C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/windows.h \
  C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/_mingw.h \
  C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/_mingw_mac.h \
@@ -368,6 +369,7 @@ src/world/CMakeFiles/ro_world.dir/World.cpp.obj: \
  C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/c++/bits/stl_multimap.h \
  C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/c++/bits/erase_if.h \
  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/res/Texture.h \
+ D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render3d/Dx7Compat.h \
  C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/ddraw.h \
  C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/_mingw_dxhelper.h \
  C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/d3d.h \

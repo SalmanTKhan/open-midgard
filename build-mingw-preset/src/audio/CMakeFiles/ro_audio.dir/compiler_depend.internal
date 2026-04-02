@@ -450,6 +450,7 @@ src/audio/CMakeFiles/ro_audio.dir/Audio.cpp.obj
  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/Types.h
  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/core/File.h
  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/core/Hash.h
+ D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/platform/WindowsCompat.h
  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/res/Res.h
  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/audio/Audio.h
  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/audio/AudioBackend.h
@@ -859,6 +860,7 @@ src/audio/CMakeFiles/ro_audio.dir/MilesAudioBackend.cpp.obj
  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/core/DllMgr.h
  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/core/DllProtos.h
  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/core/Hash.h
+ D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/platform/WindowsCompat.h
  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/res/Res.h
  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/audio/Audio.h
  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/audio/AudioBackend.h
@@ -1292,6 +1294,7 @@ src/audio/CMakeFiles/ro_audio.dir/MiniaudioBackend.cpp.obj
  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/Types.h
  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/core/File.h
  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/core/Hash.h
+ D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/platform/WindowsCompat.h
  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/res/Res.h
  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/audio/Audio.h
  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/audio/AudioBackend.h
@@ -1654,5 +1657,6 @@ src/audio/CMakeFiles/ro_audio.dir/Video.cpp.obj
  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/Types.h
  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/core/DllMgr.h
  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/core/DllProtos.h
+ D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/platform/WindowsCompat.h
  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/audio/Video.h
 

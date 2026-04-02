@@ -7,7 +7,7 @@
 
 #include <string>
 #include <vector>
-#include <windows.h>
+#include "platform/WindowsCompat.h"
 
 class UICheckBox;
 

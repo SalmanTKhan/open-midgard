@@ -285,6 +285,7 @@ src/render3d/CMakeFiles/ro_render3d.dir/RenderBackend.cpp.obj: \
  C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/float.h \
  C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/d3dcaps.h \
  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/DebugLog.h \
+ D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/platform/WindowsCompat.h \
  C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/c++/cstdio \
  C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/stdio.h \
  C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/corecrt_stdio_config.h \

@@ -1,6 +1,11 @@
 #pragma once
 
+#if RO_PLATFORM_WINDOWS
 #include <windows.h>
+using RoNativeWindowHandle = HWND;
+#else
+using RoNativeWindowHandle = void*;
+#endif
 
 enum class RenderBackendType {
     LegacyDirect3D7 = 0,
@@ -20,4 +25,4 @@ bool IsRenderBackendSupported(RenderBackendType backend);
 RenderBackendType GetConfiguredRenderBackend();
 bool SetConfiguredRenderBackend(RenderBackendType backend);
 RenderBackendType GetRequestedRenderBackend();
-bool InitializeRenderBackend(HWND hwnd, RenderBackendBootstrapResult* outResult);
+bool InitializeRenderBackend(RoNativeWindowHandle hwnd, RenderBackendBootstrapResult* outResult);

@@ -592,6 +592,7 @@ src/ui/CMakeFiles/ro_ui.dir/NpcDialogColoredText.cpp.obj: D:/Spel/RoRebuild/Ragn
   C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/wow64apiset.h \
   C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/wtypes.h \
   C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/wtypesbase.h \
+  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/platform/WindowsCompat.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render/DC.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/ui/NpcDialogColoredText.h
 
@@ -1199,8 +1200,11 @@ src/ui/CMakeFiles/ro_ui.dir/UIBasicInfoWnd.cpp.obj: D:/Spel/RoRebuild/Ragnarok__
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/core/File.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/core/Hash.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/item/Item.h \
+  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/platform/WindowsCompat.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/qtui/QtUiRuntime.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render/DC.h \
+  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render3d/Dx7Compat.h \
+  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render3d/RenderBackend.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/res/ActRes.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/res/Bitmap.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/res/Res.h \
@@ -1818,6 +1822,7 @@ src/ui/CMakeFiles/ro_ui.dir/UIChooseSellBuyWnd.cpp.obj: D:/Spel/RoRebuild/Ragnar
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/gamemode/Mode.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/item/Item.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/main/WinMain.h \
+  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/platform/WindowsCompat.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/qtui/QtUiRuntime.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render/DC.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render3d/RenderBackend.h \
@@ -2432,6 +2437,7 @@ src/ui/CMakeFiles/ro_ui.dir/UIChooseWnd.cpp.obj: D:/Spel/RoRebuild/Ragnarok___Wi
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/gamemode/Mode.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/item/Item.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/main/WinMain.h \
+  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/platform/WindowsCompat.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/qtui/QtUiRuntime.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render/DC.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render3d/RenderBackend.h \
@@ -3051,11 +3057,13 @@ src/ui/CMakeFiles/ro_ui.dir/UIEquipWnd.cpp.obj: D:/Spel/RoRebuild/Ragnarok___Win
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/gamemode/Mode.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/item/Item.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/main/WinMain.h \
+  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/platform/WindowsCompat.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/qtui/QtUiRuntime.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render/DC.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render/Renderer.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render3d/D3dutil.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render3d/Device.h \
+  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render3d/Dx7Compat.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render3d/RenderBackend.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/res/ActRes.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/res/Bitmap.h \
@@ -3674,6 +3682,7 @@ src/ui/CMakeFiles/ro_ui.dir/UIFrameWnd.cpp.obj: D:/Spel/RoRebuild/Ragnarok___Win
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/core/File.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/core/Hash.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/item/Item.h \
+  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/platform/WindowsCompat.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render/DC.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/res/Bitmap.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/res/Res.h \
@@ -4283,6 +4292,7 @@ src/ui/CMakeFiles/ro_ui.dir/UIItemPurchaseWnd.cpp.obj: D:/Spel/RoRebuild/Ragnaro
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/gamemode/Mode.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/item/Item.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/main/WinMain.h \
+  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/platform/WindowsCompat.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/qtui/QtUiRuntime.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render/DC.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render3d/RenderBackend.h \
@@ -4898,6 +4908,7 @@ src/ui/CMakeFiles/ro_ui.dir/UIItemSellWnd.cpp.obj: D:/Spel/RoRebuild/Ragnarok___
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/gamemode/Mode.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/item/Item.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/main/WinMain.h \
+  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/platform/WindowsCompat.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/qtui/QtUiRuntime.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render/DC.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render3d/RenderBackend.h \
@@ -5513,6 +5524,7 @@ src/ui/CMakeFiles/ro_ui.dir/UIItemShopWnd.cpp.obj: D:/Spel/RoRebuild/Ragnarok___
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/gamemode/Mode.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/item/Item.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/main/WinMain.h \
+  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/platform/WindowsCompat.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/qtui/QtUiRuntime.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render/DC.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render3d/RenderBackend.h \
@@ -6134,11 +6146,13 @@ src/ui/CMakeFiles/ro_ui.dir/UIItemWnd.cpp.obj: D:/Spel/RoRebuild/Ragnarok___Win3
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/gamemode/Mode.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/item/Item.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/main/WinMain.h \
+  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/platform/WindowsCompat.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/qtui/QtUiRuntime.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render/DC.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render/DrawUtil.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render/Renderer.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render3d/D3dutil.h \
+  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render3d/Dx7Compat.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render3d/RenderBackend.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/res/Bitmap.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/res/Res.h \
@@ -6750,8 +6764,10 @@ src/ui/CMakeFiles/ro_ui.dir/UILoadingWnd.cpp.obj: D:/Spel/RoRebuild/Ragnarok___W
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/core/File.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/core/Hash.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/item/Item.h \
+  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/platform/WindowsCompat.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/qtui/QtUiRuntime.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render/DC.h \
+  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render3d/RenderBackend.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/res/Bitmap.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/res/Res.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/ui/UILoadingWnd.h \
@@ -7360,6 +7376,7 @@ src/ui/CMakeFiles/ro_ui.dir/UILoginWnd.cpp.obj: D:/Spel/RoRebuild/Ragnarok___Win
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/gamemode/Mode.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/item/Item.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/main/WinMain.h \
+  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/platform/WindowsCompat.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/qtui/QtUiRuntime.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render/DC.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render3d/RenderBackend.h \
@@ -7980,11 +7997,13 @@ src/ui/CMakeFiles/ro_ui.dir/UIMakeCharWnd.cpp.obj: D:/Spel/RoRebuild/Ragnarok___
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/gamemode/Mode.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/item/Item.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/main/WinMain.h \
+  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/platform/WindowsCompat.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/qtui/QtUiRuntime.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render/DC.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render/Renderer.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render3d/D3dutil.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render3d/Device.h \
+  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render3d/Dx7Compat.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render3d/RenderBackend.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/res/ActRes.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/res/Bitmap.h \
@@ -8611,8 +8630,10 @@ src/ui/CMakeFiles/ro_ui.dir/UIMinimapWnd.cpp.obj: D:/Spel/RoRebuild/Ragnarok___W
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/gamemode/Mode.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/item/Item.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/main/WinMain.h \
+  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/platform/WindowsCompat.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/qtui/QtUiRuntime.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render/DC.h \
+  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render3d/Dx7Compat.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render3d/RenderBackend.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/res/ActRes.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/res/Bitmap.h \
@@ -9231,6 +9252,7 @@ src/ui/CMakeFiles/ro_ui.dir/UINewChatWnd.cpp.obj: D:/Spel/RoRebuild/Ragnarok___W
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/gamemode/Mode.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/item/Item.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/main/WinMain.h \
+  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/platform/WindowsCompat.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/qtui/QtUiRuntime.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render/DC.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render3d/RenderBackend.h \
@@ -9839,6 +9861,7 @@ src/ui/CMakeFiles/ro_ui.dir/UINotifyLevelUpWnd.cpp.obj: D:/Spel/RoRebuild/Ragnar
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/core/Hash.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/item/Item.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/main/WinMain.h \
+  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/platform/WindowsCompat.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/qtui/QtUiRuntime.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render/DC.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render3d/RenderBackend.h \
@@ -10452,6 +10475,7 @@ src/ui/CMakeFiles/ro_ui.dir/UINpcInputWnd.cpp.obj: D:/Spel/RoRebuild/Ragnarok___
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/gamemode/Mode.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/item/Item.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/main/WinMain.h \
+  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/platform/WindowsCompat.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/qtui/QtUiRuntime.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render/DC.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render3d/RenderBackend.h \
@@ -11064,6 +11088,7 @@ src/ui/CMakeFiles/ro_ui.dir/UINpcMenuWnd.cpp.obj: D:/Spel/RoRebuild/Ragnarok___W
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/gamemode/Mode.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/item/Item.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/main/WinMain.h \
+  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/platform/WindowsCompat.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/qtui/QtUiRuntime.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render/DC.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render3d/RenderBackend.h \
@@ -11675,6 +11700,7 @@ src/ui/CMakeFiles/ro_ui.dir/UIOptionWnd.cpp.obj: D:/Spel/RoRebuild/Ragnarok___Wi
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/core/Hash.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/item/Item.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/main/WinMain.h \
+  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/platform/WindowsCompat.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/qtui/QtUiRuntime.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render/DC.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render3d/GraphicsSettings.h \
@@ -12285,6 +12311,7 @@ src/ui/CMakeFiles/ro_ui.dir/UIRechargeGage.cpp.obj: D:/Spel/RoRebuild/Ragnarok__
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/core/Hash.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/item/Item.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/main/WinMain.h \
+  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/platform/WindowsCompat.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/qtui/QtUiRuntime.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render/DC.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render3d/RenderBackend.h \
@@ -12895,6 +12922,7 @@ src/ui/CMakeFiles/ro_ui.dir/UISayDialogWnd.cpp.obj: D:/Spel/RoRebuild/Ragnarok__
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/gamemode/Mode.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/item/Item.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/main/WinMain.h \
+  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/platform/WindowsCompat.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/qtui/QtUiRuntime.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render/DC.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render3d/RenderBackend.h \
@@ -13514,11 +13542,13 @@ src/ui/CMakeFiles/ro_ui.dir/UISelectCharWnd.cpp.obj: D:/Spel/RoRebuild/Ragnarok_
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/gamemode/Mode.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/item/Item.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/main/WinMain.h \
+  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/platform/WindowsCompat.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/qtui/QtUiRuntime.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render/DC.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render/Renderer.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render3d/D3dutil.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render3d/Device.h \
+  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render3d/Dx7Compat.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render3d/RenderBackend.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/res/ActRes.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/res/Bitmap.h \
@@ -14144,11 +14174,13 @@ src/ui/CMakeFiles/ro_ui.dir/UISelectServerWnd.cpp.obj: D:/Spel/RoRebuild/Ragnaro
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/gamemode/Mode.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/item/Item.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/main/WinMain.h \
+  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/platform/WindowsCompat.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/qtui/QtUiRuntime.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render/DC.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render/DrawUtil.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render/Renderer.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render3d/D3dutil.h \
+  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render3d/Dx7Compat.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render3d/RenderBackend.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/res/Bitmap.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/res/Res.h \
@@ -14761,6 +14793,7 @@ src/ui/CMakeFiles/ro_ui.dir/UIShortCutWnd.cpp.obj: D:/Spel/RoRebuild/Ragnarok___
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/gamemode/Mode.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/item/Item.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/main/WinMain.h \
+  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/platform/WindowsCompat.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/qtui/QtUiRuntime.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render/DC.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render3d/RenderBackend.h \
@@ -15374,6 +15407,7 @@ src/ui/CMakeFiles/ro_ui.dir/UISkillListWnd.cpp.obj: D:/Spel/RoRebuild/Ragnarok__
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/gamemode/Mode.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/item/Item.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/main/WinMain.h \
+  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/platform/WindowsCompat.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/qtui/QtUiRuntime.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render/DC.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render3d/RenderBackend.h \
@@ -15996,8 +16030,10 @@ src/ui/CMakeFiles/ro_ui.dir/UIStatusWnd.cpp.obj: D:/Spel/RoRebuild/Ragnarok___Wi
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/gamemode/Mode.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/item/Item.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/main/WinMain.h \
+  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/platform/WindowsCompat.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/qtui/QtUiRuntime.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render/DC.h \
+  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render3d/Dx7Compat.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render3d/RenderBackend.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/res/ActRes.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/res/Bitmap.h \
@@ -16612,8 +16648,10 @@ src/ui/CMakeFiles/ro_ui.dir/UIWaitWnd.cpp.obj: D:/Spel/RoRebuild/Ragnarok___Win3
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/core/File.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/core/Hash.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/item/Item.h \
+  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/platform/WindowsCompat.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/qtui/QtUiRuntime.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render/DC.h \
+  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render3d/RenderBackend.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/res/Bitmap.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/res/Res.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/ui/UIFrameWnd.h \
@@ -17222,6 +17260,7 @@ src/ui/CMakeFiles/ro_ui.dir/UIWindow.cpp.obj: D:/Spel/RoRebuild/Ragnarok___Win32
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/core/Hash.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/item/Item.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/main/WinMain.h \
+  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/platform/WindowsCompat.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/qtui/QtUiRuntime.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render/DC.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render3d/RenderBackend.h \
@@ -17842,11 +17881,13 @@ src/ui/CMakeFiles/ro_ui.dir/UIWindowMgr.cpp.obj: D:/Spel/RoRebuild/Ragnarok___Wi
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/gamemode/Mode.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/item/Item.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/main/WinMain.h \
+  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/platform/WindowsCompat.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/qtui/QtUiRuntime.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render/DC.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render/Renderer.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render3d/D3dutil.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render3d/Device.h \
+  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render3d/Dx7Compat.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render3d/GraphicsSettings.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render3d/RenderBackend.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render3d/RenderDevice.h \
@@ -17997,6 +18038,8 @@ C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/mmsyscom.h:
 C:/Qt/6.11.0/mingw_64/include/QtCore/qmalloc.h:
 
 C:/Qt/6.11.0/mingw_64/include/QtCore/q20utility.h:
+
+D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render3d/Dx7Compat.h:
 
 C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/sdks/_mingw_ddk.h:
 
@@ -18237,6 +18280,8 @@ C:/Qt/6.11.0/mingw_64/include/QtCore/qstringlist.h:
 C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/amxbf16intrin.h:
 
 D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/ui/UIRechargeGage.cpp:
+
+D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/platform/WindowsCompat.h:
 
 C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/commdlg.h:
 
@@ -19186,6 +19231,8 @@ D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/core/Hash.h:
 
 D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/qtui/QtUiRuntime.h:
 
+D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render3d/RenderBackend.h:
+
 D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/res/Bitmap.h:
 
 D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/res/Sprite.h:
@@ -19199,8 +19246,6 @@ D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/audio/Audio.h:
 D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/gamemode/GameMode.h:
 
 D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/gamemode/Mode.h:
-
-D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render3d/RenderBackend.h:
 
 D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/ui/UIChooseSellBuyWnd.h:
 

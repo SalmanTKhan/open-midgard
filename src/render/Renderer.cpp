@@ -37,6 +37,11 @@ bool ShouldLogGroundTextureName(const char* name)
 
 void LogUploadedTerrainSurfaceSamples(CTexture* tex, const char* name)
 {
+#if !RO_PLATFORM_WINDOWS
+    (void)tex;
+    (void)name;
+    return;
+#else
     if (!tex || !tex->m_pddsSurface) {
         return;
     }
@@ -87,6 +92,7 @@ void LogUploadedTerrainSurfaceSamples(CTexture* tex, const char* name)
     }
 
     tex->m_pddsSurface->Unlock(nullptr);
+#endif
 }
 
 std::string ResolveTexturePath(const char* name)
@@ -354,7 +360,9 @@ CTexture* CTexMgr::CreateTexture(unsigned long w, unsigned long h, PixelFormat f
     tex->m_backendTextureView = nullptr;
     tex->m_backendTextureUpload = nullptr;
     if (pSurface) {
+#if RO_PLATFORM_WINDOWS
         pSurface->AddRef();
+#endif
     }
     return tex;
 }

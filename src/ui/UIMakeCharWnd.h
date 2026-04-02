@@ -8,9 +8,10 @@
 #include "res/ImfRes.h"
 #include "res/Sprite.h"
 
+#include "platform/WindowsCompat.h"
+
 #include <array>
 #include <string>
-#include <windows.h>
 
 class UIEditCtrl;
 class UIBitmapButton;

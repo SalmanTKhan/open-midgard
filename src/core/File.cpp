@@ -7,7 +7,70 @@
 #include "Types.h"
 #include <string.h>
 #include <algorithm>
+#include <cstdio>
+#include <filesystem>
 #include "../DebugLog.h"
+
+namespace {
+
+#if !RO_PLATFORM_WINDOWS
+bool FileExistsPortable(const char* fileName)
+{
+    if (!fileName || !*fileName) {
+        return false;
+    }
+
+    std::error_code error;
+    return std::filesystem::exists(std::filesystem::path(fileName), error);
+}
+
+unsigned char* ReadWholeFilePortable(const char* fileName, int* outSize)
+{
+    if (outSize) {
+        *outSize = 0;
+    }
+    if (!fileName || !*fileName) {
+        return nullptr;
+    }
+
+    FILE* file = std::fopen(fileName, "rb");
+    if (!file) {
+        return nullptr;
+    }
+
+    if (std::fseek(file, 0, SEEK_END) != 0) {
+        std::fclose(file);
+        return nullptr;
+    }
+
+    const long size = std::ftell(file);
+    if (size < 0 || std::fseek(file, 0, SEEK_SET) != 0) {
+        std::fclose(file);
+        return nullptr;
+    }
+
+    unsigned char* buffer = new unsigned char[static_cast<size_t>(size) + 1];
+    if (!buffer) {
+        std::fclose(file);
+        return nullptr;
+    }
+
+    const size_t bytesRead = std::fread(buffer, 1, static_cast<size_t>(size), file);
+    std::fclose(file);
+    if (bytesRead != static_cast<size_t>(size)) {
+        delete[] buffer;
+        return nullptr;
+    }
+
+    buffer[size] = 0;
+    if (outSize) {
+        *outSize = static_cast<int>(size);
+    }
+    return buffer;
+}
+#endif
+
+} // namespace
 
 // ---------------------------------------------------------------------------
 // CFileMgr
@@ -62,8 +125,13 @@ bool CFileMgr::IsDataExist(const char* fileName)
             return true;
     }
 
+#if RO_PLATFORM_WINDOWS
     if (GetFileAttributesA(fileName) != INVALID_FILE_ATTRIBUTES)
         return true;
+#else
+    if (FileExistsPortable(fileName))
+        return true;
+#endif
 
     return false;
 }
@@ -94,6 +162,7 @@ unsigned char* CFileMgr::GetData(const char* fileName, int* outSize)
         delete[] buf;
     }
 
+#if RO_PLATFORM_WINDOWS
     HANDLE hFile = CreateFileA(fileName, GENERIC_READ, FILE_SHARE_READ,
                                nullptr, OPEN_EXISTING,
                                FILE_ATTRIBUTE_NORMAL, nullptr);
@@ -113,6 +182,11 @@ unsigned char* CFileMgr::GetData(const char* fileName, int* outSize)
         }
         CloseHandle(hFile);
     }
+#else
+    if (unsigned char* buf = ReadWholeFilePortable(fileName, outSize)) {
+        return buf;
+    }
+#endif
     return nullptr;
 }
 
@@ -145,10 +219,16 @@ bool CFile::Open(const char* fileName, int mode)
 
     if (mode & modeWrite)
     {
+#if RO_PLATFORM_WINDOWS
         m_hFile = CreateFileA(fileName, GENERIC_WRITE, FILE_SHARE_READ,
                               nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
         if (m_hFile == INVALID_HANDLE_VALUE) return false;
         m_size = GetFileSize(m_hFile, nullptr);
+#else
+        m_hFile = std::fopen(fileName, "wb");
+        if (!m_hFile) return false;
+        m_size = 0;
+#endif
         return true;
     }
 
@@ -164,10 +244,14 @@ bool CFile::Open(const char* fileName, int mode)
 
 bool CFile::Read(void* buffer, u32 count)
 {
-    if (m_hFile != INVALID_HANDLE_VALUE)
+    if (m_hFile)
     {
+#if RO_PLATFORM_WINDOWS
         DWORD bytesRead = 0;
         return ReadFile(m_hFile, buffer, (DWORD)count, &bytesRead, nullptr) != FALSE;
+#else
+        return std::fread(buffer, 1, count, static_cast<FILE*>(m_hFile)) == count;
+#endif
     }
     if (!m_buf) return false;
     if (m_cursor + count > m_size) return false;
@@ -179,18 +263,28 @@ bool CFile::Read(void* buffer, u32 count)
 
 bool CFile::Write(const void* buffer, u32 count)
 {
-    if (m_hFile == INVALID_HANDLE_VALUE) return false;
+    if (!m_hFile) return false;
+#if RO_PLATFORM_WINDOWS
     DWORD written = 0;
     return WriteFile(m_hFile, buffer, (DWORD)count, &written, nullptr) != FALSE;
+#else
+    const size_t written = std::fwrite(buffer, 1, count, static_cast<FILE*>(m_hFile));
+    m_size += static_cast<u32>(written);
+    return written == count;
+#endif
 }
 
 bool CFile::Seek(int offset, int origin)
 {
-    if (m_hFile != INVALID_HANDLE_VALUE)
+    if (m_hFile)
     {
+#if RO_PLATFORM_WINDOWS
         LARGE_INTEGER move{};
         move.QuadPart = static_cast<LONGLONG>(offset);
         return SetFilePointerEx(m_hFile, move, nullptr, static_cast<DWORD>(origin)) != FALSE;
+#else
+        return std::fseek(static_cast<FILE*>(m_hFile), offset, origin) == 0;
+#endif
     }
     if (!m_buf) return false;
 
@@ -209,10 +303,14 @@ bool CFile::Seek(int offset, int origin)
 
 void CFile::Close()
 {
-    if (m_hFile != INVALID_HANDLE_VALUE)
+    if (m_hFile)
     {
+#if RO_PLATFORM_WINDOWS
         CloseHandle(m_hFile);
-        m_hFile = INVALID_HANDLE_VALUE;
+#else
+        std::fclose(static_cast<FILE*>(m_hFile));
+#endif
+        m_hFile = nullptr;
     }
     if (m_buf)
     {
@@ -231,10 +329,14 @@ int CFile::Size() { return (int)m_size; }
 // ---------------------------------------------------------------------------
 CMemMapFile::CMemMapFile()
 {
+#if RO_PLATFORM_WINDOWS
     SYSTEM_INFO si;
     GetSystemInfo(&si);
     m_dwAllocationGranularity = si.dwAllocationGranularity;
-    m_hFile = INVALID_HANDLE_VALUE;
+#else
+    m_dwAllocationGranularity = 4096;
+#endif
+    m_hFile = nullptr;
     m_hFileMap = nullptr;
     m_pFile = nullptr;
     m_dwFileSize = 0;
@@ -255,6 +357,7 @@ u32 CMemMapFile::size()
 
 const u8* CMemMapFile::read(u32 offset, u32 len)
 {
+#if RO_PLATFORM_WINDOWS
     if (offset < m_dwOpenOffset || (offset + len) > (m_dwOpenOffset + m_dwOpenSize))
     {
         if (m_pFile) UnmapViewOfFile(m_pFile);
@@ -270,10 +373,17 @@ const u8* CMemMapFile::read(u32 offset, u32 len)
         m_dwOpenSize   = viewSize;
     }
     return m_pFile + (offset - m_dwOpenOffset);
+#else
+    if (offset > m_dwFileSize || len > (m_dwFileSize - offset)) {
+        return nullptr;
+    }
+    return m_pFileBuf.data() + offset;
+#endif
 }
 
 bool CMemMapFile::open(const char* fileName)
 {
+#if RO_PLATFORM_WINDOWS
     m_hFile = CreateFileA(fileName, GENERIC_READ, FILE_SHARE_READ,
                           nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
     if (m_hFile == INVALID_HANDLE_VALUE) return false;
@@ -298,16 +408,39 @@ bool CMemMapFile::open(const char* fileName)
     m_dwOpenOffset = 0;
     m_dwOpenSize = viewSize;
     return true;
+#else
+    close();
+    int fileSize = 0;
+    unsigned char* data = ReadWholeFilePortable(fileName, &fileSize);
+    if (!data) {
+        return false;
+    }
+
+    m_pFileBuf.assign(data, data + fileSize);
+    delete[] data;
+    m_dwFileSize = static_cast<u32>(fileSize);
+    m_dwOpenOffset = 0;
+    m_dwOpenSize = m_dwFileSize;
+    m_pFile = m_pFileBuf.data();
+    return true;
+#endif
 }
 
 void CMemMapFile::close()
 {
+#if RO_PLATFORM_WINDOWS
     if (m_pFile)    { UnmapViewOfFile(m_pFile); m_pFile = nullptr; }
     if (m_hFileMap) { CloseHandle(m_hFileMap);  m_hFileMap = nullptr; }
-    if (m_hFile != INVALID_HANDLE_VALUE)
+    if (m_hFile)
     {
         CloseHandle(m_hFile);
-        m_hFile = INVALID_HANDLE_VALUE;
+        m_hFile = nullptr;
     }
+#else
+    m_hFile = nullptr;
+    m_hFileMap = nullptr;
+    m_pFile = nullptr;
+    m_pFileBuf.clear();
+#endif
     m_dwFileSize = 0;
 }

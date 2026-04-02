@@ -73,7 +73,7 @@ void LogViewMovePerfIfNeeded()
     }
 
     const double frameCount = static_cast<double>(g_viewMovePerfStats.frames);
-    const double hoverCallCount = static_cast<double>((std::max)(1ull, g_viewMovePerfStats.hoverCalls));
+    const double hoverCallCount = static_cast<double>((std::max)(u64{1}, g_viewMovePerfStats.hoverCalls));
     DbgLog("[ViewPerfHiRes] moveFrames=%llu interp=%.3fms hoverFrame=%.3fms hoverCalls=%llu hoverCall=%.3fms ground=%.3fms actors=%.3fms background=%.3fms\n",
         static_cast<unsigned long long>(g_viewMovePerfStats.frames),
         g_viewMovePerfStats.interpolateMs / frameCount,

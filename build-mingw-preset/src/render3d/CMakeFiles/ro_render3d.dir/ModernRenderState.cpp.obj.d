@@ -1,40 +1,24 @@
 src/render3d/CMakeFiles/ro_render3d.dir/ModernRenderState.cpp.obj: \
  D:\Spel\RoRebuild\Ragnarok___Win32_HighPriest2008_Release\src\render3d\ModernRenderState.cpp \
  D:\Spel\RoRebuild\Ragnarok___Win32_HighPriest2008_Release\src\render3d\ModernRenderState.h \
- C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/d3d.h \
- C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/c++/stdlib.h \
- C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/c++/cstdlib \
- C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/c++/x86_64-w64-mingw32/bits/c++config.h \
- C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/c++/x86_64-w64-mingw32/bits/os_defines.h \
- C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/c++/x86_64-w64-mingw32/bits/cpu_defines.h \
- C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/c++/pstl/pstl_config.h \
- C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/stdlib.h \
- C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/corecrt.h \
+ D:\Spel\RoRebuild\Ragnarok___Win32_HighPriest2008_Release\src\render3d\Dx7Compat.h \
+ D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/Types.h \
+ D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/platform/WindowsCompat.h \
+ C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/windows.h \
  C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/_mingw.h \
  C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/_mingw_mac.h \
  C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/_mingw_secapi.h \
  C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/vadefs.h \
  C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/sdks/_mingw_ddk.h \
- C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/corecrt_wstdlib.h \
- C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/limits.h \
- C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/syslimits.h \
- C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/limits.h \
- C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/crtdefs.h \
- C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/sec_api/stdlib_s.h \
- C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/malloc.h \
- C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/mm_malloc.h \
- C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/errno.h \
- C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/c++/bits/std_abs.h \
- C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/objbase.h \
- C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/winapifamily.h \
- C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/rpc.h \
- C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/windows.h \
  C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/sdkddkver.h \
  C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/excpt.h \
+ C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/crtdefs.h \
+ C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/corecrt.h \
  C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/stdarg.h \
  C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/stdarg.h \
  C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/_mingw_stdarg.h \
  C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/windef.h \
+ C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/winapifamily.h \
  C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/minwindef.h \
  C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/specstrings.h \
  C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/sal.h \
@@ -93,6 +77,22 @@ src/render3d/CMakeFiles/ro_render3d.dir/ModernRenderState.cpp.obj: \
  C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/immintrin.h \
  C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/mmintrin.h \
  C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/xmmintrin.h \
+ C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/mm_malloc.h \
+ C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/c++/stdlib.h \
+ C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/c++/cstdlib \
+ C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/c++/x86_64-w64-mingw32/bits/c++config.h \
+ C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/c++/x86_64-w64-mingw32/bits/os_defines.h \
+ C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/c++/x86_64-w64-mingw32/bits/cpu_defines.h \
+ C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/c++/pstl/pstl_config.h \
+ C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/stdlib.h \
+ C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/corecrt_wstdlib.h \
+ C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/limits.h \
+ C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/syslimits.h \
+ C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/limits.h \
+ C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/sec_api/stdlib_s.h \
+ C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/malloc.h \
+ C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/c++/bits/std_abs.h \
+ C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/errno.h \
  C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/emmintrin.h \
  C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/pmmintrin.h \
  C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/tmmintrin.h \
@@ -221,6 +221,7 @@ src/render3d/CMakeFiles/ro_render3d.dir/ModernRenderState.cpp.obj: \
  C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/timeapi.h \
  C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/joystickapi.h \
  C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/nb30.h \
+ C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/rpc.h \
  C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/rpcdce.h \
  C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/rpcdcep.h \
  C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/rpcnsi.h \
@@ -249,13 +250,10 @@ src/render3d/CMakeFiles/ro_render3d.dir/ModernRenderState.cpp.obj: \
  C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/rpcndr.h \
  C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/rpcnsip.h \
  C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/rpcsal.h \
- C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/wtypesbase.h \
- C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/winioctl.h \
- C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/winsmcrd.h \
- C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/winspool.h \
- C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/prsht.h \
  C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/ole2.h \
+ C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/objbase.h \
  C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/combaseapi.h \
+ C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/wtypesbase.h \
  C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/unknwnbase.h \
  C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/objidlbase.h \
  C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/cguid.h \
@@ -268,17 +266,29 @@ src/render3d/CMakeFiles/ro_render3d.dir/ModernRenderState.cpp.obj: \
  C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/oaidl.h \
  C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/propidl.h \
  C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/oleauto.h \
+ C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/winioctl.h \
+ C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/winsmcrd.h \
+ C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/winspool.h \
+ C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/prsht.h \
  C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/commdlg.h \
  C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/stralign.h \
  C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/sec_api/stralign_s.h \
  C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/winsvc.h \
  C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/mcx.h \
  C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/imm.h \
+ C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/c++/cstdint \
+ C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/stdint.h \
+ C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/stdint.h \
+ C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/c++/cstddef \
+ C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/c++/cstring \
+ C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/c++/cassert \
+ C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/assert.h \
+ C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/ddraw.h \
+ C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/_mingw_dxhelper.h \
+ C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/d3d.h \
  C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/d3dtypes.h \
  C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/float.h \
  C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/float.h \
- C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/ddraw.h \
- C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/_mingw_dxhelper.h \
  C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/d3dcaps.h \
  C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/c++/vector \
  C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/c++/bits/requires_hosted.h \
@@ -323,7 +333,6 @@ src/render3d/CMakeFiles/ro_render3d.dir/ModernRenderState.cpp.obj: \
  C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/c++/bits/range_access.h \
  C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/c++/bits/vector.tcc \
  C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/c++/bits/memory_resource.h \
- C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/c++/cstddef \
  C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/c++/bits/uses_allocator.h \
  C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/c++/bits/uses_allocator_args.h \
  C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/c++/tuple

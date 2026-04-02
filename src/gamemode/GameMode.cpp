@@ -2295,8 +2295,8 @@ void LogGameModeMovePerfIfNeeded()
     }
 
     const double frameCount = static_cast<double>(g_gameModeMovePerfStats.frames);
-    const double skillCalls = static_cast<double>((std::max)(1ull, g_gameModeMovePerfStats.skillRechargeCalls));
-    const double cursorCalls = static_cast<double>((std::max)(1ull, g_gameModeMovePerfStats.cursorCalls));
+    const double skillCalls = static_cast<double>((std::max)(u64{1}, g_gameModeMovePerfStats.skillRechargeCalls));
+    const double cursorCalls = static_cast<double>((std::max)(u64{1}, g_gameModeMovePerfStats.cursorCalls));
     DbgLog("[GameModePerfHiRes] moveFrames=%llu skillRecharge=%.3fms skillCalls=%llu skillCall=%.3fms cursor=%.3fms cursorCalls=%llu cursorCall=%.3fms\n",
         static_cast<unsigned long long>(g_gameModeMovePerfStats.frames),
         g_gameModeMovePerfStats.skillRechargeMs / frameCount,
@@ -8064,7 +8064,7 @@ int  CGameMode::OnRun() {
 
     if (trackMovePerfFrame && (g_overlayMovePerfStats.frames % 30u) == 0) {
         const double frameCount = static_cast<double>(g_overlayMovePerfStats.frames);
-        const double refreshCount = static_cast<double>((std::max)(1ull, g_overlayMovePerfStats.modernRefreshes));
+        const double refreshCount = static_cast<double>((std::max)(u64{1}, g_overlayMovePerfStats.modernRefreshes));
         DbgLog("[OverlayPerfHiRes] moveFrames=%llu queueModern=%.3fms queueRoMap=%.3fms queueLocked=%.3fms queueMsg=%.3fms queueCursor=%.3fms refreshes=%llu overlayDraw=%.3fms uiDraw=%.3fms convert=%.3fms texUpdate=%.3fms fallbackOverlay=%.3fms fallbackMsg=%.3fms fallbackUi=%.3fms fallbackCursorHdc=%.3fms fallbackCursor=%.3fms flip=%.3fms\n",
             static_cast<unsigned long long>(g_overlayMovePerfStats.frames),
             g_overlayMovePerfStats.queueModernMs / frameCount,

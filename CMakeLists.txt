@@ -1,6 +1,10 @@
 cmake_minimum_required(VERSION 3.20)
 project(OpenMidgard VERSION 2008.0 LANGUAGES CXX)
 
+if(NOT WIN32)
+    include_directories(BEFORE ${CMAKE_CURRENT_SOURCE_DIR}/src/platform/win32)
+endif()
+
 # ─── Toolchain requirements ────────────────────────────────────────────────
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -21,6 +25,8 @@ option(RO_ENABLE_QT6_UI "Enable the Qt 6 / QML GPU UI runtime" OFF)
 option(RO_ENABLE_QT6_UI_SPIKE "Deprecated alias for RO_ENABLE_QT6_UI" OFF)
 option(RO_QT_UI_DEFAULT_ENABLED "Enable the Qt UI runtime by default unless OPEN_MIDGARD_QT_UI overrides it" OFF)
 option(RO_QT_UI_SPIKE_DEFAULT_ENABLED "Deprecated alias for RO_QT_UI_DEFAULT_ENABLED" OFF)
+option(RO_ENABLE_NATIVE_D3D11 "Enable the native Direct3D 11 backend when supported" ON)
+option(RO_ENABLE_NATIVE_D3D12 "Enable the native Direct3D 12 backend when supported" ON)
 set(RO_QT_ROOT "" CACHE PATH "Compiler-compatible Qt 6 kit root (for example C:/Qt/6.11.0/msvc2022_64)")
 set(RO_QT_WINDEPLOYQT_EXECUTABLE "" CACHE FILEPATH "Path to the matching windeployqt.exe")
 
@@ -49,9 +55,22 @@ endif()
 
 message(STATUS "Target architecture : ${RO_TARGET_ARCH}")
 
-add_definitions(-DWIN32 -D_WINDOWS -DUNICODE -D_UNICODE -DNOMINMAX)
-add_definitions(-D_CRT_SECURE_NO_WARNINGS -D_CRT_NONSTDC_NO_DEPRECATE)
+if(WIN32)
+    add_definitions(-DWIN32 -D_WINDOWS -DUNICODE -D_UNICODE -DNOMINMAX)
+    add_definitions(-D_CRT_SECURE_NO_WARNINGS -D_CRT_NONSTDC_NO_DEPRECATE)
+endif()
+
+if(WIN32)
+    set(RO_PLATFORM_WINDOWS 1)
+    set(RO_VULKAN_USE_WIN32_SURFACE 1)
+else()
+    set(RO_PLATFORM_WINDOWS 0)
+    set(RO_VULKAN_USE_WIN32_SURFACE 0)
+endif()
+
 add_compile_definitions(
+    RO_PLATFORM_WINDOWS=${RO_PLATFORM_WINDOWS}
+    RO_VULKAN_USE_WIN32_SURFACE=${RO_VULKAN_USE_WIN32_SURFACE}
     RO_ENABLE_MILES_AUDIO=$<BOOL:${RO_ENABLE_MILES_AUDIO}>
     RO_ENABLE_BINK_VIDEO=$<BOOL:${RO_ENABLE_BINK_VIDEO}>
     RO_ENABLE_GRANNY=$<BOOL:${RO_ENABLE_GRANNY}>
@@ -76,10 +95,17 @@ if(MSVC)
     add_compile_options(/W3 /MP /Zc:__cplusplus)
     # Disable warnings that are unavoidable in a decompiler-origin codebase
     add_compile_options(/wd4100 /wd4189 /wd4996)
+endif()
+
+if(WIN32 AND MSVC AND RO_ENABLE_NATIVE_D3D11)
     set(RO_HAS_NATIVE_D3D11 1)
-    set(RO_HAS_NATIVE_D3D12 1)
 else()
     set(RO_HAS_NATIVE_D3D11 0)
+endif()
+
+if(WIN32 AND MSVC AND RO_ENABLE_NATIVE_D3D12)
+    set(RO_HAS_NATIVE_D3D12 1)
+else()
     set(RO_HAS_NATIVE_D3D12 0)
 endif()
 
@@ -127,7 +153,13 @@ add_subdirectory(src/security)
 add_subdirectory(src/main)
 
 # ─── Final executable ─────────────────────────────────────────────────────
-add_executable(open_midgard WIN32 src/main/WinMain.cpp)
+set(RO_APP_MAIN_SOURCE src/main/WinMain.cpp)
+if(WIN32)
+    add_executable(open_midgard WIN32 ${RO_APP_MAIN_SOURCE})
+else()
+    set(RO_APP_MAIN_SOURCE src/main/AppMain_stub.cpp)
+    add_executable(open_midgard ${RO_APP_MAIN_SOURCE})
+endif()
 set_target_properties(open_midgard PROPERTIES OUTPUT_NAME "open-midgard")
 
 target_link_libraries(open_midgard PRIVATE
@@ -149,18 +181,22 @@ target_link_libraries(open_midgard PRIVATE
     ro_core
     ro_security
     ro_lua
-    # Windows system libraries
-    winmm.lib
-    dxguid.lib
-    ole32.lib
-    oleaut32.lib
-    psapi.lib
 )
 
-if(MINGW)
-    target_link_libraries(open_midgard PRIVATE msimg32)
-else()
-    target_link_libraries(open_midgard PRIVATE msimg32.lib)
+if(WIN32)
+    target_link_libraries(open_midgard PRIVATE
+        winmm.lib
+        dxguid.lib
+        ole32.lib
+        oleaut32.lib
+        psapi.lib
+    )
+
+    if(MINGW)
+        target_link_libraries(open_midgard PRIVATE msimg32)
+    else()
+        target_link_libraries(open_midgard PRIVATE msimg32.lib)
+    endif()
 endif()
 
 if(RO_ENABLE_QT6_UI)

@@ -6,3 +6,4 @@ HighPriest.exe.utf8.h
 .vscode/
 build/
 build64/
+build-mingw-preset/

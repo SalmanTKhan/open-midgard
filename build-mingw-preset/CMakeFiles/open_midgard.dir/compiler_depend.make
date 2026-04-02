@@ -628,12 +628,14 @@ CMakeFiles/open_midgard.dir/src/main/WinMain.cpp.obj: D:/Spel/RoRebuild/Ragnarok
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/item/Item.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/network/Connection.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/network/PacketQueue.h \
+  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/platform/WindowsCompat.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/qtui/QtUiRuntime.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render/DC.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render/Prim.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render/Renderer.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render3d/D3dutil.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render3d/Device.h \
+  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render3d/Dx7Compat.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render3d/GraphicsSettings.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render3d/RenderBackend.h \
   D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render3d/RenderDevice.h \
@@ -760,6 +762,8 @@ C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/mmsyscom.h:
 C:/Qt/6.11.0/mingw_64/include/QtCore/qmalloc.h:
 
 C:/Qt/6.11.0/mingw_64/include/QtCore/q20utility.h:
+
+D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render3d/Dx7Compat.h:
 
 C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/sdks/_mingw_ddk.h:
 
@@ -1008,6 +1012,8 @@ C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/combaseapi.h:
 C:/Qt/6.11.0/mingw_64/include/QtCore/qstringlist.h:
 
 C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/amxbf16intrin.h:
+
+D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/platform/WindowsCompat.h:
 
 C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/commdlg.h:
 

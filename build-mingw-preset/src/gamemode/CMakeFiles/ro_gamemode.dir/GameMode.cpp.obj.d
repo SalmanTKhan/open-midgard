@@ -281,6 +281,7 @@ src/gamemode/CMakeFiles/ro_gamemode.dir/GameMode.cpp.obj: \
  C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/psdk_inc/_ip_mreq1.h \
  C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/mstcpip.h \
  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/Types.h \
+ D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/platform/WindowsCompat.h \
  C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/c++/cstdint \
  C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/stdint.h \
  C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/stdint.h \
@@ -420,6 +421,7 @@ src/gamemode/CMakeFiles/ro_gamemode.dir/GameMode.cpp.obj: \
  C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/c++/bits/list.tcc \
  D:\Spel\RoRebuild\Ragnarok___Win32_HighPriest2008_Release\src\gamemode\View.h \
  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/qtui/QtUiRuntime.h \
+ D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render3d/RenderBackend.h \
  D:\Spel\RoRebuild\Ragnarok___Win32_HighPriest2008_Release\src\gamemode\GameModePacket.h \
  C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/c++/functional \
  C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/c++/bits/std_function.h \
@@ -450,6 +452,7 @@ src/gamemode/CMakeFiles/ro_gamemode.dir/GameMode.cpp.obj: \
  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/res/PaletteRes.h \
  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/res/Sprite.h \
  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/res/Texture.h \
+ D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render3d/Dx7Compat.h \
  C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/ddraw.h \
  C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/_mingw_dxhelper.h \
  C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/d3d.h \
@@ -653,7 +656,6 @@ src/gamemode/CMakeFiles/ro_gamemode.dir/GameMode.cpp.obj: \
  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render/Prim.h \
  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render3d/Device.h \
  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render3d/RenderDevice.h \
- D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/render3d/RenderBackend.h \
  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/world/GameActor.h \
  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/world/Granny.h \
  D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/src/world/MsgEffect.h \

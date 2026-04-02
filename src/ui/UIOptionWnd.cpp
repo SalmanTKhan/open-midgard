@@ -600,12 +600,12 @@ void UIOptionWnd::RefreshResolutionEntries()
             }
         }
         if (!exists) {
-            m_resolutionEntries.push_back({ static_cast<int>(displayMode.dmPelsWidth), static_cast<int>(displayMode.dmPelsHeight) });
+            m_resolutionEntries.push_back(ResolutionEntry{ static_cast<int>(displayMode.dmPelsWidth), static_cast<int>(displayMode.dmPelsHeight) });
         }
     }
 
     if (FindResolutionIndex(m_graphicsSettings.width, m_graphicsSettings.height) < 0) {
-        m_resolutionEntries.push_back({ m_graphicsSettings.width, m_graphicsSettings.height });
+        m_resolutionEntries.push_back(ResolutionEntry{ m_graphicsSettings.width, m_graphicsSettings.height });
     }
 
     std::sort(m_resolutionEntries.begin(), m_resolutionEntries.end(), [](const ResolutionEntry& lhs, const ResolutionEntry& rhs) {

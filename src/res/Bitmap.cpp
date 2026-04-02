@@ -2,8 +2,10 @@
 #include "DebugLog.h"
 #include "core/File.h"
 
+#if RO_PLATFORM_WINDOWS
 #include <objidl.h>
 #include <wincodec.h>
+#endif
 
 #include <algorithm>
 #include <cctype>
@@ -12,7 +14,9 @@
 #include <string>
 #include <vector>
 
+#if RO_PLATFORM_WINDOWS
 #pragma comment(lib, "windowscodecs.lib")
+#endif
 
 void ErrorMsg(const char* msg);
 
@@ -315,6 +319,7 @@ bool LoadStandardBmp(CBitmapRes& bitmapRes, const unsigned char* bitmap, int siz
 
 bool EnsureWicAvailable()
 {
+#if RO_PLATFORM_WINDOWS
     static bool s_initialized = false;
     static bool s_available = false;
     if (!s_initialized) {
@@ -323,8 +328,12 @@ bool EnsureWicAvailable()
         s_initialized = true;
     }
     return s_available;
+#else
+    return false;
+#endif
 }
 
+#if RO_PLATFORM_WINDOWS
 IWICImagingFactory* GetWicFactory()
 {
     static IWICImagingFactory* s_factory = nullptr;
@@ -417,6 +426,15 @@ bool DecodeImageWithWic(const unsigned char* buffer, int size, int& outW, int& o
     outData = pixels.release();
     return true;
 }
+#else
+bool DecodeImageWithWic(const unsigned char*, int, int& outW, int& outH, u32*& outData)
+{
+    outW = 0;
+    outH = 0;
+    outData = nullptr;
+    return false;
+}
+#endif
 
 bool LoadImageFromMemory(const unsigned char* buffer, int size, int& outW, int& outH, u32*& outData)
 {

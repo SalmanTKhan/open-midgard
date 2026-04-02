@@ -3,8 +3,8 @@
 #include "UIFrameWnd.h"
 #include "UIShopCommon.h"
 #include "render/DC.h"
+#include "platform/WindowsCompat.h"
 #include <string>
-#include <windows.h>
 #include <array>
 
 class UILoginWnd : public UIFrameWnd {

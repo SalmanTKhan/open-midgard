@@ -153,13 +153,24 @@ bool BuildExecutableRelativePath(const char* relativePath, char* outPath, size_t
         return false;
     }
 
-    char* lastSlash = std::strrchr(modulePath, '\\');
+    char* lastBackslash = std::strrchr(modulePath, '\\');
+    char* lastForwardSlash = std::strrchr(modulePath, '/');
+    char* lastSlash = lastBackslash;
+    if (!lastSlash || (lastForwardSlash && lastForwardSlash > lastSlash)) {
+        lastSlash = lastForwardSlash;
+    }
     if (!lastSlash) {
         return false;
     }
     lastSlash[1] = '\0';
 
+#if RO_PLATFORM_WINDOWS
     const int written = std::snprintf(outPath, outPathSize, "%s%s", modulePath, relativePath);
+#else
+    std::string normalizedRelative(relativePath);
+    std::replace(normalizedRelative.begin(), normalizedRelative.end(), '\\', '/');
+    const int written = std::snprintf(outPath, outPathSize, "%s%s", modulePath, normalizedRelative.c_str());
+#endif
     return written > 0 && static_cast<size_t>(written) < outPathSize;
 }
 

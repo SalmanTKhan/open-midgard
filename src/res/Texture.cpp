@@ -284,10 +284,14 @@ CSurface::CSurface(unsigned int w, unsigned int h, IDirectDrawSurface7* pSurface
     : m_pddsSurface(pSurface), m_w(w), m_h(h) {}
 
 CSurface::~CSurface() {
+#if RO_PLATFORM_WINDOWS
     if (m_pddsSurface) {
         m_pddsSurface->Release();
         m_pddsSurface = nullptr;
     }
+#else
+    m_pddsSurface = nullptr;
+#endif
 }
 
 bool CSurface::Create(unsigned int w, unsigned int h) {
@@ -300,6 +304,13 @@ void CSurface::ClearSurface(RECT* r, unsigned int col) {(void)r; (void)col;}
 void CSurface::DrawSurface(int x, int y, int w, int h, unsigned int flags) {(void)x; (void)y; (void)w; (void)h; (void)flags;}
 
 void CSurface::DrawSurfaceStretch(int x, int y, int w, int h) {
+#if !RO_PLATFORM_WINDOWS
+    (void)x;
+    (void)y;
+    (void)w;
+    (void)h;
+    return;
+#else
     DbgLog("[DrawSurfaceStretch] pixels=%p hWnd=%p x=%d y=%d w=%d h=%d\n",
            (const void*)GetSoftwarePixels(), (void*)GetRenderDevice().GetWindowHandle(), x, y, w, h);
     if (!HasSoftwarePixels() || !GetRenderDevice().GetWindowHandle()) {
@@ -336,6 +347,7 @@ void CSurface::DrawSurfaceStretch(int x, int y, int w, int h) {
     DbgLog("[DrawSurfaceStretch] StretchBlt(%d,%d,%d,%d from %dx%d) -> %d (err=%lu)\n",
            x, y, w, h, static_cast<int>(m_w), static_cast<int>(m_h), blitOk, blitOk == GDI_ERROR ? GetLastError() : 0UL);
     ReleaseDC(GetRenderDevice().GetWindowHandle(), target);
+#endif
 }
 
 void CSurface::Update(int x, int y, int w, int h, unsigned int* data, bool b, int p) {
