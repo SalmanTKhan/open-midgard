@@ -43,6 +43,8 @@ constexpr float kPlayerBillboardDepthWorldBiasMin = 0.75f;
 constexpr float kPlayerBillboardDepthWorldBiasMax = 3.0f;
 constexpr float kPlayerBillboardDepthHeightBiasFactor = 0.45f;
 constexpr float kPlayerBillboardTopDepthForwardBiasScale = 0.85f;
+constexpr int kActorLabelBaseYOffset = 4;
+constexpr int kPlayerLabelBaseYOffset = 22;
 constexpr float kGroundItemScreenScale = 1.6f;
 constexpr unsigned short kGroundQuadIndices[6] = { 0, 1, 2, 0, 2, 3 };
 constexpr bool kSubmitGroundSideFaces = true;
@@ -5065,7 +5067,7 @@ bool CWorld::GetPlayerScreenLabel(const matrix& viewMatrix,
         *outLabelX = static_cast<int>(std::lround(projectedBase.x));
     }
     if (outLabelY) {
-        *outLabelY = static_cast<int>(std::lround(projectedBase.y)) + 18;
+        *outLabelY = static_cast<int>(std::lround(projectedBase.y)) + kPlayerLabelBaseYOffset;
     }
     return true;
 }
@@ -5108,13 +5110,13 @@ bool CWorld::GetActorScreenMarker(const matrix& viewMatrix,
         const float zoom = m_ground ? m_ground->m_zoom : static_cast<float>(m_attr ? m_attr->m_zoom : 5);
         if (BuildBillboardRenderEntry(pc, viewMatrix, cameraLongitude, zoom, &liveEntry)) {
             if (outCenterX) {
-                *outCenterX = static_cast<int>(std::lround(liveEntry.labelX));
+                *outCenterX = static_cast<int>(std::lround(liveEntry.baseX));
             }
             if (outTopY) {
                 *outTopY = static_cast<int>(std::lround(liveEntry.top));
             }
             if (outLabelY) {
-                *outLabelY = static_cast<int>(std::lround(liveEntry.labelY));
+                *outLabelY = static_cast<int>(std::lround(liveEntry.baseY)) + kActorLabelBaseYOffset;
             }
             return true;
         }
@@ -5132,7 +5134,7 @@ bool CWorld::GetActorScreenMarker(const matrix& viewMatrix,
         *outTopY = static_cast<int>(std::lround(projectedBase.y)) - 48;
     }
     if (outLabelY) {
-        *outLabelY = static_cast<int>(std::lround(projectedBase.y));
+        *outLabelY = static_cast<int>(std::lround(projectedBase.y)) + kActorLabelBaseYOffset;
     }
     return true;
 }
@@ -5170,10 +5172,10 @@ bool CWorld::FindHoveredActorScreen(const matrix& viewMatrix,
                 *outActor = playerPc;
             }
             if (outLabelX) {
-                *outLabelX = static_cast<int>(std::lround(playerEntry.labelX));
+                *outLabelX = static_cast<int>(std::lround(playerEntry.baseX));
             }
             if (outLabelY) {
-                *outLabelY = static_cast<int>(std::lround(playerEntry.labelY));
+                *outLabelY = static_cast<int>(std::lround(playerEntry.baseY)) + kActorLabelBaseYOffset;
             }
             return true;
         }
@@ -5202,7 +5204,7 @@ bool CWorld::FindHoveredActorScreen(const matrix& viewMatrix,
                 *outLabelX = static_cast<int>(std::lround(it->baseX));
             }
             if (outLabelY) {
-                *outLabelY = static_cast<int>(std::lround(it->baseY));
+                *outLabelY = static_cast<int>(std::lround(it->baseY)) + kActorLabelBaseYOffset;
             }
             return true;
         }
@@ -5236,7 +5238,7 @@ bool CWorld::FindHoveredActorScreen(const matrix& viewMatrix,
             *outLabelX = static_cast<int>(std::lround(stickyEntry->baseX));
         }
         if (outLabelY) {
-            *outLabelY = static_cast<int>(std::lround(stickyEntry->baseY));
+            *outLabelY = static_cast<int>(std::lround(stickyEntry->baseY)) + kActorLabelBaseYOffset;
         }
         return true;
     }

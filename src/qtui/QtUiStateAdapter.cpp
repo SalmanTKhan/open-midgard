@@ -54,6 +54,7 @@
 namespace {
 
 constexpr DWORD kHoverNameRequestCooldownMs = 1000;
+constexpr int kQtActorLabelVerticalOffset = 10;
 
 QString ToQString(const std::string& value)
 {
@@ -2221,12 +2222,13 @@ bool QtUiStateAdapter::syncGameplay(CGameMode& mode,
                 &labelY)) {
             if (!hoveredActor || hoveredActor->m_gid != mode.m_lastLockOnMonGid) {
                 int anchorX = labelX;
-                int anchorY = labelY + 4;
+                int anchorY = labelY + kQtActorLabelVerticalOffset;
                 if (hoveredActor == mode.m_world->m_player || hoveredActor->m_gid == g_session.m_gid) {
                     mode.m_world->GetPlayerScreenLabel(viewMatrix, cameraLongitude, &anchorX, &anchorY);
+                    anchorY += kQtActorLabelVerticalOffset;
                 } else {
                     mode.m_world->GetActorScreenMarker(viewMatrix, cameraLongitude, hoveredActor->m_gid, &anchorX, nullptr, &anchorY);
-                    anchorY += 4;
+                    anchorY += kQtActorLabelVerticalOffset;
                 }
                 anchors.push_back(MakeCenteredAnchor(ToQString(ResolveActorLabel(mode, hoveredActor)),
                     anchorX,
@@ -2270,7 +2272,7 @@ bool QtUiStateAdapter::syncGameplay(CGameMode& mode,
                             true));
                         anchors.push_back(MakeCenteredAnchor(lockLabel,
                             labelX,
-                            labelY + 4,
+                            labelY + kQtActorLabelVerticalOffset,
                             QStringLiteral("#c05a1620"),
                             ResolveHoverForeground(actorIt->second)));
                     }
