@@ -1365,6 +1365,48 @@ bool UIEquipWnd::GetQtSystemButtonDisplayForQt(int index, QtButtonDisplay* outDa
     }
 }
 
+bool UIEquipWnd::BuildQtPreviewImage(QImage* outImage) const
+{
+#if RO_ENABLE_QT6_UI
+    if (!outImage) {
+        return false;
+    }
+
+    constexpr int kPreviewWidth = kCenterPanelRight - kCenterPanelLeft;
+    constexpr int kPreviewHeight = kCenterPanelBottom - kCenterPanelTop;
+    ArgbDibSurface previewSurface;
+    if (!previewSurface.EnsureSize(kPreviewWidth, kPreviewHeight)) {
+        outImage->fill(Qt::transparent);
+        return false;
+    }
+
+    std::memset(
+        previewSurface.GetBits(),
+        0,
+        static_cast<size_t>(kPreviewWidth) * static_cast<size_t>(kPreviewHeight) * sizeof(unsigned int));
+
+    const RECT previewRect{ 0, 0, kPreviewWidth, kPreviewHeight };
+    DrawEquipPreviewPlayerSpriteFitted(previewSurface.GetDC(), previewRect);
+
+    const QImage source(
+        reinterpret_cast<const uchar*>(previewSurface.GetBits()),
+        kPreviewWidth,
+        kPreviewHeight,
+        kPreviewWidth * static_cast<int>(sizeof(unsigned int)),
+        QImage::Format_ARGB32);
+    *outImage = source.copy();
+    return !outImage->isNull();
+#else
+    (void)outImage;
+    return false;
+#endif
+}
+
+unsigned long long UIEquipWnd::GetQtPreviewRevision() const
+{
+    return BuildVisualStateToken();
+}
+
 void UIEquipWnd::EnsureCreated()
 {
     if (!m_controlsCreated) {

@@ -1562,6 +1562,9 @@ void PopulateEquipState(QtUiState* state)
     QVariantMap data;
     if (equipWnd->GetDisplayDataForQt(&display)) {
         data.insert(QStringLiteral("title"), QStringLiteral("Equipment"));
+        data.insert(
+            QStringLiteral("previewRevision"),
+            QString::number(static_cast<qulonglong>(equipWnd->GetQtPreviewRevision())));
         QVariantList systemButtons;
         systemButtons.reserve(equipWnd->GetQtSystemButtonCount());
         for (int index = 0; index < equipWnd->GetQtSystemButtonCount(); ++index) {

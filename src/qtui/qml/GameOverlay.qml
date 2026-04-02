@@ -10,6 +10,11 @@ Item {
         return itemId > 0 ? "image://openmidgard/item/" + itemId : ""
     }
 
+    function equipPreviewSource() {
+        const revision = uiState.equipData.previewRevision || "0"
+        return "image://openmidgard/equippreview?rev=" + revision
+    }
+
     function makeCharPanelButtonsKey() {
         var buttons = uiState && uiState.makeCharButtons ? uiState.makeCharButtons : []
         var key = ""
@@ -1895,6 +1900,15 @@ Item {
                 color: "#d8d0c2"
                 border.width: 1
                 border.color: "#9d9488"
+
+                Image {
+                    anchors.fill: parent
+                    anchors.margins: 3
+                    fillMode: Image.PreserveAspectFit
+                    smooth: false
+                    cache: false
+                    source: parent.visible ? root.equipPreviewSource() : ""
+                }
             }
 
             Repeater {
@@ -1931,13 +1945,17 @@ Item {
 
                     Text {
                         x: modelData.leftColumn ? (modelData.width + 4) : 0
-                        y: 4
-                        width: modelData.leftColumn ? (width - modelData.width - 4) : (width - modelData.width - 4)
+                        y: 0
+                        width: width - modelData.width - 4
+                        height: parent.height
                         text: modelData.occupied ? modelData.label : ""
                         color: "#000000"
                         font.pixelSize: 10
+                        font.bold: modelData.hovered
                         horizontalAlignment: modelData.leftColumn ? Text.AlignLeft : Text.AlignRight
+                        verticalAlignment: Text.AlignVCenter
                         elide: Text.ElideRight
+                        visible: modelData.occupied
                     }
                 }
             }

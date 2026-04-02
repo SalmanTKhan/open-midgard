@@ -9,6 +9,7 @@
 #include <vector>
 
 class UIBitmapButton;
+class QImage;
 struct ITEM_INFO;
 
 class UIEquipWnd : public UIFrameWnd {
@@ -61,6 +62,8 @@ public:
     bool GetHoveredItemForQt(shopui::ItemHoverInfo* outData) const;
     int GetQtSystemButtonCount() const;
     bool GetQtSystemButtonDisplayForQt(int index, QtButtonDisplay* outData) const;
+    bool BuildQtPreviewImage(QImage* outImage) const;
+    unsigned long long GetQtPreviewRevision() const;
 
 private:
     void EnsureCreated();

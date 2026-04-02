@@ -9,6 +9,7 @@
 #include "render3d/RenderBackend.h"
 #include "render3d/RenderDevice.h"
 #include "session/Session.h"
+#include "ui/UIEquipWnd.h"
 #include "ui/UILoginWnd.h"
 #include "ui/UIMakeCharWnd.h"
 #include "ui/UIMinimapWnd.h"
@@ -267,6 +268,11 @@ public:
             const unsigned int itemId = baseId.mid(QStringLiteral("item/").size()).toUInt(&ok);
             if (ok) {
                 TryBuildItemIconImage(itemId, &image);
+            }
+        } else if (baseId == QStringLiteral("equippreview")) {
+            const UIEquipWnd* const equipWnd = g_windowMgr.m_equipWnd;
+            if (equipWnd && equipWnd->m_show != 0 && !equipWnd->IsMiniMode()) {
+                equipWnd->BuildQtPreviewImage(&image);
             }
         } else if (baseId == QStringLiteral("wallpaper")) {
             if (g_windowMgr.m_wallpaperSurface && g_windowMgr.m_wallpaperSurface->HasSoftwarePixels()) {
