@@ -1476,7 +1476,7 @@ void HandleGroundItemDisappear(CGameMode& mode, const PacketView& packet)
     }
 }
 
-void HandleItemRemove(CGameMode&, const PacketView& packet)
+void HandleItemRemove(CGameMode& mode, const PacketView& packet)
 {
     if (!packet.data) {
         return;
@@ -1501,6 +1501,10 @@ void HandleItemRemove(CGameMode&, const PacketView& packet)
         break;
     default:
         return;
+    }
+
+    if (mode.m_waitingItemThrowAck == static_cast<int>(itemIndex)) {
+        mode.m_waitingItemThrowAck = 0;
     }
 
     g_session.RemoveInventoryItem(itemIndex, amount);
@@ -2809,15 +2813,13 @@ void StartAttackAnimation(CGameActor* actor, CGameActor* target, int attackMT)
         return;
     }
 
-    const int action = actor->m_isPc ? 80 : 16;
     actor->m_isSitting = 0;
     actor->m_targetGid = target ? target->m_gid : 0;
     StopActorMovementForAction(actor);
     FaceActorTowardTarget(actor, target);
+    actor->SetState(kGameActorAttackStateId);
     actor->m_stateStartTick = timeGetTime();
     actor->SetModifyFactorOfmotionSpeed(attackMT);
-    actor->SetAction(action, 4, 1);
-    actor->m_stateId = kGameActorAttackStateId;
     actor->ProcessMotion();
     actor->m_attackMotion = static_cast<float>(actor->GetAttackMotion());
 
@@ -2826,22 +2828,21 @@ void StartAttackAnimation(CGameActor* actor, CGameActor* target, int attackMT)
     }
 }
 
-void StartLocalPickupAnimation(CGameMode& mode, u32 objectAid)
+void StartPickupAnimation(CGameMode& mode, CGameActor* actor, u32 objectAid)
 {
-    if (!mode.m_world || !mode.m_world->m_player || objectAid == 0) {
+    if (!mode.m_world || !actor || objectAid == 0 || !actor->m_isPc) {
         return;
     }
 
-    CPlayer* player = mode.m_world->m_player;
-    player->m_isSitting = 0;
-    player->m_targetGid = 0;
-    StopActorMovementForAction(player);
+    actor->m_isSitting = 0;
+    actor->m_targetGid = 0;
+    StopActorMovementForAction(actor);
 
     for (CItem* item : mode.m_world->m_itemList) {
         if (!item || item->m_aid != objectAid) {
             continue;
         }
-        FaceActorTowardPosition(player, item->m_pos);
+        FaceActorTowardPosition(actor, item->m_pos);
         break;
     }
 
@@ -2849,12 +2850,22 @@ void StartLocalPickupAnimation(CGameMode& mode, u32 objectAid)
     // and type 3 for stand. Our PC act bands are directional groups of 8, and
     // 16 maps to sit in practice, so use the next directional band for pickup.
     constexpr int kPlayerPickupAction = 24;
-    player->m_stateStartTick = timeGetTime();
-    player->m_attackMotion = -1.0f;
-    player->SetAction(kPlayerPickupAction, 0, 1);
-    player->m_stateId = kGameActorAttackStateId;
-    player->ProcessMotion();
-    player->InvalidateBillboard();
+    actor->m_stateStartTick = timeGetTime();
+    actor->m_attackMotion = -1.0f;
+    actor->SetAction(kPlayerPickupAction, 0, 1);
+    actor->m_stateId = kGameActorAttackStateId;
+    actor->ProcessMotion();
+
+    if (CPc* pcActor = dynamic_cast<CPc*>(actor)) {
+        pcActor->InvalidateBillboard();
+    }
+}
+
+void StartLocalPickupAnimation(CGameMode& mode, u32 objectAid)
+{
+    StartPickupAnimation(mode,
+        mode.m_world ? static_cast<CGameActor*>(mode.m_world->m_player) : nullptr,
+        objectAid);
 }
 
 void StartSitStandAnimation(CGameActor* actor, bool sitting)
@@ -3001,7 +3012,7 @@ void HandleActorActionNotify(CGameMode& mode, const PacketView& packet)
         mode.m_aidList[dstGid] = GetTickCount();
     }
 
-    if (!IsAttackNotifyType(actionType) && actionType != 2 && actionType != 3) {
+    if (!IsAttackNotifyType(actionType) && actionType != 1 && actionType != 2 && actionType != 3) {
         static std::map<u32, bool> s_loggedUnsupportedActNotifyTypes;
         const u32 unsupportedKey = (static_cast<u32>(packet.packetId) << 8) | static_cast<u32>(actionType);
         if (!s_loggedUnsupportedActNotifyTypes[unsupportedKey]) {
@@ -3035,6 +3046,16 @@ void HandleActorActionNotify(CGameMode& mode, const PacketView& packet)
         static_cast<void*>(targetActor),
         sourceActor->m_isPc,
         targetActor ? targetActor->m_isPc : 0);
+
+    if (actionType == 1) {
+        StartPickupAnimation(mode, sourceActor, dstGid);
+        DbgLog("[GameMode] act notify pickup opcode=0x%04X src=%u item=%u action=%d\n",
+            packet.packetId,
+            srcGid,
+            dstGid,
+            sourceActor->m_curAction);
+        return;
+    }
 
     if (actionType == 2 || actionType == 3) {
         StartSitStandAnimation(sourceActor, actionType == 2);
@@ -3333,10 +3354,9 @@ void StartSkillSourceAnimation(CGameActor* actor, const vector3d* targetPos, int
     if (targetPos) {
         FaceActorTowardPosition(actor, *targetPos);
     }
+    actor->SetState(kGameActorAttackStateId);
     actor->m_stateStartTick = timeGetTime();
     actor->SetModifyFactorOfmotionSpeed(attackMotionMs > 0 ? attackMotionMs : kDefaultAttackMotionTime);
-    actor->SetAction(actor->m_isPc ? 80 : 16, 4, 1);
-    actor->m_stateId = kGameActorAttackStateId;
     actor->ProcessMotion();
     actor->m_attackMotion = static_cast<float>(actor->GetAttackMotion());
     InvalidateActorBillboard(actor);

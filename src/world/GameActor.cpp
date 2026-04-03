@@ -195,6 +195,58 @@ float ActorRotationDegreesFromDir(int dir)
     return NormalizeAngle360(45.0f * static_cast<float>(dir & 7));
 }
 
+bool IsDualWeaponPcJob(int job)
+{
+    return job == 12 || job == 4013 || job == 4035;
+}
+
+int ResolvePcAttackWeaponValue(const CGameActor& actor)
+{
+    const CPc* pcActor = dynamic_cast<const CPc*>(&actor);
+    const bool isPc = actor.m_isPc != 0 && pcActor != nullptr;
+    if (!isPc) {
+        return 0;
+    }
+
+    int weaponValue = pcActor->m_weapon;
+
+    const bool isLocalPlayer = actor.m_gid != 0
+        && (actor.m_gid == g_session.m_gid || actor.m_gid == g_session.m_aid);
+    if (isLocalPlayer) {
+        const unsigned int primaryWeaponItemId = g_session.GetEquippedRightHandWeaponItemId();
+        const unsigned int secondaryWeaponItemId = g_session.GetEquippedLeftHandWeaponItemId();
+        if (primaryWeaponItemId != 0 || secondaryWeaponItemId != 0) {
+            weaponValue = primaryWeaponItemId != 0
+                ? static_cast<int>(primaryWeaponItemId)
+                : static_cast<int>(secondaryWeaponItemId);
+            if (IsDualWeaponPcJob(actor.m_job) && secondaryWeaponItemId != 0) {
+                weaponValue = g_session.MakeWeaponTypeByItemId(
+                    static_cast<int>(primaryWeaponItemId),
+                    static_cast<int>(secondaryWeaponItemId));
+            }
+            return weaponValue;
+        }
+    }
+
+    if (IsDualWeaponPcJob(actor.m_job) && pcActor->m_shield != 0) {
+        int secondaryWeaponType = pcActor->m_shield;
+        if (secondaryWeaponType > 31) {
+            secondaryWeaponType = g_session.GetWeaponTypeByItemId(secondaryWeaponType);
+        }
+        if (secondaryWeaponType > 0) {
+            return (pcActor->m_weapon & 0xFFFF) | ((pcActor->m_shield & 0xFFFF) << 16);
+        }
+    }
+
+    return weaponValue;
+}
+
+int ResolvePcAttackAction(const CGameActor& actor)
+{
+    const int weaponValue = ResolvePcAttackWeaponValue(actor);
+    return g_session.IsSecondAttack(actor.m_job, actor.m_sex, weaponValue) ? 88 : 80;
+}
+
 bool IsMonsterLikeWaveActor(const CGameActor& actor)
 {
     return actor.m_job >= kMonsterJobMin
@@ -3473,7 +3525,7 @@ void CGameActor::SetState(int state) {
         m_isMoving = 0;
         m_path.Reset();
         m_isMotionFinished = 0;
-        SetAction(m_isPc != 0 ? 80 : 16, 4, 1);
+        SetAction(m_isPc != 0 ? ResolvePcAttackAction(*this) : 16, 4, 1);
         SetModifyFactorOfmotionSpeed(1440);
         m_attackMotion = static_cast<float>(GetAttackMotion());
         return;
@@ -3489,12 +3541,7 @@ void CGameActor::SetState(int state) {
         m_isMotionFinished = 0;
         m_isCounter = 0;
         if (m_isPc != 0) {
-            const int weaponId = g_session.GetEquippedRightHandWeaponItemId();
-            if (g_session.IsSecondAttack(m_job, m_sex, weaponId)) {
-                SetAction(88, 4, 1);
-            } else {
-                SetAction(80, 4, 1);
-            }
+            SetAction(ResolvePcAttackAction(*this), 4, 1);
         } else {
             SetAction(16, 4, 1);
         }
