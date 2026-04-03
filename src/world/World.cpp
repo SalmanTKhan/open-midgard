@@ -34,6 +34,18 @@
 CWorld g_world;
 
 namespace {
+double WorldNowMs()
+{
+    static LARGE_INTEGER freq = [] {
+        LARGE_INTEGER value{};
+        QueryPerformanceFrequency(&value);
+        return value;
+    }();
+    LARGE_INTEGER now{};
+    QueryPerformanceCounter(&now);
+    return static_cast<double>(now.QuadPart) * 1000.0 / static_cast<double>(freq.QuadPart);
+}
+
 constexpr int kSceneGraphMaxLevel = 2;
 constexpr float kNearPlane = 10.0f;
 constexpr float kGroundSubmitNearPlane = 80.0f;
@@ -67,6 +79,10 @@ constexpr float kFixedEffectBaseHeightOffset = 0.0f;
 constexpr float kBackgroundObjectCullNearZ = kNearPlane;
 constexpr float kBackgroundObjectCullFarZ = 6000.0f;
 constexpr float kBackgroundObjectCullPadding = 32.0f;
+constexpr float kBackgroundTinyPropCullNearZ = 350.0f;
+constexpr float kBackgroundTinyPropCullFarZ = 700.0f;
+constexpr float kBackgroundTinyPropMinProjectedRadiusNear = 14.0f;
+constexpr float kBackgroundTinyPropMinProjectedRadiusFar = 24.0f;
 constexpr u32 kBackgroundAnimNearInterval = 1;
 constexpr u32 kBackgroundAnimMidInterval = 2;
 constexpr u32 kBackgroundAnimFarInterval = 4;
@@ -2001,10 +2017,67 @@ bool IsWorldSphereVisible(const vector3d& worldPos, float worldRadius, const mat
         && projectedY <= static_cast<float>(g_renderer.m_height) + projectedRadius;
 }
 
-bool ShouldRenderBackgroundActor(const C3dActor& actor, const matrix& viewMatrix)
+bool IsBackgroundActorVisible(const C3dActor& actor,
+    const matrix& viewMatrix,
+    float* outProjectedRadius = nullptr,
+    float* outClipZ = nullptr)
 {
     const float worldRadius = (std::max)(1.0f, actor.m_boundRadius * (std::max)(1.0f, MaxBackgroundActorScale(actor)));
-    return IsWorldSphereVisible(actor.m_pos, worldRadius, viewMatrix);
+    const float clipX = actor.m_pos.x * viewMatrix.m[0][0]
+        + actor.m_pos.y * viewMatrix.m[1][0]
+        + actor.m_pos.z * viewMatrix.m[2][0]
+        + viewMatrix.m[3][0];
+    const float clipY = actor.m_pos.x * viewMatrix.m[0][1]
+        + actor.m_pos.y * viewMatrix.m[1][1]
+        + actor.m_pos.z * viewMatrix.m[2][1]
+        + viewMatrix.m[3][1];
+    const float clipZ = actor.m_pos.x * viewMatrix.m[0][2]
+        + actor.m_pos.y * viewMatrix.m[1][2]
+        + actor.m_pos.z * viewMatrix.m[2][2]
+        + viewMatrix.m[3][2];
+
+    if (outClipZ) {
+        *outClipZ = clipZ;
+    }
+    if (!std::isfinite(clipZ) || clipZ < (kBackgroundObjectCullNearZ - worldRadius) || clipZ > (kBackgroundObjectCullFarZ + worldRadius)) {
+        return false;
+    }
+
+    const float projectedX = g_renderer.m_xoffset + clipX * g_renderer.m_hpc / clipZ;
+    const float projectedY = g_renderer.m_yoffset + clipY * g_renderer.m_vpc / clipZ;
+    const float projectedRadius = (std::max)(
+        kBackgroundObjectCullPadding,
+        worldRadius * ((std::max)(std::fabs(g_renderer.m_hpc), std::fabs(g_renderer.m_vpc)) / clipZ));
+
+    if (outProjectedRadius) {
+        *outProjectedRadius = projectedRadius;
+    }
+
+    return projectedX >= -projectedRadius
+        && projectedX <= static_cast<float>(g_renderer.m_width) + projectedRadius
+        && projectedY >= -projectedRadius
+        && projectedY <= static_cast<float>(g_renderer.m_height) + projectedRadius;
+}
+
+bool ShouldRenderBackgroundActor(const C3dActor& actor, const matrix& viewMatrix)
+{
+    float projectedRadius = 0.0f;
+    float clipZ = 0.0f;
+    if (!IsBackgroundActorVisible(actor, viewMatrix, &projectedRadius, &clipZ)) {
+        return false;
+    }
+
+    if (actor.m_animType == 0 && actor.m_boundRadius <= 24.0f && clipZ >= kBackgroundTinyPropCullNearZ) {
+        const float t = (std::min)(1.0f,
+            (std::max)(0.0f, (clipZ - kBackgroundTinyPropCullNearZ) / (kBackgroundTinyPropCullFarZ - kBackgroundTinyPropCullNearZ)));
+        const float minProjectedRadius = kBackgroundTinyPropMinProjectedRadiusNear
+            + (kBackgroundTinyPropMinProjectedRadiusFar - kBackgroundTinyPropMinProjectedRadiusNear) * t;
+        if (projectedRadius < minProjectedRadius) {
+            return false;
+        }
+    }
+
+    return true;
 }
 
 bool ResolveGameObjectCullSphere(const CGameObject& object, vector3d* outCenter, float* outRadius)
@@ -4840,6 +4913,7 @@ void CWorld::RenderGameObjects(const matrix& viewMatrix, u32* outRenderedObjects
 {
     u32 renderedObjects = 0;
     u32 renderedFixedEffects = 0;
+    const double renderStartMs = WorldNowMs();
     for (CGameObject* object : m_gameObjectList) {
         if (!object) {
             continue;
@@ -4859,6 +4933,7 @@ void CWorld::RenderGameObjects(const matrix& viewMatrix, u32* outRenderedObjects
     if (outRenderedFixedEffects) {
         *outRenderedFixedEffects = renderedFixedEffects;
     }
+    m_lastRenderStats.gameObjectRenderMs = WorldNowMs() - renderStartMs;
 }
 
 void CWorld::UpdateBackgroundObjects(const matrix* viewMatrix)
@@ -4965,6 +5040,8 @@ void CWorld::ProcessActorSkillRechargeGages(const matrix& viewMatrix, float came
 
 void CWorld::RenderActors(const matrix& viewMatrix, float cameraLongitude)
 {
+    m_lastRenderStats = RenderDebugStats{};
+
     u32 renderedObjects = 0;
     u32 renderedFixedEffects = 0;
     RenderGameObjects(viewMatrix, &renderedObjects, &renderedFixedEffects);
@@ -4997,19 +5074,27 @@ void CWorld::RenderActors(const matrix& viewMatrix, float cameraLongitude)
         pc->LaunchEffect(desiredEffectId, vector3d{ 0.0f, 0.0f, 0.0f }, 0.0f);
     };
 
+    const double itemRenderStartMs = WorldNowMs();
+    u32 renderedItems = 0;
     for (CItem* item : m_itemList) {
         if (!item) {
             continue;
         }
         item->Render(const_cast<matrix*>(&viewMatrix));
+        renderedItems += 1;
     }
+    m_lastRenderStats.renderedItems = renderedItems;
+    m_lastRenderStats.itemRenderMs = WorldNowMs() - itemRenderStartMs;
 
+    const double portalBootstrapStartMs = WorldNowMs();
+    u32 portalBootstrapActors = 0;
     for (CGameActor* actor : m_actorList) {
         if (!actor) {
             continue;
         }
         CPc* pc = dynamic_cast<CPc*>(actor);
         if (pc) {
+            portalBootstrapActors += 1;
             ensurePortalActorEffect(pc);
         }
         if (!actor->m_isVisible) {
@@ -5025,8 +5110,13 @@ void CWorld::RenderActors(const matrix& viewMatrix, float cameraLongitude)
 
     if (m_player) {
         CPc* pc = dynamic_cast<CPc*>(m_player);
+        if (pc) {
+            portalBootstrapActors += 1;
+        }
         ensurePortalActorEffect(pc);
     }
+    m_lastRenderStats.portalBootstrapActors = portalBootstrapActors;
+    m_lastRenderStats.portalBootstrapMs = WorldNowMs() - portalBootstrapStartMs;
 
     const float zoom = m_ground ? m_ground->m_zoom : static_cast<float>(m_attr ? m_attr->m_zoom : 5);
     // Use exact current-view billboard projections for visible rendering so
@@ -5035,6 +5125,7 @@ void CWorld::RenderActors(const matrix& viewMatrix, float cameraLongitude)
     // kept for hover/label queries where tiny projection error is acceptable.
     std::vector<BillboardScreenEntry> renderEntries;
     renderEntries.reserve(m_actorList.size() + (m_player ? 1u : 0u));
+    const double billboardBuildStartMs = WorldNowMs();
 
     auto enqueueRenderActor = [&](CGameActor* actor) {
         if (!actor || !actor->m_isVisible) {
@@ -5061,13 +5152,19 @@ void CWorld::RenderActors(const matrix& viewMatrix, float cameraLongitude)
         }
         enqueueRenderActor(actor);
     }
+    m_lastRenderStats.billboardBuildMs = WorldNowMs() - billboardBuildStartMs;
 
+    const double billboardSortStartMs = WorldNowMs();
     std::stable_sort(renderEntries.begin(), renderEntries.end(), CompareBillboardRenderEntry);
+    m_lastRenderStats.billboardSortMs = WorldNowMs() - billboardSortStartMs;
     m_lastRenderStats.renderedBillboards = static_cast<u32>(renderEntries.size());
+
+    const double billboardRenderStartMs = WorldNowMs();
     for (const BillboardScreenEntry& entry : renderEntries) {
         RenderCachedActorShadow(entry, viewMatrix, zoom);
         RenderCachedBillboard(entry);
     }
+    m_lastRenderStats.billboardRenderMs = WorldNowMs() - billboardRenderStartMs;
 }
 
 bool CWorld::GetPlayerScreenLabel(const matrix& viewMatrix,
@@ -5405,17 +5502,35 @@ bool CWorld::HasWarpAtAttrCell(int attrX, int attrY) const
 void CWorld::RenderBackgroundObjects(const matrix& viewMatrix) const
 {
     u32 renderedBackgroundObjects = 0;
+    u32 skippedTinyBackgroundObjects = 0;
+    const double renderStartMs = WorldNowMs();
     for (const C3dActor* actor : m_bgObjList) {
         if (!actor) {
             continue;
         }
-        if (!ShouldRenderBackgroundActor(*actor, viewMatrix)) {
+        float projectedRadius = 0.0f;
+        float clipZ = 0.0f;
+        if (!IsBackgroundActorVisible(*actor, viewMatrix, &projectedRadius, &clipZ)) {
             continue;
         }
+
+        if (actor->m_animType == 0 && actor->m_boundRadius <= 24.0f && clipZ >= kBackgroundTinyPropCullNearZ) {
+            const float t = (std::min)(1.0f,
+                (std::max)(0.0f, (clipZ - kBackgroundTinyPropCullNearZ) / (kBackgroundTinyPropCullFarZ - kBackgroundTinyPropCullNearZ)));
+            const float minProjectedRadius = kBackgroundTinyPropMinProjectedRadiusNear
+                + (kBackgroundTinyPropMinProjectedRadiusFar - kBackgroundTinyPropMinProjectedRadiusNear) * t;
+            if (projectedRadius < minProjectedRadius) {
+                skippedTinyBackgroundObjects += 1;
+                continue;
+            }
+        }
+
         renderedBackgroundObjects += 1;
         actor->Render(viewMatrix);
     }
     m_lastRenderStats.renderedBackgroundObjects = renderedBackgroundObjects;
+    m_lastRenderStats.skippedTinyBackgroundObjects = skippedTinyBackgroundObjects;
+    m_lastRenderStats.backgroundRenderMs = WorldNowMs() - renderStartMs;
 }
 
 void LaunchLevelUpEffect(CGameActor* actor, u32 effectId)

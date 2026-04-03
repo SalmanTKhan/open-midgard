@@ -168,8 +168,18 @@ public:
     struct RenderDebugStats {
         u32 renderedGameObjects = 0;
         u32 renderedFixedEffects = 0;
+        u32 renderedItems = 0;
         u32 renderedBillboards = 0;
         u32 renderedBackgroundObjects = 0;
+        u32 skippedTinyBackgroundObjects = 0;
+        u32 portalBootstrapActors = 0;
+        double gameObjectRenderMs = 0.0;
+        double itemRenderMs = 0.0;
+        double portalBootstrapMs = 0.0;
+        double billboardBuildMs = 0.0;
+        double billboardSortMs = 0.0;
+        double billboardRenderMs = 0.0;
+        double backgroundRenderMs = 0.0;
     };
 
     CWorld();

@@ -57,8 +57,18 @@ struct ViewHiResStats {
     double backgroundMs = 0.0;
     u64 renderedGameObjects = 0;
     u64 renderedFixedEffects = 0;
+    u64 renderedItems = 0;
     u64 renderedBillboards = 0;
     u64 renderedBackgroundObjects = 0;
+    u64 skippedTinyBackgroundObjects = 0;
+    u64 portalBootstrapActors = 0;
+    double actorGameObjectMs = 0.0;
+    double actorItemMs = 0.0;
+    double actorPortalMs = 0.0;
+    double actorBillboardBuildMs = 0.0;
+    double actorBillboardSortMs = 0.0;
+    double actorBillboardRenderMs = 0.0;
+    double backgroundDrawMs = 0.0;
 };
 
 ViewHiResStats g_viewHiResStats;
@@ -107,16 +117,26 @@ void LogViewHiResPerfIfNeeded(const CWorld* world)
     }
 
     const double frameCount = static_cast<double>(g_viewHiResStats.frames);
-    DbgLog("[ViewPerfHiRes] frames=%llu ground=%.3fms hover=%.3fms actors=%.3fms background=%.3fms gameObjects=%.2f fixedEffects=%.2f billboards=%.2f bgObjs=%.2f\n",
+    DbgLog("[ViewPerfHiRes] frames=%llu ground=%.3fms hover=%.3fms actors=%.3fms background=%.3fms actorObj=%.3fms actorItems=%.3fms actorPortal=%.3fms bbBuild=%.3fms bbSort=%.3fms bbDraw=%.3fms bgDraw=%.3fms gameObjects=%.2f fixedEffects=%.2f items=%.2f billboards=%.2f bgObjs=%.2f bgTinySkip=%.2f portalActors=%.2f\n",
         static_cast<unsigned long long>(g_viewHiResStats.frames),
         g_viewHiResStats.groundMs / frameCount,
         g_viewHiResStats.hoverMs / frameCount,
         g_viewHiResStats.actorMs / frameCount,
         g_viewHiResStats.backgroundMs / frameCount,
+        g_viewHiResStats.actorGameObjectMs / frameCount,
+        g_viewHiResStats.actorItemMs / frameCount,
+        g_viewHiResStats.actorPortalMs / frameCount,
+        g_viewHiResStats.actorBillboardBuildMs / frameCount,
+        g_viewHiResStats.actorBillboardSortMs / frameCount,
+        g_viewHiResStats.actorBillboardRenderMs / frameCount,
+        g_viewHiResStats.backgroundDrawMs / frameCount,
         static_cast<double>(g_viewHiResStats.renderedGameObjects) / frameCount,
         static_cast<double>(g_viewHiResStats.renderedFixedEffects) / frameCount,
+        static_cast<double>(g_viewHiResStats.renderedItems) / frameCount,
         static_cast<double>(g_viewHiResStats.renderedBillboards) / frameCount,
-        static_cast<double>(g_viewHiResStats.renderedBackgroundObjects) / frameCount);
+        static_cast<double>(g_viewHiResStats.renderedBackgroundObjects) / frameCount,
+        static_cast<double>(g_viewHiResStats.skippedTinyBackgroundObjects) / frameCount,
+        static_cast<double>(g_viewHiResStats.portalBootstrapActors) / frameCount);
     g_viewHiResStats = ViewHiResStats{};
 }
 
@@ -899,7 +919,15 @@ void CView::OnRender()
     g_viewHiResStats.actorMs += QpcNowMs() - actorHiResStartMs;
     g_viewHiResStats.renderedGameObjects += m_world->m_lastRenderStats.renderedGameObjects;
     g_viewHiResStats.renderedFixedEffects += m_world->m_lastRenderStats.renderedFixedEffects;
+    g_viewHiResStats.renderedItems += m_world->m_lastRenderStats.renderedItems;
     g_viewHiResStats.renderedBillboards += m_world->m_lastRenderStats.renderedBillboards;
+    g_viewHiResStats.portalBootstrapActors += m_world->m_lastRenderStats.portalBootstrapActors;
+    g_viewHiResStats.actorGameObjectMs += m_world->m_lastRenderStats.gameObjectRenderMs;
+    g_viewHiResStats.actorItemMs += m_world->m_lastRenderStats.itemRenderMs;
+    g_viewHiResStats.actorPortalMs += m_world->m_lastRenderStats.portalBootstrapMs;
+    g_viewHiResStats.actorBillboardBuildMs += m_world->m_lastRenderStats.billboardBuildMs;
+    g_viewHiResStats.actorBillboardSortMs += m_world->m_lastRenderStats.billboardSortMs;
+    g_viewHiResStats.actorBillboardRenderMs += m_world->m_lastRenderStats.billboardRenderMs;
     if (trackMovePerf) {
         g_viewMovePerfStats.actorMs += QpcNowMs() - actorStartMs;
     }
@@ -911,6 +939,8 @@ void CView::OnRender()
     const DWORD backgroundEnd = GetTickCount();
     g_viewHiResStats.backgroundMs += QpcNowMs() - backgroundHiResStartMs;
     g_viewHiResStats.renderedBackgroundObjects += m_world->m_lastRenderStats.renderedBackgroundObjects;
+    g_viewHiResStats.skippedTinyBackgroundObjects += m_world->m_lastRenderStats.skippedTinyBackgroundObjects;
+    g_viewHiResStats.backgroundDrawMs += m_world->m_lastRenderStats.backgroundRenderMs;
     if (trackMovePerf) {
         g_viewMovePerfStats.backgroundMs += QpcNowMs() - backgroundStartMs;
     }
