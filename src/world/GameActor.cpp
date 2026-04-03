@@ -2114,6 +2114,20 @@ std::array<int, 8> BuildPlayerRenderLayerOrder(CImfRes* imfRes, int curAction, i
         order[outIndex++] = layer;
     }
 
+    int bodyIndex = -1;
+    int headIndex = -1;
+    for (int index = 0; index < static_cast<int>(order.size()); ++index) {
+        if (order[index] == 0 && bodyIndex < 0) {
+            bodyIndex = index;
+        } else if (order[index] == 1 && headIndex < 0) {
+            headIndex = index;
+        }
+    }
+
+    if (bodyIndex >= 0 && headIndex >= 0 && headIndex < bodyIndex) {
+        std::swap(order[bodyIndex], order[headIndex]);
+    }
+
     return order;
 }
 
