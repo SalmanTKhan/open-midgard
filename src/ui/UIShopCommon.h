@@ -2,32 +2,63 @@
 
 #include "core/File.h"
 #include "item/Item.h"
+#include "render/DC.h"
+#include "res/Bitmap.h"
 
-#include <gdiplus.h>
-#include <windows.h>
+#include "platform/WindowsCompat.h"
+
+#if RO_ENABLE_QT6_UI
+#include <QFont>
+#include <QFontMetrics>
+#include <QImage>
+#include <QPainter>
+#include <QString>
+#endif
 
 #include <algorithm>
+#include <cstdio>
 #include <cstring>
 #include <string>
 #include <vector>
 
-#pragma comment(lib, "gdiplus.lib")
+#if RO_PLATFORM_WINDOWS
 #pragma comment(lib, "msimg32.lib")
+#endif
 
 namespace shopui {
 
-inline ULONG_PTR EnsureGdiplusStarted()
-{
-    static ULONG_PTR s_token = 0;
-    static bool s_started = false;
-    if (!s_started) {
-        Gdiplus::GdiplusStartupInput startupInput;
-        if (Gdiplus::GdiplusStartup(&s_token, &startupInput, nullptr) == Gdiplus::Ok) {
-            s_started = true;
-        }
+struct BitmapPixels {
+    std::vector<unsigned int> pixels;
+    int width = 0;
+    int height = 0;
+
+    bool IsValid() const
+    {
+        return width > 0
+            && height > 0
+            && pixels.size() >= static_cast<size_t>(width) * static_cast<size_t>(height);
     }
-    return s_token;
-}
+
+    void Clear()
+    {
+        pixels.clear();
+        width = 0;
+        height = 0;
+    }
+};
+
+struct ItemHoverInfo {
+    RECT anchorRect{ 0, 0, 0, 0 };
+    std::string text;
+    unsigned int itemId = 0;
+
+    bool IsValid() const
+    {
+        return anchorRect.right > anchorRect.left
+            && anchorRect.bottom > anchorRect.top
+            && !text.empty();
+    }
+};
 
 inline std::string ToLowerAscii(std::string value)
 {
@@ -109,95 +140,79 @@ inline std::string ResolveUiAssetPath(const char* fileName)
     return NormalizeSlash(fileName ? fileName : "");
 }
 
-inline HBITMAP LoadBitmapFromGameData(const std::string& path)
+inline BitmapPixels LoadBitmapPixelsFromGameData(const std::string& path, bool applyTransparentKey = false)
 {
-    if (path.empty() || !EnsureGdiplusStarted()) {
-        return nullptr;
+    BitmapPixels bitmap;
+    u32* rawPixels = nullptr;
+    if (!LoadBgraPixelsFromGameData(path.c_str(), &rawPixels, &bitmap.width, &bitmap.height)
+        || !rawPixels
+        || bitmap.width <= 0
+        || bitmap.height <= 0) {
+        delete[] rawPixels;
+        bitmap.Clear();
+        return bitmap;
     }
 
-    int size = 0;
-    unsigned char* bytes = g_fileMgr.GetData(path.c_str(), &size);
-    if (!bytes || size <= 0) {
-        delete[] bytes;
-        return nullptr;
-    }
+    const size_t pixelCount = static_cast<size_t>(bitmap.width) * static_cast<size_t>(bitmap.height);
+    bitmap.pixels.assign(rawPixels, rawPixels + pixelCount);
+    delete[] rawPixels;
 
-    HBITMAP outBitmap = nullptr;
-    HGLOBAL mem = GlobalAlloc(GMEM_MOVEABLE, static_cast<SIZE_T>(size));
-    if (mem) {
-        void* dst = GlobalLock(mem);
-        if (dst) {
-            std::memcpy(dst, bytes, static_cast<size_t>(size));
-            GlobalUnlock(mem);
-
-            IStream* stream = nullptr;
-            if (CreateStreamOnHGlobal(mem, TRUE, &stream) == S_OK) {
-                auto* bitmap = Gdiplus::Bitmap::FromStream(stream, FALSE);
-                if (bitmap && bitmap->GetLastStatus() == Gdiplus::Ok) {
-                    bitmap->GetHBITMAP(RGB(0, 0, 0), &outBitmap);
-                }
-                delete bitmap;
-                stream->Release();
-            } else {
-                GlobalFree(mem);
+    if (applyTransparentKey) {
+        for (unsigned int& pixel : bitmap.pixels) {
+            if ((pixel & 0x00FFFFFFu) == 0x00FF00FFu) {
+                pixel = 0;
             }
-        } else {
-            GlobalFree(mem);
         }
     }
 
-    delete[] bytes;
-    return outBitmap;
+    return bitmap;
 }
 
-inline void DrawBitmapTransparent(HDC target, HBITMAP bitmap, const RECT& dst)
+inline void DrawBitmapPixelsTransparent(HDC target, const BitmapPixels& bitmap, const RECT& dst)
 {
-    if (!target || !bitmap) {
+    if (!target || !bitmap.IsValid() || dst.right <= dst.left || dst.bottom <= dst.top) {
         return;
     }
 
-    BITMAP bm{};
-    if (!GetObjectA(bitmap, sizeof(bm), &bm) || bm.bmWidth <= 0 || bm.bmHeight <= 0) {
-        return;
-    }
-
-    HDC srcDC = CreateCompatibleDC(target);
-    if (!srcDC) {
-        return;
-    }
-
-    HGDIOBJ oldBitmap = SelectObject(srcDC, bitmap);
-    TransparentBlt(target,
-        dst.left,
-        dst.top,
-        dst.right - dst.left,
-        dst.bottom - dst.top,
-        srcDC,
-        0,
-        0,
-        bm.bmWidth,
-        bm.bmHeight,
-        RGB(255, 0, 255));
-    SelectObject(srcDC, oldBitmap);
-    DeleteDC(srcDC);
+    AlphaBlendArgbToHdc(target,
+                        dst.left,
+                        dst.top,
+                        dst.right - dst.left,
+                        dst.bottom - dst.top,
+                        bitmap.pixels.data(),
+                        bitmap.width,
+                        bitmap.height);
 }
 
 inline void FillRectColor(HDC hdc, const RECT& rect, COLORREF color)
 {
+#if RO_PLATFORM_WINDOWS
     HBRUSH brush = CreateSolidBrush(color);
     FillRect(hdc, &rect, brush);
     DeleteObject(brush);
+#else
+    (void)hdc;
+    (void)rect;
+    (void)color;
+#endif
 }
 
 inline void FrameRectColor(HDC hdc, const RECT& rect, COLORREF color)
 {
+#if RO_PLATFORM_WINDOWS
     HBRUSH brush = CreateSolidBrush(color);
     FrameRect(hdc, &rect, brush);
     DeleteObject(brush);
+#else
+    (void)hdc;
+    (void)rect;
+    (void)color;
+#endif
 }
 
 inline HFONT GetUiFont()
 {
+#if RO_PLATFORM_WINDOWS
     static HFONT s_font = CreateFontA(
         -11,
         0,
@@ -214,7 +229,94 @@ inline HFONT GetUiFont()
         DEFAULT_PITCH | FF_DONTCARE,
         "MS Sans Serif");
     return s_font;
+#else
+    return nullptr;
+#endif
 }
+
+#if RO_ENABLE_QT6_UI
+inline QFont BuildUiFontFromHdc(HDC hdc)
+{
+    LOGFONTA logFont{};
+#if RO_PLATFORM_WINDOWS
+    if (hdc) {
+        if (HGDIOBJ fontObject = GetCurrentObject(hdc, OBJ_FONT)) {
+            GetObjectA(fontObject, sizeof(logFont), &logFont);
+        }
+    }
+#else
+    (void)hdc;
+    std::strncpy(logFont.lfFaceName, "MS Sans Serif", LF_FACESIZE - 1);
+    logFont.lfHeight = -11;
+    logFont.lfWeight = FW_NORMAL;
+#endif
+
+    const QString family = logFont.lfFaceName[0] != '\0'
+        ? QString::fromLocal8Bit(logFont.lfFaceName)
+        : QStringLiteral("MS Sans Serif");
+    QFont font(family);
+    font.setPixelSize(logFont.lfHeight != 0 ? (std::max)(1, static_cast<int>(std::abs(logFont.lfHeight))) : 11);
+    font.setBold(logFont.lfWeight >= FW_BOLD);
+    font.setStyleStrategy(QFont::NoAntialias);
+    return font;
+}
+
+inline Qt::Alignment ToQtTextAlignment(UINT format)
+{
+    Qt::Alignment alignment = Qt::AlignLeft | Qt::AlignTop;
+    if (format & DT_CENTER) {
+        alignment &= ~Qt::AlignLeft;
+        alignment |= Qt::AlignHCenter;
+    } else if (format & DT_RIGHT) {
+        alignment &= ~Qt::AlignLeft;
+        alignment |= Qt::AlignRight;
+    }
+
+    if (format & DT_VCENTER) {
+        alignment &= ~Qt::AlignTop;
+        alignment |= Qt::AlignVCenter;
+    } else if (format & DT_BOTTOM) {
+        alignment &= ~Qt::AlignTop;
+        alignment |= Qt::AlignBottom;
+    }
+
+    return alignment;
+}
+
+inline void DrawWindowTextRectQt(HDC hdc, const RECT& rect, const std::string& text, COLORREF color, UINT format)
+{
+    if (!hdc || text.empty() || rect.right <= rect.left || rect.bottom <= rect.top) {
+        return;
+    }
+
+    QString label = QString::fromLocal8Bit(text.c_str());
+    if (label.isEmpty()) {
+        return;
+    }
+
+    const int width = rect.right - rect.left;
+    const int height = rect.bottom - rect.top;
+    const QFont font = BuildUiFontFromHdc(hdc);
+    if (format & DT_END_ELLIPSIS) {
+        const QFontMetrics metrics(font);
+        label = metrics.elidedText(label, Qt::ElideRight, width);
+    }
+
+    std::vector<unsigned int> pixels(static_cast<size_t>(width) * static_cast<size_t>(height), 0u);
+    QImage image(reinterpret_cast<uchar*>(pixels.data()), width, height, width * static_cast<int>(sizeof(unsigned int)), QImage::Format_ARGB32);
+    if (image.isNull()) {
+        return;
+    }
+
+    QPainter painter(&image);
+    painter.setRenderHint(QPainter::Antialiasing, false);
+    painter.setRenderHint(QPainter::TextAntialiasing, false);
+    painter.setFont(font);
+    painter.setPen(QColor(GetRValue(color), GetGValue(color), GetBValue(color)));
+    painter.drawText(QRect(0, 0, width, height), ToQtTextAlignment(format) | Qt::TextSingleLine, label);
+    AlphaBlendArgbToHdc(hdc, rect.left, rect.top, width, height, pixels.data(), width, height);
+}
+#endif
 
 inline void DrawWindowTextRect(HDC hdc, const RECT& rect, const std::string& text, COLORREF color, UINT format)
 {
@@ -222,12 +324,23 @@ inline void DrawWindowTextRect(HDC hdc, const RECT& rect, const std::string& tex
         return;
     }
 
+#if RO_PLATFORM_WINDOWS
     RECT drawRect = rect;
     SetBkMode(hdc, TRANSPARENT);
     SetTextColor(hdc, color);
     HGDIOBJ oldFont = SelectObject(hdc, GetUiFont());
+#if RO_ENABLE_QT6_UI
+    DrawWindowTextRectQt(hdc, drawRect, text, color, format);
+#else
     DrawTextA(hdc, text.c_str(), -1, &drawRect, format);
+#endif
     SelectObject(hdc, oldFont);
+#elif RO_ENABLE_QT6_UI
+    DrawWindowTextRectQt(hdc, rect, text, color, format);
+#else
+    (void)color;
+    (void)format;
+#endif
 }
 
 inline RECT MakeRect(int x, int y, int w, int h)
@@ -317,6 +430,27 @@ inline std::vector<std::string> BuildItemIconCandidates(const ITEM_INFO& item)
     return out;
 }
 
+inline bool TryLoadItemIconPixels(const ITEM_INFO& item, BitmapPixels* outBitmap)
+{
+    if (!outBitmap) {
+        return false;
+    }
+
+    outBitmap->Clear();
+    for (const std::string& candidate : BuildItemIconCandidates(item)) {
+        if (!g_fileMgr.IsDataExist(candidate.c_str())) {
+            continue;
+        }
+
+        *outBitmap = LoadBitmapPixelsFromGameData(candidate, true);
+        if (outBitmap->IsValid()) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
 inline std::string GetItemDisplayName(const ITEM_INFO& item)
 {
     const std::string displayName = item.GetDisplayName();
@@ -327,6 +461,38 @@ inline std::string GetItemDisplayName(const ITEM_INFO& item)
         return item.m_itemName;
     }
     return "Unknown Item";
+}
+
+inline std::string BuildItemHoverText(const ITEM_INFO& item)
+{
+    std::string text;
+    if (item.m_refiningLevel > 0) {
+        text = "+" + std::to_string(item.m_refiningLevel) + " ";
+    }
+
+    text += GetItemDisplayName(item);
+    text += ": ";
+    text += std::to_string((std::max)(1, item.m_num));
+    text += " ea";
+    return text;
+}
+
+inline std::string BuildGroundItemHoverText(const std::string& itemNameValue,
+    unsigned int itemId,
+    bool identified,
+    unsigned int amount)
+{
+    std::string itemName = itemNameValue;
+    if (itemName.empty() && itemId != 0) {
+        itemName = g_ttemmgr.GetDisplayName(itemId, identified);
+    }
+    if (itemName.empty()) {
+        itemName = "Item";
+    }
+
+    char amountText[64]{};
+    std::snprintf(amountText, sizeof(amountText), "%s: %u ea", itemName.c_str(), amount);
+    return amountText;
 }
 
 } // namespace shopui

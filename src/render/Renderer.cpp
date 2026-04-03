@@ -37,6 +37,11 @@ bool ShouldLogGroundTextureName(const char* name)
 
 void LogUploadedTerrainSurfaceSamples(CTexture* tex, const char* name)
 {
+#if !RO_PLATFORM_WINDOWS
+    (void)tex;
+    (void)name;
+    return;
+#else
     if (!tex || !tex->m_pddsSurface) {
         return;
     }
@@ -87,6 +92,7 @@ void LogUploadedTerrainSurfaceSamples(CTexture* tex, const char* name)
     }
 
     tex->m_pddsSurface->Unlock(nullptr);
+#endif
 }
 
 std::string ResolveTexturePath(const char* name)
@@ -284,8 +290,24 @@ CTexture* CTexMgr::GetTexture(const char* name, bool b) {
         skipColorKey = true;
     }
 
-    CTexture* tex = CreateTexture(bitmap->m_width, bitmap->m_height,
-        const_cast<unsigned long*>(reinterpret_cast<const unsigned long*>(textureData)), PF_A8R8G8B8, skipColorKey);
+    CTexture* tex = new CTexture();
+    if (tex) {
+        std::strncpy(tex->m_texName, cacheKey.c_str(), sizeof(tex->m_texName) - 1);
+        tex->m_texName[sizeof(tex->m_texName) - 1] = '\0';
+        if (!tex->Create(static_cast<unsigned int>(bitmap->m_width), static_cast<unsigned int>(bitmap->m_height), PF_A8R8G8B8)) {
+            delete tex;
+            tex = nullptr;
+        } else {
+            tex->Update(
+                0,
+                0,
+                bitmap->m_width,
+                bitmap->m_height,
+                const_cast<unsigned int*>(reinterpret_cast<const unsigned int*>(textureData)),
+                skipColorKey,
+                bitmap->m_width * static_cast<int>(sizeof(unsigned int)));
+        }
+    }
     if (!tex) {
         static int failedTextureCreateLogCount = 0;
         if (failedTextureCreateLogCount < 16) {
@@ -320,14 +342,12 @@ CTexture* CTexMgr::GetTexture(const char* name, bool b) {
         LogUploadedTerrainSurfaceSamples(tex, name);
     }
 
-    std::strncpy(tex->m_texName, cacheKey.c_str(), sizeof(tex->m_texName) - 1);
-    tex->m_texName[sizeof(tex->m_texName) - 1] = '\0';
     tex->m_timeStamp = GetTickCount();
     m_texTable[tex->m_texName] = tex;
     return tex;
 }
 
-CTexture* CTexMgr::CreateTexture(int w, int h, unsigned long* data, PixelFormat format, bool b) {
+CTexture* CTexMgr::CreateTexture(int w, int h, unsigned int* data, PixelFormat format, bool b) {
     CTexture* tex = new CTexture();
     if (!tex) {
         return nullptr;
@@ -337,7 +357,7 @@ CTexture* CTexMgr::CreateTexture(int w, int h, unsigned long* data, PixelFormat 
         return nullptr;
     }
     tex->Update(0, 0, w, h, reinterpret_cast<unsigned int*>(data), b,
-        w * static_cast<int>(sizeof(unsigned long)));
+        w * static_cast<int>(sizeof(unsigned int)));
     return tex;
 }
 
@@ -354,7 +374,9 @@ CTexture* CTexMgr::CreateTexture(unsigned long w, unsigned long h, PixelFormat f
     tex->m_backendTextureView = nullptr;
     tex->m_backendTextureUpload = nullptr;
     if (pSurface) {
+#if RO_PLATFORM_WINDOWS
         pSurface->AddRef();
+#endif
     }
     return tex;
 }

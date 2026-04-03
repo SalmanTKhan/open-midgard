@@ -2,12 +2,22 @@
 
 #include "UIWindowMgr.h"
 #include "core/File.h"
+#include "render/DC.h"
+#include "res/Bitmap.h"
+#include "qtui/QtUiRuntime.h"
 #include "session/Session.h"
 #include "world/GameActor.h"
 #include "world/World.h"
 
-#include <gdiplus.h>
 #include <windows.h>
+
+#if RO_ENABLE_QT6_UI
+#include <QFont>
+#include <QFontMetrics>
+#include <QImage>
+#include <QPainter>
+#include <QString>
+#endif
 
 #include <algorithm>
 #include <array>
@@ -16,8 +26,6 @@
 #include <cstring>
 #include <string>
 #include <vector>
-
-#pragma comment(lib, "gdiplus.lib")
 
 namespace {
 
@@ -29,6 +37,10 @@ constexpr int kBarWidth = 85;
 constexpr int kBarHeight = 9;
 constexpr int kExpBarWidth = 102;
 constexpr int kExpBarHeight = 6;
+constexpr int kQtMenuButtonWidth = 32;
+constexpr int kQtMenuButtonHeight = 20;
+constexpr int kQtTopButtonWidth = 11;
+constexpr int kQtTopButtonHeight = 11;
 constexpr int kTopButtonY = 3;
 constexpr int kBaseButtonX = 3;
 constexpr int kMiniButtonX = 266;
@@ -76,17 +88,92 @@ constexpr std::array<const char*, 8> kMenuButtonTooltips = {
     "Alt+Z",
 };
 
-ULONG_PTR EnsureGdiplusStarted()
+#if RO_ENABLE_QT6_UI
+QFont BuildBasicInfoFontFromHdc(HDC hdc, const char* fallbackFamily = "MS Sans Serif", int fallbackPixelSize = 13)
 {
-    static ULONG_PTR s_token = 0;
-    static bool s_started = false;
-    if (!s_started) {
-        Gdiplus::GdiplusStartupInput startupInput;
-        if (Gdiplus::GdiplusStartup(&s_token, &startupInput, nullptr) == Gdiplus::Ok) {
-            s_started = true;
+    LOGFONTA logFont{};
+    if (hdc) {
+        if (HGDIOBJ fontObject = GetCurrentObject(hdc, OBJ_FONT)) {
+            GetObjectA(fontObject, sizeof(logFont), &logFont);
         }
     }
-    return s_token;
+
+    const QString family = logFont.lfFaceName[0] != '\0'
+        ? QString::fromLocal8Bit(logFont.lfFaceName)
+        : QString::fromLocal8Bit(fallbackFamily);
+    QFont font(family);
+    font.setPixelSize(logFont.lfHeight != 0 ? (std::max)(1, static_cast<int>(std::abs(logFont.lfHeight))) : fallbackPixelSize);
+    font.setBold(logFont.lfWeight >= FW_BOLD);
+    font.setStyleStrategy(QFont::NoAntialias);
+    return font;
+}
+
+Qt::Alignment ToQtBasicInfoAlignment(UINT format)
+{
+    Qt::Alignment alignment = Qt::AlignLeft | Qt::AlignTop;
+    if (format & DT_CENTER) {
+        alignment &= ~Qt::AlignLeft;
+        alignment |= Qt::AlignHCenter;
+    } else if (format & DT_RIGHT) {
+        alignment &= ~Qt::AlignLeft;
+        alignment |= Qt::AlignRight;
+    }
+
+    if (format & DT_VCENTER) {
+        alignment &= ~Qt::AlignTop;
+        alignment |= Qt::AlignVCenter;
+    } else if (format & DT_BOTTOM) {
+        alignment &= ~Qt::AlignTop;
+        alignment |= Qt::AlignBottom;
+    }
+
+    return alignment;
+}
+
+void DrawBasicInfoTextQt(HDC hdc, const RECT& rect, const char* text, COLORREF color, UINT format)
+{
+    if (!hdc || !text || rect.right <= rect.left || rect.bottom <= rect.top) {
+        return;
+    }
+
+    QString label = QString::fromLocal8Bit(text);
+    if (label.isEmpty()) {
+        return;
+    }
+
+    const int width = rect.right - rect.left;
+    const int height = rect.bottom - rect.top;
+    const QFont font = BuildBasicInfoFontFromHdc(hdc);
+    if (format & DT_END_ELLIPSIS) {
+        const QFontMetrics metrics(font);
+        label = metrics.elidedText(label, Qt::ElideRight, width);
+    }
+
+    std::vector<unsigned int> pixels(static_cast<size_t>(width) * static_cast<size_t>(height), 0u);
+    QImage image(reinterpret_cast<uchar*>(pixels.data()), width, height, width * static_cast<int>(sizeof(unsigned int)), QImage::Format_ARGB32);
+    if (image.isNull()) {
+        return;
+    }
+
+    QPainter painter(&image);
+    painter.setRenderHint(QPainter::Antialiasing, false);
+    painter.setRenderHint(QPainter::TextAntialiasing, false);
+    painter.setFont(font);
+    painter.setPen(QColor(GetRValue(color), GetGValue(color), GetBValue(color)));
+    painter.drawText(QRect(0, 0, width, height), ToQtBasicInfoAlignment(format) | Qt::TextSingleLine, label);
+    AlphaBlendArgbToHdc(hdc, rect.left, rect.top, width, height, pixels.data(), width, height);
+}
+#endif
+
+RECT MakeBasicInfoRect(int x, int y, int left, int top, int width, int height)
+{
+    RECT rect{ x + left, y + top, x + left + width, y + top + height };
+    return rect;
+}
+
+bool IsPointInRect(const RECT& rect, int x, int y)
+{
+    return x >= rect.left && x < rect.right && y >= rect.top && y < rect.bottom;
 }
 
 std::string ToLowerAscii(std::string value)
@@ -228,70 +315,27 @@ std::string ResolveUiAssetPath(const char* fileName)
     return NormalizeSlash(fileName ? fileName : "");
 }
 
-HBITMAP LoadBitmapFromGameData(const std::string& path)
+shopui::BitmapPixels LoadBitmapPixelsFromGameData(const std::string& path)
 {
-    if (path.empty() || !EnsureGdiplusStarted()) {
-        return nullptr;
-    }
-
-    int size = 0;
-    unsigned char* bytes = g_fileMgr.GetData(path.c_str(), &size);
-    if (!bytes || size <= 0) {
-        delete[] bytes;
-        return nullptr;
-    }
-
-    HBITMAP outBitmap = nullptr;
-    HGLOBAL mem = GlobalAlloc(GMEM_MOVEABLE, static_cast<SIZE_T>(size));
-    if (mem) {
-        void* dst = GlobalLock(mem);
-        if (dst) {
-            std::memcpy(dst, bytes, static_cast<size_t>(size));
-            GlobalUnlock(mem);
-
-            IStream* stream = nullptr;
-            if (CreateStreamOnHGlobal(mem, TRUE, &stream) == S_OK) {
-                auto* bitmap = Gdiplus::Bitmap::FromStream(stream, FALSE);
-                if (bitmap && bitmap->GetLastStatus() == Gdiplus::Ok) {
-                    bitmap->GetHBITMAP(RGB(0, 0, 0), &outBitmap);
-                }
-                delete bitmap;
-                stream->Release();
-            } else {
-                GlobalFree(mem);
-            }
-        } else {
-            GlobalFree(mem);
-        }
-    }
-
-    delete[] bytes;
-    return outBitmap;
+    return shopui::LoadBitmapPixelsFromGameData(path, true);
 }
 
-void DrawBitmapTransparent(HDC target, HBITMAP bitmap, int x, int y, int width = -1, int height = -1)
+void DrawBitmapPixelsTransparent(HDC target, const shopui::BitmapPixels& bitmap, int x, int y, int width = -1, int height = -1)
 {
-    if (!target || !bitmap) {
+    if (!target || !bitmap.IsValid()) {
         return;
     }
 
-    BITMAP bm{};
-    if (!GetObjectA(bitmap, sizeof(bm), &bm) || bm.bmWidth <= 0 || bm.bmHeight <= 0) {
-        return;
-    }
-
-    const int drawWidth = width > 0 ? width : bm.bmWidth;
-    const int drawHeight = height > 0 ? height : bm.bmHeight;
-
-    HDC srcDC = CreateCompatibleDC(target);
-    if (!srcDC) {
-        return;
-    }
-
-    HGDIOBJ oldBitmap = SelectObject(srcDC, bitmap);
-    TransparentBlt(target, x, y, drawWidth, drawHeight, srcDC, 0, 0, bm.bmWidth, bm.bmHeight, RGB(255, 0, 255));
-    SelectObject(srcDC, oldBitmap);
-    DeleteDC(srcDC);
+    const int drawWidth = width > 0 ? width : bitmap.width;
+    const int drawHeight = height > 0 ? height : bitmap.height;
+    AlphaBlendArgbToHdc(target,
+                        x,
+                        y,
+                        drawWidth,
+                        drawHeight,
+                        bitmap.pixels.data(),
+                        bitmap.width,
+                        bitmap.height);
 }
 
 std::string CopyCharacterName(const CHARACTER_INFO& info)
@@ -335,15 +379,16 @@ UIBasicInfoWnd::UIBasicInfoWnd()
       m_menuButtons{ nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr },
       m_baseButton(nullptr),
       m_miniButton(nullptr),
-      m_backgroundFull(nullptr),
-      m_backgroundMini(nullptr),
-      m_barBackground(nullptr),
-      m_redLeft(nullptr),
-      m_redMid(nullptr),
-      m_redRight(nullptr),
-      m_blueLeft(nullptr),
-      m_blueMid(nullptr),
-      m_blueRight(nullptr),
+      m_backgroundFull(),
+      m_backgroundMini(),
+    m_titleBarBitmap(),
+      m_barBackground(),
+      m_redLeft(),
+      m_redMid(),
+      m_redRight(),
+      m_blueLeft(),
+      m_blueMid(),
+      m_blueRight(),
       m_lastDrawStateToken(0ull),
       m_hasDrawStateToken(false)
 {
@@ -441,6 +486,11 @@ void UIBasicInfoWnd::OnCreate(int x, int y)
     m_controlsCreated = true;
     LoadAssets();
 
+    if (IsQtUiRuntimeEnabled()) {
+        SetMiniMode(false);
+        return;
+    }
+
     for (size_t index = 0; index < kMenuButtonNames.size(); ++index) {
         auto* button = new UIBitmapButton();
         const std::string offName = std::string("btn_") + kMenuButtonNames[index] + "_off.bmp";
@@ -480,14 +530,20 @@ void UIBasicInfoWnd::OnCreate(int x, int y)
 
 void UIBasicInfoWnd::OnDraw()
 {
+    if (IsQtUiRuntimeEnabled()) {
+        m_lastDrawStateToken = BuildDisplayStateToken();
+        m_hasDrawStateToken = true;
+        m_isDirty = 0;
+        return;
+    }
+
     if (!g_hMainWnd || m_show == 0) {
         return;
     }
 
     EnsureCreated();
 
-    const bool useShared = (UIWindow::GetSharedDrawDC() != nullptr);
-    HDC hdc = useShared ? UIWindow::GetSharedDrawDC() : GetDC(g_hMainWnd);
+    HDC hdc = AcquireDrawTarget();
     if (!hdc) {
         return;
     }
@@ -496,10 +552,16 @@ void UIBasicInfoWnd::OnDraw()
     if (m_h == kMiniHeight) {
         DrawCachedBitmap(hdc, m_backgroundMini, m_x, m_y);
 
-        DrawWindowText(hdc, m_x + 17, m_y + 3, data.name.c_str(), RGB(0, 0, 0));
+        if (m_titleBarBitmap.IsValid()) {
+            DrawBitmapPixelsTransparent(hdc, m_titleBarBitmap, m_x, m_y, m_w, kTitleBarHeight);
+        }
+
+        DrawWindowText(hdc, m_x + 18, m_y + 3, data.name.c_str(), RGB(255, 255, 255));
+        DrawWindowText(hdc, m_x + 17, m_y + 2, data.name.c_str(), RGB(0, 0, 0));
 
         char topLine[128] = {};
         std::snprintf(topLine, sizeof(topLine), "Lv. %2d / %s / Exp. %d %%", data.level, data.jobName.c_str(), data.expPercent);
+        DrawWindowText(hdc, m_x + 265, m_y + 3, topLine, RGB(255, 255, 255), DT_RIGHT | DT_TOP | DT_SINGLELINE);
         DrawWindowText(hdc, m_x + 264, m_y + 2, topLine, RGB(0, 0, 0), DT_RIGHT | DT_TOP | DT_SINGLELINE);
 
         const std::string zenyText = FormatNumber(data.money);
@@ -515,6 +577,10 @@ void UIBasicInfoWnd::OnDraw()
         DrawWindowText(hdc, m_x + 275, m_y + 18, bottomLine, RGB(0, 0, 0), DT_RIGHT | DT_TOP | DT_SINGLELINE);
     } else {
         DrawCachedBitmap(hdc, m_backgroundFull, m_x, m_y);
+
+        if (m_titleBarBitmap.IsValid()) {
+            DrawBitmapPixelsTransparent(hdc, m_titleBarBitmap, m_x, m_y, m_w, kTitleBarHeight);
+        }
 
         DrawWindowText(hdc, m_x + 18, m_y + 3, "Basic Info", RGB(255, 255, 255));
         DrawWindowText(hdc, m_x + 17, m_y + 2, "Basic Info", RGB(0, 0, 0));
@@ -549,13 +615,67 @@ void UIBasicInfoWnd::OnDraw()
         DrawWindowText(hdc, m_x + 107, m_y + 103, text, RGB(0, 0, 0));
     }
 
-    DrawChildren();
-    if (!useShared) {
-        ReleaseDC(g_hMainWnd, hdc);
-    }
+    DrawChildrenToHdc(hdc);
+    ReleaseDrawTarget(hdc);
     m_lastDrawStateToken = BuildDisplayStateToken();
     m_hasDrawStateToken = true;
     m_isDirty = 0;
+}
+
+void UIBasicInfoWnd::OnLBtnDown(int x, int y)
+{
+    if (IsQtUiRuntimeEnabled()) {
+        const RECT baseRect = MakeBasicInfoRect(m_x, m_y, kBaseButtonX, kTopButtonY, kQtTopButtonWidth, kQtTopButtonHeight);
+        const RECT miniRect = MakeBasicInfoRect(m_x, m_y, kMiniButtonX, kTopButtonY, kQtTopButtonWidth, kQtTopButtonHeight);
+        if (IsPointInRect(baseRect, x, y) || IsPointInRect(miniRect, x, y)) {
+            UIWindow::OnLBtnDown(x, y);
+            return;
+        }
+    }
+
+    UIFrameWnd::OnLBtnDown(x, y);
+}
+
+void UIBasicInfoWnd::OnLBtnUp(int x, int y)
+{
+    if (IsQtUiRuntimeEnabled()) {
+        const bool wasDragging = m_isDragging != 0;
+        UIFrameWnd::OnLBtnUp(x, y);
+        if (wasDragging) {
+            return;
+        }
+
+        if (m_h == kMiniHeight) {
+            const RECT baseRect = MakeBasicInfoRect(m_x, m_y, kBaseButtonX, kTopButtonY, kQtTopButtonWidth, kQtTopButtonHeight);
+            if (IsPointInRect(baseRect, x, y)) {
+                SendMsg(this, 6, kButtonIdBase, 0, 0);
+            }
+            return;
+        }
+
+        const RECT miniRect = MakeBasicInfoRect(m_x, m_y, kMiniButtonX, kTopButtonY, kQtTopButtonWidth, kQtTopButtonHeight);
+        if (IsPointInRect(miniRect, x, y)) {
+            SendMsg(this, 6, kButtonIdMini, 0, 0);
+            return;
+        }
+
+        for (size_t index = 0; index < kMenuButtonIds.size(); ++index) {
+            const RECT buttonRect = MakeBasicInfoRect(
+                m_x,
+                m_y,
+                207 + static_cast<int>(36 * (index % 2)),
+                22 + static_cast<int>(24 * (index / 2)),
+                kQtMenuButtonWidth,
+                kQtMenuButtonHeight);
+            if (IsPointInRect(buttonRect, x, y)) {
+                SendMsg(this, 6, kMenuButtonIds[index], 0, 0);
+                return;
+            }
+        }
+        return;
+    }
+
+    UIFrameWnd::OnLBtnUp(x, y);
 }
 
 void UIBasicInfoWnd::OnLBtnDblClk(int x, int y)
@@ -581,6 +701,81 @@ void UIBasicInfoWnd::NewHeight(int height)
 {
     Resize(kFullWidth, height == kMiniHeight ? kMiniHeight : kFullHeight);
     LayoutChildren();
+}
+
+bool UIBasicInfoWnd::IsMiniMode() const
+{
+    return m_h == kMiniHeight;
+}
+
+bool UIBasicInfoWnd::GetDisplayDataForQt(DisplayData* outData) const
+{
+    if (!outData) {
+        return false;
+    }
+
+    *outData = BuildDisplayData();
+    return true;
+}
+
+int UIBasicInfoWnd::GetQtSystemButtonCount() const
+{
+    return 2;
+}
+
+bool UIBasicInfoWnd::GetQtSystemButtonDisplayForQt(int index, QtButtonDisplay* out) const
+{
+    if (!out || index < 0 || index >= GetQtSystemButtonCount()) {
+        return false;
+    }
+
+    switch (index) {
+    case 0:
+        out->id = kButtonIdBase;
+        out->x = m_x + kBaseButtonX;
+        out->y = m_y + kTopButtonY;
+        out->width = kQtTopButtonWidth;
+        out->height = kQtTopButtonHeight;
+        out->label = "B";
+        out->visible = IsMiniMode();
+        return true;
+    case 1:
+        out->id = kButtonIdMini;
+        out->x = m_x + kMiniButtonX;
+        out->y = m_y + kTopButtonY;
+        out->width = kQtTopButtonWidth;
+        out->height = kQtTopButtonHeight;
+        out->label = "_";
+        out->visible = !IsMiniMode();
+        return true;
+    default:
+        return false;
+    }
+}
+
+int UIBasicInfoWnd::GetQtMenuButtonCount() const
+{
+    return static_cast<int>(kMenuButtonIds.size());
+}
+
+bool UIBasicInfoWnd::GetQtMenuButtonDisplayForQt(int index, QtButtonDisplay* out) const
+{
+    if (!out || index < 0 || index >= GetQtMenuButtonCount()) {
+        return false;
+    }
+
+    static const std::array<const char*, 8> kMenuLabels = {
+        "ST", "OP", "IT", "EQ", "SK", "MP", "CM", "FR"
+    };
+
+    out->id = kMenuButtonIds[static_cast<size_t>(index)];
+    out->x = m_x + 207 + 36 * (index % 2);
+    out->y = m_y + 22 + 24 * (index / 2);
+    out->width = kQtMenuButtonWidth;
+    out->height = kQtMenuButtonHeight;
+    out->label = kMenuLabels[static_cast<size_t>(index)];
+    out->visible = !IsMiniMode();
+    return true;
 }
 
 void UIBasicInfoWnd::EnsureCreated()
@@ -713,19 +908,19 @@ unsigned long long UIBasicInfoWnd::BuildDisplayStateToken() const
     return hash;
 }
 
-void UIBasicInfoWnd::DrawCachedBitmap(HDC hdc, HBITMAP bitmap, int x, int y) const
+void UIBasicInfoWnd::DrawCachedBitmap(HDC hdc, const shopui::BitmapPixels& bitmap, int x, int y) const
 {
-    DrawBitmapTransparent(hdc, bitmap, x, y);
+    DrawBitmapPixelsTransparent(hdc, bitmap, x, y);
 }
 
 void UIBasicInfoWnd::DrawBar(HDC hdc, int x, int y, int percent, bool redBar) const
 {
-    DrawBitmapTransparent(hdc, m_barBackground, x, y, kBarWidth, kBarHeight);
+    DrawBitmapPixelsTransparent(hdc, m_barBackground, x, y, kBarWidth, kBarHeight);
 
-    HBITMAP left = redBar ? m_redLeft : m_blueLeft;
-    HBITMAP mid = redBar ? m_redMid : m_blueMid;
-    HBITMAP right = redBar ? m_redRight : m_blueRight;
-    if (!left || !mid || !right) {
+    const shopui::BitmapPixels& left = redBar ? m_redLeft : m_blueLeft;
+    const shopui::BitmapPixels& mid = redBar ? m_redMid : m_blueMid;
+    const shopui::BitmapPixels& right = redBar ? m_redRight : m_blueRight;
+    if (!left.IsValid() || !mid.IsValid() || !right.IsValid()) {
         return;
     }
 
@@ -734,30 +929,23 @@ void UIBasicInfoWnd::DrawBar(HDC hdc, int x, int y, int percent, bool redBar) co
         return;
     }
 
-    BITMAP leftInfo{};
-    BITMAP midInfo{};
-    BITMAP rightInfo{};
-    GetObjectA(left, sizeof(leftInfo), &leftInfo);
-    GetObjectA(mid, sizeof(midInfo), &midInfo);
-    GetObjectA(right, sizeof(rightInfo), &rightInfo);
-
-    if (fillWidth <= leftInfo.bmWidth) {
-        DrawBitmapTransparent(hdc, left, x, y, fillWidth, leftInfo.bmHeight);
+    if (fillWidth <= left.width) {
+        DrawBitmapPixelsTransparent(hdc, left, x, y, fillWidth, left.height);
         return;
     }
 
-    DrawBitmapTransparent(hdc, left, x, y, leftInfo.bmWidth, leftInfo.bmHeight);
-    int remainingWidth = fillWidth - leftInfo.bmWidth;
-    int cursorX = x + leftInfo.bmWidth;
+    DrawBitmapPixelsTransparent(hdc, left, x, y, left.width, left.height);
+    int remainingWidth = fillWidth - left.width;
+    int cursorX = x + left.width;
 
-    const int rightWidth = remainingWidth > rightInfo.bmWidth ? rightInfo.bmWidth : 0;
+    const int rightWidth = remainingWidth > right.width ? right.width : 0;
     const int midWidth = (std::max)(0, remainingWidth - rightWidth);
     if (midWidth > 0) {
-        DrawBitmapTransparent(hdc, mid, cursorX, y, midWidth, midInfo.bmHeight);
+        DrawBitmapPixelsTransparent(hdc, mid, cursorX, y, midWidth, mid.height);
         cursorX += midWidth;
     }
     if (rightWidth > 0) {
-        DrawBitmapTransparent(hdc, right, cursorX, y, rightWidth, rightInfo.bmHeight);
+        DrawBitmapPixelsTransparent(hdc, right, cursorX, y, rightWidth, right.height);
     }
 }
 
@@ -790,58 +978,58 @@ void UIBasicInfoWnd::DrawWindowText(HDC hdc, int x, int y, const char* text, COL
     SetBkMode(hdc, TRANSPARENT);
     SetTextColor(hdc, color);
     HGDIOBJ oldFont = SelectObject(hdc, font ? font : GetStockObject(DEFAULT_GUI_FONT));
+#if RO_ENABLE_QT6_UI
+    DrawBasicInfoTextQt(hdc, rect, text ? text : "", color, format);
+#else
     DrawTextA(hdc, text ? text : "", -1, &rect, format);
+#endif
     SelectObject(hdc, oldFont);
 }
 
 void UIBasicInfoWnd::LoadAssets()
 {
-    if (!m_backgroundFull) {
-        m_backgroundFull = LoadBitmapFromGameData(ResolveUiAssetPath("basewin_bg.bmp"));
+    if (!m_backgroundFull.IsValid()) {
+        m_backgroundFull = LoadBitmapPixelsFromGameData(ResolveUiAssetPath("basewin_bg.bmp"));
     }
-    if (!m_backgroundMini) {
-        m_backgroundMini = LoadBitmapFromGameData(ResolveUiAssetPath("basewin_mini.bmp"));
+    if (!m_backgroundMini.IsValid()) {
+        m_backgroundMini = LoadBitmapPixelsFromGameData(ResolveUiAssetPath("basewin_mini.bmp"));
     }
-    if (!m_barBackground) {
-        m_barBackground = LoadBitmapFromGameData(ResolveUiAssetPath("GZE_BG.BMP"));
+    if (!m_titleBarBitmap.IsValid()) {
+        m_titleBarBitmap = LoadBitmapPixelsFromGameData(ResolveUiAssetPath("titlebar_fix.bmp"));
     }
-    if (!m_redLeft) {
-        m_redLeft = LoadBitmapFromGameData(ResolveUiAssetPath("gzered_left.bmp"));
+    if (!m_barBackground.IsValid()) {
+        m_barBackground = LoadBitmapPixelsFromGameData(ResolveUiAssetPath("GZE_BG.BMP"));
     }
-    if (!m_redMid) {
-        m_redMid = LoadBitmapFromGameData(ResolveUiAssetPath("gzered_mid.bmp"));
+    if (!m_redLeft.IsValid()) {
+        m_redLeft = LoadBitmapPixelsFromGameData(ResolveUiAssetPath("gzered_left.bmp"));
     }
-    if (!m_redRight) {
-        m_redRight = LoadBitmapFromGameData(ResolveUiAssetPath("gzered_right.bmp"));
+    if (!m_redMid.IsValid()) {
+        m_redMid = LoadBitmapPixelsFromGameData(ResolveUiAssetPath("gzered_mid.bmp"));
     }
-    if (!m_blueLeft) {
-        m_blueLeft = LoadBitmapFromGameData(ResolveUiAssetPath("gzeblue_left.bmp"));
+    if (!m_redRight.IsValid()) {
+        m_redRight = LoadBitmapPixelsFromGameData(ResolveUiAssetPath("gzered_right.bmp"));
     }
-    if (!m_blueMid) {
-        m_blueMid = LoadBitmapFromGameData(ResolveUiAssetPath("gzeblue_mid.bmp"));
+    if (!m_blueLeft.IsValid()) {
+        m_blueLeft = LoadBitmapPixelsFromGameData(ResolveUiAssetPath("gzeblue_left.bmp"));
     }
-    if (!m_blueRight) {
-        m_blueRight = LoadBitmapFromGameData(ResolveUiAssetPath("gzeblue_right.bmp"));
+    if (!m_blueMid.IsValid()) {
+        m_blueMid = LoadBitmapPixelsFromGameData(ResolveUiAssetPath("gzeblue_mid.bmp"));
+    }
+    if (!m_blueRight.IsValid()) {
+        m_blueRight = LoadBitmapPixelsFromGameData(ResolveUiAssetPath("gzeblue_right.bmp"));
     }
 }
 
 void UIBasicInfoWnd::ReleaseAssets()
 {
-    HBITMAP* bitmaps[] = {
-        &m_backgroundFull,
-        &m_backgroundMini,
-        &m_barBackground,
-        &m_redLeft,
-        &m_redMid,
-        &m_redRight,
-        &m_blueLeft,
-        &m_blueMid,
-        &m_blueRight,
-    };
-    for (HBITMAP* bitmap : bitmaps) {
-        if (*bitmap) {
-            DeleteObject(*bitmap);
-            *bitmap = nullptr;
-        }
-    }
+    m_backgroundFull.Clear();
+    m_backgroundMini.Clear();
+    m_titleBarBitmap.Clear();
+    m_barBackground.Clear();
+    m_redLeft.Clear();
+    m_redMid.Clear();
+    m_redRight.Clear();
+    m_blueLeft.Clear();
+    m_blueMid.Clear();
+    m_blueRight.Clear();
 }

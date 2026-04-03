@@ -1,9 +1,11 @@
 #include "UINotifyLevelUpWnd.h"
 
 #include "UIBasicInfoWnd.h"
+#include "UIShopCommon.h"
 #include "UIWindowMgr.h"
 #include "core/File.h"
 #include "main/WinMain.h"
+#include "qtui/QtUiRuntime.h"
 
 #include <algorithm>
 #include <cctype>
@@ -101,6 +103,21 @@ std::string ResolveUiAssetPath(const char* fileName)
     return NormalizeSlash(fileName ? fileName : "");
 }
 
+SIZE ResolveNotifyButtonSize()
+{
+    static bool s_resolved = false;
+    static SIZE s_size{ 1, 1 };
+    if (!s_resolved) {
+        s_resolved = true;
+        const shopui::BitmapPixels bitmap = shopui::LoadBitmapPixelsFromGameData(ResolveUiAssetPath("lv_up_off.bmp"), true);
+        if (bitmap.IsValid()) {
+            s_size.cx = (std::max)(1, bitmap.width);
+            s_size.cy = (std::max)(1, bitmap.height);
+        }
+    }
+    return s_size;
+}
+
 }
 
 UINotifyLevelUpWnd::UINotifyLevelUpWnd()
@@ -111,7 +128,13 @@ UINotifyLevelUpWnd::UINotifyLevelUpWnd()
     Move(0, 0);
 }
 
-UINotifyLevelUpWnd::~UINotifyLevelUpWnd() = default;
+UINotifyLevelUpWnd::~UINotifyLevelUpWnd()
+{
+    if (m_button && m_button->m_parent != this) {
+        delete m_button;
+        m_button = nullptr;
+    }
+}
 
 namespace {
 void LayoutNotifyButton(UIBitmapButton* button, int x, int y)
@@ -147,6 +170,13 @@ void UINotifyLevelUpWnd::OnCreate(int x, int y)
 
     m_controlsCreated = true;
 
+    if (IsQtUiRuntimeEnabled()) {
+        const SIZE buttonSize = ResolveNotifyButtonSize();
+        Resize(buttonSize.cx, buttonSize.cy);
+        UpdateAnchor();
+        return;
+    }
+
     m_button = new UIBitmapButton();
     const std::string offPath = ResolveUiAssetPath("lv_up_off.bmp");
     const std::string onPath = ResolveUiAssetPath("LV_UP_ON.BMP");
@@ -155,7 +185,9 @@ void UINotifyLevelUpWnd::OnCreate(int x, int y)
     m_button->SetBitmapName(onPath.c_str(), 2);
     m_button->Create((std::max)(1, m_button->m_bitmapWidth), (std::max)(1, m_button->m_bitmapHeight));
     m_button->m_id = kNotifyButtonId;
-    AddChild(m_button);
+    if (!IsQtUiRuntimeEnabled()) {
+        AddChild(m_button);
+    }
 
     Resize((std::max)(1, m_button->m_w), (std::max)(1, m_button->m_h));
     UpdateAnchor();
@@ -173,11 +205,35 @@ void UINotifyLevelUpWnd::OnProcess()
 
 void UINotifyLevelUpWnd::OnDraw()
 {
-    if (m_show == 0) {
+    if (m_show == 0 || IsQtUiRuntimeEnabled()) {
         return;
     }
 
     DrawChildren();
+}
+
+bool UINotifyLevelUpWnd::HandleQtMouseDown(int x, int y) const
+{
+    return m_show != 0
+        && x >= m_x
+        && y >= m_y
+        && x < m_x + m_w
+        && y < m_y + m_h;
+}
+
+bool UINotifyLevelUpWnd::HandleQtMouseUp(int x, int y)
+{
+    if (!HandleQtMouseDown(x, y)) {
+        return false;
+    }
+
+    SendMsg(this, 6, kNotifyButtonId, 0, 0);
+    return true;
+}
+
+bool UINotifyLevelUpWnd::IsJobLevelNotice() const
+{
+    return GetTargetWindowId() == UIWindowMgr::WID_NOTIFYJOBLEVELUPWND;
 }
 
 msgresult_t UINotifyLevelUpWnd::SendMsg(UIWindow* sender, int msg, msgparam_t wparam, msgparam_t lparam, msgparam_t extra)

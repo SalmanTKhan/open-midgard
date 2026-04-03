@@ -26,7 +26,9 @@
 #include "UIWaitWnd.h"
 #include "gamemode/CursorRenderer.h"
 #include "gamemode/GameMode.h"
+#include "gamemode/LoginMode.h"
 #include "gamemode/Mode.h"
+#include "qtui/QtUiRuntime.h"
 
 #include "core/File.h"
 #include "res/Bitmap.h"
@@ -41,6 +43,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <map>
 #include <memory>
 #include <vector>
 
@@ -64,6 +67,296 @@ std::string NormalizeSlash(std::string value)
 {
     std::replace(value.begin(), value.end(), '/', '\\');
     return value;
+}
+
+const std::vector<std::string>& GetArchiveNamesByExtension(const char* ext)
+{
+    static std::map<std::string, std::vector<std::string>> s_byExt;
+    const std::string key = ToLowerAscii(ext ? ext : "");
+    auto it = s_byExt.find(key);
+    if (it != s_byExt.end()) {
+        return it->second;
+    }
+
+    std::vector<std::string> names;
+    g_fileMgr.CollectDataNamesByExtension(key.c_str(), names);
+    auto inserted = s_byExt.emplace(key, std::move(names));
+    return inserted.first->second;
+}
+
+std::string GetLowerFileName(const std::string& value)
+{
+    std::string normalized = NormalizeSlash(value);
+    const size_t slashPos = normalized.find_last_of('\\');
+    if (slashPos != std::string::npos && slashPos + 1 < normalized.size()) {
+        normalized = normalized.substr(slashPos + 1);
+    }
+    return ToLowerAscii(std::move(normalized));
+}
+
+std::string GetLowerFileExtension(const std::string& value)
+{
+    const std::string normalized = NormalizeSlash(value);
+    const size_t dotPos = normalized.find_last_of('.');
+    if (dotPos == std::string::npos || dotPos + 1 >= normalized.size()) {
+        return {};
+    }
+    return ToLowerAscii(normalized.substr(dotPos + 1));
+}
+
+int ScoreArchiveWallpaperPath(const std::string& requestedPath, const std::string& resolvedPath)
+{
+    const std::string loweredRequested = ToLowerAscii(NormalizeSlash(requestedPath));
+    const std::string loweredResolved = ToLowerAscii(NormalizeSlash(resolvedPath));
+    int score = 0;
+
+    if (loweredResolved == loweredRequested) {
+        score += 10000;
+    }
+    if (loweredResolved.rfind("data\\", 0) == 0) {
+        score += 800;
+    }
+    if (loweredResolved.find("\\texture\\") != std::string::npos) {
+        score += 300;
+    }
+    if (loweredResolved.find("\\login_interface\\") != std::string::npos) {
+        score += 250;
+    }
+    if (loweredResolved.find("\\basic_interface\\") != std::string::npos) {
+        score += 200;
+    }
+    if (loweredResolved.find("\\interface\\") != std::string::npos) {
+        score += 100;
+    }
+    if (loweredResolved.find("\xC0\xAF\xC0\xFA\xC0\xCE\xC5\xCD\xC6\xE4\xC0\xCC\xBD\xBA") != std::string::npos) {
+        score += 450;
+    }
+
+    return score;
+}
+
+std::string ResolveArchiveWallpaperByFileName(const std::string& requestedPath)
+{
+    const std::string extension = GetLowerFileExtension(requestedPath);
+    if (extension.empty()) {
+        return {};
+    }
+
+    const std::string requestedFileName = GetLowerFileName(requestedPath);
+    if (requestedFileName.empty()) {
+        return {};
+    }
+
+    const std::vector<std::string>& names = GetArchiveNamesByExtension(extension.c_str());
+    int bestScore = -1;
+    std::string bestPath;
+    for (const std::string& name : names) {
+        if (GetLowerFileName(name) != requestedFileName) {
+            continue;
+        }
+
+        const int score = ScoreArchiveWallpaperPath(requestedPath, name);
+        if (score > bestScore) {
+            bestScore = score;
+            bestPath = name;
+        }
+    }
+
+    return bestPath;
+}
+
+bool QueueFullScreenOverlayQuad(CTexture* texture, int width, int height, float sortKey)
+{
+    if (!texture || width <= 0 || height <= 0) {
+        return false;
+    }
+
+    RPFace* face = g_renderer.BorrowNullRP();
+    if (!face) {
+        return false;
+    }
+
+    const float right = static_cast<float>(width) - 0.5f;
+    const float bottom = static_cast<float>(height) - 0.5f;
+    const unsigned int overlayContentWidth = texture->m_surfaceUpdateWidth > 0 ? texture->m_surfaceUpdateWidth : static_cast<unsigned int>(width);
+    const unsigned int overlayContentHeight = texture->m_surfaceUpdateHeight > 0 ? texture->m_surfaceUpdateHeight : static_cast<unsigned int>(height);
+    const float maxU = texture->m_w != 0 ? static_cast<float>(overlayContentWidth) / static_cast<float>(texture->m_w) : 1.0f;
+    const float maxV = texture->m_h != 0 ? static_cast<float>(overlayContentHeight) / static_cast<float>(texture->m_h) : 1.0f;
+
+    face->primType = D3DPT_TRIANGLESTRIP;
+    face->verts = face->m_verts;
+    face->numVerts = 4;
+    face->indices = nullptr;
+    face->numIndices = 0;
+    face->tex = texture;
+    face->mtPreset = 3;
+    face->cullMode = D3DCULL_NONE;
+    face->srcAlphaMode = D3DBLEND_SRCALPHA;
+    face->destAlphaMode = D3DBLEND_INVSRCALPHA;
+    face->alphaSortKey = sortKey;
+
+    face->m_verts[0] = { -0.5f, -0.5f, 0.0f, 1.0f, 0xFFFFFFFFu, 0xFF000000u, 0.0f, 0.0f };
+    face->m_verts[1] = { right, -0.5f, 0.0f, 1.0f, 0xFFFFFFFFu, 0xFF000000u, maxU, 0.0f };
+    face->m_verts[2] = { -0.5f, bottom, 0.0f, 1.0f, 0xFFFFFFFFu, 0xFF000000u, 0.0f, maxV };
+    face->m_verts[3] = { right, bottom, 0.0f, 1.0f, 0xFFFFFFFFu, 0xFF000000u, maxU, maxV };
+    g_renderer.AddRP(face, 1 | 8);
+    return true;
+}
+
+bool ResolveCurrentModeCursorState(int* outCursorActNum, u32* outMouseAnimStartTick)
+{
+    if (!outCursorActNum || !outMouseAnimStartTick) {
+        return false;
+    }
+
+    if (CLoginMode* loginMode = g_modeMgr.GetCurrentLoginMode()) {
+        *outCursorActNum = loginMode->GetCursorAction();
+        *outMouseAnimStartTick = loginMode->GetCursorAnimStartTick();
+        return true;
+    }
+
+    if (CGameMode* gameMode = g_modeMgr.GetCurrentGameMode()) {
+        *outCursorActNum = gameMode->GetCursorAction();
+        *outMouseAnimStartTick = gameMode->GetCursorAnimStartTick();
+        return true;
+    }
+
+    return false;
+}
+
+bool QueueMenuCursorOverlayQuadForCurrentMode()
+{
+    int cursorActNum = 0;
+    u32 mouseAnimStartTick = 0;
+    if (!ResolveCurrentModeCursorState(&cursorActNum, &mouseAnimStartTick) || !g_hMainWnd) {
+        return false;
+    }
+
+    RECT clientRect{};
+    GetClientRect(g_hMainWnd, &clientRect);
+    const int clientWidth = clientRect.right - clientRect.left;
+    const int clientHeight = clientRect.bottom - clientRect.top;
+    if (clientWidth <= 0 || clientHeight <= 0) {
+        return false;
+    }
+
+    POINT cursorPos{};
+    if (!GetModeCursorClientPos(&cursorPos)) {
+        return false;
+    }
+
+    RECT cursorBounds{};
+    const bool hasCustomBounds = GetModeCursorDrawBounds(cursorActNum, mouseAnimStartTick, &cursorBounds);
+    const int textureWidth = hasCustomBounds ? (std::max)(1, static_cast<int>(cursorBounds.right - cursorBounds.left)) : 32;
+    const int textureHeight = hasCustomBounds ? (std::max)(1, static_cast<int>(cursorBounds.bottom - cursorBounds.top)) : 32;
+    const int drawOriginX = hasCustomBounds ? -(std::min)(0, static_cast<int>(cursorBounds.left)) : 0;
+    const int drawOriginY = hasCustomBounds ? -(std::min)(0, static_cast<int>(cursorBounds.top)) : 0;
+    const int left = hasCustomBounds ? cursorPos.x + (std::min)(0, static_cast<int>(cursorBounds.left)) : cursorPos.x;
+    const int top = hasCustomBounds ? cursorPos.y + (std::min)(0, static_cast<int>(cursorBounds.top)) : cursorPos.y;
+    static std::vector<unsigned int> s_cursorComposePixels;
+    static bool s_cursorTextureValid = false;
+    static CTexture* s_cursorTexture = nullptr;
+    static int s_cursorTextureWidth = 0;
+    static int s_cursorTextureHeight = 0;
+    static std::uint64_t s_cursorStateToken = 0ull;
+    if (!s_cursorTexture || s_cursorTextureWidth != textureWidth || s_cursorTextureHeight != textureHeight) {
+        delete s_cursorTexture;
+        s_cursorTexture = new CTexture();
+        if (!s_cursorTexture || !s_cursorTexture->Create(textureWidth, textureHeight, PF_A8R8G8B8, false)) {
+            delete s_cursorTexture;
+            s_cursorTexture = nullptr;
+            s_cursorTextureWidth = 0;
+            s_cursorTextureHeight = 0;
+            return false;
+        }
+        s_cursorTextureWidth = textureWidth;
+        s_cursorTextureHeight = textureHeight;
+        s_cursorTextureValid = false;
+        s_cursorStateToken = 0ull;
+        s_cursorComposePixels.assign(static_cast<size_t>(textureWidth) * static_cast<size_t>(textureHeight), 0u);
+    } else if (s_cursorComposePixels.size() != static_cast<size_t>(textureWidth) * static_cast<size_t>(textureHeight)) {
+        s_cursorComposePixels.assign(static_cast<size_t>(textureWidth) * static_cast<size_t>(textureHeight), 0u);
+    }
+
+    std::uint64_t cursorStateToken = 1469598103934665603ull;
+    cursorStateToken ^= static_cast<std::uint64_t>(cursorActNum);
+    cursorStateToken *= 1099511628211ull;
+    cursorStateToken ^= static_cast<std::uint64_t>(GetModeCursorVisualFrame(cursorActNum, mouseAnimStartTick));
+    cursorStateToken *= 1099511628211ull;
+    cursorStateToken ^= static_cast<std::uint64_t>(static_cast<unsigned int>(textureWidth));
+    cursorStateToken *= 1099511628211ull;
+    cursorStateToken ^= static_cast<std::uint64_t>(static_cast<unsigned int>(textureHeight));
+    cursorStateToken *= 1099511628211ull;
+    if (!s_cursorTextureValid || cursorStateToken != s_cursorStateToken) {
+        std::fill(s_cursorComposePixels.begin(), s_cursorComposePixels.end(), 0u);
+        if (!DrawModeCursorAtToArgb(
+                s_cursorComposePixels.data(),
+                textureWidth,
+                textureHeight,
+                drawOriginX,
+                drawOriginY,
+                cursorActNum,
+                mouseAnimStartTick)) {
+            return false;
+        }
+        s_cursorTexture->Update(0,
+            0,
+            textureWidth,
+            textureHeight,
+            s_cursorComposePixels.data(),
+            true,
+            textureWidth * static_cast<int>(sizeof(unsigned int)));
+        s_cursorTextureValid = true;
+        s_cursorStateToken = cursorStateToken;
+    }
+
+    RPFace* face = g_renderer.BorrowNullRP();
+    if (!face) {
+        return false;
+    }
+
+    const unsigned int overlayContentWidth = s_cursorTexture->m_surfaceUpdateWidth > 0 ? s_cursorTexture->m_surfaceUpdateWidth : static_cast<unsigned int>(textureWidth);
+    const unsigned int overlayContentHeight = s_cursorTexture->m_surfaceUpdateHeight > 0 ? s_cursorTexture->m_surfaceUpdateHeight : static_cast<unsigned int>(textureHeight);
+    const float maxU = s_cursorTexture->m_w != 0 ? static_cast<float>(overlayContentWidth) / static_cast<float>(s_cursorTexture->m_w) : 1.0f;
+    const float maxV = s_cursorTexture->m_h != 0 ? static_cast<float>(overlayContentHeight) / static_cast<float>(s_cursorTexture->m_h) : 1.0f;
+    const float quadLeft = static_cast<float>(left);
+    const float quadTop = static_cast<float>(top);
+    const float quadRight = static_cast<float>(left + textureWidth);
+    const float quadBottom = static_cast<float>(top + textureHeight);
+
+    face->primType = D3DPT_TRIANGLESTRIP;
+    face->verts = face->m_verts;
+    face->numVerts = 4;
+    face->indices = nullptr;
+    face->numIndices = 0;
+    face->tex = s_cursorTexture;
+    face->mtPreset = 3;
+    face->cullMode = D3DCULL_NONE;
+    face->srcAlphaMode = D3DBLEND_SRCALPHA;
+    face->destAlphaMode = D3DBLEND_INVSRCALPHA;
+    face->alphaSortKey = 2.0f;
+    face->m_verts[0] = { quadLeft, quadTop, 0.0f, 1.0f, 0xFFFFFFFFu, 0xFF000000u, 0.0f, 0.0f };
+    face->m_verts[1] = { quadRight, quadTop, 0.0f, 1.0f, 0xFFFFFFFFu, 0xFF000000u, maxU, 0.0f };
+    face->m_verts[2] = { quadLeft, quadBottom, 0.0f, 1.0f, 0xFFFFFFFFu, 0xFF000000u, 0.0f, maxV };
+    face->m_verts[3] = { quadRight, quadBottom, 0.0f, 1.0f, 0xFFFFFFFFu, 0xFF000000u, maxU, maxV };
+    g_renderer.AddRP(face, 1 | 8);
+    return true;
+}
+
+bool CompositeMenuCursorIntoArgbBuffer(unsigned int* pixels, int width, int height)
+{
+    int cursorActNum = 0;
+    u32 mouseAnimStartTick = 0;
+    if (!pixels || width <= 0 || height <= 0 || !ResolveCurrentModeCursorState(&cursorActNum, &mouseAnimStartTick)) {
+        return false;
+    }
+
+    POINT cursorPos{};
+    if (!GetModeCursorClientPos(&cursorPos)) {
+        return false;
+    }
+
+    return DrawModeCursorAtToArgb(pixels, width, height, cursorPos.x, cursorPos.y, cursorActNum, mouseAnimStartTick);
 }
 
 void AddUniqueCandidate(std::vector<std::string>& out, const std::string& raw)
@@ -94,12 +387,10 @@ std::vector<std::string> BuildWallpaperCandidates(const std::string& requestedWa
     const char* directDefaults[] = {
         "ad_title.jpg",
         "rag_title.jpg",
-        "win_login.bmp",
         "title.bmp",
         "title.jpg",
         "login_background.jpg",
         "login_background.bmp",
-        "loginwin.bmp",
         nullptr
     };
 
@@ -214,9 +505,8 @@ UIWindowMgr::UIWindowMgr()
       m_isDragAll(0), m_conversionMode(0),
       m_captureWindow(nullptr), m_editWindow(nullptr), m_modalWindow(nullptr), m_lastHitWindow(nullptr),
       m_loadingWnd(nullptr), m_roMapWnd(nullptr), m_minimapZoomWnd(nullptr), m_statusWnd(nullptr), m_sayDialogWnd(nullptr), m_npcMenuWnd(nullptr), m_npcInputWnd(nullptr), m_chooseSellBuyWnd(nullptr), m_itemShopWnd(nullptr), m_itemPurchaseWnd(nullptr), m_itemSellWnd(nullptr), m_shortCutWnd(nullptr), m_chatWnd(nullptr),
-    m_loginWnd(nullptr), m_selectServerWnd(nullptr), m_selectCharWnd(nullptr), m_makeCharWnd(nullptr), m_chooseWnd(nullptr), m_optionWnd(nullptr), m_itemWnd(nullptr), m_questWnd(nullptr), m_basicInfoWnd(nullptr), m_notifyLevelUpWnd(nullptr), m_notifyJobLevelUpWnd(nullptr), m_equipWnd(nullptr), m_skillListWnd(nullptr),
-      m_wallpaperSurface(nullptr), m_uiComposeDC(nullptr), m_uiComposeBitmap(nullptr), m_uiComposeBits(nullptr), m_uiComposeWidth(0), m_uiComposeHeight(0),
-      m_composeCursorActNum(0), m_composeCursorStartTick(0), m_composeCursorEnabled(false)
+    m_loginWnd(nullptr), m_selectServerWnd(nullptr), m_selectCharWnd(nullptr), m_makeCharWnd(nullptr), m_waitWnd(nullptr), m_chooseWnd(nullptr), m_optionWnd(nullptr), m_itemWnd(nullptr), m_questWnd(nullptr), m_basicInfoWnd(nullptr), m_notifyLevelUpWnd(nullptr), m_notifyJobLevelUpWnd(nullptr), m_equipWnd(nullptr), m_skillListWnd(nullptr),
+      m_wallpaperSurface(nullptr), m_uiComposeSurface()
 {
     m_loginStatus = "Login: idle";
 }
@@ -371,53 +661,12 @@ void UIWindowMgr::CloseNpcShopWindows()
 
 void UIWindowMgr::ReleaseComposeSurface()
 {
-    if (m_uiComposeBitmap) {
-        DeleteObject(m_uiComposeBitmap);
-        m_uiComposeBitmap = nullptr;
-    }
-    if (m_uiComposeDC) {
-        DeleteDC(m_uiComposeDC);
-        m_uiComposeDC = nullptr;
-    }
-    m_uiComposeWidth = 0;
-    m_uiComposeHeight = 0;
-    m_uiComposeBits = nullptr;
+    m_uiComposeSurface.Release();
 }
 
-bool UIWindowMgr::EnsureComposeSurface(HDC referenceDC, int width, int height)
+bool UIWindowMgr::EnsureComposeSurface(int width, int height)
 {
-    if (!referenceDC || width <= 0 || height <= 0) {
-        return false;
-    }
-
-    if (m_uiComposeDC && m_uiComposeBitmap && m_uiComposeWidth == width && m_uiComposeHeight == height) {
-        return true;
-    }
-
-    ReleaseComposeSurface();
-
-    m_uiComposeDC = CreateCompatibleDC(referenceDC);
-    if (!m_uiComposeDC) {
-        return false;
-    }
-
-    BITMAPINFO bmi{};
-    bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-    bmi.bmiHeader.biWidth = width;
-    bmi.bmiHeader.biHeight = -height;
-    bmi.bmiHeader.biPlanes = 1;
-    bmi.bmiHeader.biBitCount = 32;
-    bmi.bmiHeader.biCompression = BI_RGB;
-    m_uiComposeBitmap = CreateDIBSection(referenceDC, &bmi, DIB_RGB_COLORS, &m_uiComposeBits, nullptr, 0);
-    if (!m_uiComposeBitmap || !m_uiComposeBits) {
-        ReleaseComposeSurface();
-        return false;
-    }
-
-    SelectObject(m_uiComposeDC, m_uiComposeBitmap);
-    m_uiComposeWidth = width;
-    m_uiComposeHeight = height;
-    return true;
+    return m_uiComposeSurface.EnsureSize(width, height);
 }
 
 bool UIWindowMgr::Init() {
@@ -591,10 +840,14 @@ UIWindow* UIWindowMgr::MakeWindow(int windowId)
         return m_selectServerWnd;
 
     case WID_WAITWND: {
-        UIWaitWnd* waitWnd = new UIWaitWnd();
-        waitWnd->SetShow(1);
-        m_children.push_back(waitWnd);
-        return waitWnd;
+        if (!m_waitWnd) {
+            m_waitWnd = new UIWaitWnd();
+            m_children.push_back(m_waitWnd);
+        }
+        m_children.remove(m_waitWnd);
+        m_children.push_back(m_waitWnd);
+        m_waitWnd->SetShow(1);
+        return m_waitWnd;
     }
 
     case WID_LOADINGWND:
@@ -759,6 +1012,9 @@ void UIWindowMgr::DeleteWindow(UIWindow* window)
     if (window == m_makeCharWnd) {
         m_makeCharWnd = nullptr;
     }
+    if (window == m_waitWnd) {
+        m_waitWnd = nullptr;
+    }
     if (window == m_chooseWnd) {
         m_chooseWnd = nullptr;
     }
@@ -854,6 +1110,7 @@ void UIWindowMgr::RemoveAllWindows()
     m_selectServerWnd = nullptr;
     m_selectCharWnd = nullptr;
     m_makeCharWnd = nullptr;
+    m_waitWnd = nullptr;
     m_chooseWnd = nullptr;
     m_optionWnd = nullptr;
     m_itemWnd = nullptr;
@@ -916,25 +1173,49 @@ bool UIWindowMgr::HasRoMapDirtyVisualState() const
     return HasDirtyWindowRecursive(m_roMapWnd);
 }
 
-void UIWindowMgr::OnDraw() {
-    if (!g_hMainWnd) {
+void UIWindowMgr::ClearDirtyVisualState()
+{
+    for (UIWindow* child : m_children) {
+        if (child) {
+            ClearDirtyWindowRecursive(child);
+        }
+    }
+}
+
+void UIWindowMgr::ClearDirtyVisualStateExcludingRoMap()
+{
+    for (UIWindow* child : m_children) {
+        if (child && child != m_roMapWnd) {
+            ClearDirtyWindowRecursive(child);
+        }
+    }
+}
+
+void UIWindowMgr::DrawVisibleWindowsToHdc(HDC targetDC, bool includeRoMap)
+{
+    if (!g_hMainWnd || !targetDC) {
         return;
     }
 
-    if (HDC sharedDC = UIWindow::GetSharedDrawDC()) {
-        RECT clientRect{};
-        GetClientRect(g_hMainWnd, &clientRect);
-        for (auto child : m_children) {
-            if (child && child->m_show != 0) {
-                child->OnDraw();
-            }
+    RECT clientRect{};
+    GetClientRect(g_hMainWnd, &clientRect);
+    for (auto child : m_children) {
+        if (child && child->m_show != 0 && (includeRoMap || child != m_roMapWnd)) {
+            child->DrawToHdc(targetDC);
         }
-        if (m_itemWnd && m_itemWnd->m_show != 0) {
-            m_itemWnd->DrawHoverOverlay(sharedDC, clientRect);
-        }
-        for (UIWindow* child : m_children) {
-            ClearDirtyWindowRecursive(child);
-        }
+    }
+    if (m_itemWnd && m_itemWnd->m_show != 0) {
+        m_itemWnd->DrawHoverOverlay(targetDC, clientRect);
+    }
+    if (includeRoMap) {
+        ClearDirtyVisualState();
+    } else {
+        ClearDirtyVisualStateExcludingRoMap();
+    }
+}
+
+void UIWindowMgr::OnDraw() {
+    if (!g_hMainWnd) {
         return;
     }
 
@@ -944,78 +1225,142 @@ void UIWindowMgr::OnDraw() {
         (m_makeCharWnd && m_makeCharWnd->m_show != 0) ||
         (m_loadingWnd && m_loadingWnd->m_show != 0);
 
-    if (!hasMenuUi && GetRenderDevice().GetLegacyDevice() != nullptr) {
-        HDC backBufferDC = nullptr;
-        if (GetRenderDevice().AcquireBackBufferDC(&backBufferDC) && backBufferDC) {
-            RECT clientRect{};
-            GetClientRect(g_hMainWnd, &clientRect);
-            HDC previousSharedDC = UIWindow::GetSharedDrawDC();
-            UIWindow::SetSharedDrawDC(backBufferDC);
-            for (auto child : m_children) {
-                if (child && child->m_show != 0) {
-                    child->OnDraw();
-                }
-            }
-            if (m_itemWnd && m_itemWnd->m_show != 0) {
-                m_itemWnd->DrawHoverOverlay(backBufferDC, clientRect);
-            }
-            UIWindow::SetSharedDrawDC(previousSharedDC);
-            GetRenderDevice().ReleaseBackBufferDC(backBufferDC);
-            for (UIWindow* child : m_children) {
-                ClearDirtyWindowRecursive(child);
-            }
-            return;
-        }
-    }
-
-    HDC targetDC = GetDC(g_hMainWnd);
-    if (!targetDC) {
-        return;
-    }
-
     RECT clientRect{};
     GetClientRect(g_hMainWnd, &clientRect);
     const int clientWidth = clientRect.right - clientRect.left;
     const int clientHeight = clientRect.bottom - clientRect.top;
     if (clientWidth <= 0 || clientHeight <= 0) {
-        ReleaseDC(g_hMainWnd, targetDC);
         return;
     }
 
-    HDC drawDC = targetDC;
-    const bool useCompose = EnsureComposeSurface(targetDC, clientWidth, clientHeight);
+    const bool hasModernBackend = GetRenderDevice().GetLegacyDevice() == nullptr;
+    const bool qtMenuRuntimeEnabled = hasMenuUi
+        && IsQtUiRuntimeEnabled()
+        && hasModernBackend;
+
+    {
+        static int s_lastLoggedUiMgrMenuMode = -1;
+        const int menuMode = qtMenuRuntimeEnabled ? 1 : 0;
+        if (menuMode != s_lastLoggedUiMgrMenuMode) {
+            DbgLog("[UIWindowMgr] front-menu qtRuntime=%d hasMenuUi=%d modernBackend=%d size=%dx%d\n",
+                qtMenuRuntimeEnabled ? 1 : 0,
+                hasMenuUi ? 1 : 0,
+                hasModernBackend ? 1 : 0,
+                clientWidth,
+                clientHeight);
+            s_lastLoggedUiMgrMenuMode = menuMode;
+        }
+    }
+
+    if (qtMenuRuntimeEnabled) {
+        static CTexture* s_qtMenuOverlayTexture = nullptr;
+        static int s_qtMenuOverlayTextureWidth = 0;
+        static int s_qtMenuOverlayTextureHeight = 0;
+        static std::vector<unsigned int> s_qtMenuComposePixels;
+        if (!s_qtMenuOverlayTexture
+            || s_qtMenuOverlayTextureWidth != clientWidth
+            || s_qtMenuOverlayTextureHeight != clientHeight) {
+            delete s_qtMenuOverlayTexture;
+            s_qtMenuOverlayTexture = new CTexture();
+            if (!s_qtMenuOverlayTexture
+                || !s_qtMenuOverlayTexture->Create(clientWidth, clientHeight, PF_A8R8G8B8, false)) {
+                delete s_qtMenuOverlayTexture;
+                s_qtMenuOverlayTexture = nullptr;
+                s_qtMenuOverlayTextureWidth = 0;
+                s_qtMenuOverlayTextureHeight = 0;
+            } else {
+                s_qtMenuOverlayTextureWidth = clientWidth;
+                s_qtMenuOverlayTextureHeight = clientHeight;
+            }
+        }
+
+        if (s_qtMenuOverlayTexture
+            && RenderQtUiMenuOverlayTexture(s_qtMenuOverlayTexture, clientWidth, clientHeight)
+            && QueueFullScreenOverlayQuad(s_qtMenuOverlayTexture, clientWidth, clientHeight, 2.0f)) {
+            QueueMenuCursorOverlayQuadForCurrentMode();
+            ClearDirtyVisualState();
+            g_renderer.ClearBackground();
+            g_renderer.Clear(0);
+            RenderWallPaper();
+            g_renderer.DrawScene();
+            g_renderer.Flip(false);
+            return;
+        }
+
+        if (s_qtMenuOverlayTexture) {
+            const size_t pixelCount = static_cast<size_t>(clientWidth) * static_cast<size_t>(clientHeight);
+            if (s_qtMenuComposePixels.size() != pixelCount) {
+                s_qtMenuComposePixels.assign(pixelCount, 0u);
+            } else {
+                std::fill(s_qtMenuComposePixels.begin(), s_qtMenuComposePixels.end(), 0u);
+            }
+
+            if (CompositeQtUiMenuOverlay(
+                    s_qtMenuComposePixels.data(),
+                    clientWidth,
+                    clientHeight,
+                    clientWidth * static_cast<int>(sizeof(unsigned int)))) {
+                s_qtMenuOverlayTexture->Update(
+                    0,
+                    0,
+                    clientWidth,
+                    clientHeight,
+                    s_qtMenuComposePixels.data(),
+                    true,
+                    clientWidth * static_cast<int>(sizeof(unsigned int)));
+                if (QueueFullScreenOverlayQuad(s_qtMenuOverlayTexture, clientWidth, clientHeight, 2.0f)) {
+                    QueueMenuCursorOverlayQuadForCurrentMode();
+                    ClearDirtyVisualState();
+                    g_renderer.ClearBackground();
+                    g_renderer.Clear(0);
+                    RenderWallPaper();
+                    g_renderer.DrawScene();
+                    g_renderer.Flip(false);
+                    return;
+                }
+            }
+        }
+    }
+
+    const bool useCompose = EnsureComposeSurface(clientWidth, clientHeight);
+    HDC targetDC = nullptr;
+    HDC drawDC = nullptr;
     if (useCompose) {
-        drawDC = m_uiComposeDC;
-        if (m_wallpaperSurface && m_wallpaperSurface->m_hBitmap) {
+        drawDC = m_uiComposeSurface.GetDC();
+        if (m_wallpaperSurface && m_wallpaperSurface->HasSoftwarePixels()) {
             DrawWallpaperToDC(drawDC, clientWidth, clientHeight);
         } else {
             HBRUSH clearBrush = CreateSolidBrush(RGB(0, 0, 0));
             FillRect(drawDC, &clientRect, clearBrush);
             DeleteObject(clearBrush);
         }
+    } else {
+        targetDC = AcquireMainWindowDrawTarget();
+        if (!targetDC) {
+            return;
+        }
+        drawDC = targetDC;
     }
 
-    HDC previousSharedDC = UIWindow::GetSharedDrawDC();
-    UIWindow::SetSharedDrawDC(drawDC);
-    for (auto child : m_children) {
-        if (child && child->m_show != 0) {
-            child->OnDraw();
-        }
+    const bool qtMenuComposeFallback = useCompose && qtMenuRuntimeEnabled;
+    if (!qtMenuComposeFallback) {
+        DrawVisibleWindowsToHdc(drawDC, true);
+    } else {
+        ClearDirtyVisualState();
+        CompositeQtUiMenuOverlay(
+            m_uiComposeSurface.GetBits(),
+            clientWidth,
+            clientHeight,
+            clientWidth * static_cast<int>(sizeof(unsigned int)));
+        CompositeMenuCursorIntoArgbBuffer(
+            static_cast<unsigned int*>(m_uiComposeSurface.GetBits()),
+            clientWidth,
+            clientHeight);
     }
-    if (m_itemWnd && m_itemWnd->m_show != 0) {
-        m_itemWnd->DrawHoverOverlay(drawDC, clientRect);
-    }
-    UIWindow::SetSharedDrawDC(previousSharedDC);
-    if (useCompose && m_composeCursorEnabled) {
-        DrawModeCursorToHdc(drawDC, m_composeCursorActNum, m_composeCursorStartTick);
-    }
-    const bool hasModernBackend = GetRenderDevice().GetLegacyDevice() == nullptr;
-    const bool allowModernUiPresent = hasModernBackend
-        && GetRenderDevice().GetBackendType() != RenderBackendType::Vulkan;
     bool presentedModernUiFrame = false;
-    if (useCompose && allowModernUiPresent && m_uiComposeBits) {
+    if (useCompose && hasModernBackend && m_uiComposeSurface.GetBits()) {
         presentedModernUiFrame = GetRenderDevice().UpdateBackBufferFromMemory(
-            m_uiComposeBits,
+            m_uiComposeSurface.GetBits(),
             clientWidth,
             clientHeight,
             clientWidth * static_cast<int>(sizeof(unsigned int)));
@@ -1026,44 +1371,18 @@ void UIWindowMgr::OnDraw() {
 
     if (useCompose) {
         if (!presentedModernUiFrame) {
-            BitBlt(targetDC, 0, 0, clientWidth, clientHeight, drawDC, 0, 0, SRCCOPY);
+            if (!BlitArgbBitsToMainWindow(m_uiComposeSurface.GetBits(), clientWidth, clientHeight)) {
+                return;
+            }
         }
+    } else {
+        ReleaseMainWindowDrawTarget(targetDC);
     }
-
-    for (UIWindow* child : m_children) {
-        ClearDirtyWindowRecursive(child);
-    }
-
-    ReleaseDC(g_hMainWnd, targetDC);
 }
 
-void UIWindowMgr::OnDrawExcludingRoMap()
+void UIWindowMgr::OnDrawExcludingRoMapToHdc(HDC targetDC)
 {
-    if (!g_hMainWnd) {
-        return;
-    }
-
-    HDC sharedDC = UIWindow::GetSharedDrawDC();
-    if (!sharedDC) {
-        OnDraw();
-        return;
-    }
-
-    RECT clientRect{};
-    GetClientRect(g_hMainWnd, &clientRect);
-    for (auto child : m_children) {
-        if (child && child != m_roMapWnd && child->m_show != 0) {
-            child->OnDraw();
-        }
-    }
-    if (m_itemWnd && m_itemWnd->m_show != 0) {
-        m_itemWnd->DrawHoverOverlay(sharedDC, clientRect);
-    }
-    for (UIWindow* child : m_children) {
-        if (child && child != m_roMapWnd) {
-            ClearDirtyWindowRecursive(child);
-        }
-    }
+    DrawVisibleWindowsToHdc(targetDC, false);
 }
 
 bool UIWindowMgr::DrawRoMapToHdc(HDC targetDC, int x, int y)
@@ -1107,26 +1426,39 @@ void UIWindowMgr::RenderWallPaper() {
 }
 
 void UIWindowMgr::DrawWallpaperToDC(HDC targetDC, int width, int height) {
-    if (!targetDC || !m_wallpaperSurface || !m_wallpaperSurface->m_hBitmap || width <= 0 || height <= 0) {
+    if (!targetDC || !m_wallpaperSurface || !m_wallpaperSurface->HasSoftwarePixels() || width <= 0 || height <= 0) {
         return;
     }
 
-    BITMAP bm{};
-    if (!GetObjectA(m_wallpaperSurface->m_hBitmap, sizeof(bm), &bm) || bm.bmWidth <= 0 || bm.bmHeight <= 0) {
+    const unsigned int sourceWidth = m_wallpaperSurface->m_w;
+    const unsigned int sourceHeight = m_wallpaperSurface->m_h;
+    const unsigned int* sourcePixels = m_wallpaperSurface->GetSoftwarePixels();
+    if (!sourcePixels || sourceWidth == 0 || sourceHeight == 0) {
         return;
     }
 
-    HDC srcDC = CreateCompatibleDC(targetDC);
-    if (!srcDC) {
-        return;
-    }
+    BITMAPINFO bmi{};
+    bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    bmi.bmiHeader.biWidth = static_cast<LONG>(sourceWidth);
+    bmi.bmiHeader.biHeight = -static_cast<LONG>(sourceHeight);
+    bmi.bmiHeader.biPlanes = 1;
+    bmi.bmiHeader.biBitCount = 32;
+    bmi.bmiHeader.biCompression = BI_RGB;
 
-    HGDIOBJ old = SelectObject(srcDC, m_wallpaperSurface->m_hBitmap);
     SetStretchBltMode(targetDC, HALFTONE);
-    StretchBlt(targetDC, 0, 0, width, height,
-               srcDC, 0, 0, bm.bmWidth, bm.bmHeight, SRCCOPY);
-    SelectObject(srcDC, old);
-    DeleteDC(srcDC);
+    StretchDIBits(targetDC,
+        0,
+        0,
+        width,
+        height,
+        0,
+        0,
+        static_cast<int>(sourceWidth),
+        static_cast<int>(sourceHeight),
+        sourcePixels,
+        &bmi,
+        DIB_RGB_COLORS,
+        SRCCOPY);
 }
 
 void UIWindowMgr::SetWallpaper(CBitmapRes* bitmap) {
@@ -1153,11 +1485,12 @@ void UIWindowMgr::SetWallpaper(CBitmapRes* bitmap) {
     DbgLog("[SetWallpaper] Calling Update with %dx%d pixels\n",
            bitmap->m_width, bitmap->m_height);
     m_wallpaperSurface->Update(0, 0, bitmap->m_width, bitmap->m_height, bitmap->m_data, false, bitmap->m_width * 4);
-    DbgLog("[SetWallpaper] Update done, m_hBitmap=%p\n", (void*)m_wallpaperSurface);
+    DbgLog("[SetWallpaper] Update done, hasPixels=%d\n", m_wallpaperSurface->HasSoftwarePixels() ? 1 : 0);
 }
 
 bool UIWindowMgr::SetWallpaperFromGameData(const std::string& wallpaperName) {
     const std::vector<std::string> candidates = BuildWallpaperCandidates(wallpaperName);
+    std::vector<std::string> fallbackCandidates;
     LOG_WALLPAPER_LOAD("[WallpaperLoad] Searching for wallpaper '%s', %zu candidates\n",
            wallpaperName.c_str(), candidates.size());
 
@@ -1166,6 +1499,10 @@ bool UIWindowMgr::SetWallpaperFromGameData(const std::string& wallpaperName) {
         unsigned char* bytes = g_fileMgr.GetData(candidate.c_str(), &size);
         if (!bytes || size <= 0) {
             LOG_WALLPAPER_LOAD("[WallpaperLoad]   MISS: %s\n", candidate.c_str());
+            const std::string fallback = ResolveArchiveWallpaperByFileName(candidate);
+            if (!fallback.empty()) {
+                AddUniqueCandidate(fallbackCandidates, fallback);
+            }
             delete[] bytes;
             continue;
         }
@@ -1185,6 +1522,28 @@ bool UIWindowMgr::SetWallpaperFromGameData(const std::string& wallpaperName) {
         SetWallpaper(&bitmap);
         m_loadedWallpaperPath = candidate;
         LOG_WALLPAPER_LOAD("[WallpaperLoad] SUCCESS: loaded '%s'\n", candidate.c_str());
+        return true;
+    }
+
+    for (const std::string& candidate : fallbackCandidates) {
+        int size = 0;
+        unsigned char* bytes = g_fileMgr.GetData(candidate.c_str(), &size);
+        if (!bytes || size <= 0) {
+            delete[] bytes;
+            continue;
+        }
+
+        CBitmapRes bitmap;
+        const bool loaded = bitmap.LoadFromBuffer(candidate.c_str(), bytes, size);
+        delete[] bytes;
+
+        if (!loaded || !bitmap.m_data || bitmap.m_width <= 0 || bitmap.m_height <= 0) {
+            continue;
+        }
+
+        SetWallpaper(&bitmap);
+        m_loadedWallpaperPath = candidate;
+        DbgLog("[WallpaperLoad] BASENAME HIT: %s\n", candidate.c_str());
         return true;
     }
 
@@ -1229,13 +1588,6 @@ void UIWindowMgr::HideLoadingScreen()
     }
     m_loadedWallpaperPath.clear();
     SetWallpaper(nullptr);
-}
-
-void UIWindowMgr::SetComposeCursorState(int cursorActNum, u32 mouseAnimStartTick, bool enabled)
-{
-    m_composeCursorActNum = cursorActNum;
-    m_composeCursorStartTick = mouseAnimStartTick;
-    m_composeCursorEnabled = enabled;
 }
 
 void UIWindowMgr::SendMsg(int msg, msgparam_t wparam, msgparam_t lparam) {

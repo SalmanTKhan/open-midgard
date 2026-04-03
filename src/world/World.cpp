@@ -24,6 +24,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdio>
 #include <cstring>
 #include <cctype>
 #include <map>
@@ -33,6 +34,18 @@
 CWorld g_world;
 
 namespace {
+double WorldNowMs()
+{
+    static LARGE_INTEGER freq = [] {
+        LARGE_INTEGER value{};
+        QueryPerformanceFrequency(&value);
+        return value;
+    }();
+    LARGE_INTEGER now{};
+    QueryPerformanceCounter(&now);
+    return static_cast<double>(now.QuadPart) * 1000.0 / static_cast<double>(freq.QuadPart);
+}
+
 constexpr int kSceneGraphMaxLevel = 2;
 constexpr float kNearPlane = 10.0f;
 constexpr float kGroundSubmitNearPlane = 80.0f;
@@ -43,6 +56,8 @@ constexpr float kPlayerBillboardDepthWorldBiasMin = 0.75f;
 constexpr float kPlayerBillboardDepthWorldBiasMax = 3.0f;
 constexpr float kPlayerBillboardDepthHeightBiasFactor = 0.45f;
 constexpr float kPlayerBillboardTopDepthForwardBiasScale = 0.85f;
+constexpr int kActorLabelBaseYOffset = 4;
+constexpr int kPlayerLabelBaseYOffset = 22;
 constexpr float kGroundItemScreenScale = 1.6f;
 constexpr unsigned short kGroundQuadIndices[6] = { 0, 1, 2, 0, 2, 3 };
 constexpr bool kSubmitGroundSideFaces = true;
@@ -64,6 +79,18 @@ constexpr float kFixedEffectBaseHeightOffset = 0.0f;
 constexpr float kBackgroundObjectCullNearZ = kNearPlane;
 constexpr float kBackgroundObjectCullFarZ = 6000.0f;
 constexpr float kBackgroundObjectCullPadding = 32.0f;
+constexpr float kBackgroundTinyPropCullNearZ = 250.0f;
+constexpr float kBackgroundTinyPropCullFarZ = 900.0f;
+constexpr float kBackgroundTinyPropMinProjectedRadiusNear = 18.0f;
+constexpr float kBackgroundTinyPropMinProjectedRadiusFar = 36.0f;
+constexpr float kBackgroundSmallPropCullNearZ = 600.0f;
+constexpr float kBackgroundSmallPropCullFarZ = 1400.0f;
+constexpr float kBackgroundSmallPropMinProjectedRadiusNear = 10.0f;
+constexpr float kBackgroundSmallPropMinProjectedRadiusFar = 18.0f;
+constexpr float kBackgroundMediumPropCullNearZ = 900.0f;
+constexpr float kBackgroundMediumPropCullFarZ = 1800.0f;
+constexpr float kBackgroundMediumPropMinProjectedRadiusNear = 6.0f;
+constexpr float kBackgroundMediumPropMinProjectedRadiusFar = 12.0f;
 constexpr u32 kBackgroundAnimNearInterval = 1;
 constexpr u32 kBackgroundAnimMidInterval = 2;
 constexpr u32 kBackgroundAnimFarInterval = 4;
@@ -325,7 +352,7 @@ CTexture* GetPortalParticleTexture(bool cloudTexture)
     }
 
     constexpr int kTextureSize = 64;
-    std::vector<unsigned long> pixels(static_cast<size_t>(kTextureSize) * static_cast<size_t>(kTextureSize), 0u);
+    std::vector<unsigned int> pixels(static_cast<size_t>(kTextureSize) * static_cast<size_t>(kTextureSize), 0u);
     for (int y = 0; y < kTextureSize; ++y) {
         for (int x = 0; x < kTextureSize; ++x) {
             const float fx = (static_cast<float>(x) + 0.5f) / static_cast<float>(kTextureSize) * 2.0f - 1.0f;
@@ -365,7 +392,7 @@ CTexture* GetPortalAuraTexture()
     }
 
     constexpr int kTextureSize = 64;
-    std::vector<unsigned long> pixels(static_cast<size_t>(kTextureSize) * static_cast<size_t>(kTextureSize), 0u);
+    std::vector<unsigned int> pixels(static_cast<size_t>(kTextureSize) * static_cast<size_t>(kTextureSize), 0u);
     for (int y = 0; y < kTextureSize; ++y) {
         for (int x = 0; x < kTextureSize; ++x) {
             const float fx = (static_cast<float>(x) + 0.5f) / static_cast<float>(kTextureSize) * 2.0f - 1.0f;
@@ -396,7 +423,7 @@ CTexture* GetPortalRingTexture()
     }
 
     constexpr int kTextureSize = 128;
-    std::vector<unsigned long> pixels(static_cast<size_t>(kTextureSize) * static_cast<size_t>(kTextureSize), 0u);
+    std::vector<unsigned int> pixels(static_cast<size_t>(kTextureSize) * static_cast<size_t>(kTextureSize), 0u);
     for (int y = 0; y < kTextureSize; ++y) {
         for (int x = 0; x < kTextureSize; ++x) {
             const float fx = (static_cast<float>(x) + 0.5f) / static_cast<float>(kTextureSize) * 2.0f - 1.0f;
@@ -1506,6 +1533,23 @@ public:
         return IsPortalLike() && DoesWorldPositionCoverAttrCell(attr, m_source.pos, ResolveFixedEffectRadius(m_source), attrX, attrY);
     }
 
+    bool ResolveCullSphere(vector3d* outCenter, float* outRadius) const
+    {
+        if (!outCenter || !outRadius) {
+            return false;
+        }
+
+        if (m_effect && m_effect->ResolveCullSphere(outCenter, outRadius)) {
+            return true;
+        }
+
+        const float baseRadius = ResolveFixedEffectRadius(m_source);
+        const float height = ResolveFixedEffectHeight(m_source);
+        *outCenter = m_source.pos;
+        *outRadius = std::sqrt(baseRadius * baseRadius + height * height);
+        return true;
+    }
+
     void Render(matrix* viewMatrix) override
     {
         if (m_effect) {
@@ -1949,8 +1993,44 @@ float MaxBackgroundActorScale(const C3dActor& actor)
         (std::max)(std::fabs(actor.m_scale.y), std::fabs(actor.m_scale.z)));
 }
 
-bool ShouldRenderBackgroundActor(const C3dActor& actor, const matrix& viewMatrix)
+bool IsWorldSphereVisible(const vector3d& worldPos, float worldRadius, const matrix& viewMatrix)
 {
+    const float radius = (std::max)(1.0f, worldRadius);
+    const float clipX = worldPos.x * viewMatrix.m[0][0]
+        + worldPos.y * viewMatrix.m[1][0]
+        + worldPos.z * viewMatrix.m[2][0]
+        + viewMatrix.m[3][0];
+    const float clipY = worldPos.x * viewMatrix.m[0][1]
+        + worldPos.y * viewMatrix.m[1][1]
+        + worldPos.z * viewMatrix.m[2][1]
+        + viewMatrix.m[3][1];
+    const float clipZ = worldPos.x * viewMatrix.m[0][2]
+        + worldPos.y * viewMatrix.m[1][2]
+        + worldPos.z * viewMatrix.m[2][2]
+        + viewMatrix.m[3][2];
+
+    if (!std::isfinite(clipZ) || clipZ < (kBackgroundObjectCullNearZ - radius) || clipZ > (kBackgroundObjectCullFarZ + radius)) {
+        return false;
+    }
+
+    const float projectedX = g_renderer.m_xoffset + clipX * g_renderer.m_hpc / clipZ;
+    const float projectedY = g_renderer.m_yoffset + clipY * g_renderer.m_vpc / clipZ;
+    const float projectedRadius = (std::max)(
+        kBackgroundObjectCullPadding,
+        radius * ((std::max)(std::fabs(g_renderer.m_hpc), std::fabs(g_renderer.m_vpc)) / clipZ));
+
+    return projectedX >= -projectedRadius
+        && projectedX <= static_cast<float>(g_renderer.m_width) + projectedRadius
+        && projectedY >= -projectedRadius
+        && projectedY <= static_cast<float>(g_renderer.m_height) + projectedRadius;
+}
+
+bool IsBackgroundActorVisible(const C3dActor& actor,
+    const matrix& viewMatrix,
+    float* outProjectedRadius = nullptr,
+    float* outClipZ = nullptr)
+{
+    const float worldRadius = (std::max)(1.0f, actor.m_boundRadius * (std::max)(1.0f, MaxBackgroundActorScale(actor)));
     const float clipX = actor.m_pos.x * viewMatrix.m[0][0]
         + actor.m_pos.y * viewMatrix.m[1][0]
         + actor.m_pos.z * viewMatrix.m[2][0]
@@ -1964,7 +2044,9 @@ bool ShouldRenderBackgroundActor(const C3dActor& actor, const matrix& viewMatrix
         + actor.m_pos.z * viewMatrix.m[2][2]
         + viewMatrix.m[3][2];
 
-    const float worldRadius = (std::max)(1.0f, actor.m_boundRadius * (std::max)(1.0f, MaxBackgroundActorScale(actor)));
+    if (outClipZ) {
+        *outClipZ = clipZ;
+    }
     if (!std::isfinite(clipZ) || clipZ < (kBackgroundObjectCullNearZ - worldRadius) || clipZ > (kBackgroundObjectCullFarZ + worldRadius)) {
         return false;
     }
@@ -1975,10 +2057,95 @@ bool ShouldRenderBackgroundActor(const C3dActor& actor, const matrix& viewMatrix
         kBackgroundObjectCullPadding,
         worldRadius * ((std::max)(std::fabs(g_renderer.m_hpc), std::fabs(g_renderer.m_vpc)) / clipZ));
 
+    if (outProjectedRadius) {
+        *outProjectedRadius = projectedRadius;
+    }
+
     return projectedX >= -projectedRadius
         && projectedX <= static_cast<float>(g_renderer.m_width) + projectedRadius
         && projectedY >= -projectedRadius
         && projectedY <= static_cast<float>(g_renderer.m_height) + projectedRadius;
+}
+
+bool ShouldRenderBackgroundActor(const C3dActor& actor, const matrix& viewMatrix)
+{
+    float projectedRadius = 0.0f;
+    float clipZ = 0.0f;
+    if (!IsBackgroundActorVisible(actor, viewMatrix, &projectedRadius, &clipZ)) {
+        return false;
+    }
+
+    auto shouldCullByScreenSize = [](const C3dActor& candidate, float candidateProjectedRadius, float candidateClipZ) {
+        if (candidate.m_animType != 0 || candidateClipZ <= 0.0f) {
+            return false;
+        }
+
+        float nearZ = 0.0f;
+        float farZ = 0.0f;
+        float minProjectedRadiusNear = 0.0f;
+        float minProjectedRadiusFar = 0.0f;
+        if (candidate.m_boundRadius <= 24.0f) {
+            nearZ = kBackgroundTinyPropCullNearZ;
+            farZ = kBackgroundTinyPropCullFarZ;
+            minProjectedRadiusNear = kBackgroundTinyPropMinProjectedRadiusNear;
+            minProjectedRadiusFar = kBackgroundTinyPropMinProjectedRadiusFar;
+        } else if (candidate.m_boundRadius <= 48.0f) {
+            nearZ = kBackgroundSmallPropCullNearZ;
+            farZ = kBackgroundSmallPropCullFarZ;
+            minProjectedRadiusNear = kBackgroundSmallPropMinProjectedRadiusNear;
+            minProjectedRadiusFar = kBackgroundSmallPropMinProjectedRadiusFar;
+        } else if (candidate.m_boundRadius <= 72.0f) {
+            nearZ = kBackgroundMediumPropCullNearZ;
+            farZ = kBackgroundMediumPropCullFarZ;
+            minProjectedRadiusNear = kBackgroundMediumPropMinProjectedRadiusNear;
+            minProjectedRadiusFar = kBackgroundMediumPropMinProjectedRadiusFar;
+        } else {
+            return false;
+        }
+
+        if (candidateClipZ < nearZ) {
+            return false;
+        }
+
+        const float t = (std::min)(1.0f,
+            (std::max)(0.0f, (candidateClipZ - nearZ) / (farZ - nearZ)));
+        const float minProjectedRadius = minProjectedRadiusNear
+            + (minProjectedRadiusFar - minProjectedRadiusNear) * t;
+        return candidateProjectedRadius < minProjectedRadius;
+    };
+
+    if (shouldCullByScreenSize(actor, projectedRadius, clipZ)) {
+        return false;
+    }
+
+    return true;
+}
+
+bool ResolveGameObjectCullSphere(const CGameObject& object, vector3d* outCenter, float* outRadius)
+{
+    if (!outCenter || !outRadius) {
+        return false;
+    }
+
+    if (const CFixedWorldEffect* effect = dynamic_cast<const CFixedWorldEffect*>(&object)) {
+        return effect->ResolveCullSphere(outCenter, outRadius);
+    }
+
+    if (const CRagEffect* effect = dynamic_cast<const CRagEffect*>(&object)) {
+        return effect->ResolveCullSphere(outCenter, outRadius);
+    }
+
+    return false;
+}
+
+bool ShouldRenderGameObject(const CGameObject& object, const matrix& viewMatrix)
+{
+    vector3d center{};
+    float radius = 0.0f;
+    if (!ResolveGameObjectCullSphere(object, &center, &radius)) {
+        return true;
+    }
+    return IsWorldSphereVisible(center, radius, viewMatrix);
 }
 
 u32 ResolveBackgroundActorUpdateInterval(const C3dActor& actor,
@@ -3074,7 +3241,7 @@ CTexture* GetDebugGroundTestTexture()
     }
 
     constexpr int kSize = 64;
-    std::vector<unsigned long> pixels(static_cast<size_t>(kSize) * static_cast<size_t>(kSize));
+    std::vector<unsigned int> pixels(static_cast<size_t>(kSize) * static_cast<size_t>(kSize));
     for (int y = 0; y < kSize; ++y) {
         for (int x = 0; x < kSize; ++x) {
             const bool major = ((x / 16) + (y / 16)) % 2 == 0;
@@ -3130,7 +3297,7 @@ bool CLightmapMgr::Create(const CGndRes& gnd)
     m_lmSurfaces.reserve(static_cast<size_t>(atlasCount));
 
     for (int atlasIndex = 0; atlasIndex < atlasCount; ++atlasIndex) {
-        std::vector<unsigned long> atlasPixels(static_cast<size_t>(kLightmapAtlasEdge) * static_cast<size_t>(kLightmapAtlasEdge), 0xFFFFFFFFu);
+        std::vector<unsigned int> atlasPixels(static_cast<size_t>(kLightmapAtlasEdge) * static_cast<size_t>(kLightmapAtlasEdge), 0xFFFFFFFFu);
         const int atlasStart = atlasIndex * kLightmapsPerAtlas;
         const int atlasEnd = (std::min)(atlasStart + kLightmapsPerAtlas, gnd.m_numLightmap);
 
@@ -3175,16 +3342,28 @@ bool CLightmapMgr::Create(const CGndRes& gnd)
             lightmap.coor[3] = vector2d{ u1, v1 };
         }
 
-        CTexture* atlasTexture = g_texMgr.CreateTexture(
-            kLightmapAtlasEdge,
-            kLightmapAtlasEdge,
-            atlasPixels.data(),
-            PF_A8R8G8B8,
-            false);
+        CTexture* atlasTexture = new CTexture();
         if (!atlasTexture) {
             Reset();
             return false;
         }
+        char atlasName[64]{};
+        std::snprintf(atlasName, sizeof(atlasName), "__lightmap_atlas_%d__", atlasIndex);
+        std::strncpy(atlasTexture->m_texName, atlasName, sizeof(atlasTexture->m_texName) - 1);
+        atlasTexture->m_texName[sizeof(atlasTexture->m_texName) - 1] = '\0';
+        if (!atlasTexture->Create(kLightmapAtlasEdge, kLightmapAtlasEdge, PF_A8R8G8B8, false)) {
+            delete atlasTexture;
+            Reset();
+            return false;
+        }
+        atlasTexture->Update(
+            0,
+            0,
+            kLightmapAtlasEdge,
+            kLightmapAtlasEdge,
+            atlasPixels.data(),
+            false,
+            kLightmapAtlasEdge * static_cast<int>(sizeof(unsigned int)));
         m_lmSurfaces.push_back(atlasTexture);
     }
 
@@ -4073,6 +4252,37 @@ void C3dGround::FlushGround(const matrix& viewMatrix)
             const float z0 = GroundCoordZ(y, m_height, m_zoom);
             const float z1 = GroundCoordZ(y + 1, m_height, m_zoom);
 
+            float minHeight = (std::min)((std::min)(cell->h[0], cell->h[1]), (std::min)(cell->h[2], cell->h[3]));
+            float maxHeight = (std::max)((std::max)(cell->h[0], cell->h[1]), (std::max)(cell->h[2], cell->h[3]));
+            if (cell->frontSurfaceId >= 0 && y < m_height - 1) {
+                if (const CGroundCell* frontNeighbor = GetCell(x, y + 1)) {
+                    minHeight = (std::min)(minHeight, (std::min)(frontNeighbor->h[0], frontNeighbor->h[1]));
+                    maxHeight = (std::max)(maxHeight, (std::max)(frontNeighbor->h[0], frontNeighbor->h[1]));
+                }
+            }
+            if (cell->rightSurfaceId >= 0 && x < m_width - 1) {
+                if (const CGroundCell* rightNeighbor = GetCell(x + 1, y)) {
+                    minHeight = (std::min)(minHeight, (std::min)(rightNeighbor->h[0], rightNeighbor->h[2]));
+                    maxHeight = (std::max)(maxHeight, (std::max)(rightNeighbor->h[0], rightNeighbor->h[2]));
+                }
+            }
+
+            const vector3d tileCullCenter{
+                (x0 + x1) * 0.5f,
+                (minHeight + maxHeight) * 0.5f,
+                (z0 + z1) * 0.5f,
+            };
+            const float tileHalfWidth = std::fabs(x1 - x0) * 0.5f;
+            const float tileHalfDepth = std::fabs(z1 - z0) * 0.5f;
+            const float tileHalfHeight = (maxHeight - minHeight) * 0.5f;
+            const float tileCullRadius = std::sqrt(
+                tileHalfWidth * tileHalfWidth
+                + tileHalfDepth * tileHalfDepth
+                + tileHalfHeight * tileHalfHeight);
+            if (!IsWorldSphereVisible(tileCullCenter, tileCullRadius, viewMatrix)) {
+                continue;
+            }
+
             const vector3d topVerts[4] = {
                 vector3d{ x0, cell->h[0], z0 },
                 vector3d{ x1, cell->h[1], z0 },
@@ -4244,6 +4454,7 @@ CWorld::CWorld()
     , m_billboardFrameCombinedKey(0)
     , m_billboardCachedCombinedKey(0)
     , m_billboardFrameCacheValid(false), m_billboardFrameCacheDirty(true)
+    , m_lastRenderStats{}
     , m_Calculated(nullptr)
 {
 }
@@ -4770,14 +4981,31 @@ void CWorld::UpdateGameObjects()
     }
 }
 
-void CWorld::RenderGameObjects(const matrix& viewMatrix) const
+void CWorld::RenderGameObjects(const matrix& viewMatrix, u32* outRenderedObjects, u32* outRenderedFixedEffects) const
 {
+    u32 renderedObjects = 0;
+    u32 renderedFixedEffects = 0;
+    const double renderStartMs = WorldNowMs();
     for (CGameObject* object : m_gameObjectList) {
         if (!object) {
             continue;
         }
+        if (!ShouldRenderGameObject(*object, viewMatrix)) {
+            continue;
+        }
+        renderedObjects += 1;
+        if (dynamic_cast<CFixedWorldEffect*>(object)) {
+            renderedFixedEffects += 1;
+        }
         object->Render(const_cast<matrix*>(&viewMatrix));
     }
+    if (outRenderedObjects) {
+        *outRenderedObjects = renderedObjects;
+    }
+    if (outRenderedFixedEffects) {
+        *outRenderedFixedEffects = renderedFixedEffects;
+    }
+    m_lastRenderStats.gameObjectRenderMs = WorldNowMs() - renderStartMs;
 }
 
 void CWorld::UpdateBackgroundObjects(const matrix* viewMatrix)
@@ -4884,7 +5112,13 @@ void CWorld::ProcessActorSkillRechargeGages(const matrix& viewMatrix, float came
 
 void CWorld::RenderActors(const matrix& viewMatrix, float cameraLongitude)
 {
-    RenderGameObjects(viewMatrix);
+    m_lastRenderStats = RenderDebugStats{};
+
+    u32 renderedObjects = 0;
+    u32 renderedFixedEffects = 0;
+    RenderGameObjects(viewMatrix, &renderedObjects, &renderedFixedEffects);
+    m_lastRenderStats.renderedGameObjects = renderedObjects;
+    m_lastRenderStats.renderedFixedEffects = renderedFixedEffects;
 
     auto ensurePortalActorEffect = [](CPc* pc) {
         if (!pc || !IsPortalActorJob(pc->m_job)) {
@@ -4912,19 +5146,27 @@ void CWorld::RenderActors(const matrix& viewMatrix, float cameraLongitude)
         pc->LaunchEffect(desiredEffectId, vector3d{ 0.0f, 0.0f, 0.0f }, 0.0f);
     };
 
+    const double itemRenderStartMs = WorldNowMs();
+    u32 renderedItems = 0;
     for (CItem* item : m_itemList) {
         if (!item) {
             continue;
         }
         item->Render(const_cast<matrix*>(&viewMatrix));
+        renderedItems += 1;
     }
+    m_lastRenderStats.renderedItems = renderedItems;
+    m_lastRenderStats.itemRenderMs = WorldNowMs() - itemRenderStartMs;
 
+    const double portalBootstrapStartMs = WorldNowMs();
+    u32 portalBootstrapActors = 0;
     for (CGameActor* actor : m_actorList) {
         if (!actor) {
             continue;
         }
         CPc* pc = dynamic_cast<CPc*>(actor);
         if (pc) {
+            portalBootstrapActors += 1;
             ensurePortalActorEffect(pc);
         }
         if (!actor->m_isVisible) {
@@ -4940,8 +5182,13 @@ void CWorld::RenderActors(const matrix& viewMatrix, float cameraLongitude)
 
     if (m_player) {
         CPc* pc = dynamic_cast<CPc*>(m_player);
+        if (pc) {
+            portalBootstrapActors += 1;
+        }
         ensurePortalActorEffect(pc);
     }
+    m_lastRenderStats.portalBootstrapActors = portalBootstrapActors;
+    m_lastRenderStats.portalBootstrapMs = WorldNowMs() - portalBootstrapStartMs;
 
     const float zoom = m_ground ? m_ground->m_zoom : static_cast<float>(m_attr ? m_attr->m_zoom : 5);
     // Use exact current-view billboard projections for visible rendering so
@@ -4950,6 +5197,7 @@ void CWorld::RenderActors(const matrix& viewMatrix, float cameraLongitude)
     // kept for hover/label queries where tiny projection error is acceptable.
     std::vector<BillboardScreenEntry> renderEntries;
     renderEntries.reserve(m_actorList.size() + (m_player ? 1u : 0u));
+    const double billboardBuildStartMs = WorldNowMs();
 
     auto enqueueRenderActor = [&](CGameActor* actor) {
         if (!actor || !actor->m_isVisible) {
@@ -4976,12 +5224,19 @@ void CWorld::RenderActors(const matrix& viewMatrix, float cameraLongitude)
         }
         enqueueRenderActor(actor);
     }
+    m_lastRenderStats.billboardBuildMs = WorldNowMs() - billboardBuildStartMs;
 
+    const double billboardSortStartMs = WorldNowMs();
     std::stable_sort(renderEntries.begin(), renderEntries.end(), CompareBillboardRenderEntry);
+    m_lastRenderStats.billboardSortMs = WorldNowMs() - billboardSortStartMs;
+    m_lastRenderStats.renderedBillboards = static_cast<u32>(renderEntries.size());
+
+    const double billboardRenderStartMs = WorldNowMs();
     for (const BillboardScreenEntry& entry : renderEntries) {
         RenderCachedActorShadow(entry, viewMatrix, zoom);
         RenderCachedBillboard(entry);
     }
+    m_lastRenderStats.billboardRenderMs = WorldNowMs() - billboardRenderStartMs;
 }
 
 bool CWorld::GetPlayerScreenLabel(const matrix& viewMatrix,
@@ -5012,7 +5267,7 @@ bool CWorld::GetPlayerScreenLabel(const matrix& viewMatrix,
         *outLabelX = static_cast<int>(std::lround(projectedBase.x));
     }
     if (outLabelY) {
-        *outLabelY = static_cast<int>(std::lround(projectedBase.y)) + 18;
+        *outLabelY = static_cast<int>(std::lround(projectedBase.y)) + kPlayerLabelBaseYOffset;
     }
     return true;
 }
@@ -5050,19 +5305,18 @@ bool CWorld::GetActorScreenMarker(const matrix& viewMatrix,
         return false;
     }
 
-    if (actor != m_player) {
-        EnsureBillboardFrameCache(viewMatrix, cameraLongitude);
-    }
-    if (actor != m_player) {
-        if (const BillboardScreenEntry* entry = FindBillboardFrameEntryByGid(gid)) {
+    if (CPc* pc = dynamic_cast<CPc*>(actor)) {
+        BillboardScreenEntry liveEntry{};
+        const float zoom = m_ground ? m_ground->m_zoom : static_cast<float>(m_attr ? m_attr->m_zoom : 5);
+        if (BuildBillboardRenderEntry(pc, viewMatrix, cameraLongitude, zoom, &liveEntry)) {
             if (outCenterX) {
-                *outCenterX = static_cast<int>(std::lround((entry->left + entry->right) * 0.5f));
+                *outCenterX = static_cast<int>(std::lround(liveEntry.baseX));
             }
             if (outTopY) {
-                *outTopY = static_cast<int>(std::lround(entry->top));
+                *outTopY = static_cast<int>(std::lround(liveEntry.top));
             }
             if (outLabelY) {
-                *outLabelY = static_cast<int>(std::lround(entry->labelY));
+                *outLabelY = static_cast<int>(std::lround(liveEntry.baseY)) + kActorLabelBaseYOffset;
             }
             return true;
         }
@@ -5080,7 +5334,7 @@ bool CWorld::GetActorScreenMarker(const matrix& viewMatrix,
         *outTopY = static_cast<int>(std::lround(projectedBase.y)) - 48;
     }
     if (outLabelY) {
-        *outLabelY = static_cast<int>(std::lround(projectedBase.y));
+        *outLabelY = static_cast<int>(std::lround(projectedBase.y)) + kActorLabelBaseYOffset;
     }
     return true;
 }
@@ -5103,10 +5357,31 @@ bool CWorld::FindHoveredActorScreen(const matrix& viewMatrix,
         *outLabelY = 0;
     }
 
-    EnsureBillboardFrameCache(viewMatrix, cameraLongitude);
-
     const float mouseX = static_cast<float>(screenX);
     const float mouseY = static_cast<float>(screenY);
+
+    if (CPc* playerPc = dynamic_cast<CPc*>(m_player)) {
+        const float zoom = m_ground ? m_ground->m_zoom : static_cast<float>(m_attr ? m_attr->m_zoom : 5);
+        BillboardScreenEntry playerEntry{};
+        if (BuildBillboardRenderEntry(playerPc, viewMatrix, cameraLongitude, zoom, &playerEntry)
+            && mouseX >= playerEntry.left
+            && mouseX <= playerEntry.right
+            && mouseY >= playerEntry.top
+            && mouseY <= playerEntry.bottom) {
+            if (outActor) {
+                *outActor = playerPc;
+            }
+            if (outLabelX) {
+                *outLabelX = static_cast<int>(std::lround(playerEntry.baseX));
+            }
+            if (outLabelY) {
+                *outLabelY = static_cast<int>(std::lround(playerEntry.baseY)) + kActorLabelBaseYOffset;
+            }
+            return true;
+        }
+    }
+
+    EnsureBillboardFrameCache(viewMatrix, cameraLongitude);
     const BillboardScreenEntry* stickyEntry = nullptr;
     CPc* stickyActor = nullptr;
     float stickyDistanceSq = 0.0f;
@@ -5129,7 +5404,7 @@ bool CWorld::FindHoveredActorScreen(const matrix& viewMatrix,
                 *outLabelX = static_cast<int>(std::lround(it->baseX));
             }
             if (outLabelY) {
-                *outLabelY = static_cast<int>(std::lround(it->baseY));
+                *outLabelY = static_cast<int>(std::lround(it->baseY)) + kActorLabelBaseYOffset;
             }
             return true;
         }
@@ -5163,7 +5438,7 @@ bool CWorld::FindHoveredActorScreen(const matrix& viewMatrix,
             *outLabelX = static_cast<int>(std::lround(stickyEntry->baseX));
         }
         if (outLabelY) {
-            *outLabelY = static_cast<int>(std::lround(stickyEntry->baseY));
+            *outLabelY = static_cast<int>(std::lround(stickyEntry->baseY)) + kActorLabelBaseYOffset;
         }
         return true;
     }
@@ -5298,15 +5573,59 @@ bool CWorld::HasWarpAtAttrCell(int attrX, int attrY) const
 
 void CWorld::RenderBackgroundObjects(const matrix& viewMatrix) const
 {
+    u32 renderedBackgroundObjects = 0;
+    u32 skippedTinyBackgroundObjects = 0;
+    const double renderStartMs = WorldNowMs();
     for (const C3dActor* actor : m_bgObjList) {
         if (!actor) {
             continue;
         }
-        if (!ShouldRenderBackgroundActor(*actor, viewMatrix)) {
+        float projectedRadius = 0.0f;
+        float clipZ = 0.0f;
+        if (!IsBackgroundActorVisible(*actor, viewMatrix, &projectedRadius, &clipZ)) {
             continue;
         }
+
+        if (actor->m_animType == 0 && clipZ > 0.0f) {
+            float nearZ = 0.0f;
+            float farZ = 0.0f;
+            float minProjectedRadiusNear = 0.0f;
+            float minProjectedRadiusFar = 0.0f;
+            if (actor->m_boundRadius <= 24.0f) {
+                nearZ = kBackgroundTinyPropCullNearZ;
+                farZ = kBackgroundTinyPropCullFarZ;
+                minProjectedRadiusNear = kBackgroundTinyPropMinProjectedRadiusNear;
+                minProjectedRadiusFar = kBackgroundTinyPropMinProjectedRadiusFar;
+            } else if (actor->m_boundRadius <= 48.0f) {
+                nearZ = kBackgroundSmallPropCullNearZ;
+                farZ = kBackgroundSmallPropCullFarZ;
+                minProjectedRadiusNear = kBackgroundSmallPropMinProjectedRadiusNear;
+                minProjectedRadiusFar = kBackgroundSmallPropMinProjectedRadiusFar;
+            } else if (actor->m_boundRadius <= 72.0f) {
+                nearZ = kBackgroundMediumPropCullNearZ;
+                farZ = kBackgroundMediumPropCullFarZ;
+                minProjectedRadiusNear = kBackgroundMediumPropMinProjectedRadiusNear;
+                minProjectedRadiusFar = kBackgroundMediumPropMinProjectedRadiusFar;
+            }
+
+            if (nearZ > 0.0f && clipZ >= nearZ) {
+                const float t = (std::min)(1.0f,
+                    (std::max)(0.0f, (clipZ - nearZ) / (farZ - nearZ)));
+                const float minProjectedRadius = minProjectedRadiusNear
+                    + (minProjectedRadiusFar - minProjectedRadiusNear) * t;
+                if (projectedRadius < minProjectedRadius) {
+                    skippedTinyBackgroundObjects += 1;
+                    continue;
+                }
+            }
+        }
+
+        renderedBackgroundObjects += 1;
         actor->Render(viewMatrix);
     }
+    m_lastRenderStats.renderedBackgroundObjects = renderedBackgroundObjects;
+    m_lastRenderStats.skippedTinyBackgroundObjects = skippedTinyBackgroundObjects;
+    m_lastRenderStats.backgroundRenderMs = WorldNowMs() - renderStartMs;
 }
 
 void LaunchLevelUpEffect(CGameActor* actor, u32 effectId)

@@ -15,7 +15,25 @@
 #include <unordered_map>
 #include <vector>
 
+bool DrawModeCursorAtToHdc(HDC hdc, int x, int y, int cursorActNum, u32 mouseAnimStartTick);
+
 namespace {
+
+bool DrawModeCursorToMainWindow(int cursorActNum, u32 mouseAnimStartTick)
+{
+    if (!g_hMainWnd) {
+        return false;
+    }
+
+    HDC hdc = GetDC(g_hMainWnd);
+    if (!hdc) {
+        return false;
+    }
+
+    const bool drew = DrawModeCursorToHdc(hdc, cursorActNum, mouseAnimStartTick);
+    ReleaseDC(g_hMainWnd, hdc);
+    return drew;
+}
 
 struct CursorResCache
 {
@@ -24,9 +42,57 @@ struct CursorResCache
     std::string actName;
 };
 
-constexpr int kDragPreviewSize = 24;
+constexpr int kDragPreviewSize = 32;
 constexpr int kDragPreviewOffsetX = 0;
 constexpr int kDragPreviewOffsetY = 0;
+
+struct DragPreviewPixels
+{
+    int width = 0;
+    int height = 0;
+    std::vector<unsigned int> pixels;
+};
+
+struct DragPreviewBounds
+{
+    int left = 0;
+    int top = 0;
+    int width = 0;
+    int height = 0;
+};
+
+constexpr const char* kFallbackCursorMask[] = {
+    "X.............",
+    "XX............",
+    "XOX...........",
+    "XOOX..........",
+    "XOOOX.........",
+    "XOOOOX........",
+    "XOOOOOX.......",
+    "XOOOOOOX......",
+    "XOOOOOOOX.....",
+    "XOOOOOOOOX....",
+    "XOOOOOOOOOX...",
+    "XOOOOOOOOOOX..",
+    "XOOOOXXXXXXXX.",
+    "XOOXOX........",
+    "XOX..OX.......",
+    "XX....OX......",
+    "X......OX.....",
+    "........X....."
+};
+constexpr int kFallbackCursorHeight = static_cast<int>(sizeof(kFallbackCursorMask) / sizeof(kFallbackCursorMask[0]));
+constexpr int kFallbackCursorWidth = 14;
+constexpr unsigned int kFallbackCursorOutlineColor = 0xFF000000u;
+constexpr unsigned int kFallbackCursorFillColor = 0xFFF6F6F6u;
+bool s_hasCachedClientCursorPos = false;
+POINT s_cachedClientCursorPos{};
+
+unsigned int PremultiplyCursorColor(unsigned int color);
+void AlphaBlendCursorPixel(unsigned int& dst, unsigned int src);
+bool BuildFallbackCursorPixels(std::vector<unsigned int>* outPixels);
+bool ComputeVisibleDragPreviewBounds(const DragPreviewPixels& preview, DragPreviewBounds* outBounds);
+bool GetDragPreviewDrawBounds(RECT* outBounds);
 
 CursorResCache ResolveCursorResources()
 {
@@ -66,16 +132,84 @@ void DrawFallbackCursorAt(HDC hdc, int x, int y)
         return;
     }
 
-    HCURSOR cursor = LoadCursor(nullptr, IDC_ARROW);
-    if (cursor) {
-        DrawIconEx(hdc, x, y, cursor, 0, 0, 0, nullptr, DI_NORMAL);
+    std::vector<unsigned int> pixels;
+    if (!BuildFallbackCursorPixels(&pixels) || pixels.empty()) {
+        return;
     }
+
+    AlphaBlendArgbToHdc(hdc, x, y, kFallbackCursorWidth, kFallbackCursorHeight, pixels.data(), kFallbackCursorWidth, kFallbackCursorHeight);
+}
+
+bool BuildFallbackCursorPixels(std::vector<unsigned int>* outPixels)
+{
+    if (!outPixels) {
+        return false;
+    }
+
+    outPixels->assign(static_cast<size_t>(kFallbackCursorWidth) * static_cast<size_t>(kFallbackCursorHeight), 0u);
+    for (int row = 0; row < kFallbackCursorHeight; ++row) {
+        const char* maskRow = kFallbackCursorMask[row];
+        for (int col = 0; maskRow[col] != '\0'; ++col) {
+            unsigned int srcColor = 0u;
+            if (maskRow[col] == 'X') {
+                srcColor = kFallbackCursorOutlineColor;
+            } else if (maskRow[col] == 'O') {
+                srcColor = kFallbackCursorFillColor;
+            } else {
+                continue;
+            }
+
+            (*outPixels)[static_cast<size_t>(row) * static_cast<size_t>(kFallbackCursorWidth) + static_cast<size_t>(col)] =
+                PremultiplyCursorColor(srcColor);
+        }
+    }
+
+    return true;
+}
+
+bool DrawFallbackCursorToArgb(unsigned int* dest, int destW, int destH, int x, int y)
+{
+    if (!dest || destW <= 0 || destH <= 0) {
+        return false;
+    }
+
+    std::vector<unsigned int> pixels;
+    if (!BuildFallbackCursorPixels(&pixels) || pixels.empty()) {
+        return false;
+    }
+
+    for (int row = 0; row < kFallbackCursorHeight; ++row) {
+        for (int col = 0; col < kFallbackCursorWidth; ++col) {
+            const int destX = x + col;
+            const int destY = y + row;
+            if (destX < 0 || destX >= destW || destY < 0 || destY >= destH) {
+                continue;
+            }
+
+            const unsigned int srcColor =
+                pixels[static_cast<size_t>(row) * static_cast<size_t>(kFallbackCursorWidth) + static_cast<size_t>(col)];
+            if (srcColor == 0u) {
+                continue;
+            }
+
+            AlphaBlendCursorPixel(
+                dest[static_cast<size_t>(destY) * static_cast<size_t>(destW) + static_cast<size_t>(destX)],
+                srcColor);
+        }
+    }
+
+    return true;
 }
 
 bool GetClientCursorPosInternal(POINT* outPoint)
 {
     if (!outPoint || !g_hMainWnd) {
         return false;
+    }
+
+    if (s_hasCachedClientCursorPos) {
+        *outPoint = s_cachedClientCursorPos;
+        return true;
     }
 
     POINT pt{};
@@ -106,47 +240,212 @@ std::string ResolveShortcutDragSkillIconPath(int skillId)
     return g_skillMgr.GetSkillIconPath(skillId);
 }
 
-HBITMAP LoadDragPreviewBitmap(const DRAG_INFO& dragInfo)
+bool ResolveDragPreviewCacheKey(const DRAG_INFO& dragInfo, unsigned long long* outKey)
 {
-    static std::unordered_map<unsigned long long, HBITMAP> s_dragPreviewCache;
+    if (!outKey) {
+        return false;
+    }
+
+    if (dragInfo.type == static_cast<int>(DragType::ShortcutItem) && dragInfo.itemId != 0) {
+        *outKey = (1ull << 32) | static_cast<unsigned long long>(dragInfo.itemId);
+        return true;
+    }
+    if (dragInfo.type == static_cast<int>(DragType::ShortcutSkill) && dragInfo.skillId != 0) {
+        *outKey = (2ull << 32) | static_cast<unsigned long long>(static_cast<unsigned int>(dragInfo.skillId));
+        return true;
+    }
+
+    *outKey = 0;
+    return false;
+}
+
+bool LoadDragPreviewPixels(const DRAG_INFO& dragInfo, DragPreviewPixels* outPreview)
+{
+    if (!outPreview) {
+        return false;
+    }
+
+    static std::unordered_map<unsigned long long, DragPreviewPixels> s_dragPreviewCache;
 
     unsigned long long cacheKey = 0;
-    if (dragInfo.type == static_cast<int>(DragType::ShortcutItem) && dragInfo.itemId != 0) {
-        cacheKey = (1ull << 32) | static_cast<unsigned long long>(dragInfo.itemId);
-    } else if (dragInfo.type == static_cast<int>(DragType::ShortcutSkill) && dragInfo.skillId != 0) {
-        cacheKey = (2ull << 32) | static_cast<unsigned long long>(static_cast<unsigned int>(dragInfo.skillId));
-    } else {
-        return nullptr;
+    if (!ResolveDragPreviewCacheKey(dragInfo, &cacheKey)) {
+        return false;
     }
 
     const auto found = s_dragPreviewCache.find(cacheKey);
     if (found != s_dragPreviewCache.end()) {
-        return found->second;
+        *outPreview = found->second;
+        return !outPreview->pixels.empty();
     }
 
-    HBITMAP bitmap = nullptr;
+    DragPreviewPixels preview{};
+    std::string bitmapPath;
     if (dragInfo.type == static_cast<int>(DragType::ShortcutItem) && dragInfo.itemId != 0) {
         ITEM_INFO item{};
         item.SetItemId(dragInfo.itemId);
         item.m_isIdentified = 1;
-        for (const std::string& candidate : shopui::BuildItemIconCandidates(item)) {
-            if (!g_fileMgr.IsDataExist(candidate.c_str())) {
-                continue;
-            }
-            bitmap = shopui::LoadBitmapFromGameData(candidate);
-            if (bitmap) {
-                break;
-            }
+        shopui::BitmapPixels bitmap;
+        if (shopui::TryLoadItemIconPixels(item, &bitmap) && bitmap.IsValid()) {
+            preview.width = bitmap.width;
+            preview.height = bitmap.height;
+            preview.pixels = std::move(bitmap.pixels);
         }
     } else if (dragInfo.type == static_cast<int>(DragType::ShortcutSkill) && dragInfo.skillId != 0) {
         const std::string path = ResolveShortcutDragSkillIconPath(dragInfo.skillId);
         if (!path.empty() && g_fileMgr.IsDataExist(path.c_str())) {
-            bitmap = shopui::LoadBitmapFromGameData(path);
+            bitmapPath = path;
         }
     }
 
-    s_dragPreviewCache[cacheKey] = bitmap;
-    return bitmap;
+    if (preview.pixels.empty() && !bitmapPath.empty()) {
+        shopui::BitmapPixels bitmap = shopui::LoadBitmapPixelsFromGameData(bitmapPath, true);
+        if (bitmap.IsValid()) {
+            preview.width = bitmap.width;
+            preview.height = bitmap.height;
+            preview.pixels = std::move(bitmap.pixels);
+        }
+    }
+
+    s_dragPreviewCache[cacheKey] = preview;
+    *outPreview = preview;
+    return !outPreview->pixels.empty();
+}
+
+bool BuildScaledDragPreviewPixels(const DragPreviewPixels& preview, std::vector<unsigned int>* outPixels)
+{
+    if (!outPixels || preview.width <= 0 || preview.height <= 0 || preview.pixels.empty()) {
+        return false;
+    }
+
+    DragPreviewBounds visibleBounds{};
+    if (!ComputeVisibleDragPreviewBounds(preview, &visibleBounds) || visibleBounds.width <= 0 || visibleBounds.height <= 0) {
+        visibleBounds.left = 0;
+        visibleBounds.top = 0;
+        visibleBounds.width = preview.width;
+        visibleBounds.height = preview.height;
+    }
+
+    outPixels->assign(static_cast<size_t>(kDragPreviewSize) * static_cast<size_t>(kDragPreviewSize), 0u);
+
+    const float scaleX = static_cast<float>(kDragPreviewSize) / static_cast<float>(visibleBounds.width);
+    const float scaleY = static_cast<float>(kDragPreviewSize) / static_cast<float>(visibleBounds.height);
+    const float scale = (std::min)(scaleX, scaleY);
+    const int scaledWidth = (std::max)(1, static_cast<int>(std::round(static_cast<float>(visibleBounds.width) * scale)));
+    const int scaledHeight = (std::max)(1, static_cast<int>(std::round(static_cast<float>(visibleBounds.height) * scale)));
+    const int offsetX = (kDragPreviewSize - scaledWidth) / 2;
+    const int offsetY = (kDragPreviewSize - scaledHeight) / 2;
+
+    for (int dy = 0; dy < scaledHeight; ++dy) {
+        const int destY = offsetY + dy;
+        if (destY < 0 || destY >= kDragPreviewSize) {
+            continue;
+        }
+
+        const float srcYf = static_cast<float>(visibleBounds.top)
+            + ((static_cast<float>(dy) + 0.5f) * static_cast<float>(visibleBounds.height) / static_cast<float>(scaledHeight));
+        const int srcY = (std::min)(preview.height - 1, (std::max)(0, static_cast<int>(srcYf)));
+
+        for (int dx = 0; dx < scaledWidth; ++dx) {
+            const int destX = offsetX + dx;
+            if (destX < 0 || destX >= kDragPreviewSize) {
+                continue;
+            }
+
+            const float srcXf = static_cast<float>(visibleBounds.left)
+                + ((static_cast<float>(dx) + 0.5f) * static_cast<float>(visibleBounds.width) / static_cast<float>(scaledWidth));
+            const int srcX = (std::min)(preview.width - 1, (std::max)(0, static_cast<int>(srcXf)));
+            unsigned int srcColor = preview.pixels[static_cast<size_t>(srcY) * static_cast<size_t>(preview.width) + static_cast<size_t>(srcX)];
+            if (((srcColor >> 24) & 0xFFu) == 0u) {
+                continue;
+            }
+
+            (*outPixels)[static_cast<size_t>(destY) * static_cast<size_t>(kDragPreviewSize) + static_cast<size_t>(destX)] =
+                PremultiplyCursorColor(srcColor);
+        }
+    }
+
+    return true;
+}
+
+bool ComputeVisibleDragPreviewBounds(const DragPreviewPixels& preview, DragPreviewBounds* outBounds)
+{
+    if (!outBounds || preview.width <= 0 || preview.height <= 0 || preview.pixels.empty()) {
+        return false;
+    }
+
+    int minX = preview.width;
+    int minY = preview.height;
+    int maxX = -1;
+    int maxY = -1;
+
+    for (int y = 0; y < preview.height; ++y) {
+        for (int x = 0; x < preview.width; ++x) {
+            const unsigned int color = preview.pixels[static_cast<size_t>(y) * static_cast<size_t>(preview.width) + static_cast<size_t>(x)];
+            if ((color & 0x00FFFFFFu) == 0x00FF00FFu) {
+                continue;
+            }
+
+            minX = (std::min)(minX, x);
+            minY = (std::min)(minY, y);
+            maxX = (std::max)(maxX, x);
+            maxY = (std::max)(maxY, y);
+        }
+    }
+
+    if (maxX < minX || maxY < minY) {
+        outBounds->left = 0;
+        outBounds->top = 0;
+        outBounds->width = preview.width;
+        outBounds->height = preview.height;
+        return true;
+    }
+
+    outBounds->left = minX;
+    outBounds->top = minY;
+    outBounds->width = (maxX - minX) + 1;
+    outBounds->height = (maxY - minY) + 1;
+    return true;
+}
+
+bool GetDragPreviewDrawBounds(RECT* outBounds)
+{
+    if (!outBounds) {
+        return false;
+    }
+
+    const CGameMode* gameMode = g_modeMgr.GetCurrentGameMode();
+    if (!gameMode || gameMode->m_dragType == static_cast<int>(DragType::None)) {
+        return false;
+    }
+
+    DragPreviewPixels preview{};
+    if (!LoadDragPreviewPixels(gameMode->m_dragInfo, &preview)
+        || preview.width <= 0
+        || preview.height <= 0
+        || preview.pixels.empty()) {
+        return false;
+    }
+
+    std::vector<unsigned int> scaledPixels;
+    if (!BuildScaledDragPreviewPixels(preview, &scaledPixels) || scaledPixels.empty()) {
+        return false;
+    }
+
+    DragPreviewPixels scaledPreview{};
+    scaledPreview.width = kDragPreviewSize;
+    scaledPreview.height = kDragPreviewSize;
+    scaledPreview.pixels = std::move(scaledPixels);
+
+    DragPreviewBounds visibleBounds{};
+    if (!ComputeVisibleDragPreviewBounds(scaledPreview, &visibleBounds)) {
+        return false;
+    }
+
+    outBounds->left = kDragPreviewOffsetX - (kDragPreviewSize / 2) + visibleBounds.left;
+    outBounds->top = kDragPreviewOffsetY - (kDragPreviewSize / 2) + visibleBounds.top;
+    outBounds->right = outBounds->left + visibleBounds.width;
+    outBounds->bottom = outBounds->top + visibleBounds.height;
+    return outBounds->right > outBounds->left && outBounds->bottom > outBounds->top;
 }
 
 void DrawDragPreviewAt(HDC hdc, int x, int y)
@@ -160,18 +459,71 @@ void DrawDragPreviewAt(HDC hdc, int x, int y)
         return;
     }
 
-    HBITMAP bitmap = LoadDragPreviewBitmap(gameMode->m_dragInfo);
-    if (!bitmap) {
+    DragPreviewPixels preview{};
+    if (!LoadDragPreviewPixels(gameMode->m_dragInfo, &preview)) {
         return;
     }
 
-    RECT dst{
+    std::vector<unsigned int> scaledPixels;
+    if (!BuildScaledDragPreviewPixels(preview, &scaledPixels) || scaledPixels.empty()) {
+        return;
+    }
+
+    AlphaBlendArgbToHdc(hdc,
         x + kDragPreviewOffsetX - (kDragPreviewSize / 2),
         y + kDragPreviewOffsetY - (kDragPreviewSize / 2),
-        x + kDragPreviewOffsetX + (kDragPreviewSize / 2),
-        y + kDragPreviewOffsetY + (kDragPreviewSize / 2)
-    };
-    shopui::DrawBitmapTransparent(hdc, bitmap, dst);
+        kDragPreviewSize,
+        kDragPreviewSize,
+        scaledPixels.data(),
+        kDragPreviewSize,
+        kDragPreviewSize);
+}
+
+bool DrawDragPreviewToArgb(unsigned int* dest, int destW, int destH, int x, int y)
+{
+    if (!dest || destW <= 0 || destH <= 0) {
+        return false;
+    }
+
+    const CGameMode* gameMode = g_modeMgr.GetCurrentGameMode();
+    if (!gameMode || gameMode->m_dragType == static_cast<int>(DragType::None)) {
+        return false;
+    }
+
+    DragPreviewPixels preview{};
+    if (!LoadDragPreviewPixels(gameMode->m_dragInfo, &preview)
+        || preview.width <= 0
+        || preview.height <= 0
+        || preview.pixels.empty()) {
+        return false;
+    }
+
+    std::vector<unsigned int> scaledPixels;
+    if (!BuildScaledDragPreviewPixels(preview, &scaledPixels) || scaledPixels.empty()) {
+        return false;
+    }
+
+    const int destLeft = x + kDragPreviewOffsetX - (kDragPreviewSize / 2);
+    const int destTop = y + kDragPreviewOffsetY - (kDragPreviewSize / 2);
+    for (int dy = 0; dy < kDragPreviewSize; ++dy) {
+        const int destY = destTop + dy;
+        if (destY < 0 || destY >= destH) {
+            continue;
+        }
+
+        for (int dx = 0; dx < kDragPreviewSize; ++dx) {
+            const int destX = destLeft + dx;
+            if (destX < 0 || destX >= destW) {
+                continue;
+            }
+
+            AlphaBlendCursorPixel(
+                dest[static_cast<size_t>(destY) * static_cast<size_t>(destW) + static_cast<size_t>(destX)],
+                scaledPixels[static_cast<size_t>(dy) * static_cast<size_t>(kDragPreviewSize) + static_cast<size_t>(dx)]);
+        }
+    }
+
+    return true;
 }
 
 u32 GetDragPreviewVisualToken()
@@ -413,59 +765,40 @@ bool DrawCursorMotionToHdc(HDC hdc, int x, int y, CSprRes* sprRes, const CMotion
     std::vector<unsigned int> pixels(static_cast<size_t>(width) * static_cast<size_t>(height), 0u);
     BlitCursorMotionToArgb(pixels.data(), width, height, -bounds.left, -bounds.top, sprRes, motion, palette, globalColor);
 
-    BITMAPINFO bmi{};
-    bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-    bmi.bmiHeader.biWidth = width;
-    bmi.bmiHeader.biHeight = -height;
-    bmi.bmiHeader.biPlanes = 1;
-    bmi.bmiHeader.biBitCount = 32;
-    bmi.bmiHeader.biCompression = BI_RGB;
+    return AlphaBlendArgbToHdc(hdc,
+        x + (std::min)(0, static_cast<int>(bounds.left)),
+        y + (std::min)(0, static_cast<int>(bounds.top)),
+        width,
+        height,
+        pixels.data(),
+        width,
+        height);
+}
 
-    void* dibBits = nullptr;
-    HBITMAP dib = CreateDIBSection(hdc, &bmi, DIB_RGB_COLORS, &dibBits, nullptr, 0);
-    if (!dib || !dibBits) {
-        if (dib) {
-            DeleteObject(dib);
-        }
+bool DrawCursorMotionToArgb(unsigned int* dest,
+    int destW,
+    int destH,
+    int x,
+    int y,
+    CSprRes* sprRes,
+    const CMotion* motion,
+    unsigned int* palette,
+    unsigned int globalColor)
+{
+    RECT bounds{};
+    if (!dest || destW <= 0 || destH <= 0 || !ComputeCursorMotionBounds(sprRes, motion, &bounds)) {
         return false;
     }
 
-    std::memcpy(dibBits, pixels.data(), pixels.size() * sizeof(unsigned int));
-
-    HDC memDc = CreateCompatibleDC(hdc);
-    if (!memDc) {
-        DeleteObject(dib);
-        return false;
-    }
-
-    BLENDFUNCTION blend{};
-    blend.BlendOp = AC_SRC_OVER;
-    blend.SourceConstantAlpha = 255;
-    blend.AlphaFormat = AC_SRC_ALPHA;
-
-    // Cursor ACT motions are authored around a hotspot-relative local origin.
-    // When the motion bounds start entirely in positive space, placing the
-    // bitmap at `x + bounds.left/y + bounds.top` shifts the visible cursor
-    // away from the real OS cursor. Clamp that authored positive offset back
-    // out so the software cursor lands on the same hotspot.
-    const int hotspotOffsetX = (std::max)(0, static_cast<int>(bounds.left));
-    const int hotspotOffsetY = (std::max)(0, static_cast<int>(bounds.top));
-
-    HGDIOBJ oldBitmap = SelectObject(memDc, dib);
-    AlphaBlend(hdc,
-        x + bounds.left - hotspotOffsetX,
-        y + bounds.top - hotspotOffsetY,
-        width,
-        height,
-        memDc,
-        0,
-        0,
-        width,
-        height,
-        blend);
-    SelectObject(memDc, oldBitmap);
-    DeleteDC(memDc);
-    DeleteObject(dib);
+    BlitCursorMotionToArgb(dest,
+        destW,
+        destH,
+        x - (std::max)(0, static_cast<int>(bounds.left)),
+        y - (std::max)(0, static_cast<int>(bounds.top)),
+        sprRes,
+        motion,
+        palette,
+        globalColor);
     return true;
 }
 
@@ -493,6 +826,69 @@ bool DrawResolvedCursorActionAt(HDC hdc, int x, int y, int cursorActNum, u32 mou
     const int motionIndex = static_cast<int>(stateTicks / motionDelay) % motionCount;
     const CMotion* motion = actRes->GetMotion(action, motionIndex);
     return motion ? DrawCursorMotionToHdc(hdc, x, y, sprRes, motion, sprRes->m_pal, 0xFAFFFFFFu) : false;
+}
+
+bool DrawResolvedCursorActionToArgb(unsigned int* dest,
+    int destW,
+    int destH,
+    int x,
+    int y,
+    int cursorActNum,
+    u32 mouseAnimStartTick,
+    const CursorResCache& cache)
+{
+    CSprRes* sprRes = cache.resolved ? g_resMgr.GetAs<CSprRes>(cache.sprName.c_str()) : nullptr;
+    CActRes* actRes = cache.resolved ? g_resMgr.GetAs<CActRes>(cache.actName.c_str()) : nullptr;
+    if (!actRes || !sprRes) {
+        return false;
+    }
+
+    int action = cursorActNum;
+    if (action < 0 || action >= static_cast<int>(actRes->actions.size())) {
+        action = 0;
+    }
+
+    const int motionCount = actRes->GetMotionCount(action);
+    if (motionCount <= 0) {
+        return false;
+    }
+
+    const unsigned int elapsed = GetTickCount() - mouseAnimStartTick;
+    const float stateTicks = static_cast<float>(elapsed) * 0.041666668f;
+    const float motionDelay = (std::max)(0.0001f, actRes->GetDelay(action));
+    const int motionIndex = static_cast<int>(stateTicks / motionDelay) % motionCount;
+    const CMotion* motion = actRes->GetMotion(action, motionIndex);
+    return motion ? DrawCursorMotionToArgb(dest, destW, destH, x, y, sprRes, motion, sprRes->m_pal, 0xFAFFFFFFu) : false;
+}
+
+bool GetResolvedCursorActionBounds(int cursorActNum, u32 mouseAnimStartTick, const CursorResCache& cache, RECT* outBounds)
+{
+    if (!outBounds) {
+        return false;
+    }
+
+    CSprRes* sprRes = cache.resolved ? g_resMgr.GetAs<CSprRes>(cache.sprName.c_str()) : nullptr;
+    CActRes* actRes = cache.resolved ? g_resMgr.GetAs<CActRes>(cache.actName.c_str()) : nullptr;
+    if (!actRes || !sprRes) {
+        return false;
+    }
+
+    int action = cursorActNum;
+    if (action < 0 || action >= static_cast<int>(actRes->actions.size())) {
+        action = 0;
+    }
+
+    const int motionCount = actRes->GetMotionCount(action);
+    if (motionCount <= 0) {
+        return false;
+    }
+
+    const unsigned int elapsed = GetTickCount() - mouseAnimStartTick;
+    const float stateTicks = static_cast<float>(elapsed) * 0.041666668f;
+    const float motionDelay = (std::max)(0.0001f, actRes->GetDelay(action));
+    const int motionIndex = static_cast<int>(stateTicks / motionDelay) % motionCount;
+    const CMotion* motion = actRes->GetMotion(action, motionIndex);
+    return motion ? ComputeCursorMotionBounds(sprRes, motion, outBounds) : false;
 }
 
 u32 GetCursorActionVisualFrame(int cursorActNum, u32 mouseAnimStartTick, const CursorResCache& cache)
@@ -546,6 +942,8 @@ bool DrawModeCursorAtToHdc(HDC hdc, int x, int y, int cursorActNum, u32 mouseAni
         s_cacheInit = true;
     }
 
+    DrawDragPreviewAt(hdc, x, y);
+
     bool drewCustomCursor = false;
     if (cursorActNum == static_cast<int>(CursorAction::Forbidden)) {
         drewCustomCursor = DrawResolvedCursorActionAt(hdc, x, y, static_cast<int>(CursorAction::Arrow), mouseAnimStartTick, s_cache);
@@ -558,14 +956,111 @@ bool DrawModeCursorAtToHdc(HDC hdc, int x, int y, int cursorActNum, u32 mouseAni
         DrawFallbackCursorAt(hdc, x, y);
     }
 
-    DrawDragPreviewAt(hdc, x, y);
+    return drewCustomCursor;
+}
+
+bool DrawModeCursorAtToArgb(unsigned int* dest, int destW, int destH, int x, int y, int cursorActNum, u32 mouseAnimStartTick)
+{
+    if (!dest || destW <= 0 || destH <= 0 || !g_hMainWnd) {
+        return false;
+    }
+
+    static bool s_cacheInit = false;
+    static CursorResCache s_cache{};
+    if (!s_cacheInit) {
+        s_cache = ResolveCursorResources();
+        s_cacheInit = true;
+    }
+
+    DrawDragPreviewToArgb(dest, destW, destH, x, y);
+
+    bool drewCustomCursor = false;
+    if (cursorActNum == static_cast<int>(CursorAction::Forbidden)) {
+        drewCustomCursor = DrawResolvedCursorActionToArgb(dest, destW, destH, x, y, static_cast<int>(CursorAction::Arrow), mouseAnimStartTick, s_cache);
+        drewCustomCursor = DrawResolvedCursorActionToArgb(dest, destW, destH, x, y, cursorActNum, mouseAnimStartTick, s_cache) || drewCustomCursor;
+    } else {
+        drewCustomCursor = DrawResolvedCursorActionToArgb(dest, destW, destH, x, y, cursorActNum, mouseAnimStartTick, s_cache);
+    }
+
+    if (!drewCustomCursor) {
+        drewCustomCursor = DrawFallbackCursorToArgb(dest, destW, destH, x, y);
+    }
 
     return drewCustomCursor;
+}
+
+void UpdateModeCursorClientPos(int x, int y)
+{
+    s_cachedClientCursorPos.x = x;
+    s_cachedClientCursorPos.y = y;
+    s_hasCachedClientCursorPos = true;
 }
 
 bool GetModeCursorClientPos(POINT* outPoint)
 {
     return GetClientCursorPosInternal(outPoint);
+}
+
+bool GetModeCursorDrawBounds(int cursorActNum, u32 mouseAnimStartTick, RECT* outBounds)
+{
+    if (!outBounds) {
+        return false;
+    }
+
+    static bool s_cacheInit = false;
+    static CursorResCache s_cache{};
+    if (!s_cacheInit) {
+        s_cache = ResolveCursorResources();
+        s_cacheInit = true;
+    }
+
+    RECT cursorBounds{};
+    bool hasCursorBounds = false;
+
+    if (cursorActNum == static_cast<int>(CursorAction::Forbidden)) {
+        RECT arrowBounds{};
+        RECT forbiddenBounds{};
+        const bool hasArrowBounds =
+            GetResolvedCursorActionBounds(static_cast<int>(CursorAction::Arrow), mouseAnimStartTick, s_cache, &arrowBounds);
+        const bool hasForbiddenBounds =
+            GetResolvedCursorActionBounds(cursorActNum, mouseAnimStartTick, s_cache, &forbiddenBounds);
+        if (hasArrowBounds || hasForbiddenBounds) {
+            if (!hasArrowBounds) {
+                cursorBounds = forbiddenBounds;
+            } else if (!hasForbiddenBounds) {
+                cursorBounds = arrowBounds;
+            } else {
+                cursorBounds.left = (std::min)(arrowBounds.left, forbiddenBounds.left);
+                cursorBounds.top = (std::min)(arrowBounds.top, forbiddenBounds.top);
+                cursorBounds.right = (std::max)(arrowBounds.right, forbiddenBounds.right);
+                cursorBounds.bottom = (std::max)(arrowBounds.bottom, forbiddenBounds.bottom);
+            }
+            hasCursorBounds = true;
+        }
+    } else {
+        hasCursorBounds = GetResolvedCursorActionBounds(cursorActNum, mouseAnimStartTick, s_cache, &cursorBounds);
+    }
+
+    RECT dragPreviewBounds{};
+    const bool hasDragPreviewBounds = GetDragPreviewDrawBounds(&dragPreviewBounds);
+    if (!hasCursorBounds && !hasDragPreviewBounds) {
+        return false;
+    }
+
+    if (!hasCursorBounds) {
+        *outBounds = dragPreviewBounds;
+        return true;
+    }
+    if (!hasDragPreviewBounds) {
+        *outBounds = cursorBounds;
+        return true;
+    }
+
+    outBounds->left = (std::min)(cursorBounds.left, dragPreviewBounds.left);
+    outBounds->top = (std::min)(cursorBounds.top, dragPreviewBounds.top);
+    outBounds->right = (std::max)(cursorBounds.right, dragPreviewBounds.right);
+    outBounds->bottom = (std::max)(cursorBounds.bottom, dragPreviewBounds.bottom);
+    return true;
 }
 
 u32 GetModeCursorVisualFrame(int cursorActNum, u32 mouseAnimStartTick)
@@ -588,16 +1083,5 @@ u32 GetModeCursorVisualFrame(int cursorActNum, u32 mouseAnimStartTick)
 
 void DrawModeCursor(int cursorActNum, u32 mouseAnimStartTick)
 {
-    if (!g_hMainWnd) {
-        return;
-    }
-
-    HDC hdc = GetDC(g_hMainWnd);
-    if (!hdc) {
-        return;
-    }
-
-    DrawModeCursorToHdc(hdc, cursorActNum, mouseAnimStartTick);
-
-    ReleaseDC(g_hMainWnd, hdc);
+    DrawModeCursorToMainWindow(cursorActNum, mouseAnimStartTick);
 }

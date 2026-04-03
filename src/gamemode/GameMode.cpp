@@ -4,6 +4,7 @@
 #include "CursorRenderer.h"
 #include "GameMode.h"
 #include "View.h"
+#include "qtui/QtUiRuntime.h"
 #include "audio/Audio.h"
 #include "GameModePacket.h"
 #include "pathfinder/PathFinder.h"
@@ -12,12 +13,14 @@
 #include "DebugLog.h"
 #include "render/DC.h"
 #include "res/ActRes.h"
+#include "res/Bitmap.h"
 #include "res/GndRes.h"
 #include "res/ImfRes.h"
 #include "res/PaletteRes.h"
 #include "res/Sprite.h"
 #include "res/WorldRes.h"
 #include "session/Session.h"
+#include "ui/UIMinimapWnd.h"
 #include "ui/UIWindow.h"
 #include "ui/UIWindowMgr.h"
 #include "render/DrawUtil.h"
@@ -31,7 +34,6 @@
 #include "world/World.h"
 #include "main/WinMain.h"
 
-#include <gdiplus.h>
 #include <windows.h>
 
 #include <algorithm>
@@ -44,11 +46,28 @@
 #include <cstring>
 #include <vector>
 
-#pragma comment(lib, "gdiplus.lib")
+#if RO_ENABLE_QT6_UI
+#include <QFont>
+#include <QFontMetrics>
+#include <QImage>
+#include <QPainter>
+#include <QString>
+#endif
+
 #pragma comment(lib, "msimg32.lib")
 
 namespace {
 CGameModePacketRouter g_gameModePacketRouter;
+
+void SetTextureDebugName(CTexture* texture, const char* name)
+{
+    if (!texture || !name || name[0] == '\0') {
+        return;
+    }
+
+    std::strncpy(texture->m_texName, name, sizeof(texture->m_texName) - 1);
+    texture->m_texName[sizeof(texture->m_texName) - 1] = '\0';
+}
 
 constexpr char kGameModeBuildMarker[] = "2026-03-23 20:14 actor-trace-f";
 constexpr u32 kFramePerfLogIntervalFrames = 120;
@@ -68,13 +87,14 @@ constexpr int kMaxWorldProcessStepsPerUpdate = 8;
 constexpr int kHoverNameFontHeight = 20;
 constexpr unsigned char kHoverNameFontBold = 1;
 constexpr int kHoverNameTextPadding = 4;
-constexpr int kHoverNameVerticalOffset = 22;
+constexpr int kHoverNameVerticalOffset = 26;
 constexpr u32 kPickupRetryIntervalMs = 250;
 constexpr int kPlayerVitalsBarWidth = 56;
 constexpr int kPlayerVitalsBarHeight = 4;
 constexpr int kPlayerVitalsBorderThickness = 1;
 constexpr int kPlayerVitalsNameTopPadding = 3;
 constexpr int kPlayerVitalsVerticalOffset = 10;
+constexpr float kPlayerVitalsOverlaySortKey = 0.95f;
 constexpr char kLockedTargetArrowBitmapName[] = "scroll0down.bmp";
 constexpr int kLockedTargetArrowBaseLift = 56;
 constexpr float kLockedTargetArrowScale = 1.25f;
@@ -218,74 +238,24 @@ void DrawHoveredActorName(CGameMode& mode, HDC hdc);
 void DrawLockedTargetName(CGameMode& mode, HDC hdc);
 void DrawLockedTargetArrow(CGameMode& mode, HDC hdc);
 bool QueueLockedTargetOverlayQuad(CGameMode& mode);
+bool QueueHoverLabelsOverlayQuad(CGameMode& mode);
 bool QueueMsgEffectsOverlayQuad();
 bool QueuePlayerVitalsOverlayQuad(CGameMode& mode);
 void ApplyEnemyCursorMagnet(CGameMode& mode, POINT* cursorPos);
 bool IsMonsterLikeHoverActor(const CGameActor* actor);
 bool IsWalkableAttrCell(const CGameMode& mode, int tileX, int tileY);
 void DrawPlayerVitalsOverlay(CGameMode& mode, HDC hdc);
+void FillSolidRectArgb(unsigned int* pixels, int width, int height, const RECT& rect, COLORREF color);
 void DrawGameplayOverlayToHdc(CGameMode& mode, HDC targetDc);
 std::string ResolveHoveredActorName(CGameMode& mode, CGameActor* actor);
 const char* UiKorPrefix();
 std::string ResolveDataPath(const std::string& fileName, const char* ext, const std::vector<std::string>& directPrefixes);
-bool LoadBitmapFromGameData(const std::string& dataPath, HBITMAP* outBmp, int* outWidth, int* outHeight);
+double QpcNowMs();
+bool BlitArgbBitsToWindow(HWND hwnd, const void* bits, int width, int height);
 
-void ReleaseOverlayComposeSurface(HDC* composeDc, HBITMAP* composeBitmap, void** composeBits, int* composeWidth, int* composeHeight)
+bool EnsureOverlayComposeSurface(int width, int height, ArgbDibSurface* composeSurface)
 {
-    if (composeBitmap && *composeBitmap) {
-        DeleteObject(*composeBitmap);
-        *composeBitmap = nullptr;
-    }
-    if (composeDc && *composeDc) {
-        DeleteDC(*composeDc);
-        *composeDc = nullptr;
-    }
-    if (composeBits) {
-        *composeBits = nullptr;
-    }
-    if (composeWidth) {
-        *composeWidth = 0;
-    }
-    if (composeHeight) {
-        *composeHeight = 0;
-    }
-}
-
-bool EnsureOverlayComposeSurface(HDC referenceDc, int width, int height,
-    HDC* composeDc, HBITMAP* composeBitmap, void** composeBits, int* composeWidth, int* composeHeight)
-{
-    if (!referenceDc || !composeDc || !composeBitmap || !composeBits || !composeWidth || !composeHeight || width <= 0 || height <= 0) {
-        return false;
-    }
-
-    if (*composeDc && *composeBitmap && *composeBits && *composeWidth == width && *composeHeight == height) {
-        return true;
-    }
-
-    ReleaseOverlayComposeSurface(composeDc, composeBitmap, composeBits, composeWidth, composeHeight);
-
-    *composeDc = CreateCompatibleDC(referenceDc);
-    if (!*composeDc) {
-        return false;
-    }
-
-    BITMAPINFO bmi{};
-    bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-    bmi.bmiHeader.biWidth = width;
-    bmi.bmiHeader.biHeight = -height;
-    bmi.bmiHeader.biPlanes = 1;
-    bmi.bmiHeader.biBitCount = 32;
-    bmi.bmiHeader.biCompression = BI_RGB;
-    *composeBitmap = CreateDIBSection(*composeDc, &bmi, DIB_RGB_COLORS, composeBits, nullptr, 0);
-    if (!*composeBitmap || !*composeBits) {
-        ReleaseOverlayComposeSurface(composeDc, composeBitmap, composeBits, composeWidth, composeHeight);
-        return false;
-    }
-
-    SelectObject(*composeDc, *composeBitmap);
-    *composeWidth = width;
-    *composeHeight = height;
-    return true;
+    return composeSurface && composeSurface->EnsureSize(width, height);
 }
 
 void ClearOverlayComposeBits(void* composeBits, int width, int height)
@@ -309,6 +279,209 @@ void ConvertOverlayComposeBitsToAlpha(void* composeBits, int width, int height)
     for (size_t index = 0; index < pixelCount; ++index) {
         const unsigned int rgb = pixels[index] & 0x00FFFFFFu;
         pixels[index] = (rgb == (kOverlayTransparentKey & 0x00FFFFFFu)) ? 0u : (0xFF000000u | rgb);
+    }
+}
+
+struct BootstrapWorldCache;
+COLORREF ResolveHoverNameColor(const CGameActor* actor);
+float ClampUnit(float value);
+const CAttrCell* GetAttrCellSafe(const SceneGraphNode& scene, int x, int y);
+float GetTerrainCornerHeight(const SceneGraphNode& scene, int x, int y, int corner);
+float GetTerrainAverageHeightAt(const SceneGraphNode& scene, int x, int y);
+COLORREF GetGroundTextureColor(const SceneGraphNode& scene, const BootstrapWorldCache& cache, int x, int y);
+COLORREF ColorFromVector(const vector3d& value, float scale);
+COLORREF BlendColor(COLORREF a, COLORREF b, float amount);
+COLORREF MultiplyColor(COLORREF color, float brightness);
+COLORREF ModulateColor(COLORREF color, const vector3d& lightColor);
+vector3d ComputeLightingColor(const vector3d& lightDir, const vector3d& diffuseCol, const vector3d& ambientCol, const vector3d& normal);
+vector3d ComputeCellNormal(float h1, float h2, float h3, float h4);
+POINT ProjectWorldPoint(const RECT& viewRect,
+    float localX,
+    float localY,
+    float localHeight,
+    float tileWidth,
+    float tileHeight,
+    float heightScale);
+
+#if RO_ENABLE_QT6_UI
+QFont BuildOverlayLabelFont()
+{
+    QFont font(QStringLiteral("Arial"));
+    font.setPixelSize(kHoverNameFontHeight);
+    font.setBold(kHoverNameFontBold != 0);
+    font.setStyleStrategy(QFont::NoAntialias);
+    return font;
+}
+
+QColor ToQColor(COLORREF color)
+{
+    return QColor(GetRValue(color), GetGValue(color), GetBValue(color));
+}
+
+bool MeasureOverlayTextQt(const std::string& text, SIZE* outSize)
+{
+    if (!outSize || text.empty()) {
+        return false;
+    }
+
+    const QString label = QString::fromLocal8Bit(text.c_str(), static_cast<int>(text.size()));
+    if (label.isEmpty()) {
+        return false;
+    }
+
+    const QFontMetrics metrics(BuildOverlayLabelFont());
+    outSize->cx = (std::max)(1, metrics.horizontalAdvance(label));
+    outSize->cy = (std::max)(1, metrics.height());
+    return true;
+}
+
+void DrawOutlinedTextQtToOverlay(
+    unsigned int* pixels,
+    int width,
+    int height,
+    int pitch,
+    int drawX,
+    int drawY,
+    const std::string& text,
+    COLORREF color)
+{
+    if (!pixels || width <= 0 || height <= 0 || pitch < width * static_cast<int>(sizeof(unsigned int)) || text.empty()) {
+        return;
+    }
+
+    QImage image(reinterpret_cast<uchar*>(pixels), width, height, pitch, QImage::Format_ARGB32);
+    if (image.isNull()) {
+        return;
+    }
+
+    const QString label = QString::fromLocal8Bit(text.c_str(), static_cast<int>(text.size()));
+    if (label.isEmpty()) {
+        return;
+    }
+
+    QPainter painter(&image);
+    painter.setRenderHint(QPainter::Antialiasing, false);
+    painter.setRenderHint(QPainter::TextAntialiasing, false);
+    painter.setFont(BuildOverlayLabelFont());
+
+    const QFontMetrics metrics(painter.font());
+    const int baselineY = drawY + metrics.ascent();
+    painter.setPen(Qt::black);
+    painter.drawText(drawX - 1, baselineY, label);
+    painter.drawText(drawX + 1, baselineY, label);
+    painter.drawText(drawX, baselineY - 1, label);
+    painter.drawText(drawX, baselineY + 1, label);
+    painter.setPen(ToQColor(color));
+    painter.drawText(drawX, baselineY, label);
+}
+
+QFont BuildBootstrapHeaderFont()
+{
+    QFont font(QStringLiteral("Arial"));
+    font.setPixelSize(15);
+    font.setBold(true);
+    font.setStyleStrategy(QFont::NoAntialias);
+    return font;
+}
+
+QFont BuildBootstrapBodyFont()
+{
+    QFont font(QStringLiteral("Arial"));
+    font.setPixelSize(12);
+    font.setStyleStrategy(QFont::NoAntialias);
+    return font;
+}
+
+void DrawBootstrapSceneTextQt(unsigned int* pixels,
+    int width,
+    int height,
+    const CGameMode& mode,
+    const BootstrapWorldCache& cache,
+    int attrWidth,
+    int attrHeight,
+    int groundWidth,
+    int groundHeight,
+    int activeWidth,
+    int activeHeight);
+#endif
+
+inline unsigned int PackOverlayRgb(COLORREF color)
+{
+    return (static_cast<unsigned int>(GetRValue(color)) << 16)
+        | (static_cast<unsigned int>(GetGValue(color)) << 8)
+        | static_cast<unsigned int>(GetBValue(color));
+}
+
+void PutOverlayPixel(unsigned int* pixels, int width, int height, int x, int y, COLORREF color)
+{
+    if (!pixels || x < 0 || y < 0 || x >= width || y >= height) {
+        return;
+    }
+
+    pixels[static_cast<size_t>(y) * static_cast<size_t>(width) + static_cast<size_t>(x)] = PackOverlayRgb(color);
+}
+
+bool PointInTriangle(const POINT& p, const POINT& a, const POINT& b, const POINT& c)
+{
+    const auto sign = [](const POINT& p0, const POINT& p1, const POINT& p2) -> long {
+        return static_cast<long>(p0.x - p2.x) * static_cast<long>(p1.y - p2.y)
+            - static_cast<long>(p1.x - p2.x) * static_cast<long>(p0.y - p2.y);
+    };
+
+    const long d1 = sign(p, a, b);
+    const long d2 = sign(p, b, c);
+    const long d3 = sign(p, c, a);
+    const bool hasNegative = d1 < 0 || d2 < 0 || d3 < 0;
+    const bool hasPositive = d1 > 0 || d2 > 0 || d3 > 0;
+    return !(hasNegative && hasPositive);
+}
+
+void FillOverlayTriangle(unsigned int* pixels, int width, int height, const POINT& a, const POINT& b, const POINT& c, COLORREF color)
+{
+    if (!pixels || width <= 0 || height <= 0) {
+        return;
+    }
+
+    const int minX = (std::max)(0, static_cast<int>((std::min)({ a.x, b.x, c.x })));
+    const int maxX = (std::min)(width - 1, static_cast<int>((std::max)({ a.x, b.x, c.x })));
+    const int minY = (std::max)(0, static_cast<int>((std::min)({ a.y, b.y, c.y })));
+    const int maxY = (std::min)(height - 1, static_cast<int>((std::max)({ a.y, b.y, c.y })));
+    for (int y = minY; y <= maxY; ++y) {
+        for (int x = minX; x <= maxX; ++x) {
+            const POINT p{ x, y };
+            if (PointInTriangle(p, a, b, c)) {
+                PutOverlayPixel(pixels, width, height, x, y, color);
+            }
+        }
+    }
+}
+
+void DrawFallbackLockedTargetArrowToPixels(unsigned int* pixels, int width, int height, int centerX, int tipY)
+{
+    if (!pixels || width <= 0 || height <= 0) {
+        return;
+    }
+
+    const POINT outerA{ centerX, tipY };
+    const POINT outerB{ centerX - 7, tipY - 11 };
+    const POINT outerC{ centerX + 7, tipY - 11 };
+    const POINT innerA{ centerX, tipY - 1 };
+    const POINT innerB{ centerX - 4, tipY - 9 };
+    const POINT innerC{ centerX + 4, tipY - 9 };
+
+    FillOverlayTriangle(pixels, width, height, outerA, outerB, outerC, RGB(255, 226, 120));
+    FillOverlayTriangle(pixels, width, height, innerA, innerB, innerC, RGB(255, 92, 92));
+
+    const COLORREF outline = RGB(32, 16, 16);
+    const POINT outlinePoints[] = {
+        outerA, outerB, outerC
+    };
+    for (const POINT& point : outlinePoints) {
+        for (int offsetY = -1; offsetY <= 1; ++offsetY) {
+            for (int offsetX = -1; offsetX <= 1; ++offsetX) {
+                PutOverlayPixel(pixels, width, height, point.x + offsetX, point.y + offsetY, outline);
+            }
+        }
     }
 }
 
@@ -358,7 +531,18 @@ void HashTokenString(std::uint64_t* hash, const std::string& value)
 std::string ResolveGroundItemHoverLabel(const CItem* item);
 void DrawHoveredGroundItemName(CGameMode& mode, HDC hdc);
 
-std::uint64_t ComputeGameplayOverlayStateToken(CGameMode& mode, int cursorActNum, u32 mouseAnimStartTick, int clientWidth, int clientHeight)
+bool IsWorldHoverBlockedByUi(int screenX, int screenY)
+{
+    return g_windowMgr.HasActiveNpcDialog() || g_windowMgr.HasWindowAtPoint(screenX, screenY);
+}
+
+std::uint64_t ComputeGameplayOverlayStateToken(
+    CGameMode& mode,
+    int cursorActNum,
+    u32 mouseAnimStartTick,
+    int clientWidth,
+    int clientHeight,
+    bool includeWorldHover)
 {
     std::uint64_t hash = 1469598103934665603ull;
     HashTokenValue(&hash, static_cast<std::uint64_t>(clientWidth));
@@ -374,39 +558,41 @@ std::uint64_t ComputeGameplayOverlayStateToken(CGameMode& mode, int cursorActNum
         HashTokenValue(&hash, static_cast<std::uint64_t>(static_cast<std::uint32_t>(player->m_Sp)));
         HashTokenValue(&hash, static_cast<std::uint64_t>(static_cast<std::uint32_t>(player->m_MaxSp)));
 
-        CItem* hoveredGroundItem = nullptr;
-        int hoveredItemLabelX = 0;
-        int hoveredItemLabelY = 0;
-        if (mode.m_world->FindHoveredGroundItemScreen(mode.m_view->GetViewMatrix(),
-            mode.m_oldMouseX,
-            mode.m_oldMouseY,
-            &hoveredGroundItem,
-            &hoveredItemLabelX,
-            &hoveredItemLabelY)
-            && hoveredGroundItem) {
-            HashTokenValue(&hash, static_cast<std::uint64_t>(hoveredGroundItem->m_aid));
-            HashTokenValue(&hash, static_cast<std::uint64_t>(static_cast<std::uint32_t>(hoveredItemLabelX)));
-            HashTokenValue(&hash, static_cast<std::uint64_t>(static_cast<std::uint32_t>(hoveredItemLabelY)));
-            HashTokenString(&hash, ResolveGroundItemHoverLabel(hoveredGroundItem));
-        }
+        if (includeWorldHover && !IsWorldHoverBlockedByUi(mode.m_oldMouseX, mode.m_oldMouseY)) {
+            CItem* hoveredGroundItem = nullptr;
+            int hoveredItemLabelX = 0;
+            int hoveredItemLabelY = 0;
+            if (mode.m_world->FindHoveredGroundItemScreen(mode.m_view->GetViewMatrix(),
+                mode.m_oldMouseX,
+                mode.m_oldMouseY,
+                &hoveredGroundItem,
+                &hoveredItemLabelX,
+                &hoveredItemLabelY)
+                && hoveredGroundItem) {
+                HashTokenValue(&hash, static_cast<std::uint64_t>(hoveredGroundItem->m_aid));
+                HashTokenValue(&hash, static_cast<std::uint64_t>(static_cast<std::uint32_t>(hoveredItemLabelX)));
+                HashTokenValue(&hash, static_cast<std::uint64_t>(static_cast<std::uint32_t>(hoveredItemLabelY)));
+                HashTokenString(&hash, ResolveGroundItemHoverLabel(hoveredGroundItem));
+            }
 
-        CGameActor* hoveredActor = nullptr;
-        int hoveredLabelX = 0;
-        int hoveredLabelY = 0;
-        if (!hoveredGroundItem
-            && mode.m_world->FindHoveredActorScreen(mode.m_view->GetViewMatrix(),
-            mode.m_view->GetCameraLongitude(),
-            mode.m_oldMouseX,
-            mode.m_oldMouseY,
-            &hoveredActor,
-            &hoveredLabelX,
-            &hoveredLabelY)
-            && hoveredActor
-            && hoveredActor->m_gid != mode.m_lastLockOnMonGid) {
-            HashTokenValue(&hash, static_cast<std::uint64_t>(hoveredActor->m_gid));
-            HashTokenValue(&hash, static_cast<std::uint64_t>(static_cast<std::uint32_t>(hoveredLabelX)));
-            HashTokenValue(&hash, static_cast<std::uint64_t>(static_cast<std::uint32_t>(hoveredLabelY)));
-            HashTokenString(&hash, ResolveHoveredActorName(mode, hoveredActor));
+            CGameActor* hoveredActor = nullptr;
+            int hoveredLabelX = 0;
+            int hoveredLabelY = 0;
+            if (!hoveredGroundItem
+                && mode.m_world->FindHoveredActorScreen(mode.m_view->GetViewMatrix(),
+                mode.m_view->GetCameraLongitude(),
+                mode.m_oldMouseX,
+                mode.m_oldMouseY,
+                &hoveredActor,
+                &hoveredLabelX,
+                &hoveredLabelY)
+                && hoveredActor
+                && hoveredActor->m_gid != mode.m_lastLockOnMonGid) {
+                HashTokenValue(&hash, static_cast<std::uint64_t>(hoveredActor->m_gid));
+                HashTokenValue(&hash, static_cast<std::uint64_t>(static_cast<std::uint32_t>(hoveredLabelX)));
+                HashTokenValue(&hash, static_cast<std::uint64_t>(static_cast<std::uint32_t>(hoveredLabelY)));
+                HashTokenString(&hash, ResolveHoveredActorName(mode, hoveredActor));
+            }
         }
     }
 
@@ -417,16 +603,6 @@ std::uint64_t ComputeGameplayOverlayStateToken(CGameMode& mode, int cursorActNum
 bool QueueModernOverlayQuad(CGameMode& mode, int cursorActNum, u32 mouseAnimStartTick)
 {
     const bool trackMovePerf = mode.m_world && mode.m_world->m_player && mode.m_world->m_player->m_isMoving;
-    const auto qpcNowMs = []() -> double {
-        static LARGE_INTEGER freq = [] {
-            LARGE_INTEGER value{};
-            QueryPerformanceFrequency(&value);
-            return value;
-        }();
-        LARGE_INTEGER now{};
-        QueryPerformanceCounter(&now);
-        return static_cast<double>(now.QuadPart) * 1000.0 / static_cast<double>(freq.QuadPart);
-    };
 
     if (!g_hMainWnd) {
         return false;
@@ -440,29 +616,20 @@ bool QueueModernOverlayQuad(CGameMode& mode, int cursorActNum, u32 mouseAnimStar
         return false;
     }
 
-    HDC windowDc = GetDC(g_hMainWnd);
-    if (!windowDc) {
-        return false;
-    }
-
-    static HDC s_overlayComposeDc = nullptr;
-    static HBITMAP s_overlayComposeBitmap = nullptr;
-    static void* s_overlayComposeBits = nullptr;
-    static int s_overlayComposeWidth = 0;
-    static int s_overlayComposeHeight = 0;
+    static ArgbDibSurface s_overlayComposeSurface;
+    static std::vector<unsigned int> s_qtOverlayComposePixels;
     static std::uint64_t s_overlayStateToken = 0ull;
     static bool s_overlayTextureValid = false;
     static u32 s_lastMovingOverlayRefreshTick = 0;
-    const bool composeReady = EnsureOverlayComposeSurface(windowDc, clientWidth, clientHeight,
-        &s_overlayComposeDc, &s_overlayComposeBitmap, &s_overlayComposeBits, &s_overlayComposeWidth, &s_overlayComposeHeight);
-    ReleaseDC(g_hMainWnd, windowDc);
-    if (!composeReady) {
-        return false;
-    }
+    const bool qtGameplayRuntimeEnabled = IsQtUiRuntimeEnabled();
 
     static CTexture* s_overlayTexture = nullptr;
     static int s_overlayTextureWidth = 0;
     static int s_overlayTextureHeight = 0;
+    static CTexture* s_qtOverlayTexture = nullptr;
+    static int s_qtOverlayTextureWidth = 0;
+    static int s_qtOverlayTextureHeight = 0;
+    static bool s_qtOverlayTextureValid = false;
     if (!s_overlayTexture || s_overlayTextureWidth != clientWidth || s_overlayTextureHeight != clientHeight) {
         delete s_overlayTexture;
         s_overlayTexture = new CTexture();
@@ -478,10 +645,34 @@ bool QueueModernOverlayQuad(CGameMode& mode, int cursorActNum, u32 mouseAnimStar
         s_overlayTextureValid = false;
         s_overlayStateToken = 0ull;
     }
+    if (!s_qtOverlayTexture || s_qtOverlayTextureWidth != clientWidth || s_qtOverlayTextureHeight != clientHeight) {
+        delete s_qtOverlayTexture;
+        s_qtOverlayTexture = new CTexture();
+        if (!s_qtOverlayTexture || !s_qtOverlayTexture->Create(clientWidth, clientHeight, PF_A8R8G8B8, false)) {
+            delete s_qtOverlayTexture;
+            s_qtOverlayTexture = nullptr;
+            s_qtOverlayTextureWidth = 0;
+            s_qtOverlayTextureHeight = 0;
+            s_qtOverlayTextureValid = false;
+        } else {
+            s_qtOverlayTextureWidth = clientWidth;
+            s_qtOverlayTextureHeight = clientHeight;
+            s_qtOverlayTextureValid = false;
+        }
+    }
 
     const bool overlayIsAnimated = false;
-    const bool uiDirty = g_windowMgr.HasDirtyVisualStateExcludingRoMap();
-    const std::uint64_t overlayStateToken = ComputeGameplayOverlayStateToken(mode, cursorActNum, mouseAnimStartTick, clientWidth, clientHeight);
+    const bool uiDirty = qtGameplayRuntimeEnabled
+        ? g_windowMgr.HasDirtyVisualState()
+        : g_windowMgr.HasDirtyVisualStateExcludingRoMap();
+    const bool includeWorldHoverInOverlayToken = !qtGameplayRuntimeEnabled;
+    const std::uint64_t overlayStateToken = ComputeGameplayOverlayStateToken(
+        mode,
+        cursorActNum,
+        mouseAnimStartTick,
+        clientWidth,
+        clientHeight,
+        includeWorldHoverInOverlayToken);
     const bool overlayStateChanged = overlayStateToken != s_overlayStateToken;
     const u32 now = GetTickCount();
     const bool allowMovingOverlayRefresh = !trackMovePerf
@@ -493,77 +684,169 @@ bool QueueModernOverlayQuad(CGameMode& mode, int cursorActNum, u32 mouseAnimStar
         || (overlayStateChanged && allowMovingOverlayRefresh);
 
     if (needOverlayRefresh) {
-        const double refreshStartMs = trackMovePerf ? qpcNowMs() : 0.0;
-        ClearOverlayComposeBits(s_overlayComposeBits, clientWidth, clientHeight);
-        const double overlayDrawStartMs = trackMovePerf ? qpcNowMs() : 0.0;
-        DrawGameplayOverlayToHdc(mode, s_overlayComposeDc);
-        if (trackMovePerf) {
-            g_overlayMovePerfStats.modernOverlayDrawMs += qpcNowMs() - overlayDrawStartMs;
+        const double refreshStartMs = trackMovePerf ? QpcNowMs() : 0.0;
+        const bool allowQtCpuBridge = qtGameplayRuntimeEnabled
+            && GetRenderDevice().GetBackendType() != RenderBackendType::Vulkan;
+        s_qtOverlayTextureValid = qtGameplayRuntimeEnabled
+            && s_qtOverlayTexture
+            && RenderQtUiGameplayOverlayTexture(mode, s_qtOverlayTexture, clientWidth, clientHeight);
+
+        {
+            static int s_lastLoggedGameplayPath = -1;
+            const int gameplayPath = s_qtOverlayTextureValid ? 2 : (allowQtCpuBridge ? 1 : 0);
+            if (gameplayPath != s_lastLoggedGameplayPath) {
+                DbgLog("[GameMode] gameplay overlay path=%s qtEnabled=%d texture=%p size=%dx%d\n",
+                    s_qtOverlayTextureValid ? "native_texture" : (allowQtCpuBridge ? "cpu_bridge" : "legacy_gdi"),
+                    qtGameplayRuntimeEnabled ? 1 : 0,
+                    s_qtOverlayTexture,
+                    clientWidth,
+                    clientHeight);
+                s_lastLoggedGameplayPath = gameplayPath;
+            }
         }
 
-        HDC previousSharedDc = UIWindow::GetSharedDrawDC();
-        UIWindow::SetSharedDrawDC(s_overlayComposeDc);
-        const double uiDrawStartMs = trackMovePerf ? qpcNowMs() : 0.0;
-        g_windowMgr.OnDrawExcludingRoMap();
-        if (trackMovePerf) {
-            g_overlayMovePerfStats.modernUiDrawMs += qpcNowMs() - uiDrawStartMs;
-        }
-        UIWindow::SetSharedDrawDC(previousSharedDc);
+        if (s_qtOverlayTextureValid) {
+            g_windowMgr.ClearDirtyVisualState();
+            s_overlayTextureValid = false;
+        } else {
+            if (!allowQtCpuBridge) {
+                const bool composeReady = EnsureOverlayComposeSurface(clientWidth, clientHeight, &s_overlayComposeSurface);
+                if (!composeReady) {
+                    return false;
+                }
 
-        const double convertStartMs = trackMovePerf ? qpcNowMs() : 0.0;
-        ConvertOverlayComposeBitsToAlpha(s_overlayComposeBits, clientWidth, clientHeight);
-        if (trackMovePerf) {
-            g_overlayMovePerfStats.modernConvertMs += qpcNowMs() - convertStartMs;
+                ClearOverlayComposeBits(s_overlayComposeSurface.GetBits(), clientWidth, clientHeight);
+                const double overlayDrawStartMs = trackMovePerf ? QpcNowMs() : 0.0;
+#if !RO_ENABLE_QT6_UI
+                DrawGameplayOverlayToHdc(mode, s_overlayComposeSurface.GetDC());
+#endif
+                if (trackMovePerf) {
+                    g_overlayMovePerfStats.modernOverlayDrawMs += QpcNowMs() - overlayDrawStartMs;
+                }
+            }
+
+            const double uiDrawStartMs = trackMovePerf ? QpcNowMs() : 0.0;
+            if (!allowQtCpuBridge) {
+                g_windowMgr.OnDrawExcludingRoMapToHdc(s_overlayComposeSurface.GetDC());
+            } else {
+                g_windowMgr.ClearDirtyVisualState();
+            }
+            if (trackMovePerf) {
+                g_overlayMovePerfStats.modernUiDrawMs += QpcNowMs() - uiDrawStartMs;
+            }
+
+            unsigned int* overlayPixels = nullptr;
+            if (allowQtCpuBridge) {
+                const size_t pixelCount = static_cast<size_t>(clientWidth) * static_cast<size_t>(clientHeight);
+                if (s_qtOverlayComposePixels.size() != pixelCount) {
+                    s_qtOverlayComposePixels.assign(pixelCount, 0u);
+                } else {
+                    std::fill(s_qtOverlayComposePixels.begin(), s_qtOverlayComposePixels.end(), 0u);
+                }
+                overlayPixels = s_qtOverlayComposePixels.data();
+            } else {
+                const double convertStartMs = trackMovePerf ? QpcNowMs() : 0.0;
+                ConvertOverlayComposeBitsToAlpha(s_overlayComposeSurface.GetBits(), clientWidth, clientHeight);
+                if (trackMovePerf) {
+                    g_overlayMovePerfStats.modernConvertMs += QpcNowMs() - convertStartMs;
+                }
+                overlayPixels = s_overlayComposeSurface.GetPixels();
+            }
+            if (allowQtCpuBridge) {
+                CompositeQtUiGameplayOverlay(mode,
+                    overlayPixels,
+                    clientWidth,
+                    clientHeight,
+                    clientWidth * static_cast<int>(sizeof(unsigned int)));
+            }
+
+            const double textureUpdateStartMs = trackMovePerf ? QpcNowMs() : 0.0;
+            s_overlayTexture->Update(0,
+                0,
+                clientWidth,
+                clientHeight,
+                overlayPixels,
+                true,
+                clientWidth * static_cast<int>(sizeof(unsigned int)));
+            if (trackMovePerf) {
+                g_overlayMovePerfStats.modernTextureUpdateMs += QpcNowMs() - textureUpdateStartMs;
+            }
+            s_overlayTextureValid = true;
         }
-        const double textureUpdateStartMs = trackMovePerf ? qpcNowMs() : 0.0;
-        s_overlayTexture->Update(0,
-            0,
-            clientWidth,
-            clientHeight,
-            static_cast<unsigned int*>(s_overlayComposeBits),
-            true,
-            clientWidth * static_cast<int>(sizeof(unsigned int)));
         if (trackMovePerf) {
-            g_overlayMovePerfStats.modernTextureUpdateMs += qpcNowMs() - textureUpdateStartMs;
             g_overlayMovePerfStats.modernRefreshes += 1;
             (void)refreshStartMs;
         }
-        s_overlayTextureValid = true;
         s_overlayStateToken = overlayStateToken;
         if (overlayStateChanged) {
             s_lastMovingOverlayRefreshTick = now;
         }
     }
 
-    RPFace* face = g_renderer.BorrowNullRP();
-    if (!face) {
+    if (!s_overlayTextureValid && !s_qtOverlayTextureValid) {
         return false;
     }
 
     const float right = static_cast<float>(clientWidth) - 0.5f;
     const float bottom = static_cast<float>(clientHeight) - 0.5f;
-    const unsigned int overlayContentWidth = s_overlayTexture->m_surfaceUpdateWidth > 0 ? s_overlayTexture->m_surfaceUpdateWidth : static_cast<unsigned int>(clientWidth);
-    const unsigned int overlayContentHeight = s_overlayTexture->m_surfaceUpdateHeight > 0 ? s_overlayTexture->m_surfaceUpdateHeight : static_cast<unsigned int>(clientHeight);
-    const float maxU = s_overlayTexture->m_w != 0 ? static_cast<float>(overlayContentWidth) / static_cast<float>(s_overlayTexture->m_w) : 1.0f;
-    const float maxV = s_overlayTexture->m_h != 0 ? static_cast<float>(overlayContentHeight) / static_cast<float>(s_overlayTexture->m_h) : 1.0f;
+    if (s_overlayTextureValid) {
+        RPFace* face = g_renderer.BorrowNullRP();
+        if (!face) {
+            return false;
+        }
 
-    face->primType = D3DPT_TRIANGLESTRIP;
-    face->verts = face->m_verts;
-    face->numVerts = 4;
-    face->indices = nullptr;
-    face->numIndices = 0;
-    face->tex = s_overlayTexture;
-    face->mtPreset = 3;
-    face->cullMode = D3DCULL_NONE;
-    face->srcAlphaMode = D3DBLEND_SRCALPHA;
-    face->destAlphaMode = D3DBLEND_INVSRCALPHA;
-    face->alphaSortKey = 1.0f;
+        const unsigned int overlayContentWidth = s_overlayTexture->m_surfaceUpdateWidth > 0 ? s_overlayTexture->m_surfaceUpdateWidth : static_cast<unsigned int>(clientWidth);
+        const unsigned int overlayContentHeight = s_overlayTexture->m_surfaceUpdateHeight > 0 ? s_overlayTexture->m_surfaceUpdateHeight : static_cast<unsigned int>(clientHeight);
+        const float maxU = s_overlayTexture->m_w != 0 ? static_cast<float>(overlayContentWidth) / static_cast<float>(s_overlayTexture->m_w) : 1.0f;
+        const float maxV = s_overlayTexture->m_h != 0 ? static_cast<float>(overlayContentHeight) / static_cast<float>(s_overlayTexture->m_h) : 1.0f;
 
-    face->m_verts[0] = { -0.5f, -0.5f, 0.0f, 1.0f, 0xFFFFFFFFu, 0xFF000000u, 0.0f, 0.0f };
-    face->m_verts[1] = { right, -0.5f, 0.0f, 1.0f, 0xFFFFFFFFu, 0xFF000000u, maxU, 0.0f };
-    face->m_verts[2] = { -0.5f, bottom, 0.0f, 1.0f, 0xFFFFFFFFu, 0xFF000000u, 0.0f, maxV };
-    face->m_verts[3] = { right, bottom, 0.0f, 1.0f, 0xFFFFFFFFu, 0xFF000000u, maxU, maxV };
-    g_renderer.AddRP(face, 1 | 8);
+        face->primType = D3DPT_TRIANGLESTRIP;
+        face->verts = face->m_verts;
+        face->numVerts = 4;
+        face->indices = nullptr;
+        face->numIndices = 0;
+        face->tex = s_overlayTexture;
+        face->mtPreset = 3;
+        face->cullMode = D3DCULL_NONE;
+        face->srcAlphaMode = D3DBLEND_SRCALPHA;
+        face->destAlphaMode = D3DBLEND_INVSRCALPHA;
+        face->alphaSortKey = 1.0f;
+
+        face->m_verts[0] = { -0.5f, -0.5f, 0.0f, 1.0f, 0xFFFFFFFFu, 0xFF000000u, 0.0f, 0.0f };
+        face->m_verts[1] = { right, -0.5f, 0.0f, 1.0f, 0xFFFFFFFFu, 0xFF000000u, maxU, 0.0f };
+        face->m_verts[2] = { -0.5f, bottom, 0.0f, 1.0f, 0xFFFFFFFFu, 0xFF000000u, 0.0f, maxV };
+        face->m_verts[3] = { right, bottom, 0.0f, 1.0f, 0xFFFFFFFFu, 0xFF000000u, maxU, maxV };
+        g_renderer.AddRP(face, 1 | 8);
+    }
+
+    if (s_qtOverlayTextureValid) {
+        RPFace* qtFace = g_renderer.BorrowNullRP();
+        if (!qtFace) {
+            return true;
+        }
+
+        const unsigned int qtOverlayContentWidth = s_qtOverlayTexture->m_surfaceUpdateWidth > 0 ? s_qtOverlayTexture->m_surfaceUpdateWidth : static_cast<unsigned int>(clientWidth);
+        const unsigned int qtOverlayContentHeight = s_qtOverlayTexture->m_surfaceUpdateHeight > 0 ? s_qtOverlayTexture->m_surfaceUpdateHeight : static_cast<unsigned int>(clientHeight);
+        const float qtMaxU = s_qtOverlayTexture->m_w != 0 ? static_cast<float>(qtOverlayContentWidth) / static_cast<float>(s_qtOverlayTexture->m_w) : 1.0f;
+        const float qtMaxV = s_qtOverlayTexture->m_h != 0 ? static_cast<float>(qtOverlayContentHeight) / static_cast<float>(s_qtOverlayTexture->m_h) : 1.0f;
+
+        qtFace->primType = D3DPT_TRIANGLESTRIP;
+        qtFace->verts = qtFace->m_verts;
+        qtFace->numVerts = 4;
+        qtFace->indices = nullptr;
+        qtFace->numIndices = 0;
+        qtFace->tex = s_qtOverlayTexture;
+        qtFace->mtPreset = 3;
+        qtFace->cullMode = D3DCULL_NONE;
+        qtFace->srcAlphaMode = D3DBLEND_SRCALPHA;
+        qtFace->destAlphaMode = D3DBLEND_INVSRCALPHA;
+        qtFace->alphaSortKey = 1.0f;
+        qtFace->m_verts[0] = { -0.5f, -0.5f, 0.0f, 1.0f, 0xFFFFFFFFu, 0xFF000000u, 0.0f, 0.0f };
+        qtFace->m_verts[1] = { right, -0.5f, 0.0f, 1.0f, 0xFFFFFFFFu, 0xFF000000u, qtMaxU, 0.0f };
+        qtFace->m_verts[2] = { -0.5f, bottom, 0.0f, 1.0f, 0xFFFFFFFFu, 0xFF000000u, 0.0f, qtMaxV };
+        qtFace->m_verts[3] = { right, bottom, 0.0f, 1.0f, 0xFFFFFFFFu, 0xFF000000u, qtMaxU, qtMaxV };
+        g_renderer.AddRP(qtFace, 1 | 8);
+    }
     return true;
 }
 
@@ -584,23 +867,9 @@ bool QueueRoMapOverlayQuad()
         return false;
     }
 
-    HDC windowDc = GetDC(g_hMainWnd);
-    if (!windowDc) {
-        return false;
-    }
-
-    static HDC s_roMapComposeDc = nullptr;
-    static HBITMAP s_roMapComposeBitmap = nullptr;
-    static void* s_roMapComposeBits = nullptr;
-    static int s_roMapComposeWidth = 0;
-    static int s_roMapComposeHeight = 0;
+    static ArgbDibSurface s_roMapComposeSurface;
+    static std::vector<unsigned int> s_roMapComposePixels;
     static bool s_roMapTextureValid = false;
-    const bool composeReady = EnsureOverlayComposeSurface(windowDc, width, height,
-        &s_roMapComposeDc, &s_roMapComposeBitmap, &s_roMapComposeBits, &s_roMapComposeWidth, &s_roMapComposeHeight);
-    ReleaseDC(g_hMainWnd, windowDc);
-    if (!composeReady) {
-        return false;
-    }
 
     static CTexture* s_roMapTexture = nullptr;
     static int s_roMapTextureWidth = 0;
@@ -622,17 +891,50 @@ bool QueueRoMapOverlayQuad()
 
     const bool needRoMapRefresh = !s_roMapTextureValid || g_windowMgr.HasRoMapDirtyVisualState();
     if (needRoMapRefresh) {
-        ClearOverlayComposeBits(s_roMapComposeBits, width, height);
-        if (!g_windowMgr.DrawRoMapToHdc(s_roMapComposeDc, 0, 0)) {
-            return false;
+        unsigned int* uploadPixels = nullptr;
+#if RO_ENABLE_QT6_UI
+        bool builtWithQtImage = false;
+        if (g_windowMgr.m_roMapWnd) {
+            QImage overlayImage;
+            if (g_windowMgr.m_roMapWnd->BuildOverlayImageForRenderer(&overlayImage) && !overlayImage.isNull()) {
+                const QImage straightImage = overlayImage.convertToFormat(QImage::Format_ARGB32);
+                const size_t pixelCount = static_cast<size_t>(width) * static_cast<size_t>(height);
+                if (s_roMapComposePixels.size() != pixelCount) {
+                    s_roMapComposePixels.resize(pixelCount);
+                }
+
+                for (int y = 0; y < height; ++y) {
+                    const unsigned int* srcRow = reinterpret_cast<const unsigned int*>(straightImage.constScanLine(y));
+                    unsigned int* dstRow = s_roMapComposePixels.data() + static_cast<size_t>(y) * static_cast<size_t>(width);
+                    std::memcpy(dstRow, srcRow, static_cast<size_t>(width) * sizeof(unsigned int));
+                }
+
+                uploadPixels = s_roMapComposePixels.data();
+                builtWithQtImage = true;
+            }
         }
-        ApplyRoundedOverlayMask(s_roMapComposeBits, width, height, kRoMapCornerEllipseSize, kRoMapCornerEllipseSize);
-        ConvertOverlayComposeBitsToAlpha(s_roMapComposeBits, width, height);
+        if (!builtWithQtImage)
+#endif
+        {
+            const bool composeReady = EnsureOverlayComposeSurface(width, height, &s_roMapComposeSurface);
+            if (!composeReady) {
+                return false;
+            }
+
+            ClearOverlayComposeBits(s_roMapComposeSurface.GetBits(), width, height);
+            if (!g_windowMgr.DrawRoMapToHdc(s_roMapComposeSurface.GetDC(), 0, 0)) {
+                return false;
+            }
+            ApplyRoundedOverlayMask(s_roMapComposeSurface.GetBits(), width, height, kRoMapCornerEllipseSize, kRoMapCornerEllipseSize);
+            ConvertOverlayComposeBitsToAlpha(s_roMapComposeSurface.GetBits(), width, height);
+            uploadPixels = s_roMapComposeSurface.GetPixels();
+        }
+
         s_roMapTexture->Update(0,
             0,
             width,
             height,
-            static_cast<unsigned int*>(s_roMapComposeBits),
+            uploadPixels,
             true,
             width * static_cast<int>(sizeof(unsigned int)));
         s_roMapTextureValid = true;
@@ -683,59 +985,65 @@ bool QueueCursorOverlayQuad(int cursorActNum, u32 mouseAnimStartTick)
         return false;
     }
 
-    constexpr int kCursorTextureSize = 96;
-    constexpr int kCursorTextureOrigin = 32;
-    const int left = cursorPos.x - kCursorTextureOrigin;
-    const int top = cursorPos.y - kCursorTextureOrigin;
-
-    HDC windowDc = GetDC(g_hMainWnd);
-    if (!windowDc) {
-        return false;
-    }
-
-    static HDC s_cursorComposeDc = nullptr;
-    static HBITMAP s_cursorComposeBitmap = nullptr;
-    static void* s_cursorComposeBits = nullptr;
-    static int s_cursorComposeWidth = 0;
-    static int s_cursorComposeHeight = 0;
+    RECT cursorBounds{};
+    const bool hasCustomBounds = GetModeCursorDrawBounds(cursorActNum, mouseAnimStartTick, &cursorBounds);
+    const int textureWidth = hasCustomBounds ? (std::max)(1, static_cast<int>(cursorBounds.right - cursorBounds.left)) : 32;
+    const int textureHeight = hasCustomBounds ? (std::max)(1, static_cast<int>(cursorBounds.bottom - cursorBounds.top)) : 32;
+    const int drawOriginX = hasCustomBounds ? -(std::min)(0, static_cast<int>(cursorBounds.left)) : 0;
+    const int drawOriginY = hasCustomBounds ? -(std::min)(0, static_cast<int>(cursorBounds.top)) : 0;
+    const int left = hasCustomBounds ? cursorPos.x + (std::min)(0, static_cast<int>(cursorBounds.left)) : cursorPos.x;
+    const int top = hasCustomBounds ? cursorPos.y + (std::min)(0, static_cast<int>(cursorBounds.top)) : cursorPos.y;
+    static std::vector<unsigned int> s_cursorComposePixels;
     static bool s_cursorTextureValid = false;
-    const bool composeReady = EnsureOverlayComposeSurface(windowDc, kCursorTextureSize, kCursorTextureSize,
-        &s_cursorComposeDc, &s_cursorComposeBitmap, &s_cursorComposeBits, &s_cursorComposeWidth, &s_cursorComposeHeight);
-    ReleaseDC(g_hMainWnd, windowDc);
-    if (!composeReady) {
-        return false;
-    }
-
     static CTexture* s_cursorTexture = nullptr;
+    static int s_cursorTextureWidth = 0;
+    static int s_cursorTextureHeight = 0;
     static std::uint64_t s_cursorStateToken = 0ull;
-    if (!s_cursorTexture) {
+    if (!s_cursorTexture || s_cursorTextureWidth != textureWidth || s_cursorTextureHeight != textureHeight) {
+        delete s_cursorTexture;
         s_cursorTexture = new CTexture();
-        if (!s_cursorTexture || !s_cursorTexture->Create(kCursorTextureSize, kCursorTextureSize, PF_A8R8G8B8, false)) {
+        if (!s_cursorTexture || !s_cursorTexture->Create(textureWidth, textureHeight, PF_A8R8G8B8, false)) {
             delete s_cursorTexture;
             s_cursorTexture = nullptr;
+            s_cursorTextureWidth = 0;
+            s_cursorTextureHeight = 0;
             return false;
         }
+        SetTextureDebugName(s_cursorTexture, "__overlay_cursor__");
+        s_cursorTextureWidth = textureWidth;
+        s_cursorTextureHeight = textureHeight;
+        s_cursorComposePixels.assign(static_cast<size_t>(textureWidth) * static_cast<size_t>(textureHeight), 0u);
         s_cursorTextureValid = false;
         s_cursorStateToken = 0ull;
+    } else if (s_cursorComposePixels.size() != static_cast<size_t>(textureWidth) * static_cast<size_t>(textureHeight)) {
+        s_cursorComposePixels.assign(static_cast<size_t>(textureWidth) * static_cast<size_t>(textureHeight), 0u);
     }
 
     std::uint64_t cursorStateToken = 1469598103934665603ull;
     HashTokenValue(&cursorStateToken, static_cast<std::uint64_t>(cursorActNum));
     HashTokenValue(&cursorStateToken, static_cast<std::uint64_t>(GetModeCursorVisualFrame(cursorActNum, mouseAnimStartTick)));
+    HashTokenValue(&cursorStateToken, static_cast<std::uint64_t>(static_cast<unsigned int>(textureWidth)));
+    HashTokenValue(&cursorStateToken, static_cast<std::uint64_t>(static_cast<unsigned int>(textureHeight)));
 
     if (!s_cursorTextureValid || cursorStateToken != s_cursorStateToken) {
-        ClearOverlayComposeBits(s_cursorComposeBits, kCursorTextureSize, kCursorTextureSize);
-        if (!DrawModeCursorAtToHdc(s_cursorComposeDc, kCursorTextureOrigin, kCursorTextureOrigin, cursorActNum, mouseAnimStartTick)) {
+        std::fill(s_cursorComposePixels.begin(), s_cursorComposePixels.end(), 0u);
+        if (!DrawModeCursorAtToArgb(
+            s_cursorComposePixels.data(),
+            textureWidth,
+            textureHeight,
+            drawOriginX,
+            drawOriginY,
+            cursorActNum,
+            mouseAnimStartTick)) {
             return false;
         }
-        ConvertOverlayComposeBitsToAlpha(s_cursorComposeBits, kCursorTextureSize, kCursorTextureSize);
         s_cursorTexture->Update(0,
             0,
-            kCursorTextureSize,
-            kCursorTextureSize,
-            static_cast<unsigned int*>(s_cursorComposeBits),
+            textureWidth,
+            textureHeight,
+            s_cursorComposePixels.data(),
             true,
-            kCursorTextureSize * static_cast<int>(sizeof(unsigned int)));
+            textureWidth * static_cast<int>(sizeof(unsigned int)));
         s_cursorTextureValid = true;
         s_cursorStateToken = cursorStateToken;
     }
@@ -747,10 +1055,10 @@ bool QueueCursorOverlayQuad(int cursorActNum, u32 mouseAnimStartTick)
 
     const float quadLeft = static_cast<float>(left);
     const float quadTop = static_cast<float>(top);
-    const float right = static_cast<float>(left + kCursorTextureSize);
-    const float bottom = static_cast<float>(top + kCursorTextureSize);
-    const unsigned int overlayContentWidth = s_cursorTexture->m_surfaceUpdateWidth > 0 ? s_cursorTexture->m_surfaceUpdateWidth : static_cast<unsigned int>(kCursorTextureSize);
-    const unsigned int overlayContentHeight = s_cursorTexture->m_surfaceUpdateHeight > 0 ? s_cursorTexture->m_surfaceUpdateHeight : static_cast<unsigned int>(kCursorTextureSize);
+    const float right = static_cast<float>(left + textureWidth);
+    const float bottom = static_cast<float>(top + textureHeight);
+    const unsigned int overlayContentWidth = s_cursorTexture->m_surfaceUpdateWidth > 0 ? s_cursorTexture->m_surfaceUpdateWidth : static_cast<unsigned int>(textureWidth);
+    const unsigned int overlayContentHeight = s_cursorTexture->m_surfaceUpdateHeight > 0 ? s_cursorTexture->m_surfaceUpdateHeight : static_cast<unsigned int>(textureHeight);
     const float maxU = s_cursorTexture->m_w != 0 ? static_cast<float>(overlayContentWidth) / static_cast<float>(s_cursorTexture->m_w) : 1.0f;
     const float maxV = s_cursorTexture->m_h != 0 ? static_cast<float>(overlayContentHeight) / static_cast<float>(s_cursorTexture->m_h) : 1.0f;
 
@@ -776,12 +1084,10 @@ bool QueueCursorOverlayQuad(int cursorActNum, u32 mouseAnimStartTick)
 
 bool QueueLockedTargetOverlayQuad(CGameMode& mode)
 {
-    if (!g_hMainWnd || !mode.m_world || !mode.m_view || mode.m_lastLockOnMonGid == 0) {
+    if (IsQtUiRuntimeEnabled()) {
         return false;
     }
-
-    HDC windowDc = GetDC(g_hMainWnd);
-    if (!windowDc) {
+    if (!g_hMainWnd || !mode.m_world || !mode.m_view || mode.m_lastLockOnMonGid == 0) {
         return false;
     }
 
@@ -790,7 +1096,6 @@ bool QueueLockedTargetOverlayQuad(CGameMode& mode)
 
     auto actorIt = mode.m_runtimeActors.find(mode.m_lastLockOnMonGid);
     if (actorIt == mode.m_runtimeActors.end() || !actorIt->second || !actorIt->second->m_isVisible) {
-        ReleaseDC(g_hMainWnd, windowDc);
         return false;
     }
 
@@ -802,31 +1107,47 @@ bool QueueLockedTargetOverlayQuad(CGameMode& mode)
         &centerX,
         nullptr,
         &labelY)) {
-        ReleaseDC(g_hMainWnd, windowDc);
         return false;
     }
 
     RECT overlayRect{};
     SetRectEmpty(&overlayRect);
+    RECT textRect{};
+    SetRectEmpty(&textRect);
 
     const std::string label = ResolveHoveredActorName(mode, actorIt->second);
-    if (!label.empty()) {
-        DrawDC drawDc(windowDc);
+    const bool drawLockedTargetText = !label.empty();
+    const COLORREF lockedTargetTextColor = ResolveHoverNameColor(actorIt->second);
+    SIZE textSize{};
+    int textX = 0;
+    int textY = 0;
+    if (drawLockedTargetText) {
+#if RO_ENABLE_QT6_UI
+        if (!MeasureOverlayTextQt(label, &textSize)) {
+            return false;
+        }
+#else
+        static ArgbDibSurface s_measureSurface;
+        if (!s_measureSurface.EnsureSize(1, 1)) {
+            return false;
+        }
+        DrawDC drawDc(s_measureSurface.GetDC());
         drawDc.SetFont(FONT_DEFAULT, kHoverNameFontHeight, kHoverNameFontBold);
-        SIZE textSize{};
         drawDc.GetTextExtentPoint32A(label.c_str(), static_cast<int>(label.size()), &textSize);
-        const int textX = centerX - (textSize.cx / 2);
-        const int textY = labelY + kHoverNameTextPadding + kHoverNameVerticalOffset;
-        RECT textRect{ textX - 2, textY - 2, textX + textSize.cx + 2, textY + textSize.cy + 2 };
+#endif
+        textX = centerX - (textSize.cx / 2);
+        textY = labelY + kHoverNameTextPadding + kHoverNameVerticalOffset;
+        textRect = { textX - 2, textY - 2, textX + textSize.cx + 2, textY + textSize.cy + 2 };
         UnionRect(&overlayRect, &overlayRect, &textRect);
     }
 
-    static bool s_bitmapLoaded = false;
-    static HBITMAP s_bitmap = nullptr;
-    static int s_width = 0;
-    static int s_height = 0;
-    if (!s_bitmapLoaded) {
-        s_bitmapLoaded = true;
+    static bool s_arrowPixelsLoaded = false;
+    static std::vector<unsigned int> s_arrowPixels;
+    static int s_arrowWidth = 0;
+    static int s_arrowHeight = 0;
+    static CTexture* s_targetArrowTexture = nullptr;
+    if (!s_arrowPixelsLoaded) {
+        s_arrowPixelsLoaded = true;
         std::string bitmapPath = ResolveDataPath(kLockedTargetArrowBitmapName, "bmp", {
             "",
             std::string(UiKorPrefix()),
@@ -838,7 +1159,16 @@ bool QueueLockedTargetOverlayQuad(CGameMode& mode)
             std::string("data\\") + UiKorPrefix() + "basic_interface\\"
         });
         if (!bitmapPath.empty()) {
-            LoadBitmapFromGameData(bitmapPath, &s_bitmap, &s_width, &s_height);
+            u32* pixels = nullptr;
+            if (LoadBgraPixelsFromGameData(bitmapPath.c_str(), &pixels, &s_arrowWidth, &s_arrowHeight)
+                && pixels
+                && s_arrowWidth > 0
+                && s_arrowHeight > 0) {
+                s_arrowPixels.assign(
+                    pixels,
+                    pixels + static_cast<size_t>(s_arrowWidth) * static_cast<size_t>(s_arrowHeight));
+            }
+            delete[] pixels;
         }
     }
 
@@ -846,22 +1176,168 @@ bool QueueLockedTargetOverlayQuad(CGameMode& mode)
     const int bounce = static_cast<int>(std::lround((0.5f + 0.5f * std::sin(static_cast<float>(now) * kLockedTargetArrowBouncePerMs))
         * kLockedTargetArrowBouncePixels));
     RECT arrowRect{};
-    if (s_bitmap && s_width > 0 && s_height > 0) {
-        const int scaledWidth = (std::max)(1, static_cast<int>(std::lround(static_cast<float>(s_width) * kLockedTargetArrowScale)));
-        const int scaledHeight = (std::max)(1, static_cast<int>(std::lround(static_cast<float>(s_height) * kLockedTargetArrowScale)));
-        const int drawX = centerX - (scaledWidth / 2);
-        const int drawY = labelY - kLockedTargetArrowBaseLift - scaledHeight - kLockedTargetArrowYOffset - bounce;
-        arrowRect = { drawX - 2, drawY - 2, drawX + scaledWidth + 2, drawY + scaledHeight + 2 };
+    const bool hasArrowBitmap = !s_arrowPixels.empty() && s_arrowWidth > 0 && s_arrowHeight > 0;
+    int arrowDrawX = 0;
+    int arrowDrawY = 0;
+    int arrowScaledWidth = 0;
+    int arrowScaledHeight = 0;
+    if (hasArrowBitmap) {
+        arrowScaledWidth = (std::max)(1, static_cast<int>(std::lround(static_cast<float>(s_arrowWidth) * kLockedTargetArrowScale)));
+        arrowScaledHeight = (std::max)(1, static_cast<int>(std::lround(static_cast<float>(s_arrowHeight) * kLockedTargetArrowScale)));
+        arrowDrawX = centerX - (arrowScaledWidth / 2);
+        arrowDrawY = labelY - kLockedTargetArrowBaseLift - arrowScaledHeight - kLockedTargetArrowYOffset - bounce;
+        const int drawX = arrowDrawX;
+        const int drawY = arrowDrawY;
+        arrowRect = { drawX - 2, drawY - 2, drawX + arrowScaledWidth + 2, drawY + arrowScaledHeight + 2 };
     } else {
         const int tipY = labelY - kLockedTargetArrowBaseLift - bounce;
         arrowRect = { centerX - 9, tipY - 13, centerX + 9, tipY + 2 };
     }
+
+    if (hasArrowBitmap && !s_targetArrowTexture) {
+        s_targetArrowTexture = new CTexture();
+        if (!s_targetArrowTexture || !s_targetArrowTexture->Create(s_arrowWidth, s_arrowHeight, PF_A8R8G8B8, false)) {
+            delete s_targetArrowTexture;
+            s_targetArrowTexture = nullptr;
+        } else {
+            SetTextureDebugName(s_targetArrowTexture, "__overlay_target_arrow__");
+            s_targetArrowTexture->Update(
+                0,
+                0,
+                s_arrowWidth,
+                s_arrowHeight,
+                s_arrowPixels.data(),
+                false,
+                s_arrowWidth * static_cast<int>(sizeof(unsigned int)));
+        }
+    }
+
+    auto queueOverlayTextureQuad = [&](CTexture* texture, float left, float top, float right, float bottom) -> bool {
+        if (!texture) {
+            return false;
+        }
+
+        RPFace* face = g_renderer.BorrowNullRP();
+        if (!face) {
+            return false;
+        }
+
+        const unsigned int overlayContentWidth = texture->m_surfaceUpdateWidth > 0 ? texture->m_surfaceUpdateWidth : texture->m_w;
+        const unsigned int overlayContentHeight = texture->m_surfaceUpdateHeight > 0 ? texture->m_surfaceUpdateHeight : texture->m_h;
+        const float maxU = texture->m_w != 0 ? static_cast<float>(overlayContentWidth) / static_cast<float>(texture->m_w) : 1.0f;
+        const float maxV = texture->m_h != 0 ? static_cast<float>(overlayContentHeight) / static_cast<float>(texture->m_h) : 1.0f;
+
+        face->primType = D3DPT_TRIANGLESTRIP;
+        face->verts = face->m_verts;
+        face->numVerts = 4;
+        face->indices = nullptr;
+        face->numIndices = 0;
+        face->tex = texture;
+        face->mtPreset = 0;
+        face->cullMode = D3DCULL_NONE;
+        face->srcAlphaMode = D3DBLEND_SRCALPHA;
+        face->destAlphaMode = D3DBLEND_INVSRCALPHA;
+        face->alphaSortKey = 1.5f;
+
+        face->m_verts[0] = { left, top, 0.0f, 1.0f, 0xFFFFFFFFu, 0xFF000000u, 0.0f, 0.0f };
+        face->m_verts[1] = { right, top, 0.0f, 1.0f, 0xFFFFFFFFu, 0xFF000000u, maxU, 0.0f };
+        face->m_verts[2] = { left, bottom, 0.0f, 1.0f, 0xFFFFFFFFu, 0xFF000000u, 0.0f, maxV };
+        face->m_verts[3] = { right, bottom, 0.0f, 1.0f, 0xFFFFFFFFu, 0xFF000000u, maxU, maxV };
+        g_renderer.AddRP(face, 1 | 8);
+        return true;
+    };
+
+    if (hasArrowBitmap && s_targetArrowTexture) {
+        bool queuedAny = false;
+
+        if (drawLockedTargetText) {
+            static CTexture* s_targetLabelTexture = nullptr;
+            static int s_targetLabelTextureWidth = 0;
+            static int s_targetLabelTextureHeight = 0;
+            static std::vector<unsigned int> s_targetLabelPixels;
+            static bool s_targetLabelTextureValid = false;
+            static std::uint64_t s_targetLabelStateToken = 0ull;
+            const int labelWidth = (std::max)(1, static_cast<int>(textRect.right - textRect.left));
+            const int labelHeight = (std::max)(1, static_cast<int>(textRect.bottom - textRect.top));
+
+            if (!s_targetLabelTexture || s_targetLabelTextureWidth != labelWidth || s_targetLabelTextureHeight != labelHeight) {
+                delete s_targetLabelTexture;
+                s_targetLabelTexture = new CTexture();
+                if (!s_targetLabelTexture || !s_targetLabelTexture->Create(labelWidth, labelHeight, PF_A8R8G8B8, false)) {
+                    delete s_targetLabelTexture;
+                    s_targetLabelTexture = nullptr;
+                    s_targetLabelTextureWidth = 0;
+                    s_targetLabelTextureHeight = 0;
+                } else {
+                    SetTextureDebugName(s_targetLabelTexture, "__overlay_target_label__");
+                    s_targetLabelTextureWidth = labelWidth;
+                    s_targetLabelTextureHeight = labelHeight;
+                    s_targetLabelPixels.assign(static_cast<size_t>(labelWidth) * static_cast<size_t>(labelHeight), kOverlayTransparentKey);
+                    s_targetLabelTextureValid = false;
+                    s_targetLabelStateToken = 0ull;
+                }
+            } else if (s_targetLabelPixels.size() != static_cast<size_t>(labelWidth) * static_cast<size_t>(labelHeight)) {
+                s_targetLabelPixels.assign(static_cast<size_t>(labelWidth) * static_cast<size_t>(labelHeight), kOverlayTransparentKey);
+                s_targetLabelTextureValid = false;
+            }
+
+            if (s_targetLabelTexture) {
+                std::uint64_t labelStateToken = 1469598103934665603ull;
+                HashTokenString(&labelStateToken, label);
+                HashTokenValue(&labelStateToken, static_cast<std::uint64_t>(static_cast<std::uint32_t>(lockedTargetTextColor)));
+                HashTokenValue(&labelStateToken, static_cast<std::uint64_t>(static_cast<std::uint32_t>(labelWidth)));
+                HashTokenValue(&labelStateToken, static_cast<std::uint64_t>(static_cast<std::uint32_t>(labelHeight)));
+
+                if (!s_targetLabelTextureValid || labelStateToken != s_targetLabelStateToken) {
+                    std::fill(s_targetLabelPixels.begin(), s_targetLabelPixels.end(), kOverlayTransparentKey);
+                    DrawOutlinedTextQtToOverlay(
+                        s_targetLabelPixels.data(),
+                        labelWidth,
+                        labelHeight,
+                        labelWidth * static_cast<int>(sizeof(unsigned int)),
+                        2,
+                        2,
+                        label,
+                        lockedTargetTextColor);
+                    ConvertOverlayComposeBitsToAlpha(s_targetLabelPixels.data(), labelWidth, labelHeight);
+                    s_targetLabelTexture->Update(
+                        0,
+                        0,
+                        labelWidth,
+                        labelHeight,
+                        s_targetLabelPixels.data(),
+                        true,
+                        labelWidth * static_cast<int>(sizeof(unsigned int)));
+                    s_targetLabelTextureValid = true;
+                    s_targetLabelStateToken = labelStateToken;
+                }
+
+                queuedAny = queueOverlayTextureQuad(
+                    s_targetLabelTexture,
+                    static_cast<float>(textRect.left) - 0.5f,
+                    static_cast<float>(textRect.top) - 0.5f,
+                    static_cast<float>(textRect.right) - 0.5f,
+                    static_cast<float>(textRect.bottom) - 0.5f) || queuedAny;
+            }
+        }
+
+        queuedAny = queueOverlayTextureQuad(
+            s_targetArrowTexture,
+            static_cast<float>(arrowDrawX) - 0.5f,
+            static_cast<float>(arrowDrawY) - 0.5f,
+            static_cast<float>(arrowDrawX + arrowScaledWidth) - 0.5f,
+            static_cast<float>(arrowDrawY + arrowScaledHeight) - 0.5f) || queuedAny;
+
+        if (queuedAny) {
+            return true;
+        }
+    }
+
     UnionRect(&overlayRect, &overlayRect, &arrowRect);
 
     InflateRect(&overlayRect, 4, 4);
     RECT clippedRect{};
     IntersectRect(&clippedRect, &overlayRect, &clientRect);
-    ReleaseDC(g_hMainWnd, windowDc);
 
     const int width = clippedRect.right - clippedRect.left;
     const int height = clippedRect.bottom - clippedRect.top;
@@ -869,26 +1345,13 @@ bool QueueLockedTargetOverlayQuad(CGameMode& mode)
         return false;
     }
 
-    HDC composeReferenceDc = GetDC(g_hMainWnd);
-    if (!composeReferenceDc) {
-        return false;
-    }
-
-    static HDC s_targetComposeDc = nullptr;
-    static HBITMAP s_targetComposeBitmap = nullptr;
-    static void* s_targetComposeBits = nullptr;
-    static int s_targetComposeWidth = 0;
-    static int s_targetComposeHeight = 0;
-    const bool composeReady = EnsureOverlayComposeSurface(composeReferenceDc, width, height,
-        &s_targetComposeDc, &s_targetComposeBitmap, &s_targetComposeBits, &s_targetComposeWidth, &s_targetComposeHeight);
-    ReleaseDC(g_hMainWnd, composeReferenceDc);
-    if (!composeReady) {
-        return false;
-    }
-
     static CTexture* s_targetTexture = nullptr;
     static int s_targetTextureWidth = 0;
     static int s_targetTextureHeight = 0;
+    static std::vector<unsigned int> s_targetComposePixels;
+#if !RO_ENABLE_QT6_UI
+    static ArgbDibSurface s_targetComposeSurface;
+#endif
     if (!s_targetTexture || s_targetTextureWidth != width || s_targetTextureHeight != height) {
         delete s_targetTexture;
         s_targetTexture = new CTexture();
@@ -899,23 +1362,112 @@ bool QueueLockedTargetOverlayQuad(CGameMode& mode)
             s_targetTextureHeight = 0;
             return false;
         }
+        SetTextureDebugName(s_targetTexture, "__overlay_target_composite__");
         s_targetTextureWidth = width;
         s_targetTextureHeight = height;
+        s_targetComposePixels.assign(static_cast<size_t>(width) * static_cast<size_t>(height), kOverlayTransparentKey);
+    } else if (s_targetComposePixels.size() != static_cast<size_t>(width) * static_cast<size_t>(height)) {
+        s_targetComposePixels.assign(static_cast<size_t>(width) * static_cast<size_t>(height), kOverlayTransparentKey);
     }
 
-    ClearOverlayComposeBits(s_targetComposeBits, width, height);
-    const int savedDc = SaveDC(s_targetComposeDc);
-    SetViewportOrgEx(s_targetComposeDc, -clippedRect.left, -clippedRect.top, nullptr);
-    DrawLockedTargetArrow(mode, s_targetComposeDc);
-    DrawLockedTargetName(mode, s_targetComposeDc);
-    RestoreDC(s_targetComposeDc, savedDc);
+    unsigned int* targetPixels = nullptr;
+#if RO_ENABLE_QT6_UI
+    std::fill(s_targetComposePixels.begin(), s_targetComposePixels.end(), kOverlayTransparentKey);
+    targetPixels = s_targetComposePixels.data();
+    if (drawLockedTargetText) {
+        DrawOutlinedTextQtToOverlay(targetPixels,
+            width,
+            height,
+            width * static_cast<int>(sizeof(unsigned int)),
+            textX - clippedRect.left,
+            textY - clippedRect.top,
+            label,
+            lockedTargetTextColor);
+    }
+    if (!hasArrowBitmap) {
+        const int tipY = labelY - kLockedTargetArrowBaseLift - bounce;
+        DrawFallbackLockedTargetArrowToPixels(
+            targetPixels,
+            width,
+            height,
+            centerX - clippedRect.left,
+            tipY - clippedRect.top);
+    }
+#else
+    const bool needComposeSurface = drawLockedTargetText || !hasArrowBitmap;
+    if (needComposeSurface) {
+        const bool composeReady = EnsureOverlayComposeSurface(width, height, &s_targetComposeSurface);
+        if (!composeReady) {
+            return false;
+        }
 
-    ConvertOverlayComposeBitsToAlpha(s_targetComposeBits, width, height);
+        ClearOverlayComposeBits(s_targetComposeSurface.GetBits(), width, height);
+        if (drawLockedTargetText) {
+            const int savedDc = SaveDC(s_targetComposeSurface.GetDC());
+            SetViewportOrgEx(s_targetComposeSurface.GetDC(), -clippedRect.left, -clippedRect.top, nullptr);
+            DrawLockedTargetName(mode, s_targetComposeSurface.GetDC());
+            RestoreDC(s_targetComposeSurface.GetDC(), savedDc);
+        }
+        if (!hasArrowBitmap) {
+            const int savedArrowDc = SaveDC(s_targetComposeSurface.GetDC());
+            SetViewportOrgEx(s_targetComposeSurface.GetDC(), -clippedRect.left, -clippedRect.top, nullptr);
+            DrawLockedTargetArrow(mode, s_targetComposeSurface.GetDC());
+            RestoreDC(s_targetComposeSurface.GetDC(), savedArrowDc);
+        }
+        targetPixels = s_targetComposeSurface.GetPixels();
+    } else {
+        std::fill(s_targetComposePixels.begin(), s_targetComposePixels.end(), kOverlayTransparentKey);
+        targetPixels = s_targetComposePixels.data();
+    }
+#endif
+
+    if (hasArrowBitmap) {
+        for (int destY = 0; destY < arrowScaledHeight; ++destY) {
+            const int localY = (arrowDrawY - clippedRect.top) + destY;
+            if (localY < 0 || localY >= height) {
+                continue;
+            }
+
+            const int srcY = destY * s_arrowHeight / arrowScaledHeight;
+            for (int destX = 0; destX < arrowScaledWidth; ++destX) {
+                const int localX = (arrowDrawX - clippedRect.left) + destX;
+                if (localX < 0 || localX >= width) {
+                    continue;
+                }
+
+                const int srcX = destX * s_arrowWidth / arrowScaledWidth;
+                const unsigned int srcPixel = s_arrowPixels[static_cast<size_t>(srcY) * static_cast<size_t>(s_arrowWidth) + static_cast<size_t>(srcX)];
+                if ((srcPixel & 0x00FFFFFFu) == (kOverlayTransparentKey & 0x00FFFFFFu)) {
+                    continue;
+                }
+
+                const unsigned int srcAlpha = (srcPixel >> 24) & 0xFFu;
+                unsigned int& dstPixel = targetPixels[static_cast<size_t>(localY) * static_cast<size_t>(width) + static_cast<size_t>(localX)];
+                if (srcAlpha >= 0xFFu || (dstPixel & 0x00FFFFFFu) == (kOverlayTransparentKey & 0x00FFFFFFu)) {
+                    dstPixel = srcPixel & 0x00FFFFFFu;
+                } else if (srcAlpha != 0u) {
+                    const unsigned int dstBlue = dstPixel & 0xFFu;
+                    const unsigned int dstGreen = (dstPixel >> 8) & 0xFFu;
+                    const unsigned int dstRed = (dstPixel >> 16) & 0xFFu;
+                    const unsigned int srcBlue = srcPixel & 0xFFu;
+                    const unsigned int srcGreen = (srcPixel >> 8) & 0xFFu;
+                    const unsigned int srcRed = (srcPixel >> 16) & 0xFFu;
+                    const unsigned int invAlpha = 255u - srcAlpha;
+                    const unsigned int outBlue = (srcBlue * srcAlpha + dstBlue * invAlpha) / 255u;
+                    const unsigned int outGreen = (srcGreen * srcAlpha + dstGreen * invAlpha) / 255u;
+                    const unsigned int outRed = (srcRed * srcAlpha + dstRed * invAlpha) / 255u;
+                    dstPixel = (outRed << 16) | (outGreen << 8) | outBlue;
+                }
+            }
+        }
+    }
+
+    ConvertOverlayComposeBitsToAlpha(targetPixels, width, height);
     s_targetTexture->Update(0,
         0,
         width,
         height,
-        static_cast<unsigned int*>(s_targetComposeBits),
+        targetPixels,
         true,
         width * static_cast<int>(sizeof(unsigned int)));
 
@@ -955,71 +1507,130 @@ bool QueueLockedTargetOverlayQuad(CGameMode& mode)
 
 bool QueueMsgEffectsOverlayQuad()
 {
-    if (!g_hMainWnd) {
+    return QueueQueuedMsgEffectsQuads();
+}
+
+#if RO_ENABLE_QT6_UI
+bool QueueHoverLabelsOverlayQuad(CGameMode& mode)
+{
+    if (!g_hMainWnd || !mode.m_world || !mode.m_view) {
         return false;
     }
 
-    RECT effectsRect{};
-    if (!GetQueuedMsgEffectsBounds(&effectsRect)) {
+    if (IsWorldHoverBlockedByUi(mode.m_oldMouseX, mode.m_oldMouseY)) {
+        return false;
+    }
+
+    std::string label;
+    COLORREF textColor = RGB(255, 255, 255);
+    int drawX = 0;
+    int drawY = 0;
+
+    CItem* hoveredItem = nullptr;
+    int labelX = 0;
+    int labelY = 0;
+    if (mode.m_world->FindHoveredGroundItemScreen(mode.m_view->GetViewMatrix(),
+            mode.m_oldMouseX,
+            mode.m_oldMouseY,
+            &hoveredItem,
+            &labelX,
+            &labelY)
+        && hoveredItem) {
+        label = ResolveGroundItemHoverLabel(hoveredItem);
+        if (label.empty()) {
+            return false;
+        }
+
+        SIZE textSize{};
+        if (!MeasureOverlayTextQt(label, &textSize)) {
+            return false;
+        }
+        drawX = labelX - (textSize.cx / 2);
+        drawY = labelY - textSize.cy - kHoverNameTextPadding;
+    } else {
+        CGameActor* hoveredActor = nullptr;
+        if (!mode.m_world->FindHoveredActorScreen(mode.m_view->GetViewMatrix(),
+                mode.m_view->GetCameraLongitude(),
+                mode.m_oldMouseX,
+                mode.m_oldMouseY,
+                &hoveredActor,
+                &labelX,
+                &labelY)
+            || !hoveredActor
+            || hoveredActor->m_gid == mode.m_lastLockOnMonGid) {
+            return false;
+        }
+
+        label = ResolveHoveredActorName(mode, hoveredActor);
+        if (label.empty()) {
+            return false;
+        }
+
+        SIZE textSize{};
+        if (!MeasureOverlayTextQt(label, &textSize)) {
+            return false;
+        }
+        drawX = labelX - (textSize.cx / 2);
+        drawY = labelY + kHoverNameTextPadding + kHoverNameVerticalOffset;
+        if (hoveredActor == mode.m_world->m_player || hoveredActor->m_gid == g_session.m_gid) {
+            drawY += kPlayerVitalsBarHeight * 2 + kPlayerVitalsBorderThickness * 3 + kPlayerVitalsNameTopPadding - 10;
+        }
+        textColor = ResolveHoverNameColor(hoveredActor);
+    }
+
+    SIZE finalTextSize{};
+    if (!MeasureOverlayTextQt(label, &finalTextSize)) {
         return false;
     }
 
     RECT clientRect{};
     GetClientRect(g_hMainWnd, &clientRect);
+    RECT overlayRect{ drawX - 2, drawY - 2, drawX + finalTextSize.cx + 2, drawY + finalTextSize.cy + 2 };
     RECT clippedRect{};
-    IntersectRect(&clippedRect, &effectsRect, &clientRect);
+    IntersectRect(&clippedRect, &overlayRect, &clientRect);
     const int width = clippedRect.right - clippedRect.left;
     const int height = clippedRect.bottom - clippedRect.top;
     if (width <= 0 || height <= 0) {
         return false;
     }
 
-    HDC composeReferenceDc = GetDC(g_hMainWnd);
-    if (!composeReferenceDc) {
-        return false;
-    }
-
-    static HDC s_msgComposeDc = nullptr;
-    static HBITMAP s_msgComposeBitmap = nullptr;
-    static void* s_msgComposeBits = nullptr;
-    static int s_msgComposeWidth = 0;
-    static int s_msgComposeHeight = 0;
-    const bool composeReady = EnsureOverlayComposeSurface(composeReferenceDc, width, height,
-        &s_msgComposeDc, &s_msgComposeBitmap, &s_msgComposeBits, &s_msgComposeWidth, &s_msgComposeHeight);
-    ReleaseDC(g_hMainWnd, composeReferenceDc);
-    if (!composeReady) {
-        return false;
-    }
-
-    static CTexture* s_msgTexture = nullptr;
-    static int s_msgTextureWidth = 0;
-    static int s_msgTextureHeight = 0;
-    if (!s_msgTexture || s_msgTextureWidth != width || s_msgTextureHeight != height) {
-        delete s_msgTexture;
-        s_msgTexture = new CTexture();
-        if (!s_msgTexture || !s_msgTexture->Create(width, height, PF_A8R8G8B8, false)) {
-            delete s_msgTexture;
-            s_msgTexture = nullptr;
-            s_msgTextureWidth = 0;
-            s_msgTextureHeight = 0;
+    static CTexture* s_hoverTextTexture = nullptr;
+    static int s_hoverTextTextureWidth = 0;
+    static int s_hoverTextTextureHeight = 0;
+    static std::vector<unsigned int> s_hoverTextPixels;
+    if (!s_hoverTextTexture || s_hoverTextTextureWidth != width || s_hoverTextTextureHeight != height) {
+        delete s_hoverTextTexture;
+        s_hoverTextTexture = new CTexture();
+        if (!s_hoverTextTexture || !s_hoverTextTexture->Create(width, height, PF_A8R8G8B8, false)) {
+            delete s_hoverTextTexture;
+            s_hoverTextTexture = nullptr;
+            s_hoverTextTextureWidth = 0;
+            s_hoverTextTextureHeight = 0;
             return false;
         }
-        s_msgTextureWidth = width;
-        s_msgTextureHeight = height;
+        SetTextureDebugName(s_hoverTextTexture, "__overlay_hover_label__");
+        s_hoverTextTextureWidth = width;
+        s_hoverTextTextureHeight = height;
+        s_hoverTextPixels.assign(static_cast<size_t>(width) * static_cast<size_t>(height), kOverlayTransparentKey);
+    } else if (s_hoverTextPixels.size() != static_cast<size_t>(width) * static_cast<size_t>(height)) {
+        s_hoverTextPixels.assign(static_cast<size_t>(width) * static_cast<size_t>(height), kOverlayTransparentKey);
     }
 
-    ClearOverlayComposeBits(s_msgComposeBits, width, height);
-    const int savedDc = SaveDC(s_msgComposeDc);
-    SetViewportOrgEx(s_msgComposeDc, -clippedRect.left, -clippedRect.top, nullptr);
-    DrawQueuedMsgEffects(s_msgComposeDc);
-    RestoreDC(s_msgComposeDc, savedDc);
-
-    ConvertOverlayComposeBitsToAlpha(s_msgComposeBits, width, height);
-    s_msgTexture->Update(0,
+    std::fill(s_hoverTextPixels.begin(), s_hoverTextPixels.end(), kOverlayTransparentKey);
+    DrawOutlinedTextQtToOverlay(s_hoverTextPixels.data(),
+        width,
+        height,
+        width * static_cast<int>(sizeof(unsigned int)),
+        drawX - clippedRect.left,
+        drawY - clippedRect.top,
+        label,
+        textColor);
+    ConvertOverlayComposeBitsToAlpha(s_hoverTextPixels.data(), width, height);
+    s_hoverTextTexture->Update(0,
         0,
         width,
         height,
-        static_cast<unsigned int*>(s_msgComposeBits),
+        s_hoverTextPixels.data(),
         true,
         width * static_cast<int>(sizeof(unsigned int)));
 
@@ -1032,22 +1643,22 @@ bool QueueMsgEffectsOverlayQuad()
     const float top = static_cast<float>(clippedRect.top) - 0.5f;
     const float right = static_cast<float>(clippedRect.right) - 0.5f;
     const float bottom = static_cast<float>(clippedRect.bottom) - 0.5f;
-    const unsigned int overlayContentWidth = s_msgTexture->m_surfaceUpdateWidth > 0 ? s_msgTexture->m_surfaceUpdateWidth : static_cast<unsigned int>(width);
-    const unsigned int overlayContentHeight = s_msgTexture->m_surfaceUpdateHeight > 0 ? s_msgTexture->m_surfaceUpdateHeight : static_cast<unsigned int>(height);
-    const float maxU = s_msgTexture->m_w != 0 ? static_cast<float>(overlayContentWidth) / static_cast<float>(s_msgTexture->m_w) : 1.0f;
-    const float maxV = s_msgTexture->m_h != 0 ? static_cast<float>(overlayContentHeight) / static_cast<float>(s_msgTexture->m_h) : 1.0f;
+    const unsigned int overlayContentWidth = s_hoverTextTexture->m_surfaceUpdateWidth > 0 ? s_hoverTextTexture->m_surfaceUpdateWidth : static_cast<unsigned int>(width);
+    const unsigned int overlayContentHeight = s_hoverTextTexture->m_surfaceUpdateHeight > 0 ? s_hoverTextTexture->m_surfaceUpdateHeight : static_cast<unsigned int>(height);
+    const float maxU = s_hoverTextTexture->m_w != 0 ? static_cast<float>(overlayContentWidth) / static_cast<float>(s_hoverTextTexture->m_w) : 1.0f;
+    const float maxV = s_hoverTextTexture->m_h != 0 ? static_cast<float>(overlayContentHeight) / static_cast<float>(s_hoverTextTexture->m_h) : 1.0f;
 
     face->primType = D3DPT_TRIANGLESTRIP;
     face->verts = face->m_verts;
     face->numVerts = 4;
     face->indices = nullptr;
     face->numIndices = 0;
-    face->tex = s_msgTexture;
+    face->tex = s_hoverTextTexture;
     face->mtPreset = 0;
     face->cullMode = D3DCULL_NONE;
     face->srcAlphaMode = D3DBLEND_SRCALPHA;
     face->destAlphaMode = D3DBLEND_INVSRCALPHA;
-    face->alphaSortKey = 1.7f;
+    face->alphaSortKey = 1.55f;
 
     face->m_verts[0] = { left, top, 0.0f, 1.0f, 0xFFFFFFFFu, 0xFF000000u, 0.0f, 0.0f };
     face->m_verts[1] = { right, top, 0.0f, 1.0f, 0xFFFFFFFFu, 0xFF000000u, maxU, 0.0f };
@@ -1056,6 +1667,13 @@ bool QueueMsgEffectsOverlayQuad()
     g_renderer.AddRP(face, 1 | 8);
     return true;
 }
+#else
+bool QueueHoverLabelsOverlayQuad(CGameMode& mode)
+{
+    (void)mode;
+    return false;
+}
+#endif
 
 bool QueuePlayerVitalsOverlayQuad(CGameMode& mode)
 {
@@ -1098,26 +1716,12 @@ bool QueuePlayerVitalsOverlayQuad(CGameMode& mode)
         return false;
     }
 
-    HDC composeReferenceDc = GetDC(g_hMainWnd);
-    if (!composeReferenceDc) {
-        return false;
-    }
-
-    static HDC s_vitalsComposeDc = nullptr;
-    static HBITMAP s_vitalsComposeBitmap = nullptr;
-    static void* s_vitalsComposeBits = nullptr;
-    static int s_vitalsComposeWidth = 0;
-    static int s_vitalsComposeHeight = 0;
-    const bool composeReady = EnsureOverlayComposeSurface(composeReferenceDc, width, height,
-        &s_vitalsComposeDc, &s_vitalsComposeBitmap, &s_vitalsComposeBits, &s_vitalsComposeWidth, &s_vitalsComposeHeight);
-    ReleaseDC(g_hMainWnd, composeReferenceDc);
-    if (!composeReady) {
-        return false;
-    }
-
     static CTexture* s_vitalsTexture = nullptr;
     static int s_vitalsTextureWidth = 0;
     static int s_vitalsTextureHeight = 0;
+    static std::vector<unsigned int> s_vitalsComposePixels;
+    static bool s_vitalsTextureValid = false;
+    static std::uint64_t s_vitalsStateToken = 0ull;
     if (!s_vitalsTexture || s_vitalsTextureWidth != width || s_vitalsTextureHeight != height) {
         delete s_vitalsTexture;
         s_vitalsTexture = new CTexture();
@@ -1128,24 +1732,86 @@ bool QueuePlayerVitalsOverlayQuad(CGameMode& mode)
             s_vitalsTextureHeight = 0;
             return false;
         }
+        SetTextureDebugName(s_vitalsTexture, "__overlay_player_vitals__");
         s_vitalsTextureWidth = width;
         s_vitalsTextureHeight = height;
+        s_vitalsComposePixels.assign(static_cast<size_t>(width) * static_cast<size_t>(height), 0u);
+        s_vitalsTextureValid = false;
+        s_vitalsStateToken = 0ull;
+    } else if (s_vitalsComposePixels.size() != static_cast<size_t>(width) * static_cast<size_t>(height)) {
+        s_vitalsComposePixels.assign(static_cast<size_t>(width) * static_cast<size_t>(height), 0u);
+        s_vitalsTextureValid = false;
     }
 
-    ClearOverlayComposeBits(s_vitalsComposeBits, width, height);
-    const int savedDc = SaveDC(s_vitalsComposeDc);
-    SetViewportOrgEx(s_vitalsComposeDc, -clippedRect.left, -clippedRect.top, nullptr);
-    DrawPlayerVitalsOverlay(mode, s_vitalsComposeDc);
-    RestoreDC(s_vitalsComposeDc, savedDc);
+    std::uint64_t vitalsStateToken = 1469598103934665603ull;
+    HashTokenValue(&vitalsStateToken, static_cast<std::uint64_t>(player->m_gid));
+    HashTokenValue(&vitalsStateToken, static_cast<std::uint64_t>(static_cast<std::uint32_t>(player->m_Hp)));
+    HashTokenValue(&vitalsStateToken, static_cast<std::uint64_t>(static_cast<std::uint32_t>(player->m_MaxHp)));
+    HashTokenValue(&vitalsStateToken, static_cast<std::uint64_t>(static_cast<std::uint32_t>(player->m_Sp)));
+    HashTokenValue(&vitalsStateToken, static_cast<std::uint64_t>(static_cast<std::uint32_t>(player->m_MaxSp)));
+    HashTokenValue(&vitalsStateToken, static_cast<std::uint64_t>(static_cast<std::uint32_t>(labelX)));
+    HashTokenValue(&vitalsStateToken, static_cast<std::uint64_t>(static_cast<std::uint32_t>(labelY)));
+    HashTokenValue(&vitalsStateToken, static_cast<std::uint64_t>(static_cast<std::uint32_t>(width)));
+    HashTokenValue(&vitalsStateToken, static_cast<std::uint64_t>(static_cast<std::uint32_t>(height)));
 
-    ConvertOverlayComposeBitsToAlpha(s_vitalsComposeBits, width, height);
-    s_vitalsTexture->Update(0,
-        0,
-        width,
-        height,
-        static_cast<unsigned int*>(s_vitalsComposeBits),
-        true,
-        width * static_cast<int>(sizeof(unsigned int)));
+    if (!s_vitalsTextureValid || vitalsStateToken != s_vitalsStateToken) {
+        std::fill(s_vitalsComposePixels.begin(), s_vitalsComposePixels.end(), 0u);
+    const int localOuterLeft = outerLeft - clippedRect.left;
+    const int localOuterTop = labelY - clippedRect.top;
+    RECT outerRect{
+        localOuterLeft,
+        localOuterTop,
+        localOuterLeft + kPlayerVitalsBarWidth + kPlayerVitalsBorderThickness * 2,
+        localOuterTop + totalHeight,
+    };
+    FillSolidRectArgb(s_vitalsComposePixels.data(), width, height, outerRect, RGB(0, 0, 0));
+
+    const int innerLeft = outerRect.left + kPlayerVitalsBorderThickness;
+    const int innerTop = outerRect.top + kPlayerVitalsBorderThickness;
+    RECT hpRect{ innerLeft, innerTop, innerLeft + kPlayerVitalsBarWidth, innerTop + kPlayerVitalsBarHeight };
+    RECT spRect{
+        innerLeft,
+        hpRect.bottom + kPlayerVitalsBorderThickness,
+        innerLeft + kPlayerVitalsBarWidth,
+        hpRect.bottom + kPlayerVitalsBorderThickness + kPlayerVitalsBarHeight,
+    };
+    FillSolidRectArgb(s_vitalsComposePixels.data(), width, height, hpRect, RGB(255, 255, 255));
+    FillSolidRectArgb(s_vitalsComposePixels.data(), width, height, spRect, RGB(255, 255, 255));
+
+    if (maxHp > 0) {
+        const int hp = (std::max)(0, (std::min)(static_cast<int>(player->m_Hp), maxHp));
+        const int hpFillWidth = kPlayerVitalsBarWidth * hp / maxHp;
+        if (hpFillWidth > 0) {
+            RECT hpFillRect{ hpRect.left, hpRect.top, hpRect.left + hpFillWidth, hpRect.bottom };
+            const bool lowHp = hp * 4 < maxHp;
+            FillSolidRectArgb(
+                s_vitalsComposePixels.data(),
+                width,
+                height,
+                hpFillRect,
+                lowHp ? RGB(220, 32, 32) : RGB(48, 192, 48));
+        }
+    }
+
+    if (maxSp > 0) {
+        const int sp = (std::max)(0, (std::min)(static_cast<int>(player->m_Sp), maxSp));
+        const int spFillWidth = kPlayerVitalsBarWidth * sp / maxSp;
+        if (spFillWidth > 0) {
+            RECT spFillRect{ spRect.left, spRect.top, spRect.left + spFillWidth, spRect.bottom };
+            FillSolidRectArgb(s_vitalsComposePixels.data(), width, height, spFillRect, RGB(48, 96, 220));
+        }
+    }
+
+        s_vitalsTexture->Update(0,
+            0,
+            width,
+            height,
+            s_vitalsComposePixels.data(),
+            true,
+            width * static_cast<int>(sizeof(unsigned int)));
+        s_vitalsTextureValid = true;
+        s_vitalsStateToken = vitalsStateToken;
+    }
 
     RPFace* face = g_renderer.BorrowNullRP();
     if (!face) {
@@ -1171,7 +1837,7 @@ bool QueuePlayerVitalsOverlayQuad(CGameMode& mode)
     face->cullMode = D3DCULL_NONE;
     face->srcAlphaMode = D3DBLEND_SRCALPHA;
     face->destAlphaMode = D3DBLEND_INVSRCALPHA;
-    face->alphaSortKey = 1.6f;
+    face->alphaSortKey = kPlayerVitalsOverlaySortKey;
 
     face->m_verts[0] = { left, top, 0.0f, 1.0f, 0xFFFFFFFFu, 0xFF000000u, 0.0f, 0.0f };
     face->m_verts[1] = { right, top, 0.0f, 1.0f, 0xFFFFFFFFu, 0xFF000000u, maxU, 0.0f };
@@ -1187,6 +1853,9 @@ void ApplyEnemyCursorMagnet(CGameMode& mode, POINT* cursorPos)
         return;
     }
     if (mode.m_isLeftButtonHeld || mode.m_canRotateView) {
+        return;
+    }
+    if (IsWorldHoverBlockedByUi(cursorPos->x, cursorPos->y)) {
         return;
     }
 
@@ -1244,58 +1913,72 @@ void DrawGameplayOverlayToHdc(CGameMode& mode, HDC targetDc)
     if (!targetDc) {
         return;
     }
+    if (IsQtUiRuntimeEnabled()) {
+        return;
+    }
 
     DrawHoveredGroundItemName(mode, targetDc);
     DrawHoveredActorName(mode, targetDc);
 }
 
-bool ComposeModernOverlayFrame(CGameMode& mode, int cursorActNum, u32 mouseAnimStartTick)
+void DrawGameplayFallbackToWindow(
+    CGameMode& mode,
+    int cursorActNum,
+    u32 mouseAnimStartTick,
+    bool trackMovePerfFrame,
+    double uiDrawStartMs,
+    bool allowCursorWithoutWindowDc,
+    bool cursorAlreadyQueued)
 {
-    if (!g_hMainWnd) {
-        return false;
+    const bool qtGameplayRuntimeEnabled = IsQtUiRuntimeEnabled()
+        && GetRenderDevice().GetLegacyDevice() == nullptr;
+    if (qtGameplayRuntimeEnabled) {
+        if (cursorAlreadyQueued) {
+            return;
+        }
+        HDC windowDc = GetDC(g_hMainWnd);
+        if (windowDc) {
+            const double cursorHdcStartMs = trackMovePerfFrame ? QpcNowMs() : 0.0;
+            DrawModeCursorToHdc(windowDc, cursorActNum, mouseAnimStartTick);
+            if (trackMovePerfFrame) {
+                g_overlayMovePerfStats.fallbackCursorHdcMs += QpcNowMs() - cursorHdcStartMs;
+            }
+            ReleaseDC(g_hMainWnd, windowDc);
+        } else if (allowCursorWithoutWindowDc) {
+            const double cursorStartMs = trackMovePerfFrame ? QpcNowMs() : 0.0;
+            DrawModeCursor(cursorActNum, mouseAnimStartTick);
+            if (trackMovePerfFrame) {
+                g_overlayMovePerfStats.fallbackCursorMs += QpcNowMs() - cursorStartMs;
+            }
+        }
+        return;
     }
 
-    RECT clientRect{};
-    GetClientRect(g_hMainWnd, &clientRect);
-    const int clientWidth = clientRect.right - clientRect.left;
-    const int clientHeight = clientRect.bottom - clientRect.top;
-    if (clientWidth <= 0 || clientHeight <= 0) {
-        return false;
+    HDC windowDc = GetDC(g_hMainWnd);
+    if (windowDc) {
+        const double overlayDrawStartMs = trackMovePerfFrame ? QpcNowMs() : 0.0;
+        DrawGameplayOverlayToHdc(mode, windowDc);
+        DrawPlayerVitalsOverlay(mode, windowDc);
+        if (trackMovePerfFrame) {
+            g_overlayMovePerfStats.fallbackOverlayDrawMs += QpcNowMs() - overlayDrawStartMs;
+        }
+        g_windowMgr.DrawVisibleWindowsToHdc(windowDc, true);
+        if (trackMovePerfFrame) {
+            g_overlayMovePerfStats.fallbackUiDrawMs += QpcNowMs() - uiDrawStartMs;
+        }
+        const double cursorHdcStartMs = trackMovePerfFrame ? QpcNowMs() : 0.0;
+        DrawModeCursorToHdc(windowDc, cursorActNum, mouseAnimStartTick);
+        if (trackMovePerfFrame) {
+            g_overlayMovePerfStats.fallbackCursorHdcMs += QpcNowMs() - cursorHdcStartMs;
+        }
+        ReleaseDC(g_hMainWnd, windowDc);
+    } else if (allowCursorWithoutWindowDc) {
+        const double cursorStartMs = trackMovePerfFrame ? QpcNowMs() : 0.0;
+        DrawModeCursor(cursorActNum, mouseAnimStartTick);
+        if (trackMovePerfFrame) {
+            g_overlayMovePerfStats.fallbackCursorMs += QpcNowMs() - cursorStartMs;
+        }
     }
-
-    HDC sceneDc = nullptr;
-    if (!GetRenderDevice().AcquireBackBufferDC(&sceneDc) || !sceneDc) {
-        return false;
-    }
-
-    static HDC s_overlayComposeDc = nullptr;
-    static HBITMAP s_overlayComposeBitmap = nullptr;
-    static void* s_overlayComposeBits = nullptr;
-    static int s_overlayComposeWidth = 0;
-    static int s_overlayComposeHeight = 0;
-    if (!EnsureOverlayComposeSurface(sceneDc, clientWidth, clientHeight,
-        &s_overlayComposeDc, &s_overlayComposeBitmap, &s_overlayComposeBits, &s_overlayComposeWidth, &s_overlayComposeHeight)) {
-        GetRenderDevice().ReleaseBackBufferDC(sceneDc);
-        return false;
-    }
-
-    BitBlt(s_overlayComposeDc, 0, 0, clientWidth, clientHeight, sceneDc, 0, 0, SRCCOPY);
-    DrawGameplayOverlayToHdc(mode, s_overlayComposeDc);
-    DrawPlayerVitalsOverlay(mode, s_overlayComposeDc);
-    DrawQueuedMsgEffects(s_overlayComposeDc);
-
-    HDC previousSharedDc = UIWindow::GetSharedDrawDC();
-    UIWindow::SetSharedDrawDC(s_overlayComposeDc);
-    g_windowMgr.OnDraw();
-    DrawModeCursorToHdc(s_overlayComposeDc, cursorActNum, mouseAnimStartTick);
-    UIWindow::SetSharedDrawDC(previousSharedDc);
-    GetRenderDevice().ReleaseBackBufferDC(sceneDc);
-
-    return GetRenderDevice().UpdateBackBufferFromMemory(
-        s_overlayComposeBits,
-        clientWidth,
-        clientHeight,
-        clientWidth * static_cast<int>(sizeof(unsigned int)));
 }
 
 bool RequestReturnToCharSelect()
@@ -1399,8 +2082,6 @@ std::string LowercaseAscii(std::string value)
 ULONG_PTR EnsureGdiplusStarted();
 const char* UiKorPrefix();
 std::string ResolveDataPath(const std::string& fileName, const char* ext, const std::vector<std::string>& directPrefixes);
-bool LoadBitmapFromGameData(const std::string& dataPath, HBITMAP* outBmp, int* outWidth, int* outHeight);
-void DrawBitmapTransparent(HDC targetDC, HBITMAP bitmap, const RECT& dst);
 
 std::string NormalizeRswNameForCameraTables(const char* rswName)
 {
@@ -1761,6 +2442,42 @@ double QpcNowMs()
     return static_cast<double>(now.QuadPart) * 1000.0 / static_cast<double>(freq.QuadPart);
 }
 
+bool BlitArgbBitsToWindow(HWND hwnd, const void* bits, int width, int height)
+{
+    if (!hwnd || !bits || width <= 0 || height <= 0) {
+        return false;
+    }
+
+    HDC targetDc = GetDC(hwnd);
+    if (!targetDc) {
+        return GetRenderDevice().UpdateBackBufferFromMemory(bits, width, height, width * static_cast<int>(sizeof(unsigned int)));
+    }
+
+    BITMAPINFO bmi{};
+    bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    bmi.bmiHeader.biWidth = width;
+    bmi.bmiHeader.biHeight = -height;
+    bmi.bmiHeader.biPlanes = 1;
+    bmi.bmiHeader.biBitCount = 32;
+    bmi.bmiHeader.biCompression = BI_RGB;
+
+    const bool success = StretchDIBits(targetDc,
+                                       0,
+                                       0,
+                                       width,
+                                       height,
+                                       0,
+                                       0,
+                                       width,
+                                       height,
+                                       bits,
+                                       &bmi,
+                                       DIB_RGB_COLORS,
+                                       SRCCOPY) != GDI_ERROR;
+    ReleaseDC(hwnd, targetDc);
+    return success;
+}
+
 bool IsMovePerfActive(const CGameMode& mode)
 {
     return mode.m_world && mode.m_world->m_player && mode.m_world->m_player->m_isMoving;
@@ -1773,8 +2490,8 @@ void LogGameModeMovePerfIfNeeded()
     }
 
     const double frameCount = static_cast<double>(g_gameModeMovePerfStats.frames);
-    const double skillCalls = static_cast<double>((std::max)(1ull, g_gameModeMovePerfStats.skillRechargeCalls));
-    const double cursorCalls = static_cast<double>((std::max)(1ull, g_gameModeMovePerfStats.cursorCalls));
+    const double skillCalls = static_cast<double>((std::max)(u64{1}, g_gameModeMovePerfStats.skillRechargeCalls));
+    const double cursorCalls = static_cast<double>((std::max)(u64{1}, g_gameModeMovePerfStats.cursorCalls));
     DbgLog("[GameModePerfHiRes] moveFrames=%llu skillRecharge=%.3fms skillCalls=%llu skillCall=%.3fms cursor=%.3fms cursorCalls=%llu cursorCall=%.3fms\n",
         static_cast<unsigned long long>(g_gameModeMovePerfStats.frames),
         g_gameModeMovePerfStats.skillRechargeMs / frameCount,
@@ -1891,12 +2608,7 @@ void UpdateGameplayCursor(CGameMode& mode)
         return;
     }
 
-    if (g_windowMgr.HasActiveNpcDialog()) {
-        SetModeCursorAction(mode, CursorAction::Arrow);
-        return;
-    }
-
-    if (g_windowMgr.HasWindowAtPoint(mode.m_oldMouseX, mode.m_oldMouseY)) {
+    if (IsWorldHoverBlockedByUi(mode.m_oldMouseX, mode.m_oldMouseY)) {
         SetModeCursorAction(mode, CursorAction::Arrow);
         return;
     }
@@ -2100,6 +2812,10 @@ void DrawHoveredGroundItemName(CGameMode& mode, HDC hdc)
         return;
     }
 
+    if (IsWorldHoverBlockedByUi(mode.m_oldMouseX, mode.m_oldMouseY)) {
+        return;
+    }
+
     CItem* hoveredItem = nullptr;
     int labelX = 0;
     int labelY = 0;
@@ -2129,6 +2845,10 @@ void DrawHoveredGroundItemName(CGameMode& mode, HDC hdc)
 void DrawHoveredActorName(CGameMode& mode, HDC hdc)
 {
     if (!hdc || !mode.m_world || !mode.m_view) {
+        return;
+    }
+
+    if (IsWorldHoverBlockedByUi(mode.m_oldMouseX, mode.m_oldMouseY)) {
         return;
     }
 
@@ -2284,7 +3004,7 @@ void DrawLockedTargetArrow(CGameMode& mode, HDC hdc)
 
     static bool s_bitmapLoaded = false;
     static std::string s_bitmapPath;
-    static HBITMAP s_bitmap = nullptr;
+    static std::vector<unsigned int> s_bitmapPixels;
     static int s_width = 0;
     static int s_height = 0;
     if (!s_bitmapLoaded) {
@@ -2300,12 +3020,21 @@ void DrawLockedTargetArrow(CGameMode& mode, HDC hdc)
             std::string("data\\") + UiKorPrefix() + "basic_interface\\"
         });
         if (!s_bitmapPath.empty()) {
-            if (LoadBitmapFromGameData(s_bitmapPath, &s_bitmap, &s_width, &s_height) && s_bitmap) {
+            u32* pixels = nullptr;
+            if (LoadBgraPixelsFromGameData(s_bitmapPath.c_str(), &pixels, &s_width, &s_height)
+                && pixels
+                && s_width > 0
+                && s_height > 0) {
+                s_bitmapPixels.assign(
+                    pixels,
+                    pixels + static_cast<size_t>(s_width) * static_cast<size_t>(s_height));
+                delete[] pixels;
                 DbgLog("[GameMode] locked target arrow loaded path='%s' size=%dx%d\n",
                     s_bitmapPath.c_str(),
                     s_width,
                     s_height);
             } else {
+                delete[] pixels;
                 DbgLog("[GameMode] locked target arrow bitmap decode failed path='%s'\n",
                     s_bitmapPath.c_str());
             }
@@ -2315,7 +3044,7 @@ void DrawLockedTargetArrow(CGameMode& mode, HDC hdc)
         }
     }
 
-    if (!s_bitmap || s_width <= 0 || s_height <= 0) {
+    if (s_bitmapPixels.empty() || s_width <= 0 || s_height <= 0) {
         const u32 now = GetTickCount();
         const int bounce = static_cast<int>(std::lround((0.5f + 0.5f * std::sin(static_cast<float>(now) * kLockedTargetArrowBouncePerMs))
             * kLockedTargetArrowBouncePixels));
@@ -2331,8 +3060,8 @@ void DrawLockedTargetArrow(CGameMode& mode, HDC hdc)
     const int scaledHeight = (std::max)(1, static_cast<int>(std::lround(static_cast<float>(s_height) * kLockedTargetArrowScale)));
     const int drawX = centerX - (scaledWidth / 2);
     const int drawY = labelY - kLockedTargetArrowBaseLift - scaledHeight - kLockedTargetArrowYOffset - bounce;
-    RECT dst{ drawX, drawY, drawX + scaledWidth, drawY + scaledHeight };
-    DrawBitmapTransparent(hdc, s_bitmap, dst);
+
+    AlphaBlendArgbToHdc(hdc, drawX, drawY, scaledWidth, scaledHeight, s_bitmapPixels.data(), s_width, s_height);
 }
 
 u32 PackLockedTargetColor(u8 alpha, u8 red, u8 green, u8 blue)
@@ -2502,6 +3231,39 @@ void FillSolidRect(HDC hdc, const RECT& rect, COLORREF color)
     }
     FillRect(hdc, &rect, brush);
     DeleteObject(brush);
+}
+
+unsigned int PackColorRefArgb(COLORREF color)
+{
+    const unsigned int red = static_cast<unsigned int>(GetRValue(color));
+    const unsigned int green = static_cast<unsigned int>(GetGValue(color));
+    const unsigned int blue = static_cast<unsigned int>(GetBValue(color));
+    return 0xFF000000u | (red << 16) | (green << 8) | blue;
+}
+
+void FillSolidRectArgb(unsigned int* pixels, int width, int height, const RECT& rect, COLORREF color)
+{
+    if (!pixels || width <= 0 || height <= 0) {
+        return;
+    }
+
+    RECT clipped{
+        (std::max)(0, static_cast<int>(rect.left)),
+        (std::max)(0, static_cast<int>(rect.top)),
+        (std::min)(static_cast<LONG>(width), rect.right),
+        (std::min)(static_cast<LONG>(height), rect.bottom)
+    };
+    if (clipped.right <= clipped.left || clipped.bottom <= clipped.top) {
+        return;
+    }
+
+    const unsigned int argb = PackColorRefArgb(color);
+    for (LONG y = clipped.top; y < clipped.bottom; ++y) {
+        unsigned int* row = pixels + static_cast<size_t>(y) * static_cast<size_t>(width);
+        for (LONG x = clipped.left; x < clipped.right; ++x) {
+            row[x] = argb;
+        }
+    }
 }
 
 void DrawPlayerVitalsOverlay(CGameMode& mode, HDC hdc)
@@ -5047,6 +5809,7 @@ void EnsureBootstrapSelfActor(CGameMode& mode)
         pc->m_accessory = g_session.m_playerAccessory;
         pc->m_accessory2 = g_session.m_playerAccessory2;
         pc->m_accessory3 = g_session.m_playerAccessory3;
+        pc->WarmupCommonBillboardCache();
     }
 
     if (const CHARACTER_INFO* info = g_session.GetSelectedCharacterInfo()) {
@@ -5263,10 +6026,79 @@ struct BootstrapWorldCache {
     size_t nextFixedEffectIndex = 0;
     BootstrapLoadStage loadStage = BootstrapLoadStage::ResolveWorld;
     std::string minimapPath;
-    HBITMAP minimapBmp;
+    std::vector<u32> minimapPixels;
     int minimapWidth;
     int minimapHeight;
 };
+
+#if RO_ENABLE_QT6_UI
+void DrawBootstrapSceneTextQt(unsigned int* pixels,
+    int width,
+    int height,
+    const CGameMode& mode,
+    const BootstrapWorldCache& cache,
+    int attrWidth,
+    int attrHeight,
+    int groundWidth,
+    int groundHeight,
+    int activeWidth,
+    int activeHeight)
+{
+    if (!pixels || width <= 0 || height <= 0) {
+        return;
+    }
+
+    QImage image(reinterpret_cast<uchar*>(pixels), width, height, width * static_cast<int>(sizeof(unsigned int)), QImage::Format_ARGB32);
+    if (image.isNull()) {
+        return;
+    }
+
+    QPainter painter(&image);
+    painter.setRenderHint(QPainter::Antialiasing, false);
+    painter.setRenderHint(QPainter::TextAntialiasing, false);
+    painter.setPen(Qt::white);
+
+    char header[128];
+    std::snprintf(header, sizeof(header), "Map: %s   Pos: %d, %d   Dir: %d",
+        g_session.m_curMap[0] ? g_session.m_curMap : "(unknown)",
+        g_session.m_playerPosX,
+        g_session.m_playerPosY,
+        g_session.m_playerDir);
+
+    char subHeader[160];
+    std::snprintf(subHeader, sizeof(subHeader), "World bootstrap active: %s", mode.m_rswName[0] ? mode.m_rswName : "(no world name)");
+
+    char assetInfo[256];
+    std::snprintf(assetInfo, sizeof(assetInfo), "MiniMap %dx%d   GAT %dx%d   GND %dx%d   Node %dx%d   Actors %zu/%zu",
+        cache.minimapWidth,
+        cache.minimapHeight,
+        attrWidth,
+        attrHeight,
+        groundWidth,
+        groundHeight,
+        activeWidth,
+        activeHeight,
+        mode.m_actorPosList.size(),
+        mode.m_runtimeActors.size());
+
+    const char* hintText = mode.m_world && mode.m_world->m_ground && mode.m_world->m_attr
+        ? "Connected to world server. Ref-style bootstrap now renders from the world ground and attr objects before full scene/view loading."
+        : "Connected to world server. Ref-style world bootstrap is active, but the ground or attr resource is still incomplete.";
+
+    painter.setFont(BuildBootstrapHeaderFont());
+    painter.drawText(QRect(20, 18, width - 220, 24), Qt::AlignLeft | Qt::AlignVCenter | Qt::TextSingleLine, QString::fromLocal8Bit(header));
+
+    painter.setFont(BuildBootstrapBodyFont());
+    painter.drawText(QRect(20, 40, width - 220, 22), Qt::AlignLeft | Qt::AlignVCenter | Qt::TextSingleLine, QString::fromLocal8Bit(subHeader));
+
+    const QRect assetRect(width - 184, 188, 164, 18);
+    const QFontMetrics assetMetrics(painter.font());
+    const QString assetLabel = assetMetrics.elidedText(QString::fromLocal8Bit(assetInfo), Qt::ElideRight, assetRect.width());
+    painter.drawText(assetRect, Qt::AlignCenter | Qt::AlignVCenter | Qt::TextSingleLine, assetLabel);
+
+    painter.drawText(QRect(20, height - 30, width - 40, 18), Qt::AlignLeft | Qt::AlignVCenter | Qt::TextSingleLine, QString::fromLocal8Bit(hintText));
+}
+#endif
 
 bool IsBootstrapWorldReady(const BootstrapWorldCache& cache)
 {
@@ -5436,18 +6268,309 @@ void DrawBootstrapPlayerSprite(HDC hdc, int drawX, int drawY)
     DrawBootstrapPcLayer(hdc, drawX, drawY, 1, curAction, curMotion, headActName, headSprName, imfPath, bodyActName, headPaletteName);
 }
 
-ULONG_PTR EnsureGdiplusStarted()
+#if RO_ENABLE_QT6_UI
+bool DrawBootstrapPcLayerToArgb(unsigned int* pixels,
+    int width,
+    int height,
+    int drawX,
+    int drawY,
+    int layerIndex,
+    int curAction,
+    int curMotion,
+    const std::string& actName,
+    const std::string& sprName,
+    const std::string& imfName,
+    const std::string& bodyActName,
+    const std::string& paletteName)
 {
-    static ULONG_PTR s_token = 0;
-    static bool s_started = false;
-    if (!s_started) {
-        Gdiplus::GdiplusStartupInput startupInput;
-        if (Gdiplus::GdiplusStartup(&s_token, &startupInput, nullptr) == Gdiplus::Ok) {
-            s_started = true;
+    CActRes* actRes = g_resMgr.GetAs<CActRes>(actName.c_str());
+    CSprRes* sprRes = g_resMgr.GetAs<CSprRes>(sprName.c_str());
+    CImfRes* imfRes = g_resMgr.GetAs<CImfRes>(imfName.c_str());
+    if (!actRes || !sprRes || !imfRes) {
+        return false;
+    }
+
+    int resolvedLayer = imfRes->GetLayer(layerIndex, curAction, curMotion);
+    if (resolvedLayer < 0) {
+        resolvedLayer = layerIndex;
+    }
+
+    const CMotion* motion = actRes->GetMotion(curAction, curMotion);
+    if (!motion || resolvedLayer >= static_cast<int>(motion->sprClips.size())) {
+        return false;
+    }
+
+    const POINT point = GetBootstrapLayerPoint(layerIndex, resolvedLayer, imfRes, motion, bodyActName, curAction, curMotion);
+
+    std::array<unsigned int, 256> paletteOverride{};
+    unsigned int* palette = sprRes->m_pal;
+    if (!paletteName.empty() && BuildBootstrapPaletteOverride(paletteName, paletteOverride)) {
+        palette = paletteOverride.data();
+    }
+
+    CMotion singleLayerMotion{};
+    singleLayerMotion.sprClips.push_back(motion->sprClips[resolvedLayer]);
+    return DrawActMotionToArgb(pixels, width, height, drawX + point.x, drawY + point.y, sprRes, &singleLayerMotion, palette);
+}
+
+void DrawBootstrapPlayerSpriteToArgb(unsigned int* pixels, int width, int height, int drawX, int drawY)
+{
+    char bodyAct[260] = {};
+    char bodySpr[260] = {};
+    char headAct[260] = {};
+    char headSpr[260] = {};
+    char imfName[260] = {};
+    char bodyPalette[260] = {};
+    char headPalette[260] = {};
+
+    const int sex = g_session.GetSex();
+    int head = g_session.m_playerHead;
+    const int curAction = g_session.m_playerDir & 7;
+    const int curMotion = 0;
+
+    const std::string bodyActName = g_session.GetJobActName(g_session.m_playerJob, sex, bodyAct);
+    const std::string bodySprName = g_session.GetJobSprName(g_session.m_playerJob, sex, bodySpr);
+    const std::string headActName = g_session.GetHeadActName(g_session.m_playerJob, &head, sex, headAct);
+    const std::string headSprName = g_session.GetHeadSprName(g_session.m_playerJob, &head, sex, headSpr);
+    const std::string imfPath = g_session.GetImfName(g_session.m_playerJob, head, sex, imfName);
+    const std::string bodyPaletteName = g_session.m_playerBodyPalette > 0
+        ? g_session.GetBodyPaletteName(g_session.m_playerJob, sex, g_session.m_playerBodyPalette, bodyPalette)
+        : std::string();
+    const std::string headPaletteName = g_session.m_playerHeadPalette > 0
+        ? g_session.GetHeadPaletteName(head, g_session.m_playerJob, sex, g_session.m_playerHeadPalette, headPalette)
+        : std::string();
+
+    DrawBootstrapPcLayerToArgb(pixels, width, height, drawX, drawY, 0, curAction, curMotion, bodyActName, bodySprName, imfPath, bodyActName, bodyPaletteName);
+    DrawBootstrapPcLayerToArgb(pixels, width, height, drawX, drawY, 1, curAction, curMotion, headActName, headSprName, imfPath, bodyActName, headPaletteName);
+}
+
+void DrawPixelsStretchedQt(QPainter& painter, const u32* pixels, int width, int height, const RECT& dst)
+{
+    if (!pixels || width <= 0 || height <= 0 || dst.right <= dst.left || dst.bottom <= dst.top) {
+        return;
+    }
+
+    QImage image(reinterpret_cast<const uchar*>(pixels), width, height, width * static_cast<int>(sizeof(u32)), QImage::Format_ARGB32);
+    if (image.isNull()) {
+        return;
+    }
+
+    painter.drawImage(QRect(dst.left, dst.top, dst.right - dst.left, dst.bottom - dst.top), image);
+}
+
+void DrawGatWorldToArgb(unsigned int* pixels, int width, int height, const RECT& viewRect, const CGameMode& mode, const BootstrapWorldCache& cache)
+{
+    if (!pixels || width <= 0 || height <= 0) {
+        return;
+    }
+
+    const CWorld* world = mode.m_world;
+    if (!world) {
+        return;
+    }
+
+    const SceneGraphNode* scene = world->m_Calculated ? world->m_Calculated : &world->m_rootNode;
+    const C3dGround* ground = scene->m_ground ? scene->m_ground : world->m_ground;
+    const C3dAttr* attr = scene->m_attr ? scene->m_attr : world->m_attr;
+    const vector3d diffuseCol = ground ? ground->m_diffuseCol : cache.worldInfo.diffuseCol;
+    const vector3d ambientCol = ground ? ground->m_ambientCol : cache.worldInfo.ambientCol;
+    const vector3d lightDir = ground ? ground->m_lightDir : cache.worldInfo.lightDir;
+    const float waterLevel = ground ? ground->m_waterLevel : cache.worldInfo.waterLevel;
+
+    const COLORREF skyColor = BlendColor(
+        ColorFromVector(diffuseCol, 0.72f),
+        ColorFromVector(ambientCol, 1.15f),
+        0.45f);
+    const COLORREF horizonColor = BlendColor(
+        ColorFromVector(ambientCol, 0.7f),
+        RGB(36, 44, 52),
+        0.35f);
+    const COLORREF groundBaseColor = BlendColor(
+        ColorFromVector(ambientCol, 0.95f),
+        RGB(110, 102, 84),
+        0.55f);
+    const COLORREF waterColor = BlendColor(
+        ColorFromVector(diffuseCol, 0.55f),
+        RGB(38, 78, 130),
+        0.7f);
+
+    QImage image(reinterpret_cast<uchar*>(pixels), width, height, width * static_cast<int>(sizeof(unsigned int)), QImage::Format_ARGB32);
+    if (image.isNull()) {
+        return;
+    }
+
+    QPainter painter(&image);
+    painter.setRenderHint(QPainter::Antialiasing, false);
+    painter.setRenderHint(QPainter::TextAntialiasing, false);
+
+    QRect skyRect(viewRect.left, viewRect.top, viewRect.right - viewRect.left, (viewRect.bottom - viewRect.top) / 2);
+    painter.fillRect(skyRect, ToQColor(skyColor));
+    QRect groundBackRect(viewRect.left, skyRect.bottom(), viewRect.right - viewRect.left, viewRect.bottom - skyRect.bottom());
+    painter.fillRect(groundBackRect, ToQColor(horizonColor));
+
+    const int terrainWidth = ground ? ground->m_width : (attr ? attr->m_width : 0);
+    const int terrainHeight = ground ? ground->m_height : (attr ? attr->m_height : 0);
+    if (terrainWidth <= 0 || terrainHeight <= 0 || (!ground && !attr)) {
+        return;
+    }
+
+    RECT terrainArea = ground ? scene->m_groundArea : scene->m_attrArea;
+    if (terrainArea.right <= terrainArea.left || terrainArea.bottom <= terrainArea.top) {
+        SetRect(&terrainArea, 0, 0, terrainWidth, terrainHeight);
+    }
+
+    const float tileWidth = 24.0f;
+    const float tileHeight = 12.0f;
+    const float heightScale = 2.2f;
+    const float sceneSpanTilesX = ground && ground->m_zoom > 0.0f
+        ? (scene->m_aabb.max.x - scene->m_aabb.min.x) / ground->m_zoom
+        : static_cast<float>(terrainArea.right - terrainArea.left);
+    const float sceneSpanTilesY = ground && ground->m_zoom > 0.0f
+        ? (scene->m_aabb.max.z - scene->m_aabb.min.z) / ground->m_zoom
+        : static_cast<float>(terrainArea.bottom - terrainArea.top);
+    const int radius = (std::max)(8, (std::min)(18, static_cast<int>((std::min)(sceneSpanTilesX, sceneSpanTilesY) * 0.5f)));
+    const int areaLeft = static_cast<int>(terrainArea.left);
+    const int areaRight = static_cast<int>(terrainArea.right);
+    const int areaTop = static_cast<int>(terrainArea.top);
+    const int areaBottom = static_cast<int>(terrainArea.bottom);
+    const int startX = (std::max)(areaLeft, g_session.m_playerPosX - radius);
+    const int endX = (std::min)(areaRight - 2, g_session.m_playerPosX + radius);
+    const int startY = (std::max)(areaTop, g_session.m_playerPosY - radius);
+    const int endY = (std::min)(areaBottom - 2, g_session.m_playerPosY + radius);
+
+    if (endX < startX || endY < startY) {
+        return;
+    }
+
+    for (int mapY = startY; mapY <= endY; ++mapY) {
+        for (int mapX = startX; mapX <= endX; ++mapX) {
+            const float h1 = GetTerrainCornerHeight(*scene, mapX, mapY, 0);
+            const float h2 = GetTerrainCornerHeight(*scene, mapX, mapY, 1);
+            const float h3 = GetTerrainCornerHeight(*scene, mapX, mapY, 2);
+            const float h4 = GetTerrainCornerHeight(*scene, mapX, mapY, 3);
+            const float avgHeight = (h1 + h2 + h3 + h4) * 0.25f;
+            const float relX = static_cast<float>(mapX - g_session.m_playerPosX);
+            const float relY = static_cast<float>(mapY - g_session.m_playerPosY);
+            const float eastHeight = GetTerrainAverageHeightAt(*scene, mapX + 1, mapY);
+            const float southHeight = GetTerrainAverageHeightAt(*scene, mapX, mapY + 1);
+            const float slope = (std::min)(1.0f, (std::fabs(eastHeight - avgHeight) + std::fabs(southHeight - avgHeight)) / 18.0f);
+
+            POINT poly[4];
+            poly[0] = ProjectWorldPoint(viewRect, relX, relY, h1, tileWidth, tileHeight, heightScale);
+            poly[1] = ProjectWorldPoint(viewRect, relX + 1.0f, relY, h2, tileWidth, tileHeight, heightScale);
+            poly[2] = ProjectWorldPoint(viewRect, relX, relY + 1.0f, h3, tileWidth, tileHeight, heightScale);
+            poly[3] = ProjectWorldPoint(viewRect, relX + 1.0f, relY + 1.0f, h4, tileWidth, tileHeight, heightScale);
+
+            const float normalizedHeight = ClampUnit((avgHeight + 20.0f) / 50.0f);
+            const bool isWater = (ground || cache.worldInfo.loaded) && avgHeight <= waterLevel + 0.25f;
+            COLORREF fillColor = isWater ? waterColor : groundBaseColor;
+            const COLORREF gndColor = GetGroundTextureColor(*scene, cache, mapX, mapY);
+            if (gndColor != RGB(0, 0, 0)) {
+                fillColor = BlendColor(fillColor, gndColor, 0.6f);
+            }
+
+            const vector3d normal = ComputeCellNormal(h1, h2, h3, h4);
+            const vector3d lightColor = ComputeLightingColor(lightDir, diffuseCol, ambientCol, normal);
+            fillColor = ModulateColor(fillColor, lightColor);
+            fillColor = MultiplyColor(fillColor, 0.82f + normalizedHeight * 0.18f - slope * 0.12f);
+
+            if (ground) {
+                if (const CGroundCell* groundCell = ground->GetCell(mapX, mapY)) {
+                    if (const CGroundSurface* topSurface = ground->GetSurface(groundCell->topSurfaceId)) {
+                        const COLORREF surfaceColor = RGB(
+                            (topSurface->color >> 16) & 0xFF,
+                            (topSurface->color >> 8) & 0xFF,
+                            topSurface->color & 0xFF);
+                        fillColor = BlendColor(fillColor, surfaceColor, 0.22f);
+                    }
+                }
+            }
+
+            const CAttrCell* attrCell = GetAttrCellSafe(*scene, mapX, mapY);
+            const int attrFlag = attrCell ? attrCell->flag : 0;
+            if (attrFlag != 0) {
+                fillColor = BlendColor(fillColor, RGB(128, 84, 72), 0.55f);
+            }
+
+            QPoint qpoly[4] = {
+                QPoint(poly[0].x, poly[0].y),
+                QPoint(poly[1].x, poly[1].y),
+                QPoint(poly[3].x, poly[3].y),
+                QPoint(poly[2].x, poly[2].y)
+            };
+            painter.setBrush(ToQColor(fillColor));
+            painter.setPen(ToQColor(BlendColor(RGB(28, 32, 26), fillColor, 0.35f)));
+            painter.drawPolygon(qpoly, 4);
         }
     }
-    return s_token;
+
+    for (const auto& entry : mode.m_actorPosList) {
+        const u32 gid = entry.first;
+        if (gid == g_session.m_gid) {
+            continue;
+        }
+
+        const int mapX = entry.second.x;
+        const int mapY = entry.second.y;
+        if (mapX < startX || mapX > endX || mapY < startY || mapY > endY) {
+            continue;
+        }
+
+        const CGameActor* actor = nullptr;
+        const auto actorIt = mode.m_runtimeActors.find(gid);
+        if (actorIt != mode.m_runtimeActors.end()) {
+            actor = actorIt->second;
+        }
+
+        const float relX = static_cast<float>(mapX - g_session.m_playerPosX);
+        const float relY = static_cast<float>(mapY - g_session.m_playerPosY);
+        const float actorHeight = GetTerrainAverageHeightAt(*scene, mapX, mapY);
+        const POINT actorPoint = ProjectWorldPoint(viewRect, relX + 0.5f, relY + 0.5f, actorHeight, tileWidth, tileHeight, heightScale);
+
+        COLORREF fillColor = RGB(226, 116, 70);
+        COLORREF outlineColor = RGB(72, 28, 16);
+        int radiusX = 4;
+        int radiusY = 7;
+        if (actor && actor->m_isPc) {
+            fillColor = RGB(120, 214, 255);
+            outlineColor = RGB(20, 52, 78);
+            radiusX = 5;
+            radiusY = 8;
+        }
+
+        painter.setBrush(ToQColor(fillColor));
+        painter.setPen(ToQColor(outlineColor));
+        painter.drawEllipse(QRect(actorPoint.x - radiusX, actorPoint.y - radiusY, radiusX * 2, radiusY * 2 + 1));
+    }
+
+    const float playerHeight = GetTerrainAverageHeightAt(*scene, g_session.m_playerPosX, g_session.m_playerPosY);
+    const POINT playerPoint = ProjectWorldPoint(viewRect, 0.5f, 0.5f, playerHeight, tileWidth, tileHeight, heightScale);
+    painter.end();
+
+    if (g_session.m_playerJob >= 0) {
+        DrawBootstrapPlayerSpriteToArgb(pixels, width, height, playerPoint.x, playerPoint.y - 10);
+    }
+
+    QPainter markerPainter(&image);
+    markerPainter.setRenderHint(QPainter::Antialiasing, false);
+    markerPainter.setBrush(ToQColor(RGB(255, 226, 102)));
+    markerPainter.setPen(QPen(ToQColor(RGB(64, 40, 12)), 2));
+    markerPainter.drawEllipse(QRect(playerPoint.x - 6, playerPoint.y - 10, 12, 12));
+
+    POINT dirEnd = playerPoint;
+    switch (g_session.m_playerDir & 7) {
+    case 0: dirEnd.y -= 18; break;
+    case 1: dirEnd.x += 12; dirEnd.y -= 12; break;
+    case 2: dirEnd.x += 18; break;
+    case 3: dirEnd.x += 12; dirEnd.y += 12; break;
+    case 4: dirEnd.y += 18; break;
+    case 5: dirEnd.x -= 12; dirEnd.y += 12; break;
+    case 6: dirEnd.x -= 18; break;
+    case 7: dirEnd.x -= 12; dirEnd.y -= 12; break;
+    }
+    markerPainter.drawLine(QPoint(playerPoint.x, playerPoint.y - 4), QPoint(dirEnd.x, dirEnd.y));
 }
+#endif
 
 std::string ToLowerAscii(std::string value)
 {
@@ -5587,10 +6710,6 @@ std::string ResolveExistingPath(const std::string& candidate, const std::vector<
 
 void ResetBootstrapWorldCache(BootstrapWorldCache& cache)
 {
-    if (cache.minimapBmp) {
-        DeleteObject(cache.minimapBmp);
-        cache.minimapBmp = nullptr;
-    }
     cache.mapName.clear();
     cache.rswPath.clear();
     cache.attrPath.clear();
@@ -5605,6 +6724,7 @@ void ResetBootstrapWorldCache(BootstrapWorldCache& cache)
     cache.nextFixedEffectIndex = 0;
     cache.loadStage = BootstrapLoadStage::ResolveWorld;
     cache.minimapPath.clear();
+    cache.minimapPixels.clear();
     cache.minimapWidth = 0;
     cache.minimapHeight = 0;
 }
@@ -5688,131 +6808,47 @@ std::string ResolveDataPath(const std::string& fileName, const char* ext, const 
     return std::string();
 }
 
-bool LoadBitmapFromGameData(const std::string& dataPath, HBITMAP* outBmp, int* outWidth, int* outHeight)
+bool ComputeBitmapAverageColor(const unsigned int* pixels, size_t pixelCount, COLORREF* outColor)
 {
-    if (!outBmp || dataPath.empty() || !EnsureGdiplusStarted()) {
-        return false;
-    }
-
-    int size = 0;
-    unsigned char* bytes = g_fileMgr.GetData(dataPath.c_str(), &size);
-    if (!bytes || size <= 0) {
-        delete[] bytes;
-        return false;
-    }
-
-    bool loaded = false;
-    HGLOBAL mem = GlobalAlloc(GMEM_MOVEABLE, static_cast<SIZE_T>(size));
-    if (mem) {
-        void* dst = GlobalLock(mem);
-        if (dst) {
-            std::memcpy(dst, bytes, static_cast<size_t>(size));
-            GlobalUnlock(mem);
-
-            IStream* stream = nullptr;
-            if (CreateStreamOnHGlobal(mem, TRUE, &stream) == S_OK) {
-                Gdiplus::Bitmap* bitmap = Gdiplus::Bitmap::FromStream(stream, FALSE);
-                if (bitmap && bitmap->GetLastStatus() == Gdiplus::Ok) {
-                    HBITMAP loadedBmp = nullptr;
-                    if (bitmap->GetHBITMAP(RGB(0, 0, 0), &loadedBmp) == Gdiplus::Ok && loadedBmp) {
-                        BITMAP bm{};
-                        if (GetObjectA(loadedBmp, sizeof(bm), &bm) && bm.bmWidth > 0 && bm.bmHeight > 0) {
-                            *outBmp = loadedBmp;
-                            if (outWidth) {
-                                *outWidth = bm.bmWidth;
-                            }
-                            if (outHeight) {
-                                *outHeight = bm.bmHeight;
-                            }
-                            loaded = true;
-                        } else {
-                            DeleteObject(loadedBmp);
-                        }
-                    }
-                }
-                delete bitmap;
-                stream->Release();
-            } else {
-                GlobalFree(mem);
-            }
-        } else {
-            GlobalFree(mem);
-        }
-    }
-
-    delete[] bytes;
-    return loaded;
-}
-
-bool ComputeBitmapAverageColor(HBITMAP bitmap, COLORREF* outColor)
-{
-    if (!bitmap || !outColor) {
-        return false;
-    }
-
-    BITMAP bm{};
-    if (!GetObjectA(bitmap, sizeof(bm), &bm) || bm.bmWidth <= 0 || bm.bmHeight <= 0) {
-        return false;
-    }
-
-    BITMAPINFO bmi{};
-    bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-    bmi.bmiHeader.biWidth = bm.bmWidth;
-    bmi.bmiHeader.biHeight = -bm.bmHeight;
-    bmi.bmiHeader.biPlanes = 1;
-    bmi.bmiHeader.biBitCount = 32;
-    bmi.bmiHeader.biCompression = BI_RGB;
-
-    std::vector<unsigned int> pixels(static_cast<size_t>(bm.bmWidth) * static_cast<size_t>(bm.bmHeight));
-    HDC screenDC = GetDC(nullptr);
-    if (!screenDC) {
-        return false;
-    }
-
-    const int scanLines = GetDIBits(screenDC,
-        bitmap,
-        0,
-        static_cast<UINT>(bm.bmHeight),
-        pixels.data(),
-        &bmi,
-        DIB_RGB_COLORS);
-    ReleaseDC(nullptr, screenDC);
-    if (scanLines != bm.bmHeight) {
+    if (!pixels || pixelCount == 0 || !outColor) {
         return false;
     }
 
     unsigned long long totalR = 0;
     unsigned long long totalG = 0;
     unsigned long long totalB = 0;
-    const unsigned long long pixelCount = static_cast<unsigned long long>(pixels.size());
-    if (pixelCount == 0) {
-        return false;
-    }
-
-    for (unsigned int pixel : pixels) {
+    for (size_t index = 0; index < pixelCount; ++index) {
+        const unsigned int pixel = pixels[index];
         totalB += pixel & 0xFFu;
         totalG += (pixel >> 8) & 0xFFu;
         totalR += (pixel >> 16) & 0xFFu;
     }
 
     *outColor = RGB(
-        static_cast<int>(totalR / pixelCount),
-        static_cast<int>(totalG / pixelCount),
-        static_cast<int>(totalB / pixelCount));
+        static_cast<int>(totalR / static_cast<unsigned long long>(pixelCount)),
+        static_cast<int>(totalG / static_cast<unsigned long long>(pixelCount)),
+        static_cast<int>(totalB / static_cast<unsigned long long>(pixelCount)));
     return true;
 }
 
 bool LoadAverageBitmapColorFromGameData(const std::string& dataPath, COLORREF* outColor)
 {
-    HBITMAP bitmap = nullptr;
+    u32* pixels = nullptr;
     int width = 0;
     int height = 0;
-    if (!LoadBitmapFromGameData(dataPath, &bitmap, &width, &height) || !bitmap) {
+    if (!LoadBgraPixelsFromGameData(dataPath.c_str(), &pixels, &width, &height)
+        || !pixels
+        || width <= 0
+        || height <= 0) {
+        delete[] pixels;
         return false;
     }
 
-    const bool ok = ComputeBitmapAverageColor(bitmap, outColor);
-    DeleteObject(bitmap);
+    const bool ok = ComputeBitmapAverageColor(
+        pixels,
+        static_cast<size_t>(width) * static_cast<size_t>(height),
+        outColor);
+    delete[] pixels;
     return ok;
 }
 
@@ -5878,69 +6914,34 @@ void ApplyBootstrapWorldLighting(const BootstrapWorldCache& cache)
         cache.worldInfo.ambientCol.z);
 }
 
-void DrawBitmapStretched(HDC targetDC, HBITMAP bitmap, const RECT& dst)
+void DrawPixelsStretched(HDC targetDC, const u32* pixels, int width, int height, const RECT& dst)
 {
-    if (!targetDC || !bitmap) {
+    if (!targetDC || !pixels || width <= 0 || height <= 0) {
         return;
     }
 
-    BITMAP bm{};
-    if (!GetObjectA(bitmap, sizeof(bm), &bm) || bm.bmWidth <= 0 || bm.bmHeight <= 0) {
-        return;
-    }
+    BITMAPINFO bmi{};
+    bmi.bmiHeader.biSize = sizeof(bmi.bmiHeader);
+    bmi.bmiHeader.biWidth = width;
+    bmi.bmiHeader.biHeight = -height;
+    bmi.bmiHeader.biPlanes = 1;
+    bmi.bmiHeader.biBitCount = 32;
+    bmi.bmiHeader.biCompression = BI_RGB;
 
-    HDC srcDC = CreateCompatibleDC(targetDC);
-    if (!srcDC) {
-        return;
-    }
-
-    HGDIOBJ old = SelectObject(srcDC, bitmap);
     SetStretchBltMode(targetDC, HALFTONE);
-    StretchBlt(targetDC,
+    StretchDIBits(targetDC,
         dst.left,
         dst.top,
         dst.right - dst.left,
         dst.bottom - dst.top,
-        srcDC,
         0,
         0,
-        bm.bmWidth,
-        bm.bmHeight,
+        width,
+        height,
+        pixels,
+        &bmi,
+        DIB_RGB_COLORS,
         SRCCOPY);
-    SelectObject(srcDC, old);
-    DeleteDC(srcDC);
-}
-
-void DrawBitmapTransparent(HDC targetDC, HBITMAP bitmap, const RECT& dst)
-{
-    if (!targetDC || !bitmap) {
-        return;
-    }
-
-    BITMAP bm{};
-    if (!GetObjectA(bitmap, sizeof(bm), &bm) || bm.bmWidth <= 0 || bm.bmHeight <= 0) {
-        return;
-    }
-
-    HDC srcDC = CreateCompatibleDC(targetDC);
-    if (!srcDC) {
-        return;
-    }
-
-    HGDIOBJ old = SelectObject(srcDC, bitmap);
-    TransparentBlt(targetDC,
-        dst.left,
-        dst.top,
-        dst.right - dst.left,
-        dst.bottom - dst.top,
-        srcDC,
-        0,
-        0,
-        bm.bmWidth,
-        bm.bmHeight,
-        RGB(255, 0, 255));
-    SelectObject(srcDC, old);
-    DeleteDC(srcDC);
 }
 
 float ClampUnit(float value)
@@ -6564,8 +7565,17 @@ void EnsureBootstrapWorldAssets(const CGameMode& mode)
                     std::string("data\\") + UiKorPrefix() + "minimap\\"
                 });
             }
-            if (!cache.minimapPath.empty() && !cache.minimapBmp) {
-                LoadBitmapFromGameData(cache.minimapPath, &cache.minimapBmp, &cache.minimapWidth, &cache.minimapHeight);
+            if (!cache.minimapPath.empty() && cache.minimapPixels.empty()) {
+                u32* pixels = nullptr;
+                if (LoadBgraPixelsFromGameData(cache.minimapPath.c_str(), &pixels, &cache.minimapWidth, &cache.minimapHeight)
+                    && pixels
+                    && cache.minimapWidth > 0
+                    && cache.minimapHeight > 0) {
+                    cache.minimapPixels.assign(
+                        pixels,
+                        pixels + static_cast<size_t>(cache.minimapWidth) * static_cast<size_t>(cache.minimapHeight));
+                }
+                delete[] pixels;
             }
             cache.loadStage = BootstrapLoadStage::Complete;
             break;
@@ -6617,39 +7627,119 @@ void DrawBootstrapScene(HWND hwnd, const CGameMode& mode)
     }
     const BootstrapWorldCache& cache = GetBootstrapWorldCache();
 
-    HDC windowDC = GetDC(hwnd);
-    if (!windowDC) {
+    static ArgbDibSurface s_bootstrapComposeSurface;
+    if (!s_bootstrapComposeSurface.EnsureSize(width, height)) {
+        return;
+    }
+    void* dibBits = s_bootstrapComposeSurface.GetBits();
+    if (!dibBits) {
         return;
     }
 
-    HDC memDC = CreateCompatibleDC(windowDC);
-    HBITMAP bitmap = CreateCompatibleBitmap(windowDC, width, height);
-    HGDIOBJ oldBitmap = bitmap ? SelectObject(memDC, bitmap) : nullptr;
-    if (!memDC || !bitmap || !oldBitmap) {
-        if (oldBitmap) {
-            SelectObject(memDC, oldBitmap);
-        }
-        if (bitmap) {
-            DeleteObject(bitmap);
-        }
-        if (memDC) {
-            DeleteDC(memDC);
-        }
-        ReleaseDC(hwnd, windowDC);
-        return;
+    RECT worldRect{ 24, 64, width - 220, height - 36 };
+    RECT mapRect{ width - 184, 20, width - 20, 184 };
+    int markerX = (mapRect.left + mapRect.right) / 2;
+    int markerY = (mapRect.top + mapRect.bottom) / 2;
+    const int attrWidth = mode.m_world ? mode.m_world->m_rootNode.m_attrArea.right - mode.m_world->m_rootNode.m_attrArea.left : 0;
+    const int attrHeight = mode.m_world ? mode.m_world->m_rootNode.m_attrArea.bottom - mode.m_world->m_rootNode.m_attrArea.top : 0;
+    if (attrWidth > 0 && attrHeight > 0) {
+        const float normX = static_cast<float>(g_session.m_playerPosX) / static_cast<float>(attrWidth);
+        const float normY = 1.0f - (static_cast<float>(g_session.m_playerPosY) / static_cast<float>(attrHeight));
+        markerX = mapRect.left + static_cast<int>((mapRect.right - mapRect.left) * (std::max)(0.0f, (std::min)(1.0f, normX)));
+        markerY = mapRect.top + static_cast<int>((mapRect.bottom - mapRect.top) * (std::max)(0.0f, (std::min)(1.0f, normY)));
     }
 
+    const int groundWidth = mode.m_world ? mode.m_world->m_rootNode.m_groundArea.right - mode.m_world->m_rootNode.m_groundArea.left : 0;
+    const int groundHeight = mode.m_world ? mode.m_world->m_rootNode.m_groundArea.bottom - mode.m_world->m_rootNode.m_groundArea.top : 0;
+    const SceneGraphNode* scene = mode.m_world && mode.m_world->m_Calculated ? mode.m_world->m_Calculated : (mode.m_world ? &mode.m_world->m_rootNode : nullptr);
+    const int activeWidth = scene ? scene->m_groundArea.right - scene->m_groundArea.left : 0;
+    const int activeHeight = scene ? scene->m_groundArea.bottom - scene->m_groundArea.top : 0;
+
+#if RO_ENABLE_QT6_UI
+    unsigned int* pixels = s_bootstrapComposeSurface.GetPixels();
+    if (!pixels) {
+        return;
+    }
+    std::fill_n(pixels, static_cast<size_t>(width) * static_cast<size_t>(height), 0xFF151B24u);
+    DrawGatWorldToArgb(pixels, width, height, worldRect, mode, cache);
+
+    QImage image(reinterpret_cast<uchar*>(pixels), width, height, width * static_cast<int>(sizeof(unsigned int)), QImage::Format_ARGB32);
+    if (image.isNull()) {
+        return;
+    }
+    QPainter painter(&image);
+    painter.setRenderHint(QPainter::Antialiasing, false);
+    painter.setRenderHint(QPainter::TextAntialiasing, false);
+    painter.setPen(Qt::white);
+    painter.setBrush(Qt::NoBrush);
+    painter.drawRect(QRect(worldRect.left, worldRect.top, worldRect.right - worldRect.left - 1, worldRect.bottom - worldRect.top - 1));
+
+    RECT fittedMapRect = mapRect;
+    if (!cache.minimapPixels.empty() && cache.minimapWidth > 0 && cache.minimapHeight > 0) {
+        const float mapAspect = static_cast<float>(cache.minimapWidth) / static_cast<float>(cache.minimapHeight);
+        const float viewAspect = static_cast<float>(mapRect.right - mapRect.left) / static_cast<float>(mapRect.bottom - mapRect.top);
+        if (mapAspect > viewAspect) {
+            const int fittedHeight = static_cast<int>((mapRect.right - mapRect.left) / mapAspect);
+            const int pad = ((mapRect.bottom - mapRect.top) - fittedHeight) / 2;
+            fittedMapRect.top += pad;
+            fittedMapRect.bottom = fittedMapRect.top + fittedHeight;
+        } else {
+            const int fittedWidth = static_cast<int>((mapRect.bottom - mapRect.top) * mapAspect);
+            const int pad = ((mapRect.right - mapRect.left) - fittedWidth) / 2;
+            fittedMapRect.left += pad;
+            fittedMapRect.right = fittedMapRect.left + fittedWidth;
+        }
+
+        DrawPixelsStretchedQt(painter, cache.minimapPixels.data(), cache.minimapWidth, cache.minimapHeight, fittedMapRect);
+    } else {
+        painter.fillRect(QRect(mapRect.left, mapRect.top, mapRect.right - mapRect.left, mapRect.bottom - mapRect.top), ToQColor(RGB(62, 88, 52)));
+        painter.setPen(ToQColor(RGB(118, 150, 96)));
+        for (int i = 1; i < 12; ++i) {
+            const int x = mapRect.left + ((mapRect.right - mapRect.left) * i) / 12;
+            painter.drawLine(x, mapRect.top, x, mapRect.bottom);
+        }
+        for (int i = 1; i < 8; ++i) {
+            const int y = mapRect.top + ((mapRect.bottom - mapRect.top) * i) / 8;
+            painter.drawLine(mapRect.left, y, mapRect.right, y);
+        }
+    }
+
+    painter.setPen(Qt::white);
+    painter.setBrush(Qt::NoBrush);
+    painter.drawRect(QRect(mapRect.left, mapRect.top, mapRect.right - mapRect.left - 1, mapRect.bottom - mapRect.top - 1));
+
+    painter.setBrush(ToQColor(RGB(245, 224, 126)));
+    painter.setPen(QPen(ToQColor(RGB(92, 60, 16)), 2));
+    painter.drawEllipse(QRect(markerX - 8, markerY - 8, 16, 16));
+    painter.drawLine(markerX, markerY - 14, markerX + (g_session.m_playerDir == 0 ? 0 : 8), markerY + (g_session.m_playerDir == 0 ? -18 : 0));
+    painter.end();
+
+    DrawBootstrapSceneTextQt(
+        pixels,
+        width,
+        height,
+        mode,
+        cache,
+        attrWidth,
+        attrHeight,
+        groundWidth,
+        groundHeight,
+        activeWidth,
+        activeHeight);
+#else
+    HDC memDC = s_bootstrapComposeSurface.GetDC();
+    if (!memDC) {
+        return;
+    }
     RECT fullRect{ 0, 0, width, height };
     HBRUSH bgBrush = CreateSolidBrush(RGB(21, 27, 36));
     FillRect(memDC, &fullRect, bgBrush);
     DeleteObject(bgBrush);
 
-    RECT worldRect{ 24, 64, width - 220, height - 36 };
     DrawGatWorld(memDC, worldRect, mode, cache);
     FrameRect(memDC, &worldRect, static_cast<HBRUSH>(GetStockObject(WHITE_BRUSH)));
 
-    RECT mapRect{ width - 184, 20, width - 20, 184 };
-    if (cache.minimapBmp && cache.minimapWidth > 0 && cache.minimapHeight > 0) {
+    if (!cache.minimapPixels.empty() && cache.minimapWidth > 0 && cache.minimapHeight > 0) {
         const float mapAspect = static_cast<float>(cache.minimapWidth) / static_cast<float>(cache.minimapHeight);
         const float viewAspect = static_cast<float>(mapRect.right - mapRect.left) / static_cast<float>(mapRect.bottom - mapRect.top);
         if (mapAspect > viewAspect) {
@@ -6664,7 +7754,12 @@ void DrawBootstrapScene(HWND hwnd, const CGameMode& mode)
             mapRect.right = mapRect.left + fittedWidth;
         }
 
-        DrawBitmapStretched(memDC, cache.minimapBmp, mapRect);
+        DrawPixelsStretched(
+            memDC,
+            cache.minimapPixels.data(),
+            cache.minimapWidth,
+            cache.minimapHeight,
+            mapRect);
     } else {
         HBRUSH fallbackBrush = CreateSolidBrush(RGB(62, 88, 52));
         FillRect(memDC, &mapRect, fallbackBrush);
@@ -6687,17 +7782,6 @@ void DrawBootstrapScene(HWND hwnd, const CGameMode& mode)
     }
 
     FrameRect(memDC, &mapRect, static_cast<HBRUSH>(GetStockObject(WHITE_BRUSH)));
-
-    int markerX = (mapRect.left + mapRect.right) / 2;
-    int markerY = (mapRect.top + mapRect.bottom) / 2;
-    const int attrWidth = mode.m_world ? mode.m_world->m_rootNode.m_attrArea.right - mode.m_world->m_rootNode.m_attrArea.left : 0;
-    const int attrHeight = mode.m_world ? mode.m_world->m_rootNode.m_attrArea.bottom - mode.m_world->m_rootNode.m_attrArea.top : 0;
-    if (attrWidth > 0 && attrHeight > 0) {
-        const float normX = static_cast<float>(g_session.m_playerPosX) / static_cast<float>(attrWidth);
-        const float normY = 1.0f - (static_cast<float>(g_session.m_playerPosY) / static_cast<float>(attrHeight));
-        markerX = mapRect.left + static_cast<int>((mapRect.right - mapRect.left) * (std::max)(0.0f, (std::min)(1.0f, normX)));
-        markerY = mapRect.top + static_cast<int>((mapRect.bottom - mapRect.top) * (std::max)(0.0f, (std::min)(1.0f, normY)));
-    }
 
     HBRUSH markerBrush = CreateSolidBrush(RGB(245, 224, 126));
     HPEN markerPen = CreatePen(PS_SOLID, 2, RGB(92, 60, 16));
@@ -6729,11 +7813,6 @@ void DrawBootstrapScene(HWND hwnd, const CGameMode& mode)
     DrawTextA(memDC, subHeader, -1, &subHeaderRect, DT_LEFT | DT_SINGLELINE | DT_VCENTER);
 
     char assetInfo[256];
-    const int groundWidth = mode.m_world ? mode.m_world->m_rootNode.m_groundArea.right - mode.m_world->m_rootNode.m_groundArea.left : 0;
-    const int groundHeight = mode.m_world ? mode.m_world->m_rootNode.m_groundArea.bottom - mode.m_world->m_rootNode.m_groundArea.top : 0;
-    const SceneGraphNode* scene = mode.m_world && mode.m_world->m_Calculated ? mode.m_world->m_Calculated : (mode.m_world ? &mode.m_world->m_rootNode : nullptr);
-    const int activeWidth = scene ? scene->m_groundArea.right - scene->m_groundArea.left : 0;
-    const int activeHeight = scene ? scene->m_groundArea.bottom - scene->m_groundArea.top : 0;
     std::snprintf(assetInfo, sizeof(assetInfo), "MiniMap %dx%d   GAT %dx%d   GND %dx%d   Node %dx%d   Actors %zu/%zu",
         cache.minimapWidth,
         cache.minimapHeight,
@@ -6756,13 +7835,9 @@ void DrawBootstrapScene(HWND hwnd, const CGameMode& mode)
         -1,
         &hintRect,
         DT_LEFT | DT_SINGLELINE | DT_VCENTER);
+#endif
 
-    BitBlt(windowDC, 0, 0, width, height, memDC, 0, 0, SRCCOPY);
-
-    SelectObject(memDC, oldBitmap);
-    DeleteObject(bitmap);
-    DeleteDC(memDC);
-    ReleaseDC(hwnd, windowDC);
+    BlitArgbBitsToWindow(hwnd, dibBits, width, height);
 }
 }
 
@@ -7001,16 +8076,6 @@ void CGameMode::OnExit() {
     m_loadingWallpaperName.clear();
 }
 int  CGameMode::OnRun() {
-    const auto qpcNowMs = []() -> double {
-        static LARGE_INTEGER freq = [] {
-            LARGE_INTEGER value{};
-            QueryPerformanceFrequency(&value);
-            return value;
-        }();
-        LARGE_INTEGER now{};
-        QueryPerformanceCounter(&now);
-        return static_cast<double>(now.QuadPart) * 1000.0 / static_cast<double>(freq.QuadPart);
-    };
     const bool mapLoadingWasActive = IsMapLoadingActive(*this);
     const DWORD updateStart = GetTickCount();
     OnUpdate();
@@ -7026,8 +8091,23 @@ int  CGameMode::OnRun() {
         return 1;
     }
     if (IsMapLoadingActive(*this)) {
-        g_windowMgr.OnDraw();
-        DrawModeCursor(m_cursorActNum, m_mouseAnimStartTick);
+        const bool hasLegacyLoadingDevice = GetRenderDevice().GetLegacyDevice() != nullptr;
+        if (!hasLegacyLoadingDevice && IsQtUiRuntimeEnabled()) {
+            g_renderer.ClearBackground();
+            g_renderer.Clear(0);
+            g_windowMgr.RenderWallPaper();
+            const bool queuedLoadingOverlay = QueueModernOverlayQuad(*this, m_cursorActNum, m_mouseAnimStartTick);
+            if (queuedLoadingOverlay) {
+                QueueCursorOverlayQuad(m_cursorActNum, m_mouseAnimStartTick);
+                g_renderer.DrawScene();
+                g_renderer.Flip(false);
+            } else {
+                g_windowMgr.OnDraw();
+            }
+        } else {
+            g_windowMgr.OnDraw();
+            DrawModeCursor(m_cursorActNum, m_mouseAnimStartTick);
+        }
         Sleep(1);
         return 1;
     }
@@ -7060,33 +8140,39 @@ int  CGameMode::OnRun() {
     DWORD uiDrawStart = renderPrepEnd;
     DWORD uiDrawEnd = renderPrepEnd;
     bool queuedModernOverlayFrame = false;
+    bool queuedCursorOverlayFrame = false;
     if (!hasLegacyDevice) {
         uiDrawStart = GetTickCount();
-        const double modernQueueStartMs = trackMovePerfFrame ? qpcNowMs() : 0.0;
+        const double modernQueueStartMs = trackMovePerfFrame ? QpcNowMs() : 0.0;
         queuedModernOverlayFrame = QueueModernOverlayQuad(*this, m_cursorActNum, m_mouseAnimStartTick);
         if (trackMovePerfFrame) {
-            g_overlayMovePerfStats.queueModernMs += qpcNowMs() - modernQueueStartMs;
+            g_overlayMovePerfStats.queueModernMs += QpcNowMs() - modernQueueStartMs;
         }
-        const double roMapStartMs = trackMovePerfFrame ? qpcNowMs() : 0.0;
-        QueueRoMapOverlayQuad();
-        if (trackMovePerfFrame) {
-            g_overlayMovePerfStats.queueRoMapMs += qpcNowMs() - roMapStartMs;
+        if (!IsQtUiRuntimeEnabled()) {
+            const double roMapStartMs = trackMovePerfFrame ? QpcNowMs() : 0.0;
+            QueueRoMapOverlayQuad();
+            if (trackMovePerfFrame) {
+                g_overlayMovePerfStats.queueRoMapMs += QpcNowMs() - roMapStartMs;
+            }
         }
-        const double lockedTargetStartMs = trackMovePerfFrame ? qpcNowMs() : 0.0;
+        const double lockedTargetStartMs = trackMovePerfFrame ? QpcNowMs() : 0.0;
         QueueLockedTargetOverlayQuad(*this);
         if (trackMovePerfFrame) {
-            g_overlayMovePerfStats.queueLockedTargetMs += qpcNowMs() - lockedTargetStartMs;
+            g_overlayMovePerfStats.queueLockedTargetMs += QpcNowMs() - lockedTargetStartMs;
         }
-        const double msgStartMs = trackMovePerfFrame ? qpcNowMs() : 0.0;
+        const double msgStartMs = trackMovePerfFrame ? QpcNowMs() : 0.0;
         QueueMsgEffectsOverlayQuad();
         if (trackMovePerfFrame) {
-            g_overlayMovePerfStats.queueMsgMs += qpcNowMs() - msgStartMs;
+            g_overlayMovePerfStats.queueMsgMs += QpcNowMs() - msgStartMs;
         }
         QueuePlayerVitalsOverlayQuad(*this);
-        const double cursorQueueStartMs = trackMovePerfFrame ? qpcNowMs() : 0.0;
-        QueueCursorOverlayQuad(m_cursorActNum, m_mouseAnimStartTick);
+        if (!IsQtUiRuntimeEnabled()) {
+            QueueHoverLabelsOverlayQuad(*this);
+        }
+        const double cursorQueueStartMs = trackMovePerfFrame ? QpcNowMs() : 0.0;
+        queuedCursorOverlayFrame = QueueCursorOverlayQuad(m_cursorActNum, m_mouseAnimStartTick);
         if (trackMovePerfFrame) {
-            g_overlayMovePerfStats.queueCursorMs += qpcNowMs() - cursorQueueStartMs;
+            g_overlayMovePerfStats.queueCursorMs += QpcNowMs() - cursorQueueStartMs;
         }
         uiDrawEnd = GetTickCount();
     }
@@ -7094,56 +8180,24 @@ int  CGameMode::OnRun() {
     g_renderer.DrawScene();
     const DWORD drawSceneEnd = GetTickCount();
     if (hasLegacyDevice) {
-        {
-            HDC backBufferDc = nullptr;
-            if (GetRenderDevice().AcquireBackBufferDC(&backBufferDc) && backBufferDc) {
-                const double overlayDrawStartMs = trackMovePerfFrame ? qpcNowMs() : 0.0;
-                DrawGameplayOverlayToHdc(*this, backBufferDc);
-                DrawPlayerVitalsOverlay(*this, backBufferDc);
-                if (trackMovePerfFrame) {
-                    g_overlayMovePerfStats.fallbackOverlayDrawMs += qpcNowMs() - overlayDrawStartMs;
-                }
-                const double queuedMsgStartMs = trackMovePerfFrame ? qpcNowMs() : 0.0;
-                DrawQueuedMsgEffects(backBufferDc);
-                if (trackMovePerfFrame) {
-                    g_overlayMovePerfStats.fallbackMsgMs += qpcNowMs() - queuedMsgStartMs;
-                }
-                GetRenderDevice().ReleaseBackBufferDC(backBufferDc);
-            }
-        }
-        const DWORD uiDrawStart = GetTickCount();
-        const double uiDrawStartMs = trackMovePerfFrame ? qpcNowMs() : 0.0;
-        g_windowMgr.OnDraw();
-        const DWORD uiDrawEnd = GetTickCount();
-        if (trackMovePerfFrame) {
-            g_overlayMovePerfStats.fallbackUiDrawMs += qpcNowMs() - uiDrawStartMs;
-        }
-        bool drewCursorOnBackBuffer = false;
-        {
-            HDC backBufferDc = nullptr;
-            if (GetRenderDevice().AcquireBackBufferDC(&backBufferDc) && backBufferDc) {
-                const double cursorHdcStartMs = trackMovePerfFrame ? qpcNowMs() : 0.0;
-                drewCursorOnBackBuffer = DrawModeCursorToHdc(backBufferDc, m_cursorActNum, m_mouseAnimStartTick);
-                if (trackMovePerfFrame) {
-                    g_overlayMovePerfStats.fallbackCursorHdcMs += qpcNowMs() - cursorHdcStartMs;
-                }
-                GetRenderDevice().ReleaseBackBufferDC(backBufferDc);
-            }
-        }
         const DWORD flipStart = GetTickCount();
-        const double flipStartMs = trackMovePerfFrame ? qpcNowMs() : 0.0;
+        const double flipStartMs = trackMovePerfFrame ? QpcNowMs() : 0.0;
         g_renderer.Flip(false);
         const DWORD flipEnd = GetTickCount();
         if (trackMovePerfFrame) {
-            g_overlayMovePerfStats.flipMs += qpcNowMs() - flipStartMs;
+            g_overlayMovePerfStats.flipMs += QpcNowMs() - flipStartMs;
         }
-        if (!drewCursorOnBackBuffer) {
-            const double cursorStartMs = trackMovePerfFrame ? qpcNowMs() : 0.0;
-            DrawModeCursor(m_cursorActNum, m_mouseAnimStartTick);
-            if (trackMovePerfFrame) {
-                g_overlayMovePerfStats.fallbackCursorMs += qpcNowMs() - cursorStartMs;
-            }
-        }
+        const DWORD uiDrawStart = GetTickCount();
+        const double uiDrawStartMs = trackMovePerfFrame ? QpcNowMs() : 0.0;
+        DrawGameplayFallbackToWindow(
+            *this,
+            m_cursorActNum,
+            m_mouseAnimStartTick,
+            trackMovePerfFrame,
+            uiDrawStartMs,
+            true,
+            false);
+        const DWORD uiDrawEnd = GetTickCount();
 
         g_framePerfStats.frames += 1;
         g_framePerfStats.updateMs += static_cast<u64>(updateEnd - updateStart);
@@ -7166,47 +8220,22 @@ int  CGameMode::OnRun() {
     } else {
         bool composedModernOverlayFrame = queuedModernOverlayFrame;
         const DWORD flipStart = GetTickCount();
-        const double flipStartMs = trackMovePerfFrame ? qpcNowMs() : 0.0;
+        const double flipStartMs = trackMovePerfFrame ? QpcNowMs() : 0.0;
         g_renderer.Flip(false);
         const DWORD flipEnd = GetTickCount();
         if (trackMovePerfFrame) {
-            g_overlayMovePerfStats.flipMs += qpcNowMs() - flipStartMs;
+            g_overlayMovePerfStats.flipMs += QpcNowMs() - flipStartMs;
         }
         if (!composedModernOverlayFrame) {
-            HDC windowDc = GetDC(g_hMainWnd);
-            if (windowDc) {
-                const double overlayDrawStartMs = trackMovePerfFrame ? qpcNowMs() : 0.0;
-                DrawGameplayOverlayToHdc(*this, windowDc);
-                DrawPlayerVitalsOverlay(*this, windowDc);
-                if (trackMovePerfFrame) {
-                    g_overlayMovePerfStats.fallbackOverlayDrawMs += qpcNowMs() - overlayDrawStartMs;
-                }
-                const double queuedMsgStartMs = trackMovePerfFrame ? qpcNowMs() : 0.0;
-                DrawQueuedMsgEffects(windowDc);
-                if (trackMovePerfFrame) {
-                    g_overlayMovePerfStats.fallbackMsgMs += qpcNowMs() - queuedMsgStartMs;
-                }
-                HDC previousSharedDc = UIWindow::GetSharedDrawDC();
-                UIWindow::SetSharedDrawDC(windowDc);
-                const double uiDrawStartMs = trackMovePerfFrame ? qpcNowMs() : 0.0;
-                g_windowMgr.OnDraw();
-                if (trackMovePerfFrame) {
-                    g_overlayMovePerfStats.fallbackUiDrawMs += qpcNowMs() - uiDrawStartMs;
-                }
-                UIWindow::SetSharedDrawDC(previousSharedDc);
-                const double cursorHdcStartMs = trackMovePerfFrame ? qpcNowMs() : 0.0;
-                DrawModeCursorToHdc(windowDc, m_cursorActNum, m_mouseAnimStartTick);
-                if (trackMovePerfFrame) {
-                    g_overlayMovePerfStats.fallbackCursorHdcMs += qpcNowMs() - cursorHdcStartMs;
-                }
-                ReleaseDC(g_hMainWnd, windowDc);
-            } else if (!isVulkanBackend) {
-                const double cursorStartMs = trackMovePerfFrame ? qpcNowMs() : 0.0;
-                DrawModeCursor(m_cursorActNum, m_mouseAnimStartTick);
-                if (trackMovePerfFrame) {
-                    g_overlayMovePerfStats.fallbackCursorMs += qpcNowMs() - cursorStartMs;
-                }
-            }
+            const double uiDrawStartMs = trackMovePerfFrame ? QpcNowMs() : 0.0;
+            DrawGameplayFallbackToWindow(
+                *this,
+                m_cursorActNum,
+                m_mouseAnimStartTick,
+                trackMovePerfFrame,
+                uiDrawStartMs,
+                !isVulkanBackend,
+                queuedCursorOverlayFrame);
         }
         g_framePerfStats.frames += 1;
         g_framePerfStats.updateMs += static_cast<u64>(updateEnd - updateStart);
@@ -7231,7 +8260,7 @@ int  CGameMode::OnRun() {
 
     if (trackMovePerfFrame && (g_overlayMovePerfStats.frames % 30u) == 0) {
         const double frameCount = static_cast<double>(g_overlayMovePerfStats.frames);
-        const double refreshCount = static_cast<double>((std::max)(1ull, g_overlayMovePerfStats.modernRefreshes));
+        const double refreshCount = static_cast<double>((std::max)(u64{1}, g_overlayMovePerfStats.modernRefreshes));
         DbgLog("[OverlayPerfHiRes] moveFrames=%llu queueModern=%.3fms queueRoMap=%.3fms queueLocked=%.3fms queueMsg=%.3fms queueCursor=%.3fms refreshes=%llu overlayDraw=%.3fms uiDraw=%.3fms convert=%.3fms texUpdate=%.3fms fallbackOverlay=%.3fms fallbackMsg=%.3fms fallbackUi=%.3fms fallbackCursorHdc=%.3fms fallbackCursor=%.3fms flip=%.3fms\n",
             static_cast<unsigned long long>(g_overlayMovePerfStats.frames),
             g_overlayMovePerfStats.queueModernMs / frameCount,

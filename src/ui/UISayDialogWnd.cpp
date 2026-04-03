@@ -1,12 +1,22 @@
 #include "UISayDialogWnd.h"
 
 #include "NpcDialogColoredText.h"
+#include "render/DC.h"
 #include "UIWindowMgr.h"
 #include "gamemode/GameMode.h"
 #include "gamemode/Mode.h"
 #include "main/WinMain.h"
+#include "qtui/QtUiRuntime.h"
 
 #include <windows.h>
+
+#if RO_ENABLE_QT6_UI
+#include <QFont>
+#include <QFontMetrics>
+#include <QImage>
+#include <QPainter>
+#include <QString>
+#endif
 
 namespace {
 
@@ -82,6 +92,55 @@ std::string NormalizeDialogNewlines(const std::string& text)
     return normalized;
 }
 
+#if RO_ENABLE_QT6_UI
+QFont BuildDialogUiFontFromHdc(HDC hdc)
+{
+    LOGFONTA logFont{};
+    if (hdc) {
+        if (HGDIOBJ fontObject = GetCurrentObject(hdc, OBJ_FONT)) {
+            GetObjectA(fontObject, sizeof(logFont), &logFont);
+        }
+    }
+
+    const QString family = logFont.lfFaceName[0] != '\0'
+        ? QString::fromLocal8Bit(logFont.lfFaceName)
+        : QStringLiteral("MS Sans Serif");
+    QFont font(family);
+    font.setPixelSize(logFont.lfHeight != 0 ? (std::max)(1, static_cast<int>(std::abs(logFont.lfHeight))) : 13);
+    font.setBold(logFont.lfWeight >= FW_BOLD);
+    font.setStyleStrategy(QFont::NoAntialias);
+    return font;
+}
+
+void DrawDialogUiText(HDC hdc, const RECT& rect, const char* text, COLORREF color, Qt::Alignment alignment)
+{
+    if (!hdc || !text || rect.right <= rect.left || rect.bottom <= rect.top) {
+        return;
+    }
+
+    const QString label = QString::fromLocal8Bit(text);
+    if (label.isEmpty()) {
+        return;
+    }
+
+    const int width = rect.right - rect.left;
+    const int height = rect.bottom - rect.top;
+    std::vector<unsigned int> pixels(static_cast<size_t>(width) * static_cast<size_t>(height), 0u);
+    QImage image(reinterpret_cast<uchar*>(pixels.data()), width, height, width * static_cast<int>(sizeof(unsigned int)), QImage::Format_ARGB32);
+    if (image.isNull()) {
+        return;
+    }
+
+    QPainter painter(&image);
+    painter.setRenderHint(QPainter::Antialiasing, false);
+    painter.setRenderHint(QPainter::TextAntialiasing, false);
+    painter.setFont(BuildDialogUiFontFromHdc(hdc));
+    painter.setPen(QColor(GetRValue(color), GetGValue(color), GetBValue(color)));
+    painter.drawText(QRect(0, 0, width, height), alignment | Qt::TextSingleLine, label);
+    AlphaBlendArgbToHdc(hdc, rect.left, rect.top, width, height, pixels.data(), width, height);
+}
+#endif
+
 } // namespace
 
 UISayDialogWnd::UISayDialogWnd()
@@ -136,6 +195,40 @@ u32 UISayDialogWnd::GetNpcId() const
     return m_npcId;
 }
 
+std::string UISayDialogWnd::GetDisplayText() const
+{
+    return BuildDisplayText();
+}
+
+bool UISayDialogWnd::HasActionButton() const
+{
+    return m_actionButton != ActionButton::None;
+}
+
+bool UISayDialogWnd::IsNextAction() const
+{
+    return m_actionButton == ActionButton::Next;
+}
+
+bool UISayDialogWnd::IsHoveringAction() const
+{
+    return m_hoverAction;
+}
+
+bool UISayDialogWnd::IsPressingAction() const
+{
+    return m_pressAction;
+}
+
+bool UISayDialogWnd::GetActionRectForQt(RECT* outRect) const
+{
+    if (!outRect || m_actionButton == ActionButton::None) {
+        return false;
+    }
+    *outRect = GetActionRect();
+    return true;
+}
+
 RECT UISayDialogWnd::GetActionRect() const
 {
     return MakeRect(m_x + m_w - kPadding - kButtonWidth,
@@ -186,20 +279,24 @@ void UISayDialogWnd::DrawActionButton(HDC hdc, const RECT& rect) const
     const char* label = (m_actionButton == ActionButton::Next) ? "Next" : "Close";
     SetBkMode(hdc, TRANSPARENT);
     SetTextColor(hdc, RGB(0, 0, 0));
+#if RO_ENABLE_QT6_UI
+    DrawDialogUiText(hdc, textRect, label, RGB(0, 0, 0), Qt::AlignCenter | Qt::AlignVCenter);
+#else
     DrawTextA(hdc, label, -1, &textRect, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+#endif
 }
 
 void UISayDialogWnd::OnDraw()
 {
+    if (IsQtUiRuntimeEnabled()) {
+        return;
+    }
+
     if (!g_hMainWnd || m_show == 0) {
         return;
     }
 
-    HDC hdc = UIWindow::GetSharedDrawDC();
-    const bool useShared = (hdc != nullptr);
-    if (!useShared) {
-        hdc = GetDC(g_hMainWnd);
-    }
+    HDC hdc = AcquireDrawTarget();
     if (!hdc) {
         return;
     }
@@ -219,9 +316,7 @@ void UISayDialogWnd::OnDraw()
     }
 
     SelectObject(hdc, oldFont);
-    if (!useShared) {
-        ReleaseDC(g_hMainWnd, hdc);
-    }
+    ReleaseDrawTarget(hdc);
 }
 
 void UISayDialogWnd::AppendText(u32 npcId, const std::string& text)

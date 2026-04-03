@@ -1,6 +1,7 @@
 #include "UIRechargeGage.h"
 
 #include "main/WinMain.h"
+#include "qtui/QtUiRuntime.h"
 
 #include <algorithm>
 #include <windows.h>
@@ -14,14 +15,28 @@ void UIRechargeGage::SetAmount(int amount, int totalAmount)
     Invalidate();
 }
 
+int UIRechargeGage::GetAmount() const
+{
+    return m_amount;
+}
+
+int UIRechargeGage::GetTotalAmount() const
+{
+    return m_totalAmount;
+}
+
 void UIRechargeGage::OnDraw()
 {
+    if (IsQtUiRuntimeEnabled()) {
+        m_isDirty = 0;
+        return;
+    }
+
     if (!g_hMainWnd || m_show == 0) {
         return;
     }
 
-    const bool useShared = (UIWindow::GetSharedDrawDC() != nullptr);
-    HDC hdc = useShared ? UIWindow::GetSharedDrawDC() : GetDC(g_hMainWnd);
+    HDC hdc = AcquireDrawTarget();
     if (!hdc) {
         return;
     }
@@ -48,8 +63,6 @@ void UIRechargeGage::OnDraw()
         }
     }
 
-    if (!useShared) {
-        ReleaseDC(g_hMainWnd, hdc);
-    }
-    DrawChildren();
+    DrawChildrenToHdc(hdc);
+    ReleaseDrawTarget(hdc);
 }

@@ -1,12 +1,22 @@
 #include "UINpcMenuWnd.h"
 
 #include "NpcDialogColoredText.h"
+#include "render/DC.h"
 #include "UIWindowMgr.h"
 #include "gamemode/GameMode.h"
 #include "gamemode/Mode.h"
 #include "main/WinMain.h"
+#include "qtui/QtUiRuntime.h"
 
 #include <windows.h>
+
+#if RO_ENABLE_QT6_UI
+#include <QFont>
+#include <QFontMetrics>
+#include <QImage>
+#include <QPainter>
+#include <QString>
+#endif
 
 namespace {
 
@@ -63,6 +73,55 @@ RECT MakeRect(int left, int top, int width, int height)
     return rect;
 }
 
+#if RO_ENABLE_QT6_UI
+QFont BuildNpcMenuFontFromHdc(HDC hdc)
+{
+    LOGFONTA logFont{};
+    if (hdc) {
+        if (HGDIOBJ fontObject = GetCurrentObject(hdc, OBJ_FONT)) {
+            GetObjectA(fontObject, sizeof(logFont), &logFont);
+        }
+    }
+
+    const QString family = logFont.lfFaceName[0] != '\0'
+        ? QString::fromLocal8Bit(logFont.lfFaceName)
+        : QStringLiteral("MS Sans Serif");
+    QFont font(family);
+    font.setPixelSize(logFont.lfHeight != 0 ? (std::max)(1, static_cast<int>(std::abs(logFont.lfHeight))) : 13);
+    font.setBold(logFont.lfWeight >= FW_BOLD);
+    font.setStyleStrategy(QFont::NoAntialias);
+    return font;
+}
+
+void DrawNpcMenuText(HDC hdc, const RECT& rect, const char* text, COLORREF color, Qt::Alignment alignment)
+{
+    if (!hdc || !text || rect.right <= rect.left || rect.bottom <= rect.top) {
+        return;
+    }
+
+    const QString label = QString::fromLocal8Bit(text);
+    if (label.isEmpty()) {
+        return;
+    }
+
+    const int width = rect.right - rect.left;
+    const int height = rect.bottom - rect.top;
+    std::vector<unsigned int> pixels(static_cast<size_t>(width) * static_cast<size_t>(height), 0u);
+    QImage image(reinterpret_cast<uchar*>(pixels.data()), width, height, width * static_cast<int>(sizeof(unsigned int)), QImage::Format_ARGB32);
+    if (image.isNull()) {
+        return;
+    }
+
+    QPainter painter(&image);
+    painter.setRenderHint(QPainter::Antialiasing, false);
+    painter.setRenderHint(QPainter::TextAntialiasing, false);
+    painter.setFont(BuildNpcMenuFontFromHdc(hdc));
+    painter.setPen(QColor(GetRValue(color), GetGValue(color), GetBValue(color)));
+    painter.drawText(QRect(0, 0, width, height), alignment | Qt::TextSingleLine, label);
+    AlphaBlendArgbToHdc(hdc, rect.left, rect.top, width, height, pixels.data(), width, height);
+}
+#endif
+
 } // namespace
 
 UINpcMenuWnd::UINpcMenuWnd()
@@ -106,6 +165,49 @@ void UINpcMenuWnd::StoreInfo()
 u32 UINpcMenuWnd::GetNpcId() const
 {
     return m_npcId;
+}
+
+const std::vector<std::string>& UINpcMenuWnd::GetOptions() const
+{
+    return m_options;
+}
+
+int UINpcMenuWnd::GetSelectedIndex() const
+{
+    return m_selectedIndex;
+}
+
+int UINpcMenuWnd::GetHoverIndex() const
+{
+    return m_hoverIndex;
+}
+
+bool UINpcMenuWnd::IsOkPressed() const
+{
+    return m_pressedTarget == ClickTarget::Ok;
+}
+
+bool UINpcMenuWnd::IsCancelPressed() const
+{
+    return m_pressedTarget == ClickTarget::Cancel;
+}
+
+bool UINpcMenuWnd::GetOkRectForQt(RECT* outRect) const
+{
+    if (!outRect) {
+        return false;
+    }
+    *outRect = GetOkRect();
+    return true;
+}
+
+bool UINpcMenuWnd::GetCancelRectForQt(RECT* outRect) const
+{
+    if (!outRect) {
+        return false;
+    }
+    *outRect = GetCancelRect();
+    return true;
 }
 
 RECT UINpcMenuWnd::GetOptionRect(int index) const
@@ -162,20 +264,24 @@ void UINpcMenuWnd::DrawButton(HDC hdc, const RECT& rect, const char* label, bool
     RECT textRect = rect;
     SetBkMode(hdc, TRANSPARENT);
     SetTextColor(hdc, RGB(0, 0, 0));
+#if RO_ENABLE_QT6_UI
+    DrawNpcMenuText(hdc, textRect, label, RGB(0, 0, 0), Qt::AlignCenter | Qt::AlignVCenter);
+#else
     DrawTextA(hdc, label, -1, &textRect, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+#endif
 }
 
 void UINpcMenuWnd::OnDraw()
 {
+    if (IsQtUiRuntimeEnabled()) {
+        return;
+    }
+
     if (!g_hMainWnd || m_show == 0) {
         return;
     }
 
-    HDC hdc = UIWindow::GetSharedDrawDC();
-    const bool useShared = (hdc != nullptr);
-    if (!useShared) {
-        hdc = GetDC(g_hMainWnd);
-    }
+    HDC hdc = AcquireDrawTarget();
     if (!hdc) {
         return;
     }
@@ -208,9 +314,7 @@ void UINpcMenuWnd::OnDraw()
     DrawButton(hdc, GetCancelRect(), "Cancel", false, cancelPressed);
 
     SelectObject(hdc, oldFont);
-    if (!useShared) {
-        ReleaseDC(g_hMainWnd, hdc);
-    }
+    ReleaseDrawTarget(hdc);
 }
 
 void UINpcMenuWnd::SetMenu(u32 npcId, const std::vector<std::string>& options)

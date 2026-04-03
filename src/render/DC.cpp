@@ -1,13 +1,109 @@
 #include "DC.h"
-#include "Renderer.h"
 #include "res/Sprite.h"
 #include "res/ActRes.h"
 #include <cstring>
 #include <algorithm>
+#include <vector>
 
 #pragma comment(lib, "msimg32.lib")
 
-namespace {
+ArgbDibSurface::ArgbDibSurface()
+    : m_dc(nullptr), m_bitmap(nullptr), m_oldBitmap(nullptr), m_bits(nullptr), m_width(0), m_height(0)
+{
+}
+
+ArgbDibSurface::~ArgbDibSurface()
+{
+    Release();
+}
+
+bool ArgbDibSurface::EnsureSize(int width, int height)
+{
+    if (width <= 0 || height <= 0) {
+        return false;
+    }
+    if (IsValid() && m_width == width && m_height == height) {
+        return true;
+    }
+
+    Release();
+
+    m_dc = CreateCompatibleDC(nullptr);
+    if (!m_dc) {
+        return false;
+    }
+
+    BITMAPINFO bmi{};
+    bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    bmi.bmiHeader.biWidth = width;
+    bmi.bmiHeader.biHeight = -height;
+    bmi.bmiHeader.biPlanes = 1;
+    bmi.bmiHeader.biBitCount = 32;
+    bmi.bmiHeader.biCompression = BI_RGB;
+
+    m_bitmap = CreateDIBSection(nullptr, &bmi, DIB_RGB_COLORS, &m_bits, nullptr, 0);
+    if (!m_bitmap || !m_bits) {
+        Release();
+        return false;
+    }
+
+    m_oldBitmap = SelectObject(m_dc, m_bitmap);
+    m_width = width;
+    m_height = height;
+    return true;
+}
+
+void ArgbDibSurface::Release()
+{
+    if (m_dc && m_oldBitmap) {
+        SelectObject(m_dc, m_oldBitmap);
+    }
+    m_oldBitmap = nullptr;
+
+    if (m_bitmap) {
+        DeleteObject(m_bitmap);
+        m_bitmap = nullptr;
+    }
+    m_bits = nullptr;
+
+    if (m_dc) {
+        DeleteDC(m_dc);
+        m_dc = nullptr;
+    }
+
+    m_width = 0;
+    m_height = 0;
+}
+
+bool ArgbDibSurface::IsValid() const
+{
+    return m_dc != nullptr && m_bitmap != nullptr && m_bits != nullptr && m_width > 0 && m_height > 0;
+}
+
+HDC ArgbDibSurface::GetDC() const
+{
+    return m_dc;
+}
+
+void* ArgbDibSurface::GetBits() const
+{
+    return m_bits;
+}
+
+unsigned int* ArgbDibSurface::GetPixels() const
+{
+    return static_cast<unsigned int*>(m_bits);
+}
+
+int ArgbDibSurface::GetWidth() const
+{
+    return m_width;
+}
+
+int ArgbDibSurface::GetHeight() const
+{
+    return m_height;
+}
 
 unsigned int PremultiplyColor(unsigned int color)
 {
@@ -64,6 +160,61 @@ void AlphaBlendPixel(unsigned int& dst, unsigned int src)
     dst = (outA << 24) | (outR << 16) | (outG << 8) | outB;
 }
 
+bool TryAlphaBlendArgbToDibSection(HDC hdc,
+                                   int dstX,
+                                   int dstY,
+                                   int dstWidth,
+                                   int dstHeight,
+                                   const unsigned int* pixels,
+                                   int pixelWidth,
+                                   int pixelHeight,
+                                   int srcX,
+                                   int srcY,
+                                   int srcWidth,
+                                   int srcHeight)
+{
+    if (!hdc || !pixels || dstWidth != srcWidth || dstHeight != srcHeight) {
+        return false;
+    }
+
+    HGDIOBJ bitmapObject = GetCurrentObject(hdc, OBJ_BITMAP);
+    if (!bitmapObject) {
+        return false;
+    }
+
+    DIBSECTION dibSection{};
+    if (GetObjectA(bitmapObject, sizeof(dibSection), &dibSection) != sizeof(dibSection)) {
+        return false;
+    }
+    if (!dibSection.dsBm.bmBits || dibSection.dsBm.bmBitsPixel != 32 || dibSection.dsBm.bmWidth <= 0 || dibSection.dsBm.bmHeight == 0) {
+        return false;
+    }
+
+    const int targetWidth = dibSection.dsBm.bmWidth;
+    const int targetHeight = std::abs(dibSection.dsBm.bmHeight);
+    if (dstX < 0 || dstY < 0 || dstX + dstWidth > targetWidth || dstY + dstHeight > targetHeight) {
+        return false;
+    }
+
+    const bool topDown = dibSection.dsBmih.biHeight < 0;
+    const int stridePixels = dibSection.dsBm.bmWidthBytes / static_cast<int>(sizeof(unsigned int));
+    if (stridePixels < targetWidth) {
+        return false;
+    }
+
+    unsigned int* targetBits = static_cast<unsigned int*>(dibSection.dsBm.bmBits);
+    for (int row = 0; row < srcHeight; ++row) {
+        const int destRowIndex = topDown ? (dstY + row) : (targetHeight - 1 - (dstY + row));
+        unsigned int* dstRow = targetBits + static_cast<size_t>(destRowIndex) * static_cast<size_t>(stridePixels) + static_cast<size_t>(dstX);
+        const unsigned int* srcRow = pixels + static_cast<size_t>(srcY + row) * static_cast<size_t>(pixelWidth) + static_cast<size_t>(srcX);
+        for (int col = 0; col < srcWidth; ++col) {
+            AlphaBlendPixel(dstRow[col], srcRow[col]);
+        }
+    }
+
+    return true;
+}
+
 void BlitMotionToArgb(unsigned int* dest, int destW, int destH, int baseX, int baseY, CSprRes* sprRes, const CMotion* motion, unsigned int* palette)
 {
     if (!dest || !sprRes || !motion || !palette) {
@@ -118,186 +269,126 @@ void BlitMotionToArgb(unsigned int* dest, int destW, int destH, int baseX, int b
     }
 }
 
-} // namespace
-
-// --- CDCBitmap Implementation ---
-
-CDCBitmap::CDCBitmap(unsigned int w, unsigned int h) : m_dc(NULL), m_bitmap(NULL), m_bitmapOld(NULL), m_image(NULL), m_w(0), m_h(0), m_dirty(false) {
-    m_dc = CreateCompatibleDC(NULL);
-    CreateDCSurface(w, h);
-}
-
-CDCBitmap::~CDCBitmap() {
-    for (auto tex : m_textureList) {
-        delete tex;
-    }
-    m_textureList.clear();
-
-    if (m_dc) {
-        if (m_bitmapOld) SelectObject(m_dc, m_bitmapOld);
-        DeleteDC(m_dc);
-    }
-    if (m_bitmap) DeleteObject(m_bitmap);
-}
-
-void CDCBitmap::CreateDCSurface(unsigned int w, unsigned int h) {
-    m_w = w;
-    m_h = h;
-    m_dirty = true;
-
-    if (m_bitmap) {
-        SelectObject(m_dc, m_bitmapOld);
-        DeleteObject(m_bitmap);
+bool StretchArgbToHdc(HDC hdc,
+                      int dstX,
+                      int dstY,
+                      int dstWidth,
+                      int dstHeight,
+                      const unsigned int* pixels,
+                      int pixelWidth,
+                      int pixelHeight,
+                      int srcX,
+                      int srcY,
+                      int srcWidth,
+                      int srcHeight)
+{
+    if (!hdc || !pixels || pixelWidth <= 0 || pixelHeight <= 0 || dstWidth <= 0 || dstHeight <= 0) {
+        return false;
     }
 
-    BITMAPINFO bmi = {0};
+    if (srcWidth < 0) {
+        srcWidth = pixelWidth - srcX;
+    }
+    if (srcHeight < 0) {
+        srcHeight = pixelHeight - srcY;
+    }
+    if (srcX < 0 || srcY < 0 || srcWidth <= 0 || srcHeight <= 0
+        || srcX + srcWidth > pixelWidth || srcY + srcHeight > pixelHeight) {
+        return false;
+    }
+
+    BITMAPINFO bmi{};
     bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-    bmi.bmiHeader.biWidth = w;
-    bmi.bmiHeader.biHeight = -(int)h; // Top-down
+    bmi.bmiHeader.biWidth = pixelWidth;
+    bmi.bmiHeader.biHeight = -pixelHeight;
     bmi.bmiHeader.biPlanes = 1;
     bmi.bmiHeader.biBitCount = 32;
     bmi.bmiHeader.biCompression = BI_RGB;
 
-    m_bitmap = CreateDIBSection(m_dc, &bmi, DIB_RGB_COLORS, (void**)&m_image, NULL, 0);
-    m_bitmapOld = (HBITMAP)SelectObject(m_dc, m_bitmap);
+    return StretchDIBits(hdc,
+                         dstX,
+                         dstY,
+                         dstWidth,
+                         dstHeight,
+                         srcX,
+                         srcY,
+                         srcWidth,
+                         srcHeight,
+                         pixels,
+                         &bmi,
+                         DIB_RGB_COLORS,
+                         SRCCOPY) != GDI_ERROR;
 }
 
-bool CDCBitmap::GetDC(HDC* phdc) {
-    m_dirty = true;
-    *phdc = m_dc;
-    return true;
-}
-
-void CDCBitmap::ReleaseDC(HDC hdc) {
-}
-
-void CDCBitmap::BltSprite(int x, int y, class CSprRes* sprRes, struct CMotion* curMotion, unsigned int* palette) {
-    BlitMotionToArgb(m_image, static_cast<int>(m_w), static_cast<int>(m_h), x, y, sprRes, curMotion, palette);
-    m_dirty = true;
-}
-
-void CDCBitmap::BltTexture2(int x, int y, class CTexture* src, int srcx, int srcy, int w, int h, int xflip, int zoomx, int zoomy) {
-    // Software stretch/blit to m_image...
-    m_dirty = true;
-}
-
-void CDCBitmap::ClearSurface(RECT* rect, unsigned int color) {
-    m_dirty = true;
-    if (!rect) {
-        for (unsigned int i = 0; i < m_w * m_h; ++i) m_image[i] = color;
-    } else {
-        // Clear rect region...
-    }
-}
-
-void CDCBitmap::CopyRect(int x, int y, int w, int h, CDC* src) {
-    m_dirty = true;
-}
-
-void CDCBitmap::DrawSurface(int x, int y, int w, int h, unsigned int color) {
-    UpdateSurface();
-    
-    int tileX = 0, tileY = 0;
-    auto it = m_textureList.begin();
-    
-    for (unsigned int cy = 0; cy < m_h; cy += 256) {
-        int th = std::min(256u, m_h - cy);
-        for (unsigned int cx = 0; cx < m_w; cx += 256) {
-            int tw = std::min(256u, m_w - cx);
-            if (it != m_textureList.end()) {
-                (*it)->DrawSurface(x + cx, y + cy, tw, th, color);
-                ++it;
-            }
-        }
-    }
-}
-
-void CDCBitmap::UpdateSurface() {
-    if (!m_dirty) return;
-
-    // Ensure we have enough textures for tiles
-    unsigned int numTilesX = (m_w + 255) / 256;
-    unsigned int numTilesY = (m_h + 255) / 256;
-    size_t required = numTilesX * numTilesY;
-
-    while (m_textureList.size() < required) {
-        m_textureList.push_back(new CTexture());
-        m_textureList.back()->Create(256, 256, PF_DEFAULT, false);
+bool AlphaBlendArgbToHdc(HDC hdc,
+                         int dstX,
+                         int dstY,
+                         int dstWidth,
+                         int dstHeight,
+                         const unsigned int* pixels,
+                         int pixelWidth,
+                         int pixelHeight,
+                         int srcX,
+                         int srcY,
+                         int srcWidth,
+                         int srcHeight)
+{
+    if (!hdc || !pixels || pixelWidth <= 0 || pixelHeight <= 0 || dstWidth <= 0 || dstHeight <= 0) {
+        return false;
     }
 
-    auto it = m_textureList.begin();
-    for (unsigned int cy = 0; cy < m_h; cy += 256) {
-        unsigned int th = std::min(256u, m_h - cy);
-        for (unsigned int cx = 0; cx < m_w; cx += 256) {
-            unsigned int tw = std::min(256u, m_w - cx);
-            if (it != m_textureList.end()) {
-                // Update 256x256 texture from m_image sub-region
-                (*it)->Update(0, 0, tw, th, &m_image[cx + cy * m_w], false, m_w);
-                ++it;
-            }
-        }
+    if (srcWidth < 0) {
+        srcWidth = pixelWidth - srcX;
     }
-    m_dirty = false;
-}
-
-void CDCBitmap::Resize(int w, int h) {
-    if ((unsigned int)w > m_w || (unsigned int)h > m_h) {
-        CreateDCSurface(w, h);
+    if (srcHeight < 0) {
+        srcHeight = pixelHeight - srcY;
     }
-}
-
-void CDCBitmap::Update(int x, int y, int w, int h, unsigned int* data, bool skipColorKey) {
-    m_dirty = true;
-    // Copy data to m_image...
-}
-
-// --- CDCSurface Implementation ---
-
-CDCSurface::CDCSurface(unsigned int w, unsigned int h) {
-    m_surface.Create(w, h);
-}
-
-CDCSurface::CDCSurface(unsigned int w, unsigned int h, IDirectDrawSurface7* pSurface) {
-    // Wrap existing surface...
-}
-
-CDCSurface::~CDCSurface() {
-}
-
-bool CDCSurface::GetDC(HDC* phdc) {
-    if (!m_surface.m_pddsSurface) return false;
-    return SUCCEEDED(m_surface.m_pddsSurface->GetDC(phdc));
-}
-
-void CDCSurface::ReleaseDC(HDC hdc) {
-    if (m_surface.m_pddsSurface) m_surface.m_pddsSurface->ReleaseDC(hdc);
-}
-
-void CDCSurface::BltSprite(int x, int y, class CSprRes* sprRes, struct CMotion* curMotion, unsigned int* palette) {
-}
-
-void CDCSurface::BltTexture2(int x, int y, class CTexture* src, int srcx, int srcy, int w, int h, int xflip, int zoomx, int zoomy) {
-}
-
-void CDCSurface::ClearSurface(RECT* rect, unsigned int color) {
-    m_surface.ClearSurface(rect, color);
-}
-
-void CDCSurface::CopyRect(int x, int y, int w, int h, CDC* src) {
-}
-
-void CDCSurface::DrawSurface(int x, int y, int w, int h, unsigned int color) {
-    m_surface.DrawSurface(x, y, w, h, color);
-}
-
-void CDCSurface::Resize(int w, int h) {
-    if ((unsigned int)w > m_surface.m_w || (unsigned int)h > m_surface.m_h) {
-        m_surface.Create(w, h);
+    if (srcX < 0 || srcY < 0 || srcWidth <= 0 || srcHeight <= 0
+        || srcX + srcWidth > pixelWidth || srcY + srcHeight > pixelHeight) {
+        return false;
     }
-}
 
-void CDCSurface::Update(int x, int y, int w, int h, unsigned int* data, bool skipColorKey) {
-    m_surface.Update(x, y, w, h, data, skipColorKey, 0);
+    if (TryAlphaBlendArgbToDibSection(hdc,
+                                      dstX,
+                                      dstY,
+                                      dstWidth,
+                                      dstHeight,
+                                      pixels,
+                                      pixelWidth,
+                                      pixelHeight,
+                                      srcX,
+                                      srcY,
+                                      srcWidth,
+                                      srcHeight)) {
+        return true;
+    }
+
+    static thread_local ArgbDibSurface s_blendSurface;
+    if (!s_blendSurface.EnsureSize(pixelWidth, pixelHeight)) {
+        return false;
+    }
+
+    std::memcpy(s_blendSurface.GetBits(),
+                pixels,
+                static_cast<size_t>(pixelWidth) * static_cast<size_t>(pixelHeight) * sizeof(unsigned int));
+
+    BLENDFUNCTION blend{};
+    blend.BlendOp = AC_SRC_OVER;
+    blend.SourceConstantAlpha = 255;
+    blend.AlphaFormat = AC_SRC_ALPHA;
+
+    const BOOL ok = AlphaBlend(hdc,
+                               dstX,
+                               dstY,
+                               dstWidth,
+                               dstHeight,
+                               s_blendSurface.GetDC(),
+                               srcX,
+                               srcY,
+                               srcWidth,
+                               srcHeight,
+                               blend);
+    return ok == TRUE;
 }
 
 bool DrawActMotionToHdc(HDC hdc, int x, int y, class CSprRes* sprRes, const struct CMotion* motion, unsigned int* palette)
@@ -338,39 +429,42 @@ bool DrawActMotionToHdc(HDC hdc, int x, int y, class CSprRes* sprRes, const stru
 
     BlitMotionToArgb(pixels.data(), width, height, -clipBox.left, -clipBox.top, sprRes, motion, palette);
 
-    BITMAPINFO bmi{};
-    bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-    bmi.bmiHeader.biWidth = width;
-    bmi.bmiHeader.biHeight = -height;
-    bmi.bmiHeader.biPlanes = 1;
-    bmi.bmiHeader.biBitCount = 32;
-    bmi.bmiHeader.biCompression = BI_RGB;
+    return AlphaBlendArgbToHdc(hdc, x + clipBox.left, y + clipBox.top, width, height, pixels.data(), width, height);
+}
 
-    BLENDFUNCTION blend{};
-    blend.BlendOp = AC_SRC_OVER;
-    blend.SourceConstantAlpha = 255;
-    blend.AlphaFormat = AC_SRC_ALPHA;
+bool DrawActMotionToArgb(unsigned int* dest, int destW, int destH, int x, int y, class CSprRes* sprRes, const struct CMotion* motion, unsigned int* palette)
+{
+    if (!dest || destW <= 0 || destH <= 0 || !sprRes || !motion || !palette) {
+        return false;
+    }
 
-    void* dibBits = nullptr;
-    HBITMAP dib = CreateDIBSection(hdc, &bmi, DIB_RGB_COLORS, &dibBits, nullptr, 0);
-    if (!dib || !dibBits) {
-        if (dib) {
-            DeleteObject(dib);
+    RECT clipBox{};
+    bool hasClip = false;
+    for (const CSprClip& clip : motion->sprClips) {
+        const SprImg* image = sprRes->GetSprite(clip.clipType, clip.sprIndex);
+        if (!image) {
+            continue;
         }
+
+        const int drawX = clip.x - image->width / 2;
+        const int drawY = clip.y - image->height / 2;
+        RECT current = { drawX, drawY, drawX + image->width, drawY + image->height };
+        if (!hasClip) {
+            clipBox = current;
+            hasClip = true;
+        } else {
+            clipBox.left = (std::min)(clipBox.left, current.left);
+            clipBox.top = (std::min)(clipBox.top, current.top);
+            clipBox.right = (std::max)(clipBox.right, current.right);
+            clipBox.bottom = (std::max)(clipBox.bottom, current.bottom);
+        }
+    }
+
+    if (!hasClip) {
         return false;
     }
 
-    std::memcpy(dibBits, pixels.data(), pixels.size() * sizeof(unsigned int));
-    HDC memDc = CreateCompatibleDC(hdc);
-    if (!memDc) {
-        DeleteObject(dib);
-        return false;
-    }
-
-    HGDIOBJ oldBitmap = SelectObject(memDc, dib);
-    AlphaBlend(hdc, x + clipBox.left, y + clipBox.top, width, height, memDc, 0, 0, width, height, blend);
-    SelectObject(memDc, oldBitmap);
-    DeleteDC(memDc);
-    DeleteObject(dib);
+    BlitMotionToArgb(dest, destW, destH, x, y, sprRes, motion, palette);
     return true;
 }
+

@@ -4,21 +4,51 @@
 #include "core/File.h"
 #include "DebugLog.h"
 #include "main/WinMain.h"
+#include "qtui/QtUiRuntime.h"
+#include "render/DC.h"
 
-#include <gdiplus.h>
 #include <windows.h>
+
+#if RO_ENABLE_QT6_UI
+#include <QFont>
+#include <QFontMetrics>
+#include <QImage>
+#include <QPainter>
+#include <QString>
+#endif
 
 #include <algorithm>
 #include <array>
 #include <cstring>
 
-#pragma comment(lib, "gdiplus.lib")
 #pragma comment(lib, "msimg32.lib")
 
 namespace {
 
 HDC g_sharedUiDrawDC = nullptr;
 constexpr char kUiWindowRegPath[] = "Software\\Gravity Soft\\Ragnarok Online";
+
+class ScopedUiDrawTarget {
+public:
+    explicit ScopedUiDrawTarget(HDC dc)
+        : m_previous(g_sharedUiDrawDC)
+    {
+        g_sharedUiDrawDC = dc;
+    }
+
+    ~ScopedUiDrawTarget()
+    {
+        g_sharedUiDrawDC = m_previous;
+    }
+
+private:
+    HDC m_previous;
+};
+
+HDC GetActiveUiDrawTarget()
+{
+    return g_sharedUiDrawDC;
+}
 
 std::string ToLowerAsciiUi(std::string value)
 {
@@ -33,6 +63,55 @@ std::string NormalizeSlashUi(std::string value)
     std::replace(value.begin(), value.end(), '/', '\\');
     return value;
 }
+
+#if RO_ENABLE_QT6_UI
+QFont BuildUiEditFontFromHdc(HDC hdc)
+{
+    LOGFONTA logFont{};
+    if (hdc) {
+        if (HGDIOBJ fontObject = GetCurrentObject(hdc, OBJ_FONT)) {
+            GetObjectA(fontObject, sizeof(logFont), &logFont);
+        }
+    }
+
+    const QString family = logFont.lfFaceName[0] != '\0'
+        ? QString::fromLocal8Bit(logFont.lfFaceName)
+        : QStringLiteral("MS Sans Serif");
+    QFont font(family);
+    font.setPixelSize(logFont.lfHeight != 0 ? (std::max)(1, static_cast<int>(std::abs(logFont.lfHeight))) : 13);
+    font.setBold(logFont.lfWeight >= FW_BOLD);
+    font.setStyleStrategy(QFont::NoAntialias);
+    return font;
+}
+
+void DrawUiEditTextQt(HDC hdc, const RECT& rect, const std::string& text, COLORREF color)
+{
+    if (!hdc || rect.right <= rect.left || rect.bottom <= rect.top) {
+        return;
+    }
+
+    QString label = QString::fromLocal8Bit(text.c_str());
+    const int width = rect.right - rect.left;
+    const int height = rect.bottom - rect.top;
+    const QFont font = BuildUiEditFontFromHdc(hdc);
+    const QFontMetrics metrics(font);
+    label = metrics.elidedText(label, Qt::ElideRight, width);
+
+    std::vector<unsigned int> pixels(static_cast<size_t>(width) * static_cast<size_t>(height), 0u);
+    QImage image(reinterpret_cast<uchar*>(pixels.data()), width, height, width * static_cast<int>(sizeof(unsigned int)), QImage::Format_ARGB32);
+    if (image.isNull()) {
+        return;
+    }
+
+    QPainter painter(&image);
+    painter.setRenderHint(QPainter::Antialiasing, false);
+    painter.setRenderHint(QPainter::TextAntialiasing, false);
+    painter.setFont(font);
+    painter.setPen(QColor(GetRValue(color), GetGValue(color), GetBValue(color)));
+    painter.drawText(QRect(0, 0, width, height), Qt::AlignLeft | Qt::AlignVCenter | Qt::TextSingleLine, label);
+    AlphaBlendArgbToHdc(hdc, rect.left, rect.top, width, height, pixels.data(), width, height);
+}
+#endif
 
 void ClampWindowPositionToClient(int* x, int* y, int w, int h)
 {
@@ -174,146 +253,6 @@ std::string ResolveUiButtonSoundPath()
     return s_cachedPath;
 }
 
-ULONG_PTR EnsureGdiplusStarted()
-{
-    static ULONG_PTR s_token = 0;
-    static bool s_started = false;
-    if (!s_started) {
-        Gdiplus::GdiplusStartupInput startupInput;
-        if (Gdiplus::GdiplusStartup(&s_token, &startupInput, nullptr) == Gdiplus::Ok) {
-            s_started = true;
-        }
-    }
-    return s_token;
-}
-
-HBITMAP LoadBitmapFromGameData(const char* path)
-{
-    if (!path || !*path || !EnsureGdiplusStarted()) {
-        return nullptr;
-    }
-
-    int size = 0;
-    unsigned char* bytes = g_fileMgr.GetData(path, &size);
-    if (!bytes || size <= 0) {
-        delete[] bytes;
-        return nullptr;
-    }
-
-    HBITMAP outBmp = nullptr;
-    HGLOBAL mem = GlobalAlloc(GMEM_MOVEABLE, static_cast<SIZE_T>(size));
-    if (mem) {
-        void* dst = GlobalLock(mem);
-        if (dst) {
-            std::memcpy(dst, bytes, static_cast<size_t>(size));
-            GlobalUnlock(mem);
-
-            IStream* stream = nullptr;
-            if (CreateStreamOnHGlobal(mem, TRUE, &stream) == S_OK) {
-                auto* bmp = Gdiplus::Bitmap::FromStream(stream, FALSE);
-                if (bmp && bmp->GetLastStatus() == Gdiplus::Ok) {
-                    bmp->GetHBITMAP(RGB(0, 0, 0), &outBmp);
-                }
-                delete bmp;
-                stream->Release();
-            } else {
-                GlobalFree(mem);
-            }
-        } else {
-            GlobalFree(mem);
-        }
-    }
-
-    delete[] bytes;
-    return outBmp;
-}
-
-void DrawBitmapStretched(HDC target, HBITMAP bmp, const RECT& dst)
-{
-    if (!target || !bmp) {
-        return;
-    }
-
-    BITMAP bm{};
-    if (!GetObjectA(bmp, sizeof(bm), &bm) || bm.bmWidth <= 0 || bm.bmHeight <= 0) {
-        return;
-    }
-
-    HDC srcDC = CreateCompatibleDC(target);
-    if (!srcDC) {
-        return;
-    }
-
-    HGDIOBJ old = SelectObject(srcDC, bmp);
-    SetStretchBltMode(target, HALFTONE);
-    StretchBlt(target,
-        dst.left,
-        dst.top,
-        dst.right - dst.left,
-        dst.bottom - dst.top,
-        srcDC,
-        0,
-        0,
-        bm.bmWidth,
-        bm.bmHeight,
-        SRCCOPY);
-    SelectObject(srcDC, old);
-    DeleteDC(srcDC);
-}
-
-void DrawBitmapTransparent(HDC target, HBITMAP bmp, const RECT& dst)
-{
-    if (!target || !bmp) {
-        return;
-    }
-
-    BITMAP bm{};
-    if (!GetObjectA(bmp, sizeof(bm), &bm) || bm.bmWidth <= 0 || bm.bmHeight <= 0) {
-        return;
-    }
-
-    HDC srcDC = CreateCompatibleDC(target);
-    if (!srcDC) {
-        return;
-    }
-
-    HGDIOBJ old = SelectObject(srcDC, bmp);
-    TransparentBlt(target,
-        dst.left, dst.top,
-        dst.right - dst.left, dst.bottom - dst.top,
-        srcDC, 0, 0, bm.bmWidth, bm.bmHeight,
-        RGB(255, 0, 255));
-    SelectObject(srcDC, old);
-    DeleteDC(srcDC);
-}
-
-void DrawBitmapAt(HDC target, const std::string& path, int x, int y, int* outW = nullptr, int* outH = nullptr)
-{
-    if (!target || path.empty()) {
-        return;
-    }
-
-    HBITMAP bmp = LoadBitmapFromGameData(path.c_str());
-    if (!bmp) {
-        return;
-    }
-
-    BITMAP bm{};
-    if (GetObjectA(bmp, sizeof(bm), &bm) && bm.bmWidth > 0 && bm.bmHeight > 0) {
-        if (outW) {
-            *outW = bm.bmWidth;
-        }
-        if (outH) {
-            *outH = bm.bmHeight;
-        }
-
-        RECT dst = { x, y, x + bm.bmWidth, y + bm.bmHeight };
-        DrawBitmapStretched(target, bmp, dst);
-    }
-
-    DeleteObject(bmp);
-}
-
 bool IsPointInsideWindow(const UIWindow* window, int x, int y)
 {
     return window && window->m_w > 0 && window->m_h > 0 &&
@@ -325,7 +264,7 @@ bool IsPointInsideWindow(const UIWindow* window, int x, int y)
 
 UIWindow::UIWindow() 
     : m_parent(nullptr), m_x(0), m_y(0), m_w(0), m_h(0), 
-      m_isDirty(0), m_dc(nullptr), m_id(0), m_state(0), m_stateCnt(0), 
+      m_isDirty(0), m_id(0), m_state(0), m_stateCnt(0), 
       m_show(1), m_trans(0), m_transTarget(0), m_transTime(0)
 {
 }
@@ -350,6 +289,103 @@ void UIWindow::DrawChildren()
     }
 }
 
+void UIWindow::DrawChildrenToHdc(HDC dc)
+{
+    if (!dc) {
+        return;
+    }
+
+    for (UIWindow* child : m_children) {
+        if (child && child->m_show != 0) {
+            child->DrawToHdc(dc);
+        }
+    }
+}
+
+void UIWindow::DrawToHdc(HDC dc)
+{
+    if (!dc) {
+        return;
+    }
+
+    ScopedUiDrawTarget scopedTarget(dc);
+    OnDraw();
+}
+
+HDC UIWindow::AcquireDrawTarget() const
+{
+    const HDC shared = GetActiveUiDrawTarget();
+    if (shared) {
+        return shared;
+    }
+    return AcquireMainWindowDrawTarget();
+}
+
+void UIWindow::ReleaseDrawTarget(HDC dc) const
+{
+    if (dc && dc != GetActiveUiDrawTarget()) {
+        ReleaseMainWindowDrawTarget(dc);
+    }
+}
+
+HDC AcquireMainWindowDrawTarget()
+{
+    return g_hMainWnd ? GetDC(g_hMainWnd) : nullptr;
+}
+
+void ReleaseMainWindowDrawTarget(HDC dc)
+{
+    if (dc && g_hMainWnd) {
+        ReleaseDC(g_hMainWnd, dc);
+    }
+}
+
+bool BlitArgbBitsToMainWindow(const void* bits, int width, int height)
+{
+    if (!g_hMainWnd || !bits || width <= 0 || height <= 0) {
+        return false;
+    }
+
+    HDC targetDc = AcquireMainWindowDrawTarget();
+    if (!targetDc) {
+        return false;
+    }
+
+    const bool success = StretchArgbToHdc(targetDc,
+                                          0,
+                                          0,
+                                          width,
+                                          height,
+                                          static_cast<const unsigned int*>(bits),
+                                          width,
+                                          height);
+    ReleaseMainWindowDrawTarget(targetDc);
+    return success;
+}
+
+bool UIWindow::BlitArgbBitsToDrawTarget(const void* bits, int width, int height) const
+{
+    if (!bits || width <= 0 || height <= 0) {
+        return false;
+    }
+
+    HDC targetDc = AcquireDrawTarget();
+    if (!targetDc) {
+        return false;
+    }
+
+    const bool success = StretchArgbToHdc(targetDc,
+                                          0,
+                                          0,
+                                          width,
+                                          height,
+                                          static_cast<const unsigned int*>(bits),
+                                          width,
+                                          height);
+    ReleaseDrawTarget(targetDc);
+    return success;
+}
+
     void PlayUiButtonSound()
     {
         const std::string path = ResolveUiButtonSoundPath();
@@ -361,16 +397,6 @@ void UIWindow::DrawChildren()
             audio->PlaySound(path.c_str());
         }
     }
-
-void UIWindow::SetSharedDrawDC(HDC dc)
-{
-    g_sharedUiDrawDC = dc;
-}
-
-HDC UIWindow::GetSharedDrawDC()
-{
-    return g_sharedUiDrawDC;
-}
 
 bool LoadUiWindowPlacement(const char* windowName, int* x, int* y)
 {
@@ -556,24 +582,15 @@ void UIButton::OnDraw()
 
 UIBitmapButton::UIBitmapButton()
     : m_bitmapWidth(0), m_bitmapHeight(0),
-      m_normalBitmap(nullptr), m_mouseonBitmap(nullptr), m_pressedBitmap(nullptr)
+      m_normalBitmap(), m_mouseonBitmap(), m_pressedBitmap()
 {
 }
 
 UIBitmapButton::~UIBitmapButton()
 {
-    if (m_normalBitmap) {
-        DeleteObject(m_normalBitmap);
-        m_normalBitmap = nullptr;
-    }
-    if (m_mouseonBitmap) {
-        DeleteObject(m_mouseonBitmap);
-        m_mouseonBitmap = nullptr;
-    }
-    if (m_pressedBitmap) {
-        DeleteObject(m_pressedBitmap);
-        m_pressedBitmap = nullptr;
-    }
+    m_normalBitmap.Clear();
+    m_mouseonBitmap.Clear();
+    m_pressedBitmap.Clear();
 }
 
 void UIBitmapButton::SetBitmapName(const char* name, int stateIndex)
@@ -581,47 +598,35 @@ void UIBitmapButton::SetBitmapName(const char* name, int stateIndex)
     const std::string value = name ? name : "";
     if (stateIndex == 0) {
         m_normalBitmapName = value;
-        if (m_normalBitmap) {
-            DeleteObject(m_normalBitmap);
-            m_normalBitmap = nullptr;
-        }
+        m_normalBitmap.Clear();
     } else if (stateIndex == 1) {
         m_mouseonBitmapName = value;
-        if (m_mouseonBitmap) {
-            DeleteObject(m_mouseonBitmap);
-            m_mouseonBitmap = nullptr;
-        }
+        m_mouseonBitmap.Clear();
     } else if (stateIndex == 2) {
         m_pressedBitmapName = value;
-        if (m_pressedBitmap) {
-            DeleteObject(m_pressedBitmap);
-            m_pressedBitmap = nullptr;
-        }
+        m_pressedBitmap.Clear();
     }
 
     if (value.empty()) {
         return;
     }
 
-    HBITMAP loaded = LoadBitmapFromGameData(value.c_str());
-    if (!loaded) {
+    const shopui::BitmapPixels loaded = shopui::LoadBitmapPixelsFromGameData(value, true);
+    if (!loaded.IsValid()) {
         return;
     }
 
-    BITMAP bm{};
-    if (GetObjectA(loaded, sizeof(bm), &bm)) {
-        if (m_bitmapWidth <= 0) {
-            m_bitmapWidth = bm.bmWidth;
-        }
-        if (m_bitmapHeight <= 0) {
-            m_bitmapHeight = bm.bmHeight;
-        }
-        if (m_w <= 0) {
-            m_w = bm.bmWidth;
-        }
-        if (m_h <= 0) {
-            m_h = bm.bmHeight;
-        }
+    if (m_bitmapWidth <= 0) {
+        m_bitmapWidth = loaded.width;
+    }
+    if (m_bitmapHeight <= 0) {
+        m_bitmapHeight = loaded.height;
+    }
+    if (m_w <= 0) {
+        m_w = loaded.width;
+    }
+    if (m_h <= 0) {
+        m_h = loaded.height;
     }
 
     if (stateIndex == 0) {
@@ -630,8 +635,6 @@ void UIBitmapButton::SetBitmapName(const char* name, int stateIndex)
         m_mouseonBitmap = loaded;
     } else if (stateIndex == 2) {
         m_pressedBitmap = loaded;
-    } else {
-        DeleteObject(loaded);
     }
 }
 
@@ -640,39 +643,36 @@ void UIBitmapButton::OnDraw()
     if (!g_hMainWnd || m_show == 0) {
         return;
     }
+    if (IsQtUiRuntimeEnabled()) {
+        return;
+    }
 
-    const bool useShared = (UIWindow::GetSharedDrawDC() != nullptr);
-    HDC hdc = useShared ? UIWindow::GetSharedDrawDC() : GetDC(g_hMainWnd);
+    HDC hdc = AcquireDrawTarget();
     if (!hdc) {
         return;
     }
 
-    HBITMAP drawBmp = nullptr;
-    if (m_state == 1 && m_pressedBitmap) {
-        drawBmp = m_pressedBitmap;
-    } else if (m_state == 2 && m_mouseonBitmap) {
-        drawBmp = m_mouseonBitmap;
-    } else if (m_normalBitmap) {
-        drawBmp = m_normalBitmap;
-    } else if (m_mouseonBitmap) {
-        drawBmp = m_mouseonBitmap;
+    const shopui::BitmapPixels* drawBmp = nullptr;
+    if (m_state == 1 && m_pressedBitmap.IsValid()) {
+        drawBmp = &m_pressedBitmap;
+    } else if (m_state == 2 && m_mouseonBitmap.IsValid()) {
+        drawBmp = &m_mouseonBitmap;
+    } else if (m_normalBitmap.IsValid()) {
+        drawBmp = &m_normalBitmap;
+    } else if (m_mouseonBitmap.IsValid()) {
+        drawBmp = &m_mouseonBitmap;
     } else {
-        drawBmp = m_pressedBitmap;
+        drawBmp = m_pressedBitmap.IsValid() ? &m_pressedBitmap : nullptr;
     }
 
     if (drawBmp) {
-        BITMAP bm{};
-        if (GetObjectA(drawBmp, sizeof(bm), &bm) && bm.bmWidth > 0 && bm.bmHeight > 0) {
-            m_bitmapWidth = bm.bmWidth;
-            m_bitmapHeight = bm.bmHeight;
-            RECT dst = { m_x, m_y, m_x + bm.bmWidth, m_y + bm.bmHeight };
-            DrawBitmapTransparent(hdc, drawBmp, dst);
-        }
+        m_bitmapWidth = drawBmp->width;
+        m_bitmapHeight = drawBmp->height;
+        RECT dst = { m_x, m_y, m_x + drawBmp->width, m_y + drawBmp->height };
+        shopui::DrawBitmapPixelsTransparent(hdc, *drawBmp, dst);
     }
-    if (!useShared) {
-        ReleaseDC(g_hMainWnd, hdc);
-    }
-    DrawChildren();
+    DrawChildrenToHdc(hdc);
+    ReleaseDrawTarget(hdc);
 }
 
 void UIBitmapButton::OnLBtnDown(int x, int y)
@@ -816,9 +816,11 @@ void UIEditCtrl::OnDraw()
     if (!g_hMainWnd || m_show == 0) {
         return;
     }
+    if (IsQtUiRuntimeEnabled()) {
+        return;
+    }
 
-    const bool useShared = (UIWindow::GetSharedDrawDC() != nullptr);
-    HDC hdc = useShared ? UIWindow::GetSharedDrawDC() : GetDC(g_hMainWnd);
+    HDC hdc = AcquireDrawTarget();
     if (!hdc) {
         return;
     }
@@ -839,29 +841,25 @@ void UIEditCtrl::OnDraw()
     }
 
     RECT textRc = { m_x + m_xOffset, m_y + m_yOffset, m_x + m_w - 2, m_y + m_h - 2 };
+#if RO_ENABLE_QT6_UI
+    DrawUiEditTextQt(hdc, textRc, drawText, RGB(m_textR, m_textG, m_textB));
+#else
     DrawTextA(hdc, drawText.c_str(), -1, &textRc, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+#endif
 
-    if (!useShared) {
-        ReleaseDC(g_hMainWnd, hdc);
-    }
-    DrawChildren();
+    DrawChildrenToHdc(hdc);
+    ReleaseDrawTarget(hdc);
 }
 
 UICheckBox::UICheckBox()
-    : m_isChecked(0), m_onBitmap(nullptr), m_offBitmap(nullptr)
+    : m_isChecked(0), m_onBitmap(), m_offBitmap()
 {
 }
 
 UICheckBox::~UICheckBox()
 {
-    if (m_onBitmap) {
-        DeleteObject(m_onBitmap);
-        m_onBitmap = nullptr;
-    }
-    if (m_offBitmap) {
-        DeleteObject(m_offBitmap);
-        m_offBitmap = nullptr;
-    }
+    m_onBitmap.Clear();
+    m_offBitmap.Clear();
 }
 
 void UICheckBox::SetBitmap(const char* onBitmap, const char* offBitmap)
@@ -869,29 +867,20 @@ void UICheckBox::SetBitmap(const char* onBitmap, const char* offBitmap)
     m_onBitmapName = onBitmap ? onBitmap : "";
     m_offBitmapName = offBitmap ? offBitmap : "";
 
-    if (m_onBitmap) {
-        DeleteObject(m_onBitmap);
-        m_onBitmap = nullptr;
-    }
-    if (m_offBitmap) {
-        DeleteObject(m_offBitmap);
-        m_offBitmap = nullptr;
-    }
+    m_onBitmap.Clear();
+    m_offBitmap.Clear();
 
     if (!m_onBitmapName.empty()) {
-        m_onBitmap = LoadBitmapFromGameData(m_onBitmapName.c_str());
+        m_onBitmap = shopui::LoadBitmapPixelsFromGameData(m_onBitmapName, true);
     }
     if (!m_offBitmapName.empty()) {
-        m_offBitmap = LoadBitmapFromGameData(m_offBitmapName.c_str());
+        m_offBitmap = shopui::LoadBitmapPixelsFromGameData(m_offBitmapName, true);
     }
 
-    HBITMAP probe = m_offBitmap ? m_offBitmap : m_onBitmap;
+    const shopui::BitmapPixels* probe = m_offBitmap.IsValid() ? &m_offBitmap : (m_onBitmap.IsValid() ? &m_onBitmap : nullptr);
     if (probe) {
-        BITMAP bm{};
-        if (GetObjectA(probe, sizeof(bm), &bm)) {
-            m_w = bm.bmWidth;
-            m_h = bm.bmHeight;
-        }
+        m_w = probe->width;
+        m_h = probe->height;
     }
 }
 
@@ -909,24 +898,23 @@ void UICheckBox::OnDraw()
     if (!g_hMainWnd || m_show == 0) {
         return;
     }
+    if (IsQtUiRuntimeEnabled()) {
+        return;
+    }
 
-    const bool useShared = (UIWindow::GetSharedDrawDC() != nullptr);
-    HDC hdc = useShared ? UIWindow::GetSharedDrawDC() : GetDC(g_hMainWnd);
+    HDC hdc = AcquireDrawTarget();
     if (!hdc) {
         return;
     }
 
-    HBITMAP drawBmp = m_isChecked ? m_onBitmap : m_offBitmap;
-    if (!drawBmp) {
-        drawBmp = m_isChecked ? m_offBitmap : m_onBitmap;
+    const shopui::BitmapPixels* drawBmp = m_isChecked ? &m_onBitmap : &m_offBitmap;
+    if (!drawBmp->IsValid()) {
+        drawBmp = m_isChecked ? &m_offBitmap : &m_onBitmap;
     }
 
-    if (drawBmp) {
-        BITMAP bm{};
-        if (GetObjectA(drawBmp, sizeof(bm), &bm) && bm.bmWidth > 0 && bm.bmHeight > 0) {
-            RECT dst = { m_x, m_y, m_x + bm.bmWidth, m_y + bm.bmHeight };
-            DrawBitmapTransparent(hdc, drawBmp, dst);
-        }
+    if (drawBmp->IsValid()) {
+        RECT dst = { m_x, m_y, m_x + drawBmp->width, m_y + drawBmp->height };
+        shopui::DrawBitmapPixelsTransparent(hdc, *drawBmp, dst);
     } else {
         const int fallbackSize = (std::max)(12, (std::min)(m_w > 0 ? m_w : 16, m_h > 0 ? m_h : 16));
         RECT boxRect = { m_x, m_y, m_x + fallbackSize, m_y + fallbackSize };
@@ -949,10 +937,8 @@ void UICheckBox::OnDraw()
             DeleteObject(pen);
         }
     }
-    if (!useShared) {
-        ReleaseDC(g_hMainWnd, hdc);
-    }
-    DrawChildren();
+    DrawChildrenToHdc(hdc);
+    ReleaseDrawTarget(hdc);
 }
 
 void UICheckBox::OnLBtnUp(int x, int y)

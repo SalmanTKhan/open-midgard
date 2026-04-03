@@ -1,16 +1,25 @@
 #include "UIStatusWnd.h"
 
+#include "render/DC.h"
 #include "UIWindowMgr.h"
 #include "core/File.h"
 #include "gamemode/GameMode.h"
 #include "gamemode/Mode.h"
 #include "main/WinMain.h"
+#include "qtui/QtUiRuntime.h"
+#include "res/Bitmap.h"
 #include "session/Session.h"
 #include "world/GameActor.h"
 #include "world/World.h"
 
-#include <gdiplus.h>
 #include <windows.h>
+
+#if RO_ENABLE_QT6_UI
+#include <QFont>
+#include <QImage>
+#include <QPainter>
+#include <QString>
+#endif
 
 #include <algorithm>
 #include <array>
@@ -19,7 +28,6 @@
 #include <string>
 #include <vector>
 
-#pragma comment(lib, "gdiplus.lib")
 #pragma comment(lib, "msimg32.lib")
 
 namespace {
@@ -61,19 +69,86 @@ constexpr std::array<int, 6> kStatRows = { 6, 22, 38, 54, 70, 86 };
 constexpr std::array<int, 6> kRightLeftRows = { 21, 37, 53, 69, 85, 101 };
 constexpr std::array<int, 4> kRightRightRows = { 21, 37, 53, 69 };
 constexpr const char* kExternalSkinDir = "D:\\Spel\\OldRO\\skin\\default\\basic_interface\\";
+constexpr int kQtButtonWidth = 12;
+constexpr int kQtButtonHeight = 11;
 
-ULONG_PTR EnsureGdiplusStarted()
+RECT MakeStatusRect(int x, int y, int left, int top, int width, int height)
 {
-    static ULONG_PTR s_token = 0;
-    static bool s_started = false;
-    if (!s_started) {
-        Gdiplus::GdiplusStartupInput startupInput;
-        if (Gdiplus::GdiplusStartup(&s_token, &startupInput, nullptr) == Gdiplus::Ok) {
-            s_started = true;
+    RECT rect{ x + left, y + top, x + left + width, y + top + height };
+    return rect;
+}
+
+bool IsPointInRect(const RECT& rect, int x, int y)
+{
+    return x >= rect.left && x < rect.right && y >= rect.top && y < rect.bottom;
+}
+
+#if RO_ENABLE_QT6_UI
+QFont BuildStatusFontFromHdc(HDC hdc)
+{
+    LOGFONTA logFont{};
+    if (hdc) {
+        if (HGDIOBJ fontObject = GetCurrentObject(hdc, OBJ_FONT)) {
+            GetObjectA(fontObject, sizeof(logFont), &logFont);
         }
     }
-    return s_token;
+
+    const QString family = logFont.lfFaceName[0] != '\0'
+        ? QString::fromLocal8Bit(logFont.lfFaceName)
+        : QStringLiteral("MS Sans Serif");
+    QFont font(family);
+    font.setPixelSize(logFont.lfHeight != 0 ? (std::max)(1, static_cast<int>(std::abs(logFont.lfHeight))) : 13);
+    font.setBold(logFont.lfWeight >= FW_BOLD);
+    font.setStyleStrategy(QFont::NoAntialias);
+    return font;
 }
+
+Qt::Alignment ToQtAlignment(UINT format)
+{
+    Qt::Alignment alignment = Qt::AlignLeft | Qt::AlignTop;
+    if (format & DT_CENTER) {
+        alignment &= ~Qt::AlignLeft;
+        alignment |= Qt::AlignHCenter;
+    } else if (format & DT_RIGHT) {
+        alignment &= ~Qt::AlignLeft;
+        alignment |= Qt::AlignRight;
+    }
+
+    if (format & DT_VCENTER) {
+        alignment &= ~Qt::AlignTop;
+        alignment |= Qt::AlignVCenter;
+    } else if (format & DT_BOTTOM) {
+        alignment &= ~Qt::AlignTop;
+        alignment |= Qt::AlignBottom;
+    }
+
+    return alignment;
+}
+
+void DrawStatusTextQt(HDC hdc, const RECT& rect, const char* text, COLORREF color, UINT format)
+{
+    if (!hdc || !text || rect.right <= rect.left || rect.bottom <= rect.top) {
+        return;
+    }
+
+    const QString label = QString::fromLocal8Bit(text);
+    const int width = rect.right - rect.left;
+    const int height = rect.bottom - rect.top;
+    std::vector<unsigned int> pixels(static_cast<size_t>(width) * static_cast<size_t>(height), 0u);
+    QImage image(reinterpret_cast<uchar*>(pixels.data()), width, height, width * static_cast<int>(sizeof(unsigned int)), QImage::Format_ARGB32);
+    if (image.isNull()) {
+        return;
+    }
+
+    QPainter painter(&image);
+    painter.setRenderHint(QPainter::Antialiasing, false);
+    painter.setRenderHint(QPainter::TextAntialiasing, false);
+    painter.setFont(BuildStatusFontFromHdc(hdc));
+    painter.setPen(QColor(GetRValue(color), GetGValue(color), GetBValue(color)));
+    painter.drawText(QRect(0, 0, width, height), ToQtAlignment(format) | Qt::TextSingleLine, label);
+    AlphaBlendArgbToHdc(hdc, rect.left, rect.top, width, height, pixels.data(), width, height);
+}
+#endif
 
 std::string ToLowerAscii(std::string value)
 {
@@ -156,92 +231,9 @@ std::string ResolveUiAssetPath(const char* fileName)
     return NormalizeSlash(fileName ? fileName : "");
 }
 
-HBITMAP LoadBitmapFromGameData(const std::string& path)
+shopui::BitmapPixels LoadBitmapPixelsFromGameData(const std::string& path)
 {
-    if (path.empty() || !EnsureGdiplusStarted()) {
-        return nullptr;
-    }
-
-    int size = 0;
-    unsigned char* bytes = g_fileMgr.GetData(path.c_str(), &size);
-    if (!bytes || size <= 0) {
-        delete[] bytes;
-        return nullptr;
-    }
-
-    HBITMAP outBitmap = nullptr;
-    HGLOBAL mem = GlobalAlloc(GMEM_MOVEABLE, static_cast<SIZE_T>(size));
-    if (mem) {
-        void* dst = GlobalLock(mem);
-        if (dst) {
-            std::memcpy(dst, bytes, static_cast<size_t>(size));
-            GlobalUnlock(mem);
-
-            IStream* stream = nullptr;
-            if (CreateStreamOnHGlobal(mem, TRUE, &stream) == S_OK) {
-                auto* bitmap = Gdiplus::Bitmap::FromStream(stream, FALSE);
-                if (bitmap && bitmap->GetLastStatus() == Gdiplus::Ok) {
-                    bitmap->GetHBITMAP(RGB(0, 0, 0), &outBitmap);
-                }
-                delete bitmap;
-                stream->Release();
-            } else {
-                GlobalFree(mem);
-            }
-        } else {
-            GlobalFree(mem);
-        }
-    }
-
-    delete[] bytes;
-    return outBitmap;
-}
-
-void DrawBitmapTransparent(HDC target, HBITMAP bitmap, const RECT& dst)
-{
-    if (!target || !bitmap || dst.right <= dst.left || dst.bottom <= dst.top) {
-        return;
-    }
-
-    BITMAP bm{};
-    if (!GetObjectA(bitmap, sizeof(bm), &bm) || bm.bmWidth <= 0 || bm.bmHeight <= 0) {
-        return;
-    }
-
-    HDC srcDC = CreateCompatibleDC(target);
-    if (!srcDC) {
-        return;
-    }
-
-    HGDIOBJ oldBitmap = SelectObject(srcDC, bitmap);
-    TransparentBlt(target,
-        dst.left,
-        dst.top,
-        dst.right - dst.left,
-        dst.bottom - dst.top,
-        srcDC,
-        0,
-        0,
-        bm.bmWidth,
-        bm.bmHeight,
-        RGB(255, 0, 255));
-    SelectObject(srcDC, oldBitmap);
-    DeleteDC(srcDC);
-}
-
-void DrawBitmapTransparent(HDC target, HBITMAP bitmap, int x, int y)
-{
-    if (!bitmap) {
-        return;
-    }
-
-    BITMAP bm{};
-    if (!GetObjectA(bitmap, sizeof(bm), &bm) || bm.bmWidth <= 0 || bm.bmHeight <= 0) {
-        return;
-    }
-
-    RECT dst{ x, y, x + bm.bmWidth, y + bm.bmHeight };
-    DrawBitmapTransparent(target, bitmap, dst);
+    return shopui::LoadBitmapPixelsFromGameData(path, true);
 }
 
 void HashValue(unsigned long long* hash, unsigned long long value)
@@ -317,8 +309,8 @@ UIStatusWnd::UIStatusWnd()
       m_page(0),
       m_systemButtons{ nullptr, nullptr, nullptr },
       m_incrementButtons{ nullptr, nullptr, nullptr, nullptr, nullptr, nullptr },
-      m_titleBarBitmap(nullptr),
-      m_pageBackgrounds{ nullptr, nullptr },
+      m_titleBarBitmap(),
+      m_pageBackgrounds{},
       m_lastDrawStateToken(0ull),
       m_hasDrawStateToken(false)
 {
@@ -414,6 +406,12 @@ void UIStatusWnd::OnCreate(int x, int y)
     m_controlsCreated = true;
     LoadAssets();
 
+    if (IsQtUiRuntimeEnabled()) {
+        LayoutChildren();
+        RefreshIncrementButtons();
+        return;
+    }
+
     struct ButtonSpec {
         const char* offName;
         const char* onName;
@@ -458,6 +456,13 @@ void UIStatusWnd::OnCreate(int x, int y)
 
 void UIStatusWnd::OnDraw()
 {
+    if (IsQtUiRuntimeEnabled()) {
+        m_lastDrawStateToken = BuildDisplayStateToken();
+        m_hasDrawStateToken = true;
+        m_isDirty = 0;
+        return;
+    }
+
     if (m_show == 0) {
         return;
     }
@@ -465,23 +470,19 @@ void UIStatusWnd::OnDraw()
     EnsureCreated();
     RefreshIncrementButtons();
 
-    HDC hdc = UIWindow::GetSharedDrawDC();
-    const bool useShared = hdc != nullptr;
-    if (!hdc && g_hMainWnd) {
-        hdc = GetDC(g_hMainWnd);
-    }
+    HDC hdc = AcquireDrawTarget();
     if (!hdc) {
         return;
     }
 
     RECT titleRect{ m_x, m_y, m_x + m_w, m_y + kTitleBarHeight };
-    DrawBitmapTransparent(hdc, m_titleBarBitmap, titleRect);
+    shopui::DrawBitmapPixelsTransparent(hdc, m_titleBarBitmap, titleRect);
     DrawWindowText(hdc, m_x + 18, m_y + 3, "Status", RGB(255, 255, 255));
     DrawWindowText(hdc, m_x + 17, m_y + 2, "Status", RGB(0, 0, 0));
 
     if (m_h > kMiniHeight) {
         RECT bodyRect{ m_x, m_y + kTitleBarHeight, m_x + m_w, m_y + kTitleBarHeight + kBodyHeight };
-        DrawBitmapTransparent(hdc, m_pageBackgrounds[m_page == 0 ? 0 : 1], bodyRect);
+        shopui::DrawBitmapPixelsTransparent(hdc, m_pageBackgrounds[m_page == 0 ? 0 : 1], bodyRect);
 
         if (m_page == 0) {
             const DisplayData data = BuildDisplayData();
@@ -504,10 +505,8 @@ void UIStatusWnd::OnDraw()
         }
     }
 
-    DrawChildren();
-    if (!useShared) {
-        ReleaseDC(g_hMainWnd, hdc);
-    }
+    DrawChildrenToHdc(hdc);
+    ReleaseDrawTarget(hdc);
 
     m_lastDrawStateToken = BuildDisplayStateToken();
     m_hasDrawStateToken = true;
@@ -525,6 +524,16 @@ void UIStatusWnd::OnLBtnDblClk(int x, int y)
 
 void UIStatusWnd::OnLBtnDown(int x, int y)
 {
+    if (IsQtUiRuntimeEnabled()) {
+        const RECT baseRect = MakeStatusRect(m_x, m_y, 3, 3, kQtButtonWidth, kQtButtonHeight);
+        const RECT miniRect = MakeStatusRect(m_x, m_y, 252, 3, kQtButtonWidth, kQtButtonHeight);
+        const RECT closeRect = MakeStatusRect(m_x, m_y, 266, 3, kQtButtonWidth, kQtButtonHeight);
+        if (IsPointInRect(baseRect, x, y) || IsPointInRect(miniRect, x, y) || IsPointInRect(closeRect, x, y)) {
+            UIWindow::OnLBtnDown(x, y);
+            return;
+        }
+    }
+
     if (m_h > kMiniHeight && x >= m_x && x < m_x + 20 && y >= m_y + kTitleBarHeight) {
         if (y < m_y + 43) {
             SetPage(0);
@@ -540,6 +549,60 @@ void UIStatusWnd::OnLBtnDown(int x, int y)
     }
 }
 
+void UIStatusWnd::OnLBtnUp(int x, int y)
+{
+    if (IsQtUiRuntimeEnabled()) {
+        const bool wasDragging = m_isDragging != 0;
+        UIFrameWnd::OnLBtnUp(x, y);
+        if (wasDragging) {
+            return;
+        }
+
+        const RECT baseRect = MakeStatusRect(m_x, m_y, 3, 3, kQtButtonWidth, kQtButtonHeight);
+        const RECT miniRect = MakeStatusRect(m_x, m_y, 252, 3, kQtButtonWidth, kQtButtonHeight);
+        const RECT closeRect = MakeStatusRect(m_x, m_y, 266, 3, kQtButtonWidth, kQtButtonHeight);
+
+        if (m_h == kMiniHeight && IsPointInRect(baseRect, x, y)) {
+            SendMsg(this, 6, kButtonIdBase, 0, 0);
+            return;
+        }
+        if (m_h > kMiniHeight && IsPointInRect(miniRect, x, y)) {
+            SendMsg(this, 6, kButtonIdMini, 0, 0);
+            return;
+        }
+        if (IsPointInRect(closeRect, x, y)) {
+            SendMsg(this, 6, kButtonIdClose, 0, 0);
+            return;
+        }
+
+        if (m_h > kMiniHeight && m_page == 0) {
+            const DisplayData data = BuildDisplayData();
+            for (size_t index = 0; index < kIncrementButtonIds.size(); ++index) {
+                if (data.statCosts[index] <= 0
+                    || data.baseStats[index] >= 99
+                    || data.statCosts[index] > data.statusPoint) {
+                    continue;
+                }
+
+                const RECT incrementRect = MakeStatusRect(
+                    m_x,
+                    m_y,
+                    92,
+                    23 + static_cast<int>(index) * 16,
+                    kQtButtonWidth,
+                    kQtButtonHeight);
+                if (IsPointInRect(incrementRect, x, y)) {
+                    SendMsg(this, 6, kIncrementButtonIds[index], 0, 0);
+                    return;
+                }
+            }
+        }
+        return;
+    }
+
+    UIFrameWnd::OnLBtnUp(x, y);
+}
+
 void UIStatusWnd::OnMouseHover(int x, int y)
 {
     UIFrameWnd::OnMouseHover(x, y);
@@ -548,6 +611,123 @@ void UIStatusWnd::OnMouseHover(int x, int y)
 void UIStatusWnd::StoreInfo()
 {
     SaveUiWindowPlacement("StatusWnd", m_x, m_y);
+}
+
+bool UIStatusWnd::IsMiniMode() const
+{
+    return m_h == kMiniHeight;
+}
+
+int UIStatusWnd::GetPageForQt() const
+{
+    return m_page;
+}
+
+bool UIStatusWnd::GetDisplayDataForQt(DisplayData* outData) const
+{
+    if (!outData) {
+        return false;
+    }
+
+    *outData = BuildDisplayData();
+    return true;
+}
+
+int UIStatusWnd::GetQtSystemButtonCount() const
+{
+    return 3;
+}
+
+bool UIStatusWnd::GetQtSystemButtonDisplayForQt(int index, QtButtonDisplay* out) const
+{
+    if (!out || index < 0 || index >= GetQtSystemButtonCount()) {
+        return false;
+    }
+
+    switch (index) {
+    case 0:
+        out->id = kButtonIdBase;
+        out->x = m_x + 3;
+        out->y = m_y + 3;
+        out->width = kQtButtonWidth;
+        out->height = kQtButtonHeight;
+        out->label = "B";
+        out->visible = IsMiniMode();
+        out->active = false;
+        return true;
+    case 1:
+        out->id = kButtonIdMini;
+        out->x = m_x + 252;
+        out->y = m_y + 3;
+        out->width = kQtButtonWidth;
+        out->height = kQtButtonHeight;
+        out->label = "_";
+        out->visible = !IsMiniMode();
+        out->active = false;
+        return true;
+    case 2:
+        out->id = kButtonIdClose;
+        out->x = m_x + 266;
+        out->y = m_y + 3;
+        out->width = kQtButtonWidth;
+        out->height = kQtButtonHeight;
+        out->label = "X";
+        out->visible = true;
+        out->active = false;
+        return true;
+    default:
+        return false;
+    }
+}
+
+int UIStatusWnd::GetQtPageTabCount() const
+{
+    return 2;
+}
+
+bool UIStatusWnd::GetQtPageTabDisplayForQt(int index, QtButtonDisplay* out) const
+{
+    if (!out || index < 0 || index >= GetQtPageTabCount()) {
+        return false;
+    }
+
+    out->id = index;
+    out->x = m_x;
+    out->y = m_y + kTitleBarHeight + (index == 0 ? 0 : 26);
+    out->width = 20;
+    out->height = index == 0 ? 26 : 24;
+    out->label = index == 0 ? "1" : "2";
+    out->visible = !IsMiniMode();
+    out->active = m_page == index;
+    return true;
+}
+
+int UIStatusWnd::GetQtIncrementButtonCount() const
+{
+    return static_cast<int>(kIncrementButtonIds.size());
+}
+
+bool UIStatusWnd::GetQtIncrementButtonDisplayForQt(int index, QtButtonDisplay* out) const
+{
+    if (!out || index < 0 || index >= GetQtIncrementButtonCount()) {
+        return false;
+    }
+
+    const DisplayData data = BuildDisplayData();
+    out->id = kIncrementButtonIds[static_cast<size_t>(index)];
+    out->x = m_x + 88;
+    out->y = m_y + 17 + kStatRows[static_cast<size_t>(index)];
+    out->width = kQtButtonWidth;
+    out->height = kQtButtonHeight;
+    out->label = ">";
+    out->visible =
+        !IsMiniMode()
+        && m_page == 0
+        && data.statCosts[static_cast<size_t>(index)] > 0
+        && data.baseStats[static_cast<size_t>(index)] < 99
+        && data.statCosts[static_cast<size_t>(index)] <= data.statusPoint;
+    out->active = false;
+    return true;
 }
 
 void UIStatusWnd::EnsureCreated()
@@ -740,7 +920,11 @@ void UIStatusWnd::DrawWindowText(HDC hdc, int x, int y, const char* text, COLORR
     SetBkMode(hdc, TRANSPARENT);
     SetTextColor(hdc, color);
     HGDIOBJ oldFont = SelectObject(hdc, GetStatusFont());
+#if RO_ENABLE_QT6_UI
+    DrawStatusTextQt(hdc, rect, text ? text : "", color, format);
+#else
     DrawTextA(hdc, text ? text : "", -1, &rect, format);
+#endif
     SelectObject(hdc, oldFont);
 }
 
@@ -750,34 +934,30 @@ void UIStatusWnd::DrawRightAlignedValue(HDC hdc, int right, int y, const std::st
     SetBkMode(hdc, TRANSPARENT);
     SetTextColor(hdc, RGB(0, 0, 0));
     HGDIOBJ oldFont = SelectObject(hdc, GetStatusFont());
+#if RO_ENABLE_QT6_UI
+    DrawStatusTextQt(hdc, rect, text.c_str(), RGB(0, 0, 0), DT_RIGHT | DT_TOP | DT_SINGLELINE);
+#else
     DrawTextA(hdc, text.c_str(), -1, &rect, DT_RIGHT | DT_TOP | DT_SINGLELINE);
+#endif
     SelectObject(hdc, oldFont);
 }
 
 void UIStatusWnd::LoadAssets()
 {
-    if (!m_titleBarBitmap) {
-        m_titleBarBitmap = LoadBitmapFromGameData(ResolveUiAssetPath("titlebar_fix.bmp"));
+    if (!m_titleBarBitmap.IsValid()) {
+        m_titleBarBitmap = LoadBitmapPixelsFromGameData(ResolveUiAssetPath("titlebar_fix.bmp"));
     }
-    if (!m_pageBackgrounds[0]) {
-        m_pageBackgrounds[0] = LoadBitmapFromGameData(ResolveUiAssetPath("statwin0_bg.bmp"));
+    if (!m_pageBackgrounds[0].IsValid()) {
+        m_pageBackgrounds[0] = LoadBitmapPixelsFromGameData(ResolveUiAssetPath("statwin0_bg.bmp"));
     }
-    if (!m_pageBackgrounds[1]) {
-        m_pageBackgrounds[1] = LoadBitmapFromGameData(ResolveUiAssetPath("statwin1_bg.bmp"));
+    if (!m_pageBackgrounds[1].IsValid()) {
+        m_pageBackgrounds[1] = LoadBitmapPixelsFromGameData(ResolveUiAssetPath("statwin1_bg.bmp"));
     }
 }
 
 void UIStatusWnd::ReleaseAssets()
 {
-    HBITMAP* bitmaps[] = {
-        &m_titleBarBitmap,
-        &m_pageBackgrounds[0],
-        &m_pageBackgrounds[1],
-    };
-    for (HBITMAP* bitmap : bitmaps) {
-        if (*bitmap) {
-            DeleteObject(*bitmap);
-            *bitmap = nullptr;
-        }
-    }
+    m_titleBarBitmap.Clear();
+    m_pageBackgrounds[0].Clear();
+    m_pageBackgrounds[1].Clear();
 }

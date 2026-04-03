@@ -5,6 +5,7 @@
 #include "gamemode/GameMode.h"
 #include "gamemode/Mode.h"
 #include "main/WinMain.h"
+#include "qtui/QtUiRuntime.h"
 #include "session/Session.h"
 
 #include <windows.h>
@@ -144,7 +145,13 @@ void UIChooseSellBuyWnd::ActivateButton(ButtonId buttonId)
 
 void UIChooseSellBuyWnd::OnDraw()
 {
-    HDC hdc = GetSharedDrawDC();
+    if (IsQtUiRuntimeEnabled()) {
+        m_lastDrawStateToken = BuildDisplayStateToken();
+        m_hasDrawStateToken = true;
+        return;
+    }
+
+    HDC hdc = AcquireDrawTarget();
     if (!hdc || m_show == 0) {
         return;
     }
@@ -166,6 +173,7 @@ void UIChooseSellBuyWnd::OnDraw()
 
     m_lastDrawStateToken = BuildDisplayStateToken();
     m_hasDrawStateToken = true;
+    ReleaseDrawTarget(hdc);
 }
 
 void UIChooseSellBuyWnd::OnLBtnDown(int x, int y)
@@ -211,6 +219,16 @@ void UIChooseSellBuyWnd::HandleKeyDown(int virtualKey)
     default:
         break;
     }
+}
+
+UIChooseSellBuyWnd::ButtonId UIChooseSellBuyWnd::GetHoverButton() const
+{
+    return m_hoverButton;
+}
+
+UIChooseSellBuyWnd::ButtonId UIChooseSellBuyWnd::GetPressedButton() const
+{
+    return m_pressedButton;
 }
 
 unsigned long long UIChooseSellBuyWnd::BuildDisplayStateToken() const

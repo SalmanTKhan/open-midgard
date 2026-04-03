@@ -30,4 +30,8 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(ZLIB)
 
-target_link_libraries(ro_core PRIVATE zlibstatic winmm.lib)
+target_link_libraries(ro_core PRIVATE zlibstatic)
+
+if(WIN32)
+    target_link_libraries(ro_core PRIVATE winmm.lib)
+endif()

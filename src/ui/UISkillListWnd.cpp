@@ -6,18 +6,27 @@
 #include "UIWindowMgr.h"
 #include "core/File.h"
 #include "main/WinMain.h"
+#include "qtui/QtUiRuntime.h"
+#include "render/DC.h"
+#include "res/Bitmap.h"
 #include "session/Session.h"
 #include "skill/Skill.h"
 
-#include <gdiplus.h>
 #include <windows.h>
+
+#if RO_ENABLE_QT6_UI
+#include <QFont>
+#include <QFontMetrics>
+#include <QImage>
+#include <QPainter>
+#include <QString>
+#endif
 
 #include <algorithm>
 #include <array>
 #include <cstring>
 #include <string>
 
-#pragma comment(lib, "gdiplus.lib")
 #pragma comment(lib, "msimg32.lib")
 
 namespace {
@@ -34,24 +43,13 @@ constexpr int kRowHeight = 37;
 constexpr int kIconSize = 24;
 constexpr int kIconCellSize = 32;
 constexpr int kScrollBarWidth = 10;
+constexpr int kQtButtonWidth = 12;
+constexpr int kQtButtonHeight = 11;
 constexpr int kButtonIdBase = 148;
 constexpr int kButtonIdMini = 149;
 constexpr int kButtonIdClose = 150;
 constexpr int kBottomButtonUse = 0;
 constexpr int kBottomButtonClose = 1;
-
-ULONG_PTR EnsureGdiplusStarted()
-{
-    static ULONG_PTR s_token = 0;
-    static bool s_started = false;
-    if (!s_started) {
-        Gdiplus::GdiplusStartupInput startupInput;
-        if (Gdiplus::GdiplusStartup(&s_token, &startupInput, nullptr) == Gdiplus::Ok) {
-            s_started = true;
-        }
-    }
-    return s_token;
-}
 
 std::string NormalizeSlash(std::string value)
 {
@@ -153,127 +151,144 @@ std::string ResolveUiAssetPath(const char* fileName)
     return NormalizeSlash(fileName ? fileName : "");
 }
 
-HBITMAP LoadBitmapFromGameData(const std::string& path)
+shopui::BitmapPixels LoadBitmapPixelsFromGameData(const std::string& path)
 {
-    if (path.empty() || !EnsureGdiplusStarted()) {
-        return nullptr;
-    }
-
-    int size = 0;
-    unsigned char* bytes = g_fileMgr.GetData(path.c_str(), &size);
-    if (!bytes || size <= 0) {
-        delete[] bytes;
-        return nullptr;
-    }
-
-    HBITMAP outBitmap = nullptr;
-    HGLOBAL mem = GlobalAlloc(GMEM_MOVEABLE, static_cast<SIZE_T>(size));
-    if (mem) {
-        void* dst = GlobalLock(mem);
-        if (dst) {
-            std::memcpy(dst, bytes, static_cast<size_t>(size));
-            GlobalUnlock(mem);
-
-            IStream* stream = nullptr;
-            if (CreateStreamOnHGlobal(mem, TRUE, &stream) == S_OK) {
-                auto* bitmap = Gdiplus::Bitmap::FromStream(stream, FALSE);
-                if (bitmap && bitmap->GetLastStatus() == Gdiplus::Ok) {
-                    bitmap->GetHBITMAP(RGB(0, 0, 0), &outBitmap);
-                }
-                delete bitmap;
-                stream->Release();
-            } else {
-                GlobalFree(mem);
-            }
-        } else {
-            GlobalFree(mem);
-        }
-    }
-
-    delete[] bytes;
-    return outBitmap;
+    return shopui::LoadBitmapPixelsFromGameData(path, true);
 }
 
-void DrawBitmapTransparent(HDC target, HBITMAP bitmap, const RECT& dst)
+void DrawBitmapPixelsStretched(HDC target, const shopui::BitmapPixels& bitmap, const RECT& dst)
 {
-    if (!target || !bitmap) {
+    if (!target || !bitmap.IsValid() || dst.right <= dst.left || dst.bottom <= dst.top) {
         return;
     }
-
-    BITMAP bm{};
-    if (!GetObjectA(bitmap, sizeof(bm), &bm) || bm.bmWidth <= 0 || bm.bmHeight <= 0) {
-        return;
-    }
-
-    HDC srcDC = CreateCompatibleDC(target);
-    if (!srcDC) {
-        return;
-    }
-
-    HGDIOBJ oldBitmap = SelectObject(srcDC, bitmap);
-    TransparentBlt(target,
-        dst.left,
-        dst.top,
-        dst.right - dst.left,
-        dst.bottom - dst.top,
-        srcDC,
-        0,
-        0,
-        bm.bmWidth,
-        bm.bmHeight,
-        RGB(255, 0, 255));
-    SelectObject(srcDC, oldBitmap);
-    DeleteDC(srcDC);
+    AlphaBlendArgbToHdc(target,
+                        dst.left,
+                        dst.top,
+                        dst.right - dst.left,
+                        dst.bottom - dst.top,
+                        bitmap.pixels.data(),
+                        bitmap.width,
+                        bitmap.height);
 }
 
-void TileBitmap(HDC target, HBITMAP bitmap, const RECT& rect)
+void TileBitmapPixels(HDC target, const shopui::BitmapPixels& bitmap, const RECT& rect)
 {
-    if (!target || !bitmap || rect.right <= rect.left || rect.bottom <= rect.top) {
+    if (!target || !bitmap.IsValid() || rect.right <= rect.left || rect.bottom <= rect.top) {
         return;
     }
 
-    BITMAP bm{};
-    if (!GetObjectA(bitmap, sizeof(bm), &bm) || bm.bmWidth <= 0 || bm.bmHeight <= 0) {
-        return;
-    }
-
-    for (int y = rect.top; y < rect.bottom; y += bm.bmHeight) {
-        for (int x = rect.left; x < rect.right; x += bm.bmWidth) {
-            RECT dst{ x, y, std::min(x + bm.bmWidth, rect.right), std::min(y + bm.bmHeight, rect.bottom) };
-            DrawBitmapTransparent(target, bitmap, dst);
+    const int rectRight = static_cast<int>(rect.right);
+    const int rectBottom = static_cast<int>(rect.bottom);
+    for (int y = rect.top; y < rect.bottom; y += bitmap.height) {
+        for (int x = rect.left; x < rect.right; x += bitmap.width) {
+            RECT dst{ x, y, (std::min)(x + bitmap.width, rectRight), (std::min)(y + bitmap.height, rectBottom) };
+            DrawBitmapPixelsStretched(target, bitmap, dst);
         }
     }
 }
 
-void DrawThreePieceBar(HDC hdc, const RECT& rect, HBITMAP left, HBITMAP mid, HBITMAP right)
+void DrawThreePieceBarPixels(HDC hdc, const RECT& rect, const shopui::BitmapPixels& left, const shopui::BitmapPixels& mid, const shopui::BitmapPixels& right)
 {
     if (rect.right <= rect.left || rect.bottom <= rect.top) {
         return;
     }
 
-    BITMAP leftBm{};
-    BITMAP rightBm{};
     int leftWidth = 0;
     int rightWidth = 0;
-    if (left && GetObjectA(left, sizeof(leftBm), &leftBm)) {
-        leftWidth = leftBm.bmWidth;
+    if (left.IsValid()) {
+        leftWidth = left.width;
     }
-    if (right && GetObjectA(right, sizeof(rightBm), &rightBm)) {
-        rightWidth = rightBm.bmWidth;
+    if (right.IsValid()) {
+        rightWidth = right.width;
     }
 
-    if (left) {
+    if (left.IsValid()) {
         RECT dst{ rect.left, rect.top, rect.left + leftWidth, rect.bottom };
-        DrawBitmapTransparent(hdc, left, dst);
+        DrawBitmapPixelsStretched(hdc, left, dst);
     }
-    if (right) {
+    if (right.IsValid()) {
         RECT dst{ rect.right - rightWidth, rect.top, rect.right, rect.bottom };
-        DrawBitmapTransparent(hdc, right, dst);
+        DrawBitmapPixelsStretched(hdc, right, dst);
     }
 
     RECT midRect{ rect.left + leftWidth, rect.top, rect.right - rightWidth, rect.bottom };
-    TileBitmap(hdc, mid, midRect);
+    TileBitmapPixels(hdc, mid, midRect);
 }
+
+#if RO_ENABLE_QT6_UI
+QFont BuildSkillListFontFromHdc(HDC hdc)
+{
+    LOGFONTA logFont{};
+    if (hdc) {
+        if (HGDIOBJ fontObject = GetCurrentObject(hdc, OBJ_FONT)) {
+            GetObjectA(fontObject, sizeof(logFont), &logFont);
+        }
+    }
+
+    const QString family = logFont.lfFaceName[0] != '\0'
+        ? QString::fromLocal8Bit(logFont.lfFaceName)
+        : QStringLiteral("MS Sans Serif");
+    QFont font(family);
+    font.setPixelSize(logFont.lfHeight != 0 ? (std::max)(1, static_cast<int>(std::abs(logFont.lfHeight))) : 13);
+    font.setBold(logFont.lfWeight >= FW_BOLD);
+    font.setStyleStrategy(QFont::NoAntialias);
+    return font;
+}
+
+void DrawSkillTextLineQt(HDC hdc, int x, int y, COLORREF color, const std::string& text)
+{
+    if (!hdc || text.empty()) {
+        return;
+    }
+
+    const QString label = QString::fromLocal8Bit(text.c_str());
+    if (label.isEmpty()) {
+        return;
+    }
+
+    const QFont font = BuildSkillListFontFromHdc(hdc);
+    const QFontMetrics metrics(font);
+    const int width = (std::max)(1, metrics.horizontalAdvance(label) + 4);
+    const int height = (std::max)(1, metrics.height() + 2);
+    std::vector<unsigned int> pixels(static_cast<size_t>(width) * static_cast<size_t>(height), 0u);
+    QImage image(reinterpret_cast<uchar*>(pixels.data()), width, height, width * static_cast<int>(sizeof(unsigned int)), QImage::Format_ARGB32);
+    if (image.isNull()) {
+        return;
+    }
+
+    QPainter painter(&image);
+    painter.setRenderHint(QPainter::Antialiasing, false);
+    painter.setRenderHint(QPainter::TextAntialiasing, false);
+    painter.setFont(font);
+    painter.setPen(QColor(GetRValue(color), GetGValue(color), GetBValue(color)));
+    painter.drawText(0, metrics.ascent(), label);
+    AlphaBlendArgbToHdc(hdc, x, y, width, height, pixels.data(), width, height);
+}
+
+void DrawSkillButtonTextQt(HDC hdc, const RECT& rect, const std::string& text, COLORREF color)
+{
+    if (!hdc || text.empty() || rect.right <= rect.left || rect.bottom <= rect.top) {
+        return;
+    }
+
+    const QString label = QString::fromLocal8Bit(text.c_str());
+    const int width = rect.right - rect.left;
+    const int height = rect.bottom - rect.top;
+    std::vector<unsigned int> pixels(static_cast<size_t>(width) * static_cast<size_t>(height), 0u);
+    QImage image(reinterpret_cast<uchar*>(pixels.data()), width, height, width * static_cast<int>(sizeof(unsigned int)), QImage::Format_ARGB32);
+    if (image.isNull()) {
+        return;
+    }
+
+    QPainter painter(&image);
+    painter.setRenderHint(QPainter::Antialiasing, false);
+    painter.setRenderHint(QPainter::TextAntialiasing, false);
+    painter.setFont(BuildSkillListFontFromHdc(hdc));
+    painter.setPen(QColor(GetRValue(color), GetGValue(color), GetBValue(color)));
+    painter.drawText(QRect(0, 0, width, height), Qt::AlignCenter | Qt::AlignVCenter | Qt::TextSingleLine, label);
+    AlphaBlendArgbToHdc(hdc, rect.left, rect.top, width, height, pixels.data(), width, height);
+}
+#endif
 
 void DrawTextLine(HDC hdc, int x, int y, COLORREF color, const std::string& text)
 {
@@ -282,7 +297,11 @@ void DrawTextLine(HDC hdc, int x, int y, COLORREF color, const std::string& text
     }
     SetBkMode(hdc, TRANSPARENT);
     SetTextColor(hdc, color);
+#if RO_ENABLE_QT6_UI
+    DrawSkillTextLineQt(hdc, x, y, color, text);
+#else
     TextOutA(hdc, x, y, text.c_str(), static_cast<int>(text.size()));
+#endif
 }
 
 void FillRectColor(HDC hdc, const RECT& rect, COLORREF color)
@@ -302,6 +321,12 @@ void FrameRectColor(HDC hdc, const RECT& rect, COLORREF color)
 bool IsInsideRect(const RECT& rect, int x, int y)
 {
     return x >= rect.left && x < rect.right && y >= rect.top && y < rect.bottom;
+}
+
+RECT MakeSkillRect(int x, int y, int left, int top, int width, int height)
+{
+    RECT rect{ x + left, y + top, x + left + width, y + top + height };
+    return rect;
 }
 
 std::string ResolveSkillIconPath(const SkillMetadata& metadata)
@@ -324,6 +349,11 @@ std::string BuildSkillRightText(const PLAYER_SKILL_INFO& skill)
         return "Sp : " + std::to_string(skill.spcost);
     }
     return "Passive";
+}
+
+std::string BuildSkillDisplayName(const PLAYER_SKILL_INFO& skill)
+{
+    return skill.skillName.empty() ? skill.skillIdName : skill.skillName;
 }
 
 HFONT GetUiFont()
@@ -360,24 +390,24 @@ UISkillListWnd::UISkillListWnd()
       m_scrollDragOffsetY(0),
       m_systemButtons{},
       m_bottomButtons{},
-      m_titleBarBitmap(nullptr),
-      m_titleBarLeftBitmap(nullptr),
-      m_titleBarMidBitmap(nullptr),
-      m_titleBarRightBitmap(nullptr),
-      m_btnBarLeftBitmap(nullptr),
-      m_btnBarMidBitmap(nullptr),
-      m_btnBarRightBitmap(nullptr),
-      m_btnBarLeft2Bitmap(nullptr),
-      m_btnBarMid2Bitmap(nullptr),
-      m_btnBarRight2Bitmap(nullptr),
-      m_itemRowBitmap(nullptr),
-      m_itemInvertBitmap(nullptr),
-      m_upgradeNormalBitmap(nullptr),
-      m_upgradeHoverBitmap(nullptr),
-      m_upgradePressedBitmap(nullptr),
-      m_mesBtnLeftBitmap(nullptr),
-      m_mesBtnMidBitmap(nullptr),
-      m_mesBtnRightBitmap(nullptr),
+      m_titleBarBitmap(),
+      m_titleBarLeftBitmap(),
+      m_titleBarMidBitmap(),
+      m_titleBarRightBitmap(),
+      m_btnBarLeftBitmap(),
+      m_btnBarMidBitmap(),
+      m_btnBarRightBitmap(),
+      m_btnBarLeft2Bitmap(),
+      m_btnBarMid2Bitmap(),
+      m_btnBarRight2Bitmap(),
+      m_itemRowBitmap(),
+      m_itemInvertBitmap(),
+      m_upgradeNormalBitmap(),
+      m_upgradeHoverBitmap(),
+      m_upgradePressedBitmap(),
+      m_mesBtnLeftBitmap(),
+      m_mesBtnMidBitmap(),
+      m_mesBtnRightBitmap(),
       m_lastVisualStateToken(0ull),
       m_hasVisualStateToken(false)
 {
@@ -406,6 +436,7 @@ void UISkillListWnd::SetShow(int show)
     if (show != 0) {
         EnsureCreated();
         LayoutChildren();
+        RefreshVisibleSkillsForInteractionState();
     }
 }
 
@@ -413,6 +444,9 @@ void UISkillListWnd::Move(int x, int y)
 {
     UIWindow::Move(x, y);
     LayoutChildren();
+    if (m_show != 0) {
+        RefreshVisibleSkillsForInteractionState();
+    }
 }
 
 bool UISkillListWnd::IsUpdateNeed()
@@ -458,6 +492,11 @@ void UISkillListWnd::OnCreate(int x, int y)
     m_controlsCreated = true;
     LoadAssets();
 
+    if (IsQtUiRuntimeEnabled()) {
+        LayoutChildren();
+        return;
+    }
+
     struct ButtonSpec {
         const char* offName;
         const char* onName;
@@ -497,19 +536,18 @@ void UISkillListWnd::OnDraw()
     }
 
     EnsureCreated();
+    RefreshVisibleSkillsForInteractionState();
+
     const std::vector<const PLAYER_SKILL_INFO*> skills = GetSortedSkills();
-    if (m_selectedSkillId == 0 && !skills.empty()) {
-        m_selectedSkillId = skills.front()->SKID;
+
+    if (IsQtUiRuntimeEnabled()) {
+        m_lastVisualStateToken = BuildVisualStateToken();
+        m_hasVisualStateToken = true;
+        m_isDirty = 0;
+        return;
     }
 
-    const int visibleRows = std::max(1, (m_h - kTitleBarHeight - kBottomBarHeight - kListTop - kListBottomMargin) / kRowHeight);
-    m_viewOffset = std::max(0, std::min(m_viewOffset, GetMaxViewOffset(static_cast<int>(skills.size()))));
-    m_visibleSkills.clear();
-
-    HDC hdc = UIWindow::GetSharedDrawDC();
-    if (!hdc) {
-        hdc = GetDC(g_hMainWnd);
-    }
+    HDC hdc = AcquireDrawTarget();
     if (!hdc) {
         return;
     }
@@ -518,7 +556,8 @@ void UISkillListWnd::OnDraw()
 
     DrawWindowChrome(hdc);
     SelectObject(hdc, GetUiFont());
-    DrawTextLine(hdc, m_x + 10, m_y + 3, RGB(0, 0, 0), "Skill Tree");
+    DrawTextLine(hdc, m_x + 18, m_y + 3, RGB(255, 255, 255), "Skill Tree");
+    DrawTextLine(hdc, m_x + 17, m_y + 2, RGB(0, 0, 0), "Skill Tree");
     SelectObject(hdc, GetUiBoldFont());
     DrawTextLine(hdc, m_x + 13, m_y + m_h - 18, RGB(176, 145, 48),
         "Skill Point : " + std::to_string(g_session.GetPlayerSkillPointCount()));
@@ -526,20 +565,16 @@ void UISkillListWnd::OnDraw()
 
     const int rowLeft = m_x + kLeftGutterWidth + 4;
     const int rowRight = m_x + m_w - kListRightMargin - 4;
-    const int firstIndex = m_viewOffset;
-    const int lastIndex = std::min(static_cast<int>(skills.size()), firstIndex + visibleRows);
     const CGameMode* gameMode = g_modeMgr.GetCurrentGameMode();
     const bool hideDraggedSkill = gameMode
         && gameMode->m_dragType == static_cast<int>(DragType::ShortcutSkill)
+        && gameMode->m_dragInfo.source == static_cast<int>(DragSource::SkillListWindow)
         && gameMode->m_dragInfo.skillId != 0;
-    for (int drawIndex = firstIndex; drawIndex < lastIndex; ++drawIndex) {
-        const int rowIndex = drawIndex - firstIndex;
-        const int rowTop = m_y + kListTop + rowIndex * kRowHeight;
-        RECT rowRect{ rowLeft, rowTop, rowRight, rowTop + kRowHeight };
-        RECT upgradeRect{ rowRect.right - 28, rowRect.top + 4, rowRect.right - 4, rowRect.top + 28 };
-        const PLAYER_SKILL_INFO* skill = skills[drawIndex];
-        m_visibleSkills.push_back({ skill, rowRect, upgradeRect });
-
+    for (size_t rowIndex = 0; rowIndex < m_visibleSkills.size(); ++rowIndex) {
+        const VisibleSkill& visible = m_visibleSkills[rowIndex];
+        const RECT& rowRect = visible.rowRect;
+        const RECT& upgradeRect = visible.upgradeRect;
+        const PLAYER_SKILL_INFO* skill = visible.skill;
         const bool isSelected = skill && skill->SKID == m_selectedSkillId;
         RECT iconCellRect{ rowRect.left + 4, rowRect.top + 1, rowRect.left + 4 + kIconCellSize, rowRect.top + 1 + kIconCellSize };
         RECT iconInvertRect{ iconCellRect.left + 2, iconCellRect.top + 8, iconCellRect.left + 2 + 28, iconCellRect.top + 8 + 15 };
@@ -549,18 +584,18 @@ void UISkillListWnd::OnDraw()
             iconCellRect.left + ((kIconCellSize - kIconSize) / 2) + kIconSize,
             iconCellRect.top + ((kIconCellSize - kIconSize) / 2) + kIconSize
         };
-        if (m_itemRowBitmap) {
-            DrawBitmapTransparent(hdc, m_itemRowBitmap, iconCellRect);
+        if (m_itemRowBitmap.IsValid()) {
+            DrawBitmapPixelsStretched(hdc, m_itemRowBitmap, iconCellRect);
         }
-        if (isSelected && m_itemInvertBitmap) {
-            DrawBitmapTransparent(hdc, m_itemInvertBitmap, iconInvertRect);
+        if (isSelected && m_itemInvertBitmap.IsValid()) {
+            DrawBitmapPixelsStretched(hdc, m_itemInvertBitmap, iconInvertRect);
         }
 
         if (skill) {
             const bool isDraggedSource = hideDraggedSkill && skill->SKID == gameMode->m_dragInfo.skillId;
             if (!isDraggedSource) {
-                if (HBITMAP icon = GetSkillIcon(skill->SKID)) {
-                    DrawBitmapTransparent(hdc, icon, iconRect);
+                if (const shopui::BitmapPixels* icon = GetSkillIcon(skill->SKID)) {
+                    shopui::DrawBitmapPixelsTransparent(hdc, *icon, iconRect);
                 }
             }
 
@@ -573,9 +608,9 @@ void UISkillListWnd::OnDraw()
 
             const bool canUpgrade = skill->upgradable != 0 && g_session.GetPlayerSkillPointCount() > 0;
             if (canUpgrade) {
-                HBITMAP upgradeBitmap = m_upgradeNormalBitmap;
-                if (upgradeBitmap) {
-                    DrawBitmapTransparent(hdc, upgradeBitmap, upgradeRect);
+                const shopui::BitmapPixels& upgradeBitmap = m_upgradeNormalBitmap;
+                if (upgradeBitmap.IsValid()) {
+                    DrawBitmapPixelsStretched(hdc, upgradeBitmap, upgradeRect);
                 }
             }
         }
@@ -594,13 +629,11 @@ void UISkillListWnd::OnDraw()
         DrawBottomButton(hdc, button);
     }
 
-    DrawChildren();
+    DrawChildrenToHdc(hdc);
 
     SelectObject(hdc, oldFont);
 
-    if (UIWindow::GetSharedDrawDC() == nullptr) {
-        ReleaseDC(g_hMainWnd, hdc);
-    }
+    ReleaseDrawTarget(hdc);
 
     m_lastVisualStateToken = BuildVisualStateToken();
     m_hasVisualStateToken = true;
@@ -609,9 +642,24 @@ void UISkillListWnd::OnDraw()
 
 void UISkillListWnd::OnLBtnDown(int x, int y)
 {
+    EnsureCreated();
+    if (IsQtUiRuntimeEnabled()) {
+        RefreshVisibleSkillsForInteractionState();
+    }
+
     m_dragArmed = false;
     m_dragSkillId = 0;
     m_dragSkillLevel = 0;
+
+    if (IsQtUiRuntimeEnabled()) {
+        const RECT baseRect = MakeSkillRect(m_x, m_y, 231, 2, kQtButtonWidth, kQtButtonHeight);
+        const RECT miniRect = MakeSkillRect(m_x, m_y, 247, 2, kQtButtonWidth, kQtButtonHeight);
+        const RECT closeRect = MakeSkillRect(m_x, m_y, 263, 2, kQtButtonWidth, kQtButtonHeight);
+        if (IsInsideRect(baseRect, x, y) || IsInsideRect(miniRect, x, y) || IsInsideRect(closeRect, x, y)) {
+            UIWindow::OnLBtnDown(x, y);
+            return;
+        }
+    }
 
     if (y >= m_y && y < m_y + kTitleBarHeight) {
         UIFrameWnd::OnLBtnDown(x, y);
@@ -671,7 +719,37 @@ void UISkillListWnd::OnLBtnDown(int x, int y)
 
 void UISkillListWnd::OnLBtnUp(int x, int y)
 {
-    UIFrameWnd::OnLBtnUp(x, y);
+    if (IsQtUiRuntimeEnabled()) {
+        RefreshVisibleSkillsForInteractionState();
+    }
+
+    if (IsQtUiRuntimeEnabled()) {
+        const bool wasDragging = m_isDragging != 0;
+        UIFrameWnd::OnLBtnUp(x, y);
+        if (wasDragging) {
+            return;
+        }
+
+        const RECT baseRect = MakeSkillRect(m_x, m_y, 231, 2, kQtButtonWidth, kQtButtonHeight);
+        const RECT miniRect = MakeSkillRect(m_x, m_y, 247, 2, kQtButtonWidth, kQtButtonHeight);
+        const RECT closeRect = MakeSkillRect(m_x, m_y, 263, 2, kQtButtonWidth, kQtButtonHeight);
+
+        if (IsInsideRect(baseRect, x, y)) {
+            SendMsg(this, 6, kButtonIdBase, 0, 0);
+            return;
+        }
+        if (IsInsideRect(miniRect, x, y)) {
+            SendMsg(this, 6, kButtonIdMini, 0, 0);
+            return;
+        }
+        if (IsInsideRect(closeRect, x, y)) {
+            SendMsg(this, 6, kButtonIdClose, 0, 0);
+            return;
+        }
+    } else {
+        UIFrameWnd::OnLBtnUp(x, y);
+    }
+
     m_isDraggingScrollThumb = 0;
     const int bottomButtonIndex = HitTestBottomButton(x, y);
     for (size_t index = 0; index < m_bottomButtons.size(); ++index) {
@@ -710,6 +788,10 @@ void UISkillListWnd::OnLBtnUp(int x, int y)
 
 void UISkillListWnd::OnMouseMove(int x, int y)
 {
+    if (IsQtUiRuntimeEnabled()) {
+        RefreshVisibleSkillsForInteractionState();
+    }
+
     UIFrameWnd::OnMouseMove(x, y);
     UpdateHover(x, y);
     if (m_dragArmed) {
@@ -748,11 +830,142 @@ void UISkillListWnd::OnWheel(int delta)
     } else if (delta < 0) {
         m_viewOffset = std::min(maxOffset, m_viewOffset + 1);
     }
+    RefreshVisibleSkillsForInteractionState();
 }
 
 void UISkillListWnd::StoreInfo()
 {
     SaveUiWindowPlacement("SkillListWnd", m_x, m_y);
+}
+
+bool UISkillListWnd::GetDisplayDataForQt(DisplayData* outData) const
+{
+    if (!outData) {
+        return false;
+    }
+
+    DisplayData data{};
+    const std::vector<const PLAYER_SKILL_INFO*> skills = GetSortedSkills();
+    data.skillPointCount = g_session.GetPlayerSkillPointCount();
+    data.viewOffset = m_viewOffset;
+    data.maxViewOffset = GetMaxViewOffset(static_cast<int>(skills.size()));
+    data.scrollBarVisible = IsScrollBarVisible(static_cast<int>(skills.size()));
+
+    if (data.scrollBarVisible) {
+        const RECT trackRect = GetScrollTrackRect();
+        const RECT thumbRect = GetScrollThumbRect(static_cast<int>(skills.size()));
+        data.scrollTrackX = trackRect.left;
+        data.scrollTrackY = trackRect.top;
+        data.scrollTrackWidth = trackRect.right - trackRect.left;
+        data.scrollTrackHeight = trackRect.bottom - trackRect.top;
+        data.scrollThumbX = thumbRect.left;
+        data.scrollThumbY = thumbRect.top;
+        data.scrollThumbWidth = thumbRect.right - thumbRect.left;
+        data.scrollThumbHeight = thumbRect.bottom - thumbRect.top;
+    }
+
+    const int visibleRows = std::max(1, (m_h - kTitleBarHeight - kBottomBarHeight - kListTop - kListBottomMargin) / kRowHeight);
+    const int rowLeft = m_x + kLeftGutterWidth + 4;
+    const int rowRight = m_x + m_w - kListRightMargin - 4;
+    const CGameMode* gameMode = g_modeMgr.GetCurrentGameMode();
+    const bool hideDraggedSkill = gameMode
+        && gameMode->m_dragType == static_cast<int>(DragType::ShortcutSkill)
+        && gameMode->m_dragInfo.source == static_cast<int>(DragSource::SkillListWindow)
+        && gameMode->m_dragInfo.skillId != 0;
+    const int firstIndex = data.viewOffset;
+    const int lastIndex = std::min(static_cast<int>(skills.size()), firstIndex + visibleRows);
+    data.rows.reserve(static_cast<size_t>(std::max(0, lastIndex - firstIndex)));
+    for (int drawIndex = firstIndex; drawIndex < lastIndex; ++drawIndex) {
+        const PLAYER_SKILL_INFO* const skill = skills[drawIndex];
+        if (!skill) {
+            continue;
+        }
+
+        const int rowIndex = drawIndex - firstIndex;
+        const int rowTop = m_y + kListTop + rowIndex * kRowHeight;
+        RECT rowRect{ rowLeft, rowTop, rowRight, rowTop + kRowHeight };
+        RECT upgradeRect{ rowRect.right - 28, rowRect.top + 4, rowRect.right - 4, rowRect.top + 28 };
+
+        DisplayRow row{};
+        row.skillId = skill->SKID;
+        row.x = rowRect.left;
+        row.y = rowRect.top;
+        row.width = rowRect.right - rowRect.left;
+        row.height = rowRect.bottom - rowRect.top;
+        row.iconVisible = !(hideDraggedSkill && skill->SKID == gameMode->m_dragInfo.skillId);
+        row.selected = skill->SKID == m_selectedSkillId;
+        row.hovered = drawIndex == (m_viewOffset + m_hoveredRow);
+        row.upgradeVisible = skill->upgradable != 0 && g_session.GetPlayerSkillPointCount() > 0;
+        row.upgradePressed = skill->SKID == m_pressedUpgradeSkillId;
+        row.upgradeX = upgradeRect.left;
+        row.upgradeY = upgradeRect.top;
+        row.upgradeWidth = upgradeRect.right - upgradeRect.left;
+        row.upgradeHeight = upgradeRect.bottom - upgradeRect.top;
+        row.name = BuildSkillDisplayName(*skill);
+        row.levelText = "Lv : " + std::to_string(skill->level);
+        row.rightText = BuildSkillRightText(*skill);
+        data.rows.push_back(std::move(row));
+    }
+
+    data.bottomButtons.reserve(m_bottomButtons.size());
+    for (const TextButton& button : m_bottomButtons) {
+        DisplayButton displayButton{};
+        displayButton.x = button.rect.left;
+        displayButton.y = button.rect.top;
+        displayButton.width = button.rect.right - button.rect.left;
+        displayButton.height = button.rect.bottom - button.rect.top;
+        displayButton.hovered = button.hovered;
+        displayButton.pressed = button.pressed;
+        displayButton.label = button.label;
+        data.bottomButtons.push_back(std::move(displayButton));
+    }
+
+    *outData = std::move(data);
+    return true;
+}
+
+int UISkillListWnd::GetQtSystemButtonCount() const
+{
+    return 3;
+}
+
+bool UISkillListWnd::GetQtSystemButtonDisplayForQt(int index, QtButtonDisplay* outData) const
+{
+    if (!outData || index < 0 || index >= GetQtSystemButtonCount()) {
+        return false;
+    }
+
+    switch (index) {
+    case 0:
+        outData->id = kButtonIdBase;
+        outData->x = m_x + 231;
+        outData->y = m_y + 2;
+        outData->width = kQtButtonWidth;
+        outData->height = kQtButtonHeight;
+        outData->label = "B";
+        outData->visible = true;
+        return true;
+    case 1:
+        outData->id = kButtonIdMini;
+        outData->x = m_x + 247;
+        outData->y = m_y + 2;
+        outData->width = kQtButtonWidth;
+        outData->height = kQtButtonHeight;
+        outData->label = "_";
+        outData->visible = true;
+        return true;
+    case 2:
+        outData->id = kButtonIdClose;
+        outData->x = m_x + 263;
+        outData->y = m_y + 2;
+        outData->width = kQtButtonWidth;
+        outData->height = kQtButtonHeight;
+        outData->label = "X";
+        outData->visible = true;
+        return true;
+    default:
+        return false;
+    }
 }
 
 void UISkillListWnd::EnsureCreated()
@@ -784,60 +997,72 @@ void UISkillListWnd::LayoutChildren()
 void UISkillListWnd::LoadAssets()
 {
     ReleaseAssets();
-    m_titleBarBitmap = LoadBitmapFromGameData(ResolveUiAssetPath("titlebar_fix.bmp"));
-    m_titleBarLeftBitmap = LoadBitmapFromGameData(ResolveUiAssetPath("titlebar_left.bmp"));
-    m_titleBarMidBitmap = LoadBitmapFromGameData(ResolveUiAssetPath("titlebar_mid.bmp"));
-    m_titleBarRightBitmap = LoadBitmapFromGameData(ResolveUiAssetPath("titlebar_right.bmp"));
-    m_btnBarLeftBitmap = LoadBitmapFromGameData(ResolveUiAssetPath("btnbar_left.bmp"));
-    m_btnBarMidBitmap = LoadBitmapFromGameData(ResolveUiAssetPath("btnbar_mid.bmp"));
-    m_btnBarRightBitmap = LoadBitmapFromGameData(ResolveUiAssetPath("btnbar_right.bmp"));
-    m_btnBarLeft2Bitmap = LoadBitmapFromGameData(ResolveUiAssetPath("btnbar_left2.bmp"));
-    m_btnBarMid2Bitmap = LoadBitmapFromGameData(ResolveUiAssetPath("btnbar_mid2.bmp"));
-    m_btnBarRight2Bitmap = LoadBitmapFromGameData(ResolveUiAssetPath("btnbar_right2.bmp"));
-    m_itemRowBitmap = LoadBitmapFromGameData(ResolveUiAssetPath("itemwin_mid.bmp"));
-    m_itemInvertBitmap = LoadBitmapFromGameData(ResolveUiAssetPath("item_invert.bmp"));
-    m_upgradeNormalBitmap = LoadBitmapFromGameData(ResolveUiAssetPath("skill_up_a.bmp"));
-    m_upgradeHoverBitmap = LoadBitmapFromGameData(ResolveUiAssetPath("skill_up_b.bmp"));
-    m_upgradePressedBitmap = LoadBitmapFromGameData(ResolveUiAssetPath("skill_up_c.bmp"));
-    m_mesBtnLeftBitmap = LoadBitmapFromGameData(ResolveUiAssetPath("mesbtn_left.bmp"));
-    m_mesBtnMidBitmap = LoadBitmapFromGameData(ResolveUiAssetPath("mesbtn_mid.bmp"));
-    m_mesBtnRightBitmap = LoadBitmapFromGameData(ResolveUiAssetPath("mesbtn_right.bmp"));
+    m_titleBarBitmap = LoadBitmapPixelsFromGameData(ResolveUiAssetPath("titlebar_fix.bmp"));
+    m_titleBarLeftBitmap = LoadBitmapPixelsFromGameData(ResolveUiAssetPath("titlebar_left.bmp"));
+    m_titleBarMidBitmap = LoadBitmapPixelsFromGameData(ResolveUiAssetPath("titlebar_mid.bmp"));
+    m_titleBarRightBitmap = LoadBitmapPixelsFromGameData(ResolveUiAssetPath("titlebar_right.bmp"));
+    m_btnBarLeftBitmap = LoadBitmapPixelsFromGameData(ResolveUiAssetPath("btnbar_left.bmp"));
+    m_btnBarMidBitmap = LoadBitmapPixelsFromGameData(ResolveUiAssetPath("btnbar_mid.bmp"));
+    m_btnBarRightBitmap = LoadBitmapPixelsFromGameData(ResolveUiAssetPath("btnbar_right.bmp"));
+    m_btnBarLeft2Bitmap = LoadBitmapPixelsFromGameData(ResolveUiAssetPath("btnbar_left2.bmp"));
+    m_btnBarMid2Bitmap = LoadBitmapPixelsFromGameData(ResolveUiAssetPath("btnbar_mid2.bmp"));
+    m_btnBarRight2Bitmap = LoadBitmapPixelsFromGameData(ResolveUiAssetPath("btnbar_right2.bmp"));
+    m_itemRowBitmap = LoadBitmapPixelsFromGameData(ResolveUiAssetPath("itemwin_mid.bmp"));
+    m_itemInvertBitmap = LoadBitmapPixelsFromGameData(ResolveUiAssetPath("item_invert.bmp"));
+    m_upgradeNormalBitmap = LoadBitmapPixelsFromGameData(ResolveUiAssetPath("skill_up_a.bmp"));
+    m_upgradeHoverBitmap = LoadBitmapPixelsFromGameData(ResolveUiAssetPath("skill_up_b.bmp"));
+    m_upgradePressedBitmap = LoadBitmapPixelsFromGameData(ResolveUiAssetPath("skill_up_c.bmp"));
+    m_mesBtnLeftBitmap = LoadBitmapPixelsFromGameData(ResolveUiAssetPath("mesbtn_left.bmp"));
+    m_mesBtnMidBitmap = LoadBitmapPixelsFromGameData(ResolveUiAssetPath("mesbtn_mid.bmp"));
+    m_mesBtnRightBitmap = LoadBitmapPixelsFromGameData(ResolveUiAssetPath("mesbtn_right.bmp"));
 }
 
 void UISkillListWnd::ReleaseAssets()
 {
-    auto releaseBitmap = [](HBITMAP& bitmap) {
-        if (bitmap) {
-            DeleteObject(bitmap);
-            bitmap = nullptr;
-        }
-    };
+    m_titleBarBitmap.Clear();
+    m_titleBarLeftBitmap.Clear();
+    m_titleBarMidBitmap.Clear();
+    m_titleBarRightBitmap.Clear();
+    m_btnBarLeftBitmap.Clear();
+    m_btnBarMidBitmap.Clear();
+    m_btnBarRightBitmap.Clear();
+    m_btnBarLeft2Bitmap.Clear();
+    m_btnBarMid2Bitmap.Clear();
+    m_btnBarRight2Bitmap.Clear();
+    m_itemRowBitmap.Clear();
+    m_itemInvertBitmap.Clear();
+    m_upgradeNormalBitmap.Clear();
+    m_upgradeHoverBitmap.Clear();
+    m_upgradePressedBitmap.Clear();
+    m_mesBtnLeftBitmap.Clear();
+    m_mesBtnMidBitmap.Clear();
+    m_mesBtnRightBitmap.Clear();
 
-    releaseBitmap(m_titleBarBitmap);
-    releaseBitmap(m_titleBarLeftBitmap);
-    releaseBitmap(m_titleBarMidBitmap);
-    releaseBitmap(m_titleBarRightBitmap);
-    releaseBitmap(m_btnBarLeftBitmap);
-    releaseBitmap(m_btnBarMidBitmap);
-    releaseBitmap(m_btnBarRightBitmap);
-    releaseBitmap(m_btnBarLeft2Bitmap);
-    releaseBitmap(m_btnBarMid2Bitmap);
-    releaseBitmap(m_btnBarRight2Bitmap);
-    releaseBitmap(m_itemRowBitmap);
-    releaseBitmap(m_itemInvertBitmap);
-    releaseBitmap(m_upgradeNormalBitmap);
-    releaseBitmap(m_upgradeHoverBitmap);
-    releaseBitmap(m_upgradePressedBitmap);
-    releaseBitmap(m_mesBtnLeftBitmap);
-    releaseBitmap(m_mesBtnMidBitmap);
-    releaseBitmap(m_mesBtnRightBitmap);
-
-    for (auto& entry : m_iconCache) {
-        if (entry.second) {
-            DeleteObject(entry.second);
-        }
-    }
     m_iconCache.clear();
+}
+
+void UISkillListWnd::RefreshVisibleSkillsForInteractionState()
+{
+    const std::vector<const PLAYER_SKILL_INFO*> skills = GetSortedSkills();
+    if (m_selectedSkillId == 0 && !skills.empty()) {
+        m_selectedSkillId = skills.front()->SKID;
+    }
+
+    const int visibleRows = std::max(1, (m_h - kTitleBarHeight - kBottomBarHeight - kListTop - kListBottomMargin) / kRowHeight);
+    m_viewOffset = std::max(0, std::min(m_viewOffset, GetMaxViewOffset(static_cast<int>(skills.size()))));
+    m_visibleSkills.clear();
+
+    const int rowLeft = m_x + kLeftGutterWidth + 4;
+    const int rowRight = m_x + m_w - kListRightMargin - 4;
+    const int firstIndex = m_viewOffset;
+    const int lastIndex = std::min(static_cast<int>(skills.size()), firstIndex + visibleRows);
+    for (int drawIndex = firstIndex; drawIndex < lastIndex; ++drawIndex) {
+        const int rowIndex = drawIndex - firstIndex;
+        const int rowTop = m_y + kListTop + rowIndex * kRowHeight;
+        RECT rowRect{ rowLeft, rowTop, rowRight, rowTop + kRowHeight };
+        RECT upgradeRect{ rowRect.right - 28, rowRect.top + 4, rowRect.right - 4, rowRect.top + 28 };
+        m_visibleSkills.push_back({ skills[drawIndex], rowRect, upgradeRect });
+    }
 }
 
 void UISkillListWnd::UpdateHover(int globalX, int globalY)
@@ -859,35 +1084,33 @@ void UISkillListWnd::DrawWindowChrome(HDC hdc) const
     FillRect(hdc, &outer, whiteBrush);
     DeleteObject(whiteBrush);
 
-    if (m_titleBarBitmap && m_w == 280) {
+    if (m_titleBarBitmap.IsValid() && m_w == 280) {
         RECT titleRect{ m_x, m_y, m_x + m_w, m_y + kTitleBarHeight };
-        DrawBitmapTransparent(hdc, m_titleBarBitmap, titleRect);
+        DrawBitmapPixelsStretched(hdc, m_titleBarBitmap, titleRect);
     } else {
         RECT titleRect{ m_x, m_y, m_x + m_w, m_y + kTitleBarHeight };
-        DrawThreePieceBar(hdc, titleRect, m_titleBarLeftBitmap, m_titleBarMidBitmap, m_titleBarRightBitmap);
+        DrawThreePieceBarPixels(hdc, titleRect, m_titleBarLeftBitmap, m_titleBarMidBitmap, m_titleBarRightBitmap);
     }
 
     RECT bottomTopRect{ m_x, m_y + m_h - kBottomBarHeight, m_x + m_w, m_y + m_h - 29 };
     RECT bottomBottomRect{ m_x, m_y + m_h - 29, m_x + m_w, m_y + m_h };
-    DrawThreePieceBar(hdc, bottomTopRect, m_btnBarLeftBitmap, m_btnBarMidBitmap, m_btnBarRightBitmap);
-    DrawThreePieceBar(hdc, bottomBottomRect, m_btnBarLeft2Bitmap, m_btnBarMid2Bitmap, m_btnBarRight2Bitmap);
+    DrawThreePieceBarPixels(hdc, bottomTopRect, m_btnBarLeftBitmap, m_btnBarMidBitmap, m_btnBarRightBitmap);
+    DrawThreePieceBarPixels(hdc, bottomBottomRect, m_btnBarLeft2Bitmap, m_btnBarMid2Bitmap, m_btnBarRight2Bitmap);
 
     RECT leftBarRect{ m_x, m_y + kTitleBarHeight, m_x + kLeftGutterWidth, m_y + m_h - kBottomBarHeight };
     if (leftBarRect.bottom > leftBarRect.top) {
-        BITMAP topBm{};
-        BITMAP bottomBm{};
         int y = leftBarRect.top;
         const int limit = leftBarRect.bottom;
-        if (m_btnBarMidBitmap && GetObjectA(m_btnBarMidBitmap, sizeof(topBm), &topBm)) {
-            while (y + topBm.bmHeight <= limit) {
-                RECT dst{ leftBarRect.left, y, leftBarRect.right, y + topBm.bmHeight };
-                DrawBitmapTransparent(hdc, m_btnBarMidBitmap, dst);
-                y += topBm.bmHeight;
-                if (m_btnBarMid2Bitmap && GetObjectA(m_btnBarMid2Bitmap, sizeof(bottomBm), &bottomBm)) {
-                    if (y + bottomBm.bmHeight <= limit) {
-                        RECT dst2{ leftBarRect.left, y, leftBarRect.right, y + bottomBm.bmHeight };
-                        DrawBitmapTransparent(hdc, m_btnBarMid2Bitmap, dst2);
-                        y += bottomBm.bmHeight;
+        if (m_btnBarMidBitmap.IsValid()) {
+            while (y + m_btnBarMidBitmap.height <= limit) {
+                RECT dst{ leftBarRect.left, y, leftBarRect.right, y + m_btnBarMidBitmap.height };
+                DrawBitmapPixelsStretched(hdc, m_btnBarMidBitmap, dst);
+                y += m_btnBarMidBitmap.height;
+                if (m_btnBarMid2Bitmap.IsValid()) {
+                    if (y + m_btnBarMid2Bitmap.height <= limit) {
+                        RECT dst2{ leftBarRect.left, y, leftBarRect.right, y + m_btnBarMid2Bitmap.height };
+                        DrawBitmapPixelsStretched(hdc, m_btnBarMid2Bitmap, dst2);
+                        y += m_btnBarMid2Bitmap.height;
                     }
                 }
             }
@@ -921,11 +1144,15 @@ void UISkillListWnd::DrawWindowChrome(HDC hdc) const
 
 void UISkillListWnd::DrawBottomButton(HDC hdc, const TextButton& button) const
 {
-    DrawThreePieceBar(hdc, button.rect, m_mesBtnLeftBitmap, m_mesBtnMidBitmap, m_mesBtnRightBitmap);
+    DrawThreePieceBarPixels(hdc, button.rect, m_mesBtnLeftBitmap, m_mesBtnMidBitmap, m_mesBtnRightBitmap);
     RECT textRect{ button.rect.left, button.rect.top + 3, button.rect.right, button.rect.bottom };
     SetBkMode(hdc, TRANSPARENT);
     SetTextColor(hdc, RGB(0, 0, 0));
+#if RO_ENABLE_QT6_UI
+    DrawSkillButtonTextQt(hdc, textRect, button.label, RGB(0, 0, 0));
+#else
     DrawTextA(hdc, button.label.c_str(), static_cast<int>(button.label.size()), &textRect, DT_CENTER | DT_SINGLELINE | DT_VCENTER);
+#endif
 }
 
 int UISkillListWnd::HitTestBottomButton(int globalX, int globalY) const
@@ -1014,18 +1241,21 @@ int UISkillListWnd::GetMaxViewOffset(int skillCount) const
     return std::max(0, skillCount - visibleRows);
 }
 
-HBITMAP UISkillListWnd::GetSkillIcon(int skillId)
+const shopui::BitmapPixels* UISkillListWnd::GetSkillIcon(int skillId)
 {
     const auto existing = m_iconCache.find(skillId);
     if (existing != m_iconCache.end()) {
-        return existing->second;
+        return existing->second.IsValid() ? &existing->second : nullptr;
     }
 
     const SkillMetadata* metadata = g_skillMgr.GetSkillMetadata(skillId);
     std::string path = metadata ? ResolveSkillIconPath(*metadata) : g_skillMgr.GetSkillIconPath(skillId);
-    HBITMAP bitmap = path.empty() ? nullptr : LoadBitmapFromGameData(path);
-    m_iconCache[skillId] = bitmap;
-    return bitmap;
+    shopui::BitmapPixels bitmap;
+    if (!path.empty()) {
+        bitmap = shopui::LoadBitmapPixelsFromGameData(path, true);
+    }
+    auto inserted = m_iconCache.emplace(skillId, std::move(bitmap));
+    return inserted.first->second.IsValid() ? &inserted.first->second : nullptr;
 }
 
 const PLAYER_SKILL_INFO* UISkillListWnd::GetSelectedSkill() const
@@ -1054,6 +1284,7 @@ unsigned long long UISkillListWnd::BuildVisualStateToken() const
     HashTokenValue(&hash, static_cast<unsigned long long>(g_session.GetPlayerSkillPointCount()));
     if (const CGameMode* gameMode = g_modeMgr.GetCurrentGameMode()) {
         HashTokenValue(&hash, static_cast<unsigned long long>(gameMode->m_dragType));
+        HashTokenValue(&hash, static_cast<unsigned long long>(gameMode->m_dragInfo.source));
         HashTokenValue(&hash, static_cast<unsigned long long>(gameMode->m_dragInfo.skillId));
         HashTokenValue(&hash, static_cast<unsigned long long>(gameMode->m_dragInfo.skillLevel));
     }

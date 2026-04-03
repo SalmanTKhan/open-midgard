@@ -71,3 +71,10 @@ target_link_libraries(ro_ui PUBLIC
     ro_session
     ro_skill
 )
+
+if(RO_ENABLE_QT6_UI)
+    target_link_libraries(ro_ui PUBLIC
+        Qt6::Core
+        Qt6::Gui
+    )
+endif()

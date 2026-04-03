@@ -13,11 +13,13 @@
 #include "Types.h"
 #include "core/Timer.h"
 #include "core/File.h"
+#include "gamemode/CursorRenderer.h"
 #include "gamemode/GameMode.h"
 #include "gamemode/Mode.h"
 #include "network/Connection.h"
 #include "core/DllMgr.h"
 #include "core/ClientInfoLocale.h"
+#include "qtui/QtUiRuntime.h"
 #include "ui/UIOptionWnd.h"
 #include "ui/UIWindowMgr.h"
 #include "render3d/Device.h"
@@ -257,6 +259,34 @@ int ReadRegistry()
 // ---------------------------------------------------------------------------
 LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
+    switch (msg) {
+    case WM_MOUSEMOVE:
+    case WM_LBUTTONDOWN:
+    case WM_LBUTTONUP:
+    case WM_LBUTTONDBLCLK:
+    case WM_RBUTTONDOWN:
+    case WM_RBUTTONUP:
+        UpdateModeCursorClientPos(GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam));
+        SetCursor(nullptr);
+        break;
+    case WM_MOUSEWHEEL:
+    {
+        POINT screenPoint{ GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
+        POINT clientPoint = screenPoint;
+        if (ScreenToClient(hwnd, &clientPoint)) {
+            UpdateModeCursorClientPos(clientPoint.x, clientPoint.y);
+        }
+        SetCursor(nullptr);
+        break;
+    }
+    default:
+        break;
+    }
+
+    if (HandleQtUiRuntimeWindowMessage(msg, wParam, lParam)) {
+        return 0;
+    }
+
     switch (msg)
     {
     case WM_ACTIVATE:
@@ -386,7 +416,7 @@ bool InitApp(HINSTANCE hInstance, int nCmdShow)
     wc.lpfnWndProc  = WindowProc;
     wc.hInstance    = hInstance;
     wc.hIcon        = LoadIconA(hInstance, MAKEINTRESOURCEA(0x77));
-    wc.hCursor      = LoadCursorA(nullptr, (LPCSTR)IDC_ARROW);
+    wc.hCursor      = nullptr;
     wc.hbrBackground= nullptr;
     wc.lpszClassName= WINDOW_NAME;
     RegisterClassA(&wc);
@@ -502,6 +532,7 @@ static bool InitClientSystems()
 
     g_renderer.Init();
     g_renderer.SetSize(renderW, renderH);
+    InitializeQtUiRuntime(g_hMainWnd);
     return true;
 }
 
@@ -629,6 +660,7 @@ int __stdcall WinMain(HINSTANCE hInstance, HINSTANCE /*hPrevInstance*/,
     // CDllMgr cleanup will happen automatically if we add it to a destructor or call it explicitly
     CConnection::Cleanup();
     g_windowMgr.Reset();
+    ShutdownQtUiRuntime();
     GetRenderDevice().Shutdown();
     UnInitMSS();
 

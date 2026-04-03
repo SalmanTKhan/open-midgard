@@ -1,7 +1,7 @@
 #pragma once
 
 #include "Res.h"
-#include <windows.h>
+#include "platform/WindowsCompat.h"
 #include <array>
 #include <vector>
 

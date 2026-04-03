@@ -1,14 +1,16 @@
 #pragma once
 #include "Types.h"
+#include "UIShopCommon.h"
 #include <list>
 #include <vector>
 #include <string>
 
-class CDC;
-
 void PlayUiButtonSound();
 bool LoadUiWindowPlacement(const char* windowName, int* x, int* y);
 void SaveUiWindowPlacement(const char* windowName, int x, int y);
+HDC AcquireMainWindowDrawTarget();
+void ReleaseMainWindowDrawTarget(HDC dc);
+bool BlitArgbBitsToMainWindow(const void* bits, int width, int height);
 
 struct BOXINFO {
     int x;
@@ -31,9 +33,11 @@ public:
     virtual void Create(int w, int h);
     virtual void AddChild(UIWindow* child);
     virtual void DrawChildren();
-
-    static void SetSharedDrawDC(HDC dc);
-    static HDC GetSharedDrawDC();
+    virtual void DrawChildrenToHdc(HDC dc);
+    virtual void DrawToHdc(HDC dc);
+    virtual HDC AcquireDrawTarget() const;
+    virtual void ReleaseDrawTarget(HDC dc) const;
+    bool BlitArgbBitsToDrawTarget(const void* bits, int width, int height) const;
 
     virtual void Invalidate();
     virtual void InvalidateWallPaper();
@@ -85,7 +89,6 @@ public:
     std::list<UIWindow*> m_children;
     int m_x, m_y, m_w, m_h;
     int m_isDirty;
-    CDC* m_dc;
     int m_id;
     int m_state;
     int m_stateCnt;
@@ -143,9 +146,9 @@ public:
     std::string m_normalBitmapName;
     std::string m_mouseonBitmapName;
     std::string m_pressedBitmapName;
-    HBITMAP m_normalBitmap;
-    HBITMAP m_mouseonBitmap;
-    HBITMAP m_pressedBitmap;
+    shopui::BitmapPixels m_normalBitmap;
+    shopui::BitmapPixels m_mouseonBitmap;
+    shopui::BitmapPixels m_pressedBitmap;
 };
 
 class UIEditCtrl : public UIWindow {
@@ -186,6 +189,6 @@ public:
     int m_isChecked;
     std::string m_onBitmapName;
     std::string m_offBitmapName;
-    HBITMAP m_onBitmap;
-    HBITMAP m_offBitmap;
+    shopui::BitmapPixels m_onBitmap;
+    shopui::BitmapPixels m_offBitmap;
 };

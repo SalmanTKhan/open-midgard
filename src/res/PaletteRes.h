@@ -1,7 +1,7 @@
 #pragma once
 
 #include "Res.h"
-#include <windows.h>
+#include "platform/WindowsCompat.h"
 
 class CPaletteRes : public CRes {
 public:

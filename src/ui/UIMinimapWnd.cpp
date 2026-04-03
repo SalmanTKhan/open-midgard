@@ -5,21 +5,30 @@
 #include "gamemode/GameMode.h"
 #include "gamemode/Mode.h"
 #include "main/WinMain.h"
+#include "qtui/QtUiRuntime.h"
+#include "render/DC.h"
+#include "res/Bitmap.h"
 #include "session/Session.h"
 #include "world/World.h"
 
-#include <gdiplus.h>
 #include <windows.h>
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <limits>
 #include <string>
 #include <vector>
 
-#pragma comment(lib, "gdiplus.lib")
+#if RO_ENABLE_QT6_UI
+#include <QFont>
+#include <QImage>
+#include <QPainter>
+#include <QPainterPath>
+#endif
+
 #pragma comment(lib, "msimg32.lib")
 
 namespace {
@@ -35,6 +44,7 @@ constexpr int kCoordsHeight = 16;
 constexpr int kDefaultScreenMargin = 20;
 constexpr int kButtonIdClose = 135;
 constexpr int kWindowCornerRadius = 10;
+constexpr int kFallbackCloseButtonSize = 11;
 constexpr u32 kDynamicRefreshIntervalMs = 100;
 constexpr float kMinZoom = 1.0f;
 constexpr float kMaxZoom = 4.0f;
@@ -47,19 +57,6 @@ const char* UiKorPrefix()
         "\xC0\xAF\xC0\xFA\xC0\xCE\xC5\xCD\xC6\xE4\xC0\xCC\xBD\xBA"
         "\\";
     return kUiKor;
-}
-
-ULONG_PTR EnsureGdiplusStarted()
-{
-    static ULONG_PTR s_token = 0;
-    static bool s_started = false;
-    if (!s_started) {
-        Gdiplus::GdiplusStartupInput startupInput;
-        if (Gdiplus::GdiplusStartup(&s_token, &startupInput, nullptr) == Gdiplus::Ok) {
-            s_started = true;
-        }
-    }
-    return s_token;
 }
 
 std::string ToLowerAscii(std::string value)
@@ -196,136 +193,93 @@ std::string ResolveMinimapPath(const std::string& bitmapName)
     return std::string();
 }
 
-HBITMAP LoadBitmapFromGameData(const std::string& path, int* outWidth = nullptr, int* outHeight = nullptr)
+float NormalizeAngle360(float angle)
 {
-    if (outWidth) {
-        *outWidth = 0;
+    while (angle < 0.0f) {
+        angle += 360.0f;
     }
-    if (outHeight) {
-        *outHeight = 0;
+    while (angle >= 360.0f) {
+        angle -= 360.0f;
     }
-
-    if (path.empty() || !EnsureGdiplusStarted()) {
-        return nullptr;
-    }
-
-    int size = 0;
-    unsigned char* bytes = g_fileMgr.GetData(path.c_str(), &size);
-    if (!bytes || size <= 0) {
-        delete[] bytes;
-        return nullptr;
-    }
-
-    HBITMAP outBitmap = nullptr;
-    HGLOBAL mem = GlobalAlloc(GMEM_MOVEABLE, static_cast<SIZE_T>(size));
-    if (mem) {
-        void* dst = GlobalLock(mem);
-        if (dst) {
-            std::memcpy(dst, bytes, static_cast<size_t>(size));
-            GlobalUnlock(mem);
-
-            IStream* stream = nullptr;
-            if (CreateStreamOnHGlobal(mem, TRUE, &stream) == S_OK) {
-                auto* bitmap = Gdiplus::Bitmap::FromStream(stream, FALSE);
-                if (bitmap && bitmap->GetLastStatus() == Gdiplus::Ok) {
-                    bitmap->GetHBITMAP(RGB(0, 0, 0), &outBitmap);
-                }
-                delete bitmap;
-                stream->Release();
-            } else {
-                GlobalFree(mem);
-            }
-        } else {
-            GlobalFree(mem);
-        }
-    }
-
-    delete[] bytes;
-
-    if (outBitmap) {
-        BITMAP bm{};
-        if (GetObjectA(outBitmap, sizeof(bm), &bm)) {
-            if (outWidth) {
-                *outWidth = bm.bmWidth;
-            }
-            if (outHeight) {
-                *outHeight = bm.bmHeight;
-            }
-        }
-    }
-
-    return outBitmap;
+    return angle;
 }
 
-void DrawBitmapTransparent(HDC target, HBITMAP bitmap, const RECT& dst)
+int ResolveFacingDirFromRotationDegrees(float rotationDegrees)
 {
-    if (!target || !bitmap) {
-        return;
-    }
-
-    BITMAP bm{};
-    if (!GetObjectA(bitmap, sizeof(bm), &bm) || bm.bmWidth <= 0 || bm.bmHeight <= 0) {
-        return;
-    }
-
-    HDC srcDC = CreateCompatibleDC(target);
-    if (!srcDC) {
-        return;
-    }
-
-    HGDIOBJ oldBitmap = SelectObject(srcDC, bitmap);
-    TransparentBlt(target,
-        dst.left,
-        dst.top,
-        dst.right - dst.left,
-        dst.bottom - dst.top,
-        srcDC,
-        0,
-        0,
-        bm.bmWidth,
-        bm.bmHeight,
-        RGB(255, 0, 255));
-    SelectObject(srcDC, oldBitmap);
-    DeleteDC(srcDC);
+    return static_cast<int>((NormalizeAngle360(rotationDegrees) + 22.5f) / 45.0f) & 7;
 }
 
-void DrawBitmapStretched(HDC target, HBITMAP bitmap, const RECT& dst, const RECT* srcRect = nullptr)
+int ResolveDisplayedPlayerDir()
 {
-    if (!target || !bitmap) {
-        return;
+    if (g_world.m_player && std::isfinite(g_world.m_player->m_roty)) {
+        return ResolveFacingDirFromRotationDegrees(g_world.m_player->m_roty);
     }
 
-    BITMAP bm{};
-    if (!GetObjectA(bitmap, sizeof(bm), &bm) || bm.bmWidth <= 0 || bm.bmHeight <= 0) {
+    // Match the actor-facing convention used by PacketDirToRotationDegrees.
+    return ((g_session.m_playerDir & 7) + 4) & 7;
+}
+
+shopui::BitmapPixels LoadBitmapPixelsFromGameData(const std::string& path)
+{
+    return shopui::LoadBitmapPixelsFromGameData(path, true);
+}
+
+void DrawBitmapPixelsAlphaBlended(HDC target, const shopui::BitmapPixels& bitmap, const RECT& dst)
+{
+    if (!target || !bitmap.IsValid() || dst.right <= dst.left || dst.bottom <= dst.top) {
         return;
     }
+    AlphaBlendArgbToHdc(target,
+                        dst.left,
+                        dst.top,
+                        dst.right - dst.left,
+                        dst.bottom - dst.top,
+                        bitmap.pixels.data(),
+                        bitmap.width,
+                        bitmap.height);
+}
 
-    RECT src{ 0, 0, bm.bmWidth, bm.bmHeight };
+void DrawBgraPixelsStretched(HDC target,
+    const u32* pixels,
+    int bitmapWidth,
+    int bitmapHeight,
+    const RECT& dst,
+    const RECT* srcRect = nullptr)
+{
+    if (!target || !pixels || bitmapWidth <= 0 || bitmapHeight <= 0 || dst.right <= dst.left || dst.bottom <= dst.top) {
+        return;
+    }
+    RECT src{ 0, 0, bitmapWidth, bitmapHeight };
     if (srcRect) {
         src = *srcRect;
     }
-
-    HDC srcDC = CreateCompatibleDC(target);
-    if (!srcDC) {
+    if (src.left < 0 || src.top < 0 || src.right > bitmapWidth || src.bottom > bitmapHeight || src.right <= src.left || src.bottom <= src.top) {
         return;
     }
 
-    HGDIOBJ oldBitmap = SelectObject(srcDC, bitmap);
+    BITMAPINFO bmi{};
+    bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    bmi.bmiHeader.biWidth = bitmapWidth;
+    bmi.bmiHeader.biHeight = -bitmapHeight;
+    bmi.bmiHeader.biPlanes = 1;
+    bmi.bmiHeader.biBitCount = 32;
+    bmi.bmiHeader.biCompression = BI_RGB;
+
     const int oldStretchMode = SetStretchBltMode(target, COLORONCOLOR);
-    StretchBlt(target,
+    StretchDIBits(target,
         dst.left,
         dst.top,
         dst.right - dst.left,
         dst.bottom - dst.top,
-        srcDC,
         src.left,
         src.top,
         src.right - src.left,
         src.bottom - src.top,
+        pixels,
+        &bmi,
+        DIB_RGB_COLORS,
         SRCCOPY);
     SetStretchBltMode(target, oldStretchMode);
-    SelectObject(srcDC, oldBitmap);
-    DeleteDC(srcDC);
 }
 
 RECT FitRectPreservingAspect(const RECT& dst, int srcWidth, int srcHeight)
@@ -412,13 +366,88 @@ void FrameSolidRect(HDC hdc, const RECT& rect, COLORREF color)
     DeleteObject(brush);
 }
 
+#if RO_ENABLE_QT6_UI
+QFont BuildMinimapFontFromHdc(HDC hdc)
+{
+    LOGFONTA logFont{};
+    if (hdc) {
+        if (HGDIOBJ fontObject = GetCurrentObject(hdc, OBJ_FONT)) {
+            GetObjectA(fontObject, sizeof(logFont), &logFont);
+        }
+    }
+
+    const QString family = logFont.lfFaceName[0] != '\0'
+        ? QString::fromLocal8Bit(logFont.lfFaceName)
+        : QStringLiteral("MS Sans Serif");
+    QFont font(family);
+    font.setPixelSize(logFont.lfHeight != 0 ? (std::max)(1, static_cast<int>(std::abs(logFont.lfHeight))) : 13);
+    font.setBold(logFont.lfWeight >= FW_BOLD);
+    font.setStyleStrategy(QFont::NoAntialias);
+    return font;
+}
+
+Qt::Alignment ToQtTextAlignment(UINT format)
+{
+    Qt::Alignment alignment = Qt::AlignLeft | Qt::AlignTop;
+    if (format & DT_CENTER) {
+        alignment &= ~Qt::AlignLeft;
+        alignment |= Qt::AlignHCenter;
+    } else if (format & DT_RIGHT) {
+        alignment &= ~Qt::AlignLeft;
+        alignment |= Qt::AlignRight;
+    }
+
+    if (format & DT_VCENTER) {
+        alignment &= ~Qt::AlignTop;
+        alignment |= Qt::AlignVCenter;
+    } else if (format & DT_BOTTOM) {
+        alignment &= ~Qt::AlignTop;
+        alignment |= Qt::AlignBottom;
+    }
+
+    return alignment;
+}
+
+void DrawWindowTextQt(HDC hdc, const RECT& rect, const char* text, COLORREF color, UINT format)
+{
+    if (!hdc || !text || rect.right <= rect.left || rect.bottom <= rect.top) {
+        return;
+    }
+
+    const QString label = QString::fromLocal8Bit(text);
+    if (label.isEmpty()) {
+        return;
+    }
+
+    const int width = rect.right - rect.left;
+    const int height = rect.bottom - rect.top;
+    std::vector<unsigned int> pixels(static_cast<size_t>(width) * static_cast<size_t>(height), 0u);
+    QImage image(reinterpret_cast<uchar*>(pixels.data()), width, height, width * static_cast<int>(sizeof(unsigned int)), QImage::Format_ARGB32);
+    if (image.isNull()) {
+        return;
+    }
+
+    QPainter painter(&image);
+    painter.setRenderHint(QPainter::Antialiasing, false);
+    painter.setRenderHint(QPainter::TextAntialiasing, false);
+    painter.setFont(BuildMinimapFontFromHdc(hdc));
+    painter.setPen(QColor(GetRValue(color), GetGValue(color), GetBValue(color)));
+    painter.drawText(QRect(0, 0, width, height), ToQtTextAlignment(format) | Qt::TextSingleLine, label);
+    AlphaBlendArgbToHdc(hdc, rect.left, rect.top, width, height, pixels.data(), width, height);
+}
+#endif
+
 void DrawWindowText(HDC hdc, int windowRight, int x, int y, const char* text, COLORREF color, UINT format, int height = 16)
 {
     RECT rect = { x, y, windowRight - 4, y + height };
     SetBkMode(hdc, TRANSPARENT);
     SetTextColor(hdc, color);
     HGDIOBJ oldFont = SelectObject(hdc, GetStockObject(DEFAULT_GUI_FONT));
+#if RO_ENABLE_QT6_UI
+    DrawWindowTextQt(hdc, rect, text ? text : "", color, format);
+#else
     DrawTextA(hdc, text ? text : "", -1, &rect, format);
+#endif
     SelectObject(hdc, oldFont);
 }
 
@@ -449,19 +478,61 @@ std::string StripExtension(const std::string& value)
     return out;
 }
 
+#if RO_ENABLE_QT6_UI
+QImage BitmapPixelsToQImage(const shopui::BitmapPixels& bitmap)
+{
+    if (!bitmap.IsValid()) {
+        return QImage();
+    }
+
+    QImage image(
+        reinterpret_cast<const uchar*>(bitmap.pixels.data()),
+        bitmap.width,
+        bitmap.height,
+        bitmap.width * static_cast<int>(sizeof(unsigned int)),
+        QImage::Format_ARGB32);
+    return image.copy();
+}
+#endif
+
+bool BlitArgbCacheToHdc(HDC target, int x, int y, int width, int height, const void* bits)
+{
+    if (!target || !bits || width <= 0 || height <= 0) {
+        return false;
+    }
+
+    BITMAPINFO bmi{};
+    bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    bmi.bmiHeader.biWidth = width;
+    bmi.bmiHeader.biHeight = -height;
+    bmi.bmiHeader.biPlanes = 1;
+    bmi.bmiHeader.biBitCount = 32;
+    bmi.bmiHeader.biCompression = BI_RGB;
+
+    return StretchDIBits(
+               target,
+               x,
+               y,
+               width,
+               height,
+               0,
+               0,
+               width,
+               height,
+               bits,
+               &bmi,
+               DIB_RGB_COLORS,
+               SRCCOPY) != GDI_ERROR;
+}
+
 } // namespace
 
 UIRoMapWnd::UIRoMapWnd()
     : m_controlsCreated(false),
       m_closeButton(nullptr),
-      m_titleBarBitmap(nullptr),
-      m_bodyBitmap(nullptr),
-      m_mapBitmap(nullptr),
-      m_renderCacheDC(nullptr),
-      m_renderCacheBitmap(nullptr),
-      m_renderCacheOldBitmap(nullptr),
-      m_renderCacheWidth(0),
-      m_renderCacheHeight(0),
+      m_titleBarBitmap(),
+      m_bodyBitmap(),
+      m_renderCacheSurface(),
       m_renderCacheDirty(true),
       m_mapBitmapWidth(0),
       m_mapBitmapHeight(0),
@@ -470,7 +541,8 @@ UIRoMapWnd::UIRoMapWnd()
       m_lastPlayerX(std::numeric_limits<int>::min()),
       m_lastPlayerY(std::numeric_limits<int>::min()),
       m_lastPlayerDir(std::numeric_limits<int>::min()),
-      m_lastDynamicInvalidateTick(0)
+      m_lastDynamicInvalidateTick(0),
+      m_qtCloseButtonPressed(false)
 {
     Create(kWindowWidth, kWindowHeight);
 
@@ -556,6 +628,12 @@ void UIRoMapWnd::OnCreate(int x, int y)
     m_controlsCreated = true;
     LoadAssets();
 
+    if (IsQtUiRuntimeEnabled()) {
+        LayoutChildren();
+        UpdateMinimapBitmap();
+        return;
+    }
+
     m_closeButton = new UIBitmapButton();
     m_closeButton->SetBitmapName(ResolveUiAssetPath("sys_close_off.bmp").c_str(), 0);
     m_closeButton->SetBitmapName(ResolveUiAssetPath("sys_close_on.bmp").c_str(), 1);
@@ -569,6 +647,42 @@ void UIRoMapWnd::OnCreate(int x, int y)
     UpdateMinimapBitmap();
 }
 
+void UIRoMapWnd::OnLBtnDown(int x, int y)
+{
+    const RECT closeRect = GetCloseButtonRect();
+    const bool insideClose = x >= closeRect.left && x < closeRect.right
+        && y >= closeRect.top && y < closeRect.bottom;
+    if (IsQtUiRuntimeEnabled() && insideClose) {
+        m_qtCloseButtonPressed = true;
+        return;
+    }
+
+    m_qtCloseButtonPressed = false;
+    UIFrameWnd::OnLBtnDown(x, y);
+}
+
+void UIRoMapWnd::OnLBtnDblClk(int x, int y)
+{
+    OnLBtnDown(x, y);
+}
+
+void UIRoMapWnd::OnLBtnUp(int x, int y)
+{
+    if (m_qtCloseButtonPressed) {
+        const RECT closeRect = GetCloseButtonRect();
+        const bool shouldClose = x >= closeRect.left && x < closeRect.right
+            && y >= closeRect.top && y < closeRect.bottom;
+        m_qtCloseButtonPressed = false;
+        if (shouldClose) {
+            SetShow(0);
+            StoreInfo();
+        }
+        return;
+    }
+
+    UIFrameWnd::OnLBtnUp(x, y);
+}
+
 void UIRoMapWnd::OnProcess()
 {
     UIFrameWnd::OnProcess();
@@ -578,7 +692,7 @@ void UIRoMapWnd::OnProcess()
 
     const int playerX = g_session.m_playerPosX;
     const int playerY = g_session.m_playerPosY;
-    const int playerDir = g_session.m_playerDir;
+    const int playerDir = ResolveDisplayedPlayerDir();
     if (playerX == m_lastPlayerX && playerY == m_lastPlayerY && playerDir == m_lastPlayerDir) {
         return;
     }
@@ -619,14 +733,14 @@ void UIRoMapWnd::DrawWindowContents(HDC hdc, int baseX, int baseY)
         SelectClipRgn(hdc, clipRgn);
     }
 
-    if (m_bodyBitmap) {
-        DrawBitmapTransparent(hdc, m_bodyBitmap, bodyRect);
+    if (m_bodyBitmap.IsValid()) {
+        DrawBitmapPixelsAlphaBlended(hdc, m_bodyBitmap, bodyRect);
     } else {
         FillSolidRect(hdc, bodyRect, RGB(209, 216, 228));
     }
 
-    if (m_titleBarBitmap) {
-        DrawBitmapTransparent(hdc, m_titleBarBitmap, titleRect);
+    if (m_titleBarBitmap.IsValid()) {
+        DrawBitmapPixelsAlphaBlended(hdc, m_titleBarBitmap, titleRect);
     } else {
         FillSolidRect(hdc, titleRect, RGB(98, 114, 158));
     }
@@ -644,7 +758,7 @@ void UIRoMapWnd::DrawWindowContents(HDC hdc, int baseX, int baseY)
         attrArea = gameMode->m_world->m_rootNode.m_attrArea;
     }
 
-    if (m_mapBitmap && m_mapBitmapWidth > 0 && m_mapBitmapHeight > 0) {
+    if (m_mapBitmapWidth > 0 && m_mapBitmapHeight > 0) {
         if (zoom > kMinZoom + 0.001f) {
             zoomedView = true;
             const float viewAspect = static_cast<float>(mapRect.right - mapRect.left) / static_cast<float>(mapRect.bottom - mapRect.top);
@@ -682,10 +796,10 @@ void UIRoMapWnd::DrawWindowContents(HDC hdc, int baseX, int baseY)
             srcRect.top = (std::max)(0, (std::min)(static_cast<int>(srcRect.top), m_mapBitmapHeight - srcHeight));
             srcRect.right = srcRect.left + srcWidth;
             srcRect.bottom = srcRect.top + srcHeight;
-            DrawBitmapStretched(hdc, m_mapBitmap, mapRect, &srcRect);
+            DrawBgraPixelsStretched(hdc, m_mapPixels.data(), m_mapBitmapWidth, m_mapBitmapHeight, mapRect, &srcRect);
         } else {
             drawRect = FitRectPreservingAspect(mapRect, m_mapBitmapWidth, m_mapBitmapHeight);
-            DrawBitmapStretched(hdc, m_mapBitmap, drawRect);
+            DrawBgraPixelsStretched(hdc, m_mapPixels.data(), m_mapBitmapWidth, m_mapBitmapHeight, drawRect);
         }
     } else {
         FillSolidRect(hdc, mapRect, RGB(62, 88, 52));
@@ -774,16 +888,21 @@ void UIRoMapWnd::OnDraw()
         return;
     }
 
-    const bool useShared = (UIWindow::GetSharedDrawDC() != nullptr);
-    HDC hdc = useShared ? UIWindow::GetSharedDrawDC() : GetDC(g_hMainWnd);
+    if (IsQtUiRuntimeEnabled()) {
+        UpdateMinimapBitmap();
+        m_lastVisualStateToken = BuildVisualStateToken();
+        m_hasVisualStateToken = true;
+        m_isDirty = 0;
+        return;
+    }
+
+    HDC hdc = AcquireDrawTarget();
     if (!hdc) {
         return;
     }
 
     DrawToHdc(hdc, m_x, m_y);
-    if (!useShared) {
-        ReleaseDC(g_hMainWnd, hdc);
-    }
+    ReleaseDrawTarget(hdc);
 }
 
 void UIRoMapWnd::DrawToHdc(HDC hdc, int drawX, int drawY)
@@ -800,13 +919,15 @@ void UIRoMapWnd::DrawToHdc(HDC hdc, int drawX, int drawY)
         InvalidateRenderCache();
     }
 
-    EnsureRenderCache(hdc);
-    if (m_renderCacheDC && m_renderCacheBitmap) {
+    EnsureRenderCache();
+    if (m_renderCacheSurface.IsValid()) {
         if (m_renderCacheDirty) {
-            DrawWindowContents(m_renderCacheDC, 0, 0);
+            DrawWindowContents(m_renderCacheSurface.GetDC(), 0, 0);
             m_renderCacheDirty = false;
         }
-        BitBlt(hdc, drawX, drawY, m_w, m_h, m_renderCacheDC, 0, 0, SRCCOPY);
+        if (!BlitArgbCacheToHdc(hdc, drawX, drawY, m_w, m_h, m_renderCacheSurface.GetBits())) {
+            DrawWindowContents(hdc, drawX, drawY);
+        }
     } else {
         DrawWindowContents(hdc, drawX, drawY);
     }
@@ -832,6 +953,336 @@ void UIRoMapWnd::StoreInfo()
     SaveUiWindowPlacement("RoMapWnd", m_x, m_y);
 }
 
+bool UIRoMapWnd::GetDisplayDataForQt(DisplayData* outData) const
+{
+    if (!outData) {
+        return false;
+    }
+
+    UIRoMapWnd* mutableThis = const_cast<UIRoMapWnd*>(this);
+    mutableThis->EnsureCreated();
+    mutableThis->UpdateMinimapBitmap();
+
+    DisplayData data{};
+    data.imageRevision = static_cast<int>(BuildVisualStateToken() & 0x7fffffff);
+
+    const RECT mapRect{ m_x + kBodyInset, m_y + kMapTop, m_x + kBodyInset + kMapSize, m_y + kMapTop + kMapSize };
+    data.mapX = mapRect.left;
+    data.mapY = mapRect.top;
+    data.mapWidth = mapRect.right - mapRect.left;
+    data.mapHeight = mapRect.bottom - mapRect.top;
+
+    const RECT coordsRect{ m_x + 8, m_y + kCoordsTop, m_x + m_w - 8, m_y + kCoordsTop + kCoordsHeight };
+    data.coordsX = coordsRect.left;
+    data.coordsY = coordsRect.top;
+    data.coordsWidth = coordsRect.right - coordsRect.left;
+    data.coordsHeight = coordsRect.bottom - coordsRect.top;
+
+    const RECT closeRect = GetCloseButtonRect();
+    data.closeX = closeRect.left;
+    data.closeY = closeRect.top;
+    data.closeWidth = closeRect.right - closeRect.left;
+    data.closeHeight = closeRect.bottom - closeRect.top;
+    data.closePressed = m_qtCloseButtonPressed;
+
+    data.mapName = StripExtension(GetCurrentMinimapBitmapName());
+    char coordsText[64] = {};
+    std::snprintf(coordsText, sizeof(coordsText), "X : %d    Y : %d", g_session.m_playerPosX, g_session.m_playerPosY);
+    data.coordsText = coordsText;
+
+    RECT drawRect = mapRect;
+    RECT srcRect{ 0, 0, m_mapBitmapWidth, m_mapBitmapHeight };
+    bool zoomedView = false;
+
+    const float zoom = (std::max)(kMinZoom, (std::min)(kMaxZoom, g_windowMgr.m_miniMapZoomFactor));
+    const CGameMode* gameMode = g_modeMgr.GetCurrentGameMode();
+    RECT attrArea{ 0, 0, 0, 0 };
+    if (gameMode && gameMode->m_world) {
+        attrArea = gameMode->m_world->m_rootNode.m_attrArea;
+    }
+
+    if (m_mapBitmapWidth > 0 && m_mapBitmapHeight > 0) {
+        if (zoom > kMinZoom + 0.001f) {
+            zoomedView = true;
+            const float viewAspect = static_cast<float>(mapRect.right - mapRect.left) / static_cast<float>(mapRect.bottom - mapRect.top);
+            const float bitmapAspect = static_cast<float>(m_mapBitmapWidth) / static_cast<float>(m_mapBitmapHeight);
+
+            int srcWidth = 0;
+            int srcHeight = 0;
+            if (bitmapAspect > viewAspect) {
+                srcHeight = static_cast<int>(m_mapBitmapHeight / zoom);
+                srcWidth = static_cast<int>(srcHeight * viewAspect);
+            } else {
+                srcWidth = static_cast<int>(m_mapBitmapWidth / zoom);
+                srcHeight = static_cast<int>(srcWidth / viewAspect);
+            }
+
+            srcWidth = (std::max)(1, (std::min)(srcWidth, m_mapBitmapWidth));
+            srcHeight = (std::max)(1, (std::min)(srcHeight, m_mapBitmapHeight));
+
+            float centerNormX = 0.5f;
+            float centerNormY = 0.5f;
+            const int attrWidth = attrArea.right - attrArea.left;
+            const int attrHeight = attrArea.bottom - attrArea.top;
+            if (attrWidth > 0 && attrHeight > 0) {
+                centerNormX = static_cast<float>(g_session.m_playerPosX - attrArea.left) / static_cast<float>(attrWidth);
+                centerNormY = 1.0f - (static_cast<float>(g_session.m_playerPosY - attrArea.top) / static_cast<float>(attrHeight));
+                centerNormX = (std::max)(0.0f, (std::min)(1.0f, centerNormX));
+                centerNormY = (std::max)(0.0f, (std::min)(1.0f, centerNormY));
+            }
+
+            const int centerX = static_cast<int>(centerNormX * m_mapBitmapWidth);
+            const int centerY = static_cast<int>(centerNormY * m_mapBitmapHeight);
+            srcRect.left = centerX - srcWidth / 2;
+            srcRect.top = centerY - srcHeight / 2;
+            srcRect.left = (std::max)(0, (std::min)(static_cast<int>(srcRect.left), m_mapBitmapWidth - srcWidth));
+            srcRect.top = (std::max)(0, (std::min)(static_cast<int>(srcRect.top), m_mapBitmapHeight - srcHeight));
+            srcRect.right = srcRect.left + srcWidth;
+            srcRect.bottom = srcRect.top + srcHeight;
+        } else {
+            drawRect = FitRectPreservingAspect(mapRect, m_mapBitmapWidth, m_mapBitmapHeight);
+        }
+    }
+
+    auto appendMarker = [&](int cellX, int cellY, COLORREF fillColor, int radius) {
+        POINT pt{};
+        if (!BuildMarkerPoint(attrArea, drawRect, zoomedView, srcRect, m_mapBitmapWidth, m_mapBitmapHeight, cellX, cellY, &pt)) {
+            return;
+        }
+        DisplayMarker marker{};
+        marker.x = pt.x;
+        marker.y = pt.y;
+        marker.radius = radius;
+        marker.color = static_cast<unsigned int>(fillColor & 0x00FFFFFFu);
+        data.markers.push_back(marker);
+    };
+
+    if (gameMode) {
+        for (const auto& entry : gameMode->m_partyPosList) {
+            appendMarker(entry.second.x, entry.second.y, entry.second.color & 0x00FFFFFFu, 2);
+        }
+        for (const auto& entry : gameMode->m_guildPosList) {
+            appendMarker(entry.second.x, entry.second.y, entry.second.color & 0x00FFFFFFu, 2);
+        }
+        if (g_windowMgr.m_isDrawCompass != 0) {
+            for (const auto& entry : gameMode->m_compassPosList) {
+                appendMarker(entry.second.x, entry.second.y, entry.second.color & 0x00FFFFFFu, 3);
+            }
+        }
+    }
+
+    POINT playerPoint{};
+    if (BuildMarkerPoint(attrArea, drawRect, zoomedView, srcRect, m_mapBitmapWidth, m_mapBitmapHeight,
+            g_session.m_playerPosX, g_session.m_playerPosY, &playerPoint)) {
+        data.playerVisible = true;
+        data.playerX = playerPoint.x;
+        data.playerY = playerPoint.y;
+        data.playerDirection = ResolveDisplayedPlayerDir();
+    }
+
+    *outData = std::move(data);
+    return true;
+}
+
+bool UIRoMapWnd::BuildQtMinimapImage(QImage* outImage) const
+{
+#if !RO_ENABLE_QT6_UI
+    (void)outImage;
+    return false;
+#else
+    if (!outImage) {
+        return false;
+    }
+
+    UIRoMapWnd* mutableThis = const_cast<UIRoMapWnd*>(this);
+    mutableThis->EnsureCreated();
+    mutableThis->UpdateMinimapBitmap();
+
+    if (m_mapBitmapWidth <= 0 || m_mapBitmapHeight <= 0 || m_mapPixels.empty()) {
+        return false;
+    }
+
+    const QImage sourceImage(
+        reinterpret_cast<const uchar*>(m_mapPixels.data()),
+        m_mapBitmapWidth,
+        m_mapBitmapHeight,
+        m_mapBitmapWidth * static_cast<int>(sizeof(u32)),
+        QImage::Format_ARGB32);
+    if (sourceImage.isNull()) {
+        return false;
+    }
+
+    QImage composed(kMapSize, kMapSize, QImage::Format_ARGB32_Premultiplied);
+    composed.fill(qRgba(18, 22, 29, 255));
+
+    QRect targetRect(0, 0, kMapSize, kMapSize);
+    QRect sourceRect(0, 0, sourceImage.width(), sourceImage.height());
+    const float zoom = (std::max)(kMinZoom, (std::min)(kMaxZoom, g_windowMgr.m_miniMapZoomFactor));
+    const CGameMode* gameMode = g_modeMgr.GetCurrentGameMode();
+    RECT attrArea{ 0, 0, 0, 0 };
+    if (gameMode && gameMode->m_world) {
+        attrArea = gameMode->m_world->m_rootNode.m_attrArea;
+    }
+
+    if (zoom > kMinZoom + 0.001f) {
+        const float viewAspect = static_cast<float>(kMapSize) / static_cast<float>(kMapSize);
+        const float bitmapAspect = static_cast<float>(sourceImage.width()) / static_cast<float>(sourceImage.height());
+        int srcWidth = 0;
+        int srcHeight = 0;
+        if (bitmapAspect > viewAspect) {
+            srcHeight = static_cast<int>(sourceImage.height() / zoom);
+            srcWidth = static_cast<int>(srcHeight * viewAspect);
+        } else {
+            srcWidth = static_cast<int>(sourceImage.width() / zoom);
+            srcHeight = static_cast<int>(srcWidth / viewAspect);
+        }
+
+        srcWidth = (std::max)(1, (std::min)(srcWidth, sourceImage.width()));
+        srcHeight = (std::max)(1, (std::min)(srcHeight, sourceImage.height()));
+
+        float centerNormX = 0.5f;
+        float centerNormY = 0.5f;
+        const int attrWidth = attrArea.right - attrArea.left;
+        const int attrHeight = attrArea.bottom - attrArea.top;
+        if (attrWidth > 0 && attrHeight > 0) {
+            centerNormX = static_cast<float>(g_session.m_playerPosX - attrArea.left) / static_cast<float>(attrWidth);
+            centerNormY = 1.0f - (static_cast<float>(g_session.m_playerPosY - attrArea.top) / static_cast<float>(attrHeight));
+            centerNormX = (std::max)(0.0f, (std::min)(1.0f, centerNormX));
+            centerNormY = (std::max)(0.0f, (std::min)(1.0f, centerNormY));
+        }
+
+        const int centerX = static_cast<int>(centerNormX * sourceImage.width());
+        const int centerY = static_cast<int>(centerNormY * sourceImage.height());
+        int srcLeft = centerX - srcWidth / 2;
+        int srcTop = centerY - srcHeight / 2;
+        srcLeft = (std::max)(0, (std::min)(srcLeft, sourceImage.width() - srcWidth));
+        srcTop = (std::max)(0, (std::min)(srcTop, sourceImage.height() - srcHeight));
+        sourceRect = QRect(srcLeft, srcTop, srcWidth, srcHeight);
+    } else {
+        RECT fitted = FitRectPreservingAspect(RECT{ 0, 0, kMapSize, kMapSize }, sourceImage.width(), sourceImage.height());
+        targetRect = QRect(fitted.left, fitted.top, fitted.right - fitted.left, fitted.bottom - fitted.top);
+    }
+
+    {
+        QPainter painter(&composed);
+        painter.setRenderHint(QPainter::SmoothPixmapTransform, false);
+        painter.drawImage(targetRect, sourceImage, sourceRect);
+    }
+
+    *outImage = composed;
+    return true;
+#endif
+}
+
+bool UIRoMapWnd::BuildOverlayImageForRenderer(QImage* outImage) const
+{
+#if !RO_ENABLE_QT6_UI
+    (void)outImage;
+    return false;
+#else
+    if (!outImage) {
+        return false;
+    }
+
+    UIRoMapWnd* mutableThis = const_cast<UIRoMapWnd*>(this);
+    mutableThis->EnsureCreated();
+    mutableThis->UpdateMinimapBitmap();
+    mutableThis->LayoutChildren();
+
+    QImage minimapImage;
+    if (!BuildQtMinimapImage(&minimapImage)) {
+        return false;
+    }
+
+    QImage composed(m_w, m_h, QImage::Format_ARGB32);
+    composed.fill(Qt::transparent);
+
+    QPainter painter(&composed);
+    painter.setRenderHint(QPainter::Antialiasing, false);
+    painter.setRenderHint(QPainter::SmoothPixmapTransform, false);
+    painter.setRenderHint(QPainter::TextAntialiasing, false);
+
+    const QRect windowRect(0, 0, m_w, m_h);
+    const QRect titleRect(0, 0, m_w, kTitleBarHeight);
+    const QRect bodyRect(0, kTitleBarHeight, m_w, m_h - kTitleBarHeight);
+    const QRect mapRect(kBodyInset, kMapTop, kMapSize, kMapSize);
+    const QRect coordsRect(8, kCoordsTop, m_w - 16, kCoordsHeight);
+
+    QPainterPath clipPath;
+    clipPath.addRoundedRect(QRectF(windowRect), static_cast<qreal>(kWindowCornerRadius), static_cast<qreal>(kWindowCornerRadius));
+    painter.setClipPath(clipPath);
+
+    const QImage bodyImage = BitmapPixelsToQImage(m_bodyBitmap);
+    if (!bodyImage.isNull()) {
+        painter.drawImage(bodyRect, bodyImage);
+    } else {
+        painter.fillRect(bodyRect, QColor(209, 216, 228));
+    }
+
+    const QImage titleImage = BitmapPixelsToQImage(m_titleBarBitmap);
+    if (!titleImage.isNull()) {
+        painter.drawImage(titleRect, titleImage);
+    } else {
+        painter.fillRect(titleRect, QColor(98, 114, 158));
+    }
+
+    painter.drawImage(mapRect, minimapImage);
+    painter.setClipping(false);
+
+    QPen borderPen(QColor(57, 66, 86));
+    painter.setPen(borderPen);
+    painter.setBrush(Qt::NoBrush);
+    painter.drawRoundedRect(QRectF(0.5, 0.5, static_cast<qreal>(m_w - 1), static_cast<qreal>(m_h - 1)),
+        static_cast<qreal>(kWindowCornerRadius),
+        static_cast<qreal>(kWindowCornerRadius));
+    painter.drawRect(QRectF(mapRect.x() + 0.5, mapRect.y() + 0.5, static_cast<qreal>(mapRect.width() - 1), static_cast<qreal>(mapRect.height() - 1)));
+
+    QFont font(QStringLiteral("MS Sans Serif"));
+    font.setPixelSize(11);
+    font.setStyleStrategy(QFont::NoAntialias);
+    painter.setFont(font);
+
+    painter.setPen(Qt::black);
+    painter.drawText(QPoint(17, 11), QStringLiteral("Mini Map"));
+    painter.setPen(Qt::white);
+    painter.drawText(QPoint(18, 12), QStringLiteral("Mini Map"));
+
+    painter.setPen(Qt::black);
+    painter.drawText(coordsRect.adjusted(0, 0, -78, 0), Qt::AlignLeft | Qt::AlignVCenter | Qt::TextSingleLine,
+        QString::fromStdString(StripExtension(GetCurrentMinimapBitmapName())));
+    const QString coordsText = QStringLiteral("X : %1    Y : %2").arg(g_session.m_playerPosX).arg(g_session.m_playerPosY);
+    painter.drawText(coordsRect, Qt::AlignRight | Qt::AlignVCenter | Qt::TextSingleLine, coordsText);
+
+    if (m_closeButton && m_closeButton->m_show != 0) {
+        const shopui::BitmapPixels* drawBmp = nullptr;
+        if (m_closeButton->m_state == 1 && m_closeButton->m_pressedBitmap.IsValid()) {
+            drawBmp = &m_closeButton->m_pressedBitmap;
+        } else if (m_closeButton->m_state == 2 && m_closeButton->m_mouseonBitmap.IsValid()) {
+            drawBmp = &m_closeButton->m_mouseonBitmap;
+        } else if (m_closeButton->m_normalBitmap.IsValid()) {
+            drawBmp = &m_closeButton->m_normalBitmap;
+        } else if (m_closeButton->m_mouseonBitmap.IsValid()) {
+            drawBmp = &m_closeButton->m_mouseonBitmap;
+        } else if (m_closeButton->m_pressedBitmap.IsValid()) {
+            drawBmp = &m_closeButton->m_pressedBitmap;
+        }
+
+        if (drawBmp) {
+            const QImage closeImage = BitmapPixelsToQImage(*drawBmp);
+            if (!closeImage.isNull()) {
+                const int buttonOffsetX = m_closeButton->m_x - m_x;
+                const int buttonOffsetY = m_closeButton->m_y - m_y;
+                painter.drawImage(QRect(buttonOffsetX, buttonOffsetY, drawBmp->width, drawBmp->height), closeImage);
+            }
+        }
+    }
+
+    painter.end();
+    *outImage = composed;
+    return true;
+#endif
+}
+
 void UIRoMapWnd::EnsureCreated()
 {
     if (!m_controlsCreated) {
@@ -842,18 +1293,32 @@ void UIRoMapWnd::EnsureCreated()
 void UIRoMapWnd::LayoutChildren()
 {
     if (m_closeButton) {
-        m_closeButton->Move(m_x + m_w - 19, m_y + 3);
+        const RECT closeRect = GetCloseButtonRect();
+        m_closeButton->Move(closeRect.left, closeRect.top);
         m_closeButton->SetShow(1);
     }
 }
 
+RECT UIRoMapWnd::GetCloseButtonRect() const
+{
+    int width = kFallbackCloseButtonSize;
+    int height = kFallbackCloseButtonSize;
+    if (m_closeButton) {
+        width = m_closeButton->m_bitmapWidth > 0 ? m_closeButton->m_bitmapWidth : width;
+        height = m_closeButton->m_bitmapHeight > 0 ? m_closeButton->m_bitmapHeight : height;
+    }
+
+    RECT rc{ m_x + m_w - 19, m_y + 3, m_x + m_w - 19 + width, m_y + 3 + height };
+    return rc;
+}
+
 void UIRoMapWnd::LoadAssets()
 {
-    if (!m_titleBarBitmap) {
-        m_titleBarBitmap = LoadBitmapFromGameData(ResolveUiAssetPath("titlebar_fix.bmp"));
+    if (!m_titleBarBitmap.IsValid()) {
+        m_titleBarBitmap = LoadBitmapPixelsFromGameData(ResolveUiAssetPath("titlebar_fix.bmp"));
     }
-    if (!m_bodyBitmap) {
-        m_bodyBitmap = LoadBitmapFromGameData(ResolveUiAssetPath("itemwin_mid.bmp"));
+    if (!m_bodyBitmap.IsValid()) {
+        m_bodyBitmap = LoadBitmapPixelsFromGameData(ResolveUiAssetPath("itemwin_mid.bmp"));
     }
     InvalidateRenderCache();
 }
@@ -864,25 +1329,20 @@ void UIRoMapWnd::DrawCloseButton(HDC hdc, int drawX, int drawY)
         return;
     }
 
-    HBITMAP drawBmp = nullptr;
-    if (m_closeButton->m_state == 1 && m_closeButton->m_pressedBitmap) {
-        drawBmp = m_closeButton->m_pressedBitmap;
-    } else if (m_closeButton->m_state == 2 && m_closeButton->m_mouseonBitmap) {
-        drawBmp = m_closeButton->m_mouseonBitmap;
-    } else if (m_closeButton->m_normalBitmap) {
-        drawBmp = m_closeButton->m_normalBitmap;
-    } else if (m_closeButton->m_mouseonBitmap) {
-        drawBmp = m_closeButton->m_mouseonBitmap;
+    const shopui::BitmapPixels* drawBmp = nullptr;
+    if (m_closeButton->m_state == 1 && m_closeButton->m_pressedBitmap.IsValid()) {
+        drawBmp = &m_closeButton->m_pressedBitmap;
+    } else if (m_closeButton->m_state == 2 && m_closeButton->m_mouseonBitmap.IsValid()) {
+        drawBmp = &m_closeButton->m_mouseonBitmap;
+    } else if (m_closeButton->m_normalBitmap.IsValid()) {
+        drawBmp = &m_closeButton->m_normalBitmap;
+    } else if (m_closeButton->m_mouseonBitmap.IsValid()) {
+        drawBmp = &m_closeButton->m_mouseonBitmap;
     } else {
-        drawBmp = m_closeButton->m_pressedBitmap;
+        drawBmp = m_closeButton->m_pressedBitmap.IsValid() ? &m_closeButton->m_pressedBitmap : nullptr;
     }
 
     if (!drawBmp) {
-        return;
-    }
-
-    BITMAP bm{};
-    if (!GetObjectA(drawBmp, sizeof(bm), &bm) || bm.bmWidth <= 0 || bm.bmHeight <= 0) {
         return;
     }
 
@@ -891,77 +1351,48 @@ void UIRoMapWnd::DrawCloseButton(HDC hdc, int drawX, int drawY)
     RECT dst{
         drawX + buttonOffsetX,
         drawY + buttonOffsetY,
-        drawX + buttonOffsetX + bm.bmWidth,
-        drawY + buttonOffsetY + bm.bmHeight
+        drawX + buttonOffsetX + drawBmp->width,
+        drawY + buttonOffsetY + drawBmp->height
     };
-    DrawBitmapTransparent(hdc, drawBmp, dst);
-    m_closeButton->m_bitmapWidth = bm.bmWidth;
-    m_closeButton->m_bitmapHeight = bm.bmHeight;
+    shopui::DrawBitmapPixelsTransparent(hdc, *drawBmp, dst);
+    m_closeButton->m_bitmapWidth = drawBmp->width;
+    m_closeButton->m_bitmapHeight = drawBmp->height;
     m_closeButton->m_isDirty = 0;
 }
 
 void UIRoMapWnd::ReleaseAssets()
 {
     ReleaseRenderCache();
-    HBITMAP* bitmaps[] = {
-        &m_titleBarBitmap,
-        &m_bodyBitmap,
-        &m_mapBitmap,
-    };
-    for (HBITMAP* bitmap : bitmaps) {
-        if (*bitmap) {
-            DeleteObject(*bitmap);
-            *bitmap = nullptr;
-        }
-    }
+    m_titleBarBitmap.Clear();
+    m_bodyBitmap.Clear();
     m_mapBitmapWidth = 0;
     m_mapBitmapHeight = 0;
+    m_mapPixels.clear();
+    m_loadedBitmapName.clear();
+    m_loadedBitmapPath.clear();
 }
 
-void UIRoMapWnd::EnsureRenderCache(HDC referenceDc)
+void UIRoMapWnd::EnsureRenderCache()
 {
-    if (!referenceDc || m_w <= 0 || m_h <= 0) {
+    if (m_w <= 0 || m_h <= 0) {
         return;
     }
-    if (m_renderCacheDC && m_renderCacheBitmap && m_renderCacheWidth == m_w && m_renderCacheHeight == m_h) {
+    if (m_renderCacheSurface.IsValid()
+        && m_renderCacheSurface.GetWidth() == m_w
+        && m_renderCacheSurface.GetHeight() == m_h) {
         return;
     }
 
     ReleaseRenderCache();
-
-    m_renderCacheDC = CreateCompatibleDC(referenceDc);
-    if (!m_renderCacheDC) {
+    if (!m_renderCacheSurface.EnsureSize(m_w, m_h)) {
         return;
     }
-
-    m_renderCacheBitmap = CreateCompatibleBitmap(referenceDc, m_w, m_h);
-    if (!m_renderCacheBitmap) {
-        ReleaseRenderCache();
-        return;
-    }
-
-    m_renderCacheOldBitmap = static_cast<HBITMAP>(SelectObject(m_renderCacheDC, m_renderCacheBitmap));
-    m_renderCacheWidth = m_w;
-    m_renderCacheHeight = m_h;
     m_renderCacheDirty = true;
 }
 
 void UIRoMapWnd::ReleaseRenderCache()
 {
-    if (m_renderCacheDC && m_renderCacheOldBitmap) {
-        SelectObject(m_renderCacheDC, m_renderCacheOldBitmap);
-    }
-    m_renderCacheOldBitmap = nullptr;
-    if (m_renderCacheBitmap) {
-        DeleteObject(m_renderCacheBitmap);
-        m_renderCacheBitmap = nullptr;
-    }
-    if (m_renderCacheDC) {
-        DeleteDC(m_renderCacheDC);
-        m_renderCacheDC = nullptr;
-    }
-    m_renderCacheWidth = 0;
-    m_renderCacheHeight = 0;
+    m_renderCacheSurface.Release();
     m_renderCacheDirty = true;
 }
 
@@ -974,10 +1405,7 @@ void UIRoMapWnd::UpdateMinimapBitmap()
 {
     const std::string bitmapName = GetCurrentMinimapBitmapName();
     if (bitmapName.empty()) {
-        if (m_mapBitmap) {
-            DeleteObject(m_mapBitmap);
-            m_mapBitmap = nullptr;
-        }
+        m_mapPixels.clear();
         m_mapBitmapWidth = 0;
         m_mapBitmapHeight = 0;
         m_loadedBitmapName.clear();
@@ -986,21 +1414,29 @@ void UIRoMapWnd::UpdateMinimapBitmap()
         return;
     }
 
-    if (!m_loadedBitmapName.empty() && ToLowerAscii(m_loadedBitmapName) == ToLowerAscii(bitmapName) && m_mapBitmap) {
+    const bool hasCachedMinimap = !m_mapPixels.empty() && m_mapBitmapWidth > 0 && m_mapBitmapHeight > 0;
+    if (!m_loadedBitmapName.empty() && ToLowerAscii(m_loadedBitmapName) == ToLowerAscii(bitmapName) && hasCachedMinimap) {
         return;
     }
 
     const std::string resolvedPath = ResolveMinimapPath(bitmapName);
-    if (m_mapBitmap) {
-        DeleteObject(m_mapBitmap);
-        m_mapBitmap = nullptr;
-    }
+    m_mapPixels.clear();
     m_mapBitmapWidth = 0;
     m_mapBitmapHeight = 0;
     m_loadedBitmapName = bitmapName;
     m_loadedBitmapPath = resolvedPath;
     if (!resolvedPath.empty()) {
-        m_mapBitmap = LoadBitmapFromGameData(resolvedPath, &m_mapBitmapWidth, &m_mapBitmapHeight);
+        u32* pixels = nullptr;
+        if (LoadBgraPixelsFromGameData(resolvedPath.c_str(), &pixels, &m_mapBitmapWidth, &m_mapBitmapHeight) && pixels) {
+            const size_t pixelCount = static_cast<size_t>(m_mapBitmapWidth) * static_cast<size_t>(m_mapBitmapHeight);
+            m_mapPixels.assign(pixels, pixels + pixelCount);
+            for (u32& pixel : m_mapPixels) {
+                if ((pixel & 0x00FFFFFFu) == 0x00FF00FFu) {
+                    pixel = 0u;
+                }
+            }
+        }
+        delete[] pixels;
     }
     InvalidateRenderCache();
     Invalidate();

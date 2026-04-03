@@ -1,12 +1,13 @@
 #pragma once
 
 #include "UIFrameWnd.h"
+#include "UIShopCommon.h"
 #include "render3d/GraphicsSettings.h"
 #include "render3d/RenderBackend.h"
 
 #include <string>
 #include <vector>
-#include <windows.h>
+#include "platform/WindowsCompat.h"
 
 class UICheckBox;
 
@@ -14,6 +15,76 @@ void ApplySavedAudioSettings();
 
 class UIOptionWnd : public UIFrameWnd {
 public:
+    struct DisplayButton {
+        int x = 0;
+        int y = 0;
+        int width = 0;
+        int height = 0;
+        bool visible = true;
+        std::string label;
+    };
+
+    struct DisplayToggle {
+        int x = 0;
+        int y = 0;
+        int width = 0;
+        int height = 0;
+        bool checked = false;
+        std::string label;
+    };
+
+    struct DisplaySlider {
+        int x = 0;
+        int y = 0;
+        int width = 0;
+        int height = 0;
+        int value = 0;
+        std::string label;
+    };
+
+    struct DisplayGraphicsRow {
+        int x = 0;
+        int y = 0;
+        int width = 0;
+        int height = 0;
+        int prevX = 0;
+        int prevY = 0;
+        int prevWidth = 0;
+        int prevHeight = 0;
+        int nextX = 0;
+        int nextY = 0;
+        int nextWidth = 0;
+        int nextHeight = 0;
+        std::string prevLabel;
+        std::string nextLabel;
+        std::string label;
+        std::string value;
+    };
+
+    struct DisplayTab {
+        int x = 0;
+        int y = 0;
+        int width = 0;
+        int height = 0;
+        bool active = false;
+        std::string label;
+    };
+
+    struct DisplayData {
+        bool collapsed = false;
+        int activeTab = 0;
+        int contentX = 0;
+        int contentY = 0;
+        int contentWidth = 0;
+        int contentHeight = 0;
+        std::vector<DisplayButton> systemButtons;
+        DisplayButton restartButton;
+        std::vector<DisplayTab> tabs;
+        std::vector<DisplayToggle> toggles;
+        std::vector<DisplaySlider> sliders;
+        std::vector<DisplayGraphicsRow> graphicsRows;
+    };
+
     UIOptionWnd();
     ~UIOptionWnd() override;
 
@@ -25,6 +96,7 @@ public:
     void OnLBtnDblClk(int x, int y) override;
     msgresult_t SendMsg(UIWindow* sender, int msg, msgparam_t wparam, msgparam_t lparam, msgparam_t extra) override;
     void OnKeyDown(int virtualKey);
+    bool GetDisplayDataForQt(DisplayData* outData) const;
 
 private:
     enum TabId {
@@ -77,6 +149,8 @@ private:
     RECT GetRestartButtonRect() const;
     RECT GetBgmSliderRect() const;
     RECT GetSoundSliderRect() const;
+    RECT GetAudioToggleRect(int toggleIndex) const;
+    RECT GetGameToggleRect(int toggleIndex) const;
     RECT GetSliderKnobRect(const RECT& sliderRect, int value) const;
     void DrawSlider(HDC hdc, const RECT& sliderRect, int value, const char* label) const;
     void DrawHeaderButton(HDC hdc, const RECT& rect, const char* text) const;
@@ -95,12 +169,13 @@ private:
     void CycleGraphicsSetting(GraphicsRowId rowId, int direction);
     std::string GetGraphicsRowValue(GraphicsRowId rowId) const;
     void SaveGraphicsPreferences() const;
+    bool HandleQtToggleClick(int x, int y);
 
     bool m_controlsCreated;
     bool m_assetsProbed;
-    HBITMAP m_frameBitmap;
+    shopui::BitmapPixels m_frameBitmap;
     std::string m_frameBitmapPath;
-    HBITMAP m_bodyBitmap;
+    shopui::BitmapPixels m_bodyBitmap;
     std::string m_bodyBitmapPath;
     UICheckBox* m_bgmOnCheckBox;
     UICheckBox* m_soundOnCheckBox;

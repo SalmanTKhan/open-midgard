@@ -129,11 +129,14 @@ CRes* CResMgr::Get(const char* fNameInput, bool bRefresh)
         fullPath[259] = '\0';
         std::strncat(fullPath, fNameInput, 259 - std::strlen(fullPath));
     }
+    fullPath[259] = '\0';
+
+    CHash normalizedPath(fullPath);
 
     // Check if already loaded
     auto& resMap = m_fileList[extIndex];
     for (auto& pair : resMap) {
-        if (std::strcmp(pair.first->m_String, fullPath) == 0) {
+        if (std::strcmp(pair.first->m_String, normalizedPath.m_String) == 0) {
             if (!bRefresh) {
                 pair.second->m_timeStamp = GetTickCount();
                 LeaveCriticalSection(&m_GetResSection);

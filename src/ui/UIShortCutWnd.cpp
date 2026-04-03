@@ -6,8 +6,17 @@
 #include "gamemode/Mode.h"
 #include "item/Item.h"
 #include "main/WinMain.h"
+#include "qtui/QtUiRuntime.h"
+#include "render/DC.h"
 #include "session/Session.h"
 #include "skill/Skill.h"
+
+#if RO_ENABLE_QT6_UI
+#include <QFont>
+#include <QImage>
+#include <QPainter>
+#include <QString>
+#endif
 
 #include <algorithm>
 #include <string>
@@ -23,10 +32,54 @@ constexpr int kSlotSize = 24;
 constexpr int kPageTextInsetX = 13;
 constexpr int kPageTextInsetY = 16;
 
-void DrawBitmapFit(HDC hdc, HBITMAP bitmap, const RECT& rect)
+void DrawBitmapFit(HDC hdc, const shopui::BitmapPixels& bitmap, const RECT& rect)
 {
-    shopui::DrawBitmapTransparent(hdc, bitmap, rect);
+    shopui::DrawBitmapPixelsTransparent(hdc, bitmap, rect);
 }
+
+#if RO_ENABLE_QT6_UI
+QFont BuildShortCutFontFromHdc(HDC hdc)
+{
+    LOGFONTA logFont{};
+    if (hdc) {
+        if (HGDIOBJ fontObject = GetCurrentObject(hdc, OBJ_FONT)) {
+            GetObjectA(fontObject, sizeof(logFont), &logFont);
+        }
+    }
+
+    const QString family = logFont.lfFaceName[0] != '\0'
+        ? QString::fromLocal8Bit(logFont.lfFaceName)
+        : QStringLiteral("MS Sans Serif");
+    QFont font(family);
+    font.setPixelSize(logFont.lfHeight != 0 ? (std::max)(1, static_cast<int>(std::abs(logFont.lfHeight))) : 13);
+    font.setBold(logFont.lfWeight >= FW_BOLD);
+    font.setStyleStrategy(QFont::NoAntialias);
+    return font;
+}
+
+void DrawShortCutTextPass(HDC hdc, const RECT& rect, const QString& text, COLORREF color)
+{
+    if (!hdc || text.isEmpty() || rect.right <= rect.left || rect.bottom <= rect.top) {
+        return;
+    }
+
+    const int width = rect.right - rect.left;
+    const int height = rect.bottom - rect.top;
+    std::vector<unsigned int> pixels(static_cast<size_t>(width) * static_cast<size_t>(height), 0u);
+    QImage image(reinterpret_cast<uchar*>(pixels.data()), width, height, width * static_cast<int>(sizeof(unsigned int)), QImage::Format_ARGB32);
+    if (image.isNull()) {
+        return;
+    }
+
+    QPainter painter(&image);
+    painter.setRenderHint(QPainter::Antialiasing, false);
+    painter.setRenderHint(QPainter::TextAntialiasing, false);
+    painter.setFont(BuildShortCutFontFromHdc(hdc));
+    painter.setPen(QColor(GetRValue(color), GetGValue(color), GetBValue(color)));
+    painter.drawText(QRect(0, 0, width, height), Qt::AlignRight | Qt::AlignBottom | Qt::TextSingleLine, text);
+    AlphaBlendArgbToHdc(hdc, rect.left, rect.top, width, height, pixels.data(), width, height);
+}
+#endif
 
 void DrawOutlinedText(HDC hdc, RECT rect, const std::string& text, COLORREF fillColor, COLORREF outlineColor = RGB(0, 0, 0))
 {
@@ -37,6 +90,22 @@ void DrawOutlinedText(HDC hdc, RECT rect, const std::string& text, COLORREF fill
     SetBkMode(hdc, TRANSPARENT);
     HGDIOBJ oldFont = SelectObject(hdc, shopui::GetUiFont());
 
+#if RO_ENABLE_QT6_UI
+    const QString label = QString::fromLocal8Bit(text.c_str());
+    RECT shadowRect = rect;
+    OffsetRect(&shadowRect, -1, 0);
+    DrawShortCutTextPass(hdc, shadowRect, label, outlineColor);
+    shadowRect = rect;
+    OffsetRect(&shadowRect, 1, 0);
+    DrawShortCutTextPass(hdc, shadowRect, label, outlineColor);
+    shadowRect = rect;
+    OffsetRect(&shadowRect, 0, -1);
+    DrawShortCutTextPass(hdc, shadowRect, label, outlineColor);
+    shadowRect = rect;
+    OffsetRect(&shadowRect, 0, 1);
+    DrawShortCutTextPass(hdc, shadowRect, label, outlineColor);
+    DrawShortCutTextPass(hdc, rect, label, fillColor);
+#else
     RECT shadowRect = rect;
     SetTextColor(hdc, outlineColor);
     OffsetRect(&shadowRect, -1, 0);
@@ -53,6 +122,7 @@ void DrawOutlinedText(HDC hdc, RECT rect, const std::string& text, COLORREF fill
 
     SetTextColor(hdc, fillColor);
     DrawTextA(hdc, text.c_str(), -1, &rect, DT_RIGHT | DT_BOTTOM | DT_SINGLELINE | DT_NOPREFIX);
+#endif
     SelectObject(hdc, oldFont);
 }
 
@@ -78,8 +148,8 @@ std::string ResolveShortcutSkillIconPath(int skillId)
 } // namespace
 
 UIShortCutWnd::UIShortCutWnd()
-    : m_backgroundBitmap(nullptr),
-      m_slotButtonBitmap(nullptr),
+    : m_backgroundBitmap(),
+      m_slotButtonBitmap(),
       m_hoverSlot(-1),
       m_pressedSlot(-1),
       m_pressedSlotAbsoluteIndex(-1),
@@ -192,23 +262,27 @@ void UIShortCutWnd::StoreInfo()
 
 void UIShortCutWnd::OnDraw()
 {
-    HDC hdc = UIWindow::GetSharedDrawDC();
-    if (!hdc) {
-        hdc = GetDC(g_hMainWnd);
+    if (IsQtUiRuntimeEnabled()) {
+        m_lastDrawStateToken = BuildDisplayStateToken();
+        m_hasDrawStateToken = true;
+        m_isDirty = 0;
+        return;
     }
+
+    HDC hdc = AcquireDrawTarget();
     if (!hdc) {
         return;
     }
 
     const RECT bounds{ m_x, m_y, m_x + m_w, m_y + m_h };
-    if (m_backgroundBitmap) {
-        shopui::DrawBitmapTransparent(hdc, m_backgroundBitmap, bounds);
+    if (m_backgroundBitmap.IsValid()) {
+        shopui::DrawBitmapPixelsTransparent(hdc, m_backgroundBitmap, bounds);
     } else {
         shopui::FillRectColor(hdc, bounds, RGB(224, 224, 224));
         shopui::FrameRectColor(hdc, bounds, RGB(96, 96, 96));
     }
 
-    if (m_slotButtonBitmap && m_hoverSlot >= 0) {
+    if (m_slotButtonBitmap.IsValid() && m_hoverSlot >= 0) {
         DrawBitmapFit(hdc, m_slotButtonBitmap, GetSlotRect(m_hoverSlot));
     }
 
@@ -230,8 +304,8 @@ void UIShortCutWnd::OnDraw()
         RECT slotRect = GetSlotRect(slotIndex);
         RECT iconRect = slotRect;
         if (slot->isSkill != 0) {
-            if (HBITMAP icon = GetSkillIcon(static_cast<int>(slot->id))) {
-                DrawBitmapFit(hdc, icon, iconRect);
+            if (const shopui::BitmapPixels* icon = GetSkillIcon(static_cast<int>(slot->id))) {
+                DrawBitmapFit(hdc, *icon, iconRect);
             }
 
             const PLAYER_SKILL_INFO* skill = g_session.GetSkillItemBySkillId(static_cast<int>(slot->id));
@@ -245,8 +319,8 @@ void UIShortCutWnd::OnDraw()
             fallbackItem.m_isIdentified = 1;
             const ITEM_INFO* item = g_session.GetInventoryItemByItemId(slot->id);
             const ITEM_INFO& iconSource = item ? *item : fallbackItem;
-            if (HBITMAP icon = GetItemIcon(iconSource)) {
-                DrawBitmapFit(hdc, icon, iconRect);
+            if (const shopui::BitmapPixels* icon = GetItemIcon(iconSource)) {
+                DrawBitmapFit(hdc, *icon, iconRect);
             }
 
             const int displayedCount = item ? item->m_num : 0;
@@ -259,9 +333,7 @@ void UIShortCutWnd::OnDraw()
     RECT pageRect{ m_x + m_w - kPageTextInsetX - 12, m_y + m_h - kPageTextInsetY, m_x + m_w - 2, m_y + m_h - 2 };
     DrawOutlinedText(hdc, pageRect, std::to_string(g_session.GetShortcutPage() + 1), RGB(255, 255, 255));
 
-    if (UIWindow::GetSharedDrawDC() == nullptr) {
-        ReleaseDC(g_hMainWnd, hdc);
-    }
+    ReleaseDrawTarget(hdc);
 
     m_lastDrawStateToken = BuildDisplayStateToken();
     m_hasDrawStateToken = true;
@@ -395,39 +467,50 @@ void UIShortCutWnd::OnWheel(int delta)
     }
 }
 
+int UIShortCutWnd::GetHoverSlot() const
+{
+    return m_hoverSlot;
+}
+
+bool UIShortCutWnd::GetHoveredItemForQt(shopui::ItemHoverInfo* outData) const
+{
+    if (!outData || m_show == 0 || m_hoverSlot < 0) {
+        return false;
+    }
+
+    const SHORTCUT_SLOT* slot = g_session.GetShortcutSlotByVisibleIndex(m_hoverSlot);
+    if (!slot || slot->id == 0 || slot->isSkill != 0) {
+        return false;
+    }
+
+    ITEM_INFO fallbackItem{};
+    fallbackItem.SetItemId(slot->id);
+    fallbackItem.m_isIdentified = 1;
+    const ITEM_INFO* item = g_session.GetInventoryItemByItemId(slot->id);
+    const ITEM_INFO& hoverItem = item ? *item : fallbackItem;
+
+    outData->anchorRect = GetSlotRect(m_hoverSlot);
+    outData->text = shopui::BuildItemHoverText(hoverItem);
+    outData->itemId = hoverItem.GetItemId();
+    return outData->IsValid();
+}
+
 void UIShortCutWnd::LoadAssets()
 {
     ReleaseAssets();
-    m_backgroundBitmap = shopui::LoadBitmapFromGameData(shopui::ResolveUiAssetPath("shortitem_bg.bmp"));
-    m_slotButtonBitmap = shopui::LoadBitmapFromGameData(shopui::ResolveUiAssetPath("shortitem_btn.bmp"));
+    m_backgroundBitmap = shopui::LoadBitmapPixelsFromGameData(shopui::ResolveUiAssetPath("shortitem_bg.bmp"), true);
+    m_slotButtonBitmap = shopui::LoadBitmapPixelsFromGameData(shopui::ResolveUiAssetPath("shortitem_btn.bmp"), true);
 
-    BITMAP bm{};
-    if (m_backgroundBitmap && GetObjectA(m_backgroundBitmap, sizeof(bm), &bm) && bm.bmWidth > 0 && bm.bmHeight > 0) {
-        Resize(bm.bmWidth, bm.bmHeight);
+    if (m_backgroundBitmap.IsValid()) {
+        Resize(m_backgroundBitmap.width, m_backgroundBitmap.height);
     }
 }
 
 void UIShortCutWnd::ReleaseAssets()
 {
-    if (m_backgroundBitmap) {
-        DeleteObject(m_backgroundBitmap);
-        m_backgroundBitmap = nullptr;
-    }
-    if (m_slotButtonBitmap) {
-        DeleteObject(m_slotButtonBitmap);
-        m_slotButtonBitmap = nullptr;
-    }
-    for (auto& entry : m_itemIconCache) {
-        if (entry.second) {
-            DeleteObject(entry.second);
-        }
-    }
+    m_backgroundBitmap.Clear();
+    m_slotButtonBitmap.Clear();
     m_itemIconCache.clear();
-    for (auto& entry : m_skillIconCache) {
-        if (entry.second) {
-            DeleteObject(entry.second);
-        }
-    }
     m_skillIconCache.clear();
 }
 
@@ -488,44 +571,44 @@ void UIShortCutWnd::DrawSlotOverlayText(HDC hdc, const RECT& slotRect, int value
     DrawOutlinedText(hdc, textRect, std::to_string(value), RGB(0, 0, 0), RGB(255, 255, 255));
 }
 
-HBITMAP UIShortCutWnd::GetItemIcon(const ITEM_INFO& item)
+const shopui::BitmapPixels* UIShortCutWnd::GetItemIcon(const ITEM_INFO& item)
 {
     const unsigned int itemId = item.GetItemId();
     const auto found = m_itemIconCache.find(itemId);
     if (found != m_itemIconCache.end()) {
-        return found->second;
+        return found->second.IsValid() ? &found->second : nullptr;
     }
 
-    HBITMAP bitmap = nullptr;
+    shopui::BitmapPixels bitmap;
     for (const std::string& candidate : shopui::BuildItemIconCandidates(item)) {
         if (!g_fileMgr.IsDataExist(candidate.c_str())) {
             continue;
         }
-        bitmap = shopui::LoadBitmapFromGameData(candidate);
-        if (bitmap) {
+        bitmap = shopui::LoadBitmapPixelsFromGameData(candidate, true);
+        if (bitmap.IsValid()) {
             break;
         }
     }
 
-    m_itemIconCache[itemId] = bitmap;
-    return bitmap;
+    auto inserted = m_itemIconCache.emplace(itemId, std::move(bitmap));
+    return inserted.first->second.IsValid() ? &inserted.first->second : nullptr;
 }
 
-HBITMAP UIShortCutWnd::GetSkillIcon(int skillId)
+const shopui::BitmapPixels* UIShortCutWnd::GetSkillIcon(int skillId)
 {
     const auto found = m_skillIconCache.find(skillId);
     if (found != m_skillIconCache.end()) {
-        return found->second;
+        return found->second.IsValid() ? &found->second : nullptr;
     }
 
-    HBITMAP bitmap = nullptr;
+    shopui::BitmapPixels bitmap;
     const std::string path = ResolveShortcutSkillIconPath(skillId);
     if (!path.empty() && g_fileMgr.IsDataExist(path.c_str())) {
-        bitmap = shopui::LoadBitmapFromGameData(path);
+        bitmap = shopui::LoadBitmapPixelsFromGameData(path, true);
     }
 
-    m_skillIconCache[skillId] = bitmap;
-    return bitmap;
+    auto inserted = m_skillIconCache.emplace(skillId, std::move(bitmap));
+    return inserted.first->second.IsValid() ? &inserted.first->second : nullptr;
 }
 
 unsigned long long UIShortCutWnd::BuildDisplayStateToken() const

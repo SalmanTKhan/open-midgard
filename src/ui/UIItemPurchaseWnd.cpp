@@ -6,6 +6,7 @@
 #include "gamemode/GameMode.h"
 #include "gamemode/Mode.h"
 #include "main/WinMain.h"
+#include "qtui/QtUiRuntime.h"
 #include "session/Session.h"
 
 #include <windows.h>
@@ -191,7 +192,13 @@ void UIItemPurchaseWnd::ActivateButton(ButtonId buttonId)
 
 void UIItemPurchaseWnd::OnDraw()
 {
-    HDC hdc = GetSharedDrawDC();
+    if (IsQtUiRuntimeEnabled()) {
+        m_lastDrawStateToken = BuildDisplayStateToken();
+        m_hasDrawStateToken = true;
+        return;
+    }
+
+    HDC hdc = AcquireDrawTarget();
     if (!hdc || m_show == 0) {
         return;
     }
@@ -254,6 +261,7 @@ void UIItemPurchaseWnd::OnDraw()
 
     m_lastDrawStateToken = BuildDisplayStateToken();
     m_hasDrawStateToken = true;
+    ReleaseDrawTarget(hdc);
 }
 
 void UIItemPurchaseWnd::OnLBtnDown(int x, int y)
@@ -347,6 +355,41 @@ void UIItemPurchaseWnd::HandleKeyDown(int virtualKey)
         m_viewOffset = selectedRow - GetVisibleRowCount() + 2;
     }
     m_viewOffset = (std::max)(0, (std::min)(GetMaxViewOffset(), m_viewOffset));
+}
+
+int UIItemPurchaseWnd::GetViewOffset() const
+{
+    return m_viewOffset;
+}
+
+int UIItemPurchaseWnd::GetHoverRow() const
+{
+    return m_hoverRow;
+}
+
+int UIItemPurchaseWnd::GetVisibleRowCountForQt() const
+{
+    return GetVisibleRowCount();
+}
+
+int UIItemPurchaseWnd::GetHoverButton() const
+{
+    return static_cast<int>(m_hoverButton);
+}
+
+int UIItemPurchaseWnd::GetPressedButton() const
+{
+    return static_cast<int>(m_pressedButton);
+}
+
+bool UIItemPurchaseWnd::GetButtonRectForQt(int buttonId, RECT* outRect) const
+{
+    if (!outRect || buttonId < ButtonAdd || buttonId > ButtonCancel) {
+        return false;
+    }
+
+    *outRect = GetButtonRect(static_cast<ButtonId>(buttonId));
+    return true;
 }
 
 unsigned long long UIItemPurchaseWnd::BuildDisplayStateToken() const

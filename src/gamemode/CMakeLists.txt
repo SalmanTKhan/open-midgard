@@ -25,3 +25,10 @@ target_link_libraries(ro_gamemode PUBLIC
     ro_audio
     ro_ui
 )
+
+if(RO_ENABLE_QT6_UI)
+    target_link_libraries(ro_gamemode PUBLIC
+        Qt6::Core
+        Qt6::Gui
+    )
+endif()

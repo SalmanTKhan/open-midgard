@@ -1,6 +1,5 @@
 #pragma once
 #include "Types.h"
-#include <windows.h>
 
 // ============================================================================
 // Miles Sound System (Mss32.dll)

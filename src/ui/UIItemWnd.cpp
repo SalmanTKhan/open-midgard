@@ -7,12 +7,22 @@
 #include "core/File.h"
 #include "item/Item.h"
 #include "main/WinMain.h"
+#include "qtui/QtUiRuntime.h"
+#include "render/DC.h"
+#include "res/Bitmap.h"
 #include "render/DrawUtil.h"
 #include "session/Session.h"
 #include "ui/UIWindow.h"
 
-#include <gdiplus.h>
 #include <windows.h>
+
+#if RO_ENABLE_QT6_UI
+#include <QFont>
+#include <QFontMetrics>
+#include <QImage>
+#include <QPainter>
+#include <QString>
+#endif
 
 #include <algorithm>
 #include <array>
@@ -23,7 +33,6 @@
 #include <string>
 #include <vector>
 
-#pragma comment(lib, "gdiplus.lib")
 #pragma comment(lib, "msimg32.lib")
 
 namespace {
@@ -32,14 +41,17 @@ constexpr int kWindowWidth = 280;
 constexpr int kWindowHeight = 134;
 constexpr int kMiniHeight = 34;
 constexpr int kTitleBarHeight = 17;
-constexpr int kGridLeft = 40;
+constexpr int kGridLeft = 36;
 constexpr int kGridTop = 17;
 constexpr int kGridCell = 32;
 constexpr int kGridRightMargin = 20;
 constexpr int kGridBottomMargin = 21;
-constexpr int kTabWidth = 20;
+constexpr int kTabWidth = 32;
 constexpr int kTabHeight = 82;
 constexpr int kTabCount = 3;
+constexpr int kInventorySlotCapacity = 100;
+constexpr int kQtButtonWidth = 12;
+constexpr int kQtButtonHeight = 11;
 constexpr int kButtonIdBase = 134;
 constexpr int kButtonIdClose = 135;
 constexpr int kButtonIdMini = 136;
@@ -47,19 +59,6 @@ constexpr const char* kUiKorPrefix =
     "texture\\"
     "\xC0\xAF\xC0\xFA\xC0\xCE\xC5\xCD\xC6\xE4\xC0\xCC\xBD\xBA"
     "\\";
-
-ULONG_PTR EnsureGdiplusStarted()
-{
-    static ULONG_PTR s_token = 0;
-    static bool s_started = false;
-    if (!s_started) {
-        Gdiplus::GdiplusStartupInput startupInput;
-        if (Gdiplus::GdiplusStartup(&s_token, &startupInput, nullptr) == Gdiplus::Ok) {
-            s_started = true;
-        }
-    }
-    return s_token;
-}
 
 std::string ToLowerAscii(std::string value)
 {
@@ -96,6 +95,17 @@ void HashTokenString(unsigned long long* hash, const std::string& value)
         HashTokenValue(hash, static_cast<unsigned long long>(ch));
     }
     HashTokenValue(hash, 0xFFull);
+}
+
+RECT MakeItemRect(int x, int y, int left, int top, int width, int height)
+{
+    RECT rect{ x + left, y + top, x + left + width, y + top + height };
+    return rect;
+}
+
+bool IsPointInRect(const RECT& rect, int x, int y)
+{
+    return x >= rect.left && x < rect.right && y >= rect.top && y < rect.bottom;
 }
 
 void AddUniqueCandidate(std::vector<std::string>& out, const std::string& raw)
@@ -161,77 +171,24 @@ std::string ResolveUiAssetPath(const char* fileName)
     return NormalizeSlash(fileName ? fileName : "");
 }
 
-HBITMAP LoadBitmapFromGameData(const std::string& path)
+shopui::BitmapPixels LoadBitmapPixelsFromGameData(const std::string& path)
 {
-    if (path.empty() || !EnsureGdiplusStarted()) {
-        return nullptr;
-    }
-
-    int size = 0;
-    unsigned char* bytes = g_fileMgr.GetData(path.c_str(), &size);
-    if (!bytes || size <= 0) {
-        delete[] bytes;
-        return nullptr;
-    }
-
-    HBITMAP outBitmap = nullptr;
-    HGLOBAL mem = GlobalAlloc(GMEM_MOVEABLE, static_cast<SIZE_T>(size));
-    if (mem) {
-        void* dst = GlobalLock(mem);
-        if (dst) {
-            std::memcpy(dst, bytes, static_cast<size_t>(size));
-            GlobalUnlock(mem);
-
-            IStream* stream = nullptr;
-            if (CreateStreamOnHGlobal(mem, TRUE, &stream) == S_OK) {
-                auto* bitmap = Gdiplus::Bitmap::FromStream(stream, FALSE);
-                if (bitmap && bitmap->GetLastStatus() == Gdiplus::Ok) {
-                    bitmap->GetHBITMAP(RGB(0, 0, 0), &outBitmap);
-                }
-                delete bitmap;
-                stream->Release();
-            } else {
-                GlobalFree(mem);
-            }
-        } else {
-            GlobalFree(mem);
-        }
-    }
-
-    delete[] bytes;
-    return outBitmap;
+    return shopui::LoadBitmapPixelsFromGameData(path, true);
 }
 
-void DrawBitmapTransparent(HDC target, HBITMAP bitmap, const RECT& dst)
+void DrawBitmapPixelsStretched(HDC target, const shopui::BitmapPixels& bitmap, const RECT& dst)
 {
-    if (!target || !bitmap) {
+    if (!target || !bitmap.IsValid() || dst.right <= dst.left || dst.bottom <= dst.top) {
         return;
     }
-
-    BITMAP bm{};
-    if (!GetObjectA(bitmap, sizeof(bm), &bm) || bm.bmWidth <= 0 || bm.bmHeight <= 0) {
-        return;
-    }
-
-    HDC srcDC = CreateCompatibleDC(target);
-    if (!srcDC) {
-        return;
-    }
-
-    HGDIOBJ oldBitmap = SelectObject(srcDC, bitmap);
-    TransparentBlt(target,
-        dst.left,
-        dst.top,
-        dst.right - dst.left,
-        dst.bottom - dst.top,
-        srcDC,
-        0,
-        0,
-        bm.bmWidth,
-        bm.bmHeight,
-        RGB(255, 0, 255));
-    SelectObject(srcDC, oldBitmap);
-    DeleteDC(srcDC);
+    AlphaBlendArgbToHdc(target,
+                        dst.left,
+                        dst.top,
+                        dst.right - dst.left,
+                        dst.bottom - dst.top,
+                        bitmap.pixels.data(),
+                        bitmap.width,
+                        bitmap.height);
 }
 
 void FillRectColor(HDC hdc, const RECT& rect, COLORREF color)
@@ -254,41 +211,116 @@ void FillRectAlpha(HDC target, const RECT& rect, COLORREF color, BYTE alpha)
         return;
     }
 
-    HDC memDc = CreateCompatibleDC(target);
-    if (!memDc) {
+    const int width = rect.right - rect.left;
+    const int height = rect.bottom - rect.top;
+    if (width <= 0 || height <= 0) {
         return;
     }
 
-    HBITMAP memBitmap = CreateCompatibleBitmap(target, rect.right - rect.left, rect.bottom - rect.top);
-    if (!memBitmap) {
-        DeleteDC(memDc);
-        return;
-    }
+    const unsigned int red = GetRValue(color);
+    const unsigned int green = GetGValue(color);
+    const unsigned int blue = GetBValue(color);
+    const unsigned int premultipliedPixel =
+        (static_cast<unsigned int>(alpha) << 24)
+        | ((red * alpha / 255u) << 16)
+        | ((green * alpha / 255u) << 8)
+        | (blue * alpha / 255u);
+    std::vector<unsigned int> pixels(static_cast<size_t>(width) * static_cast<size_t>(height), premultipliedPixel);
 
-    HGDIOBJ oldBitmap = SelectObject(memDc, memBitmap);
-    RECT localRect{ 0, 0, rect.right - rect.left, rect.bottom - rect.top };
-    FillRectColor(memDc, localRect, color);
-
-    BLENDFUNCTION blend{};
-    blend.BlendOp = AC_SRC_OVER;
-    blend.SourceConstantAlpha = alpha;
-    blend.AlphaFormat = 0;
-    AlphaBlend(target,
+    AlphaBlendArgbToHdc(target,
         rect.left,
         rect.top,
-        rect.right - rect.left,
-        rect.bottom - rect.top,
-        memDc,
-        0,
-        0,
-        rect.right - rect.left,
-        rect.bottom - rect.top,
-        blend);
-
-    SelectObject(memDc, oldBitmap);
-    DeleteObject(memBitmap);
-    DeleteDC(memDc);
+        width,
+        height,
+        pixels.data(),
+        width,
+        height);
 }
+
+#if RO_ENABLE_QT6_UI
+QFont BuildItemWindowFontFromHdc(HDC hdc, const char* fallbackFamily = "MS Sans Serif", int fallbackPixelSize = 13)
+{
+    LOGFONTA logFont{};
+    if (hdc) {
+        if (HGDIOBJ fontObject = GetCurrentObject(hdc, OBJ_FONT)) {
+            GetObjectA(fontObject, sizeof(logFont), &logFont);
+        }
+    }
+
+    const QString family = logFont.lfFaceName[0] != '\0'
+        ? QString::fromLocal8Bit(logFont.lfFaceName)
+        : QString::fromLocal8Bit(fallbackFamily);
+    QFont font(family);
+    font.setPixelSize(logFont.lfHeight != 0 ? (std::max)(1, static_cast<int>(std::abs(logFont.lfHeight))) : fallbackPixelSize);
+    font.setBold(logFont.lfWeight >= FW_BOLD);
+    font.setStyleStrategy(QFont::NoAntialias);
+    return font;
+}
+
+Qt::Alignment ToQtItemTextAlignment(UINT format)
+{
+    Qt::Alignment alignment = Qt::AlignLeft | Qt::AlignTop;
+    if (format & DT_CENTER) {
+        alignment &= ~Qt::AlignLeft;
+        alignment |= Qt::AlignHCenter;
+    } else if (format & DT_RIGHT) {
+        alignment &= ~Qt::AlignLeft;
+        alignment |= Qt::AlignRight;
+    }
+
+    if (format & DT_VCENTER) {
+        alignment &= ~Qt::AlignTop;
+        alignment |= Qt::AlignVCenter;
+    } else if (format & DT_BOTTOM) {
+        alignment &= ~Qt::AlignTop;
+        alignment |= Qt::AlignBottom;
+    }
+
+    return alignment;
+}
+
+void DrawItemWindowTextQt(HDC hdc, const RECT& rect, const std::string& text, COLORREF color, UINT format)
+{
+    if (!hdc || text.empty() || rect.right <= rect.left || rect.bottom <= rect.top) {
+        return;
+    }
+
+    QString label = QString::fromLocal8Bit(text.c_str());
+    if (label.isEmpty()) {
+        return;
+    }
+
+    const int width = rect.right - rect.left;
+    const int height = rect.bottom - rect.top;
+    const QFont font = BuildItemWindowFontFromHdc(hdc);
+    if (format & DT_END_ELLIPSIS) {
+        const QFontMetrics metrics(font);
+        label = metrics.elidedText(label, Qt::ElideRight, width);
+    }
+
+    std::vector<unsigned int> pixels(static_cast<size_t>(width) * static_cast<size_t>(height), 0u);
+    QImage image(reinterpret_cast<uchar*>(pixels.data()), width, height, width * static_cast<int>(sizeof(unsigned int)), QImage::Format_ARGB32);
+    if (image.isNull()) {
+        return;
+    }
+
+    QPainter painter(&image);
+    painter.setRenderHint(QPainter::Antialiasing, false);
+    painter.setRenderHint(QPainter::TextAntialiasing, false);
+    painter.setFont(font);
+    painter.setPen(QColor(GetRValue(color), GetGValue(color), GetBValue(color)));
+    painter.drawText(QRect(0, 0, width, height), ToQtItemTextAlignment(format) | Qt::TextSingleLine, label);
+    AlphaBlendArgbToHdc(hdc, rect.left, rect.top, width, height, pixels.data(), width, height);
+}
+
+QFont BuildItemTooltipFont()
+{
+    QFont font(QStringLiteral("MS Sans Serif"));
+    font.setPixelSize(14);
+    font.setStyleStrategy(QFont::NoAntialias);
+    return font;
+}
+#endif
 
 void DrawWindowText(HDC hdc, int x, int y, const std::string& text, COLORREF color, UINT format = DT_LEFT | DT_TOP | DT_SINGLELINE)
 {
@@ -300,7 +332,11 @@ void DrawWindowText(HDC hdc, int x, int y, const std::string& text, COLORREF col
     SetTextColor(hdc, color);
     RECT rect{ x, y, x + 240, y + 24 };
     HGDIOBJ oldFont = SelectObject(hdc, GetStockObject(DEFAULT_GUI_FONT));
+#if RO_ENABLE_QT6_UI
+    DrawItemWindowTextQt(hdc, rect, text, color, format);
+#else
     DrawTextA(hdc, text.c_str(), -1, &rect, format);
+#endif
     SelectObject(hdc, oldFont);
 }
 
@@ -333,7 +369,11 @@ void DrawWindowTextRect(HDC hdc, const RECT& rect, const std::string& text, COLO
     SetBkMode(hdc, TRANSPARENT);
     SetTextColor(hdc, color);
     HGDIOBJ oldFont = SelectObject(hdc, s_sharpUiFont ? s_sharpUiFont : GetStockObject(DEFAULT_GUI_FONT));
+#if RO_ENABLE_QT6_UI
+    DrawItemWindowTextQt(hdc, drawRect, text, color, format);
+#else
     DrawTextA(hdc, text.c_str(), -1, &drawRect, format);
+#endif
     SelectObject(hdc, oldFont);
 }
 
@@ -389,42 +429,37 @@ bool ItemBelongsToTab(const ITEM_INFO& item, int tabIndex)
     }
 }
 
-std::string BuildHoverTooltipText(const ITEM_INFO& item)
+std::string BuildShortItemLabel(const ITEM_INFO& item)
 {
-    std::string text;
-    if (item.m_refiningLevel > 0 && IsEquipTabType(item.m_itemType)) {
-        text = "+" + std::to_string(item.m_refiningLevel) + " ";
+    std::string shortName = item.GetDisplayName();
+    if (shortName.size() > 6) {
+        shortName.resize(6);
     }
-
-    text += item.GetDisplayName();
-    text += ": ";
-    text += std::to_string((std::max)(1, item.m_num));
-    text += " ea";
-    return text;
+    return shortName;
 }
 
 void DrawItemSlot(HDC hdc,
-    HBITMAP slotBitmap,
-    HBITMAP hoverBitmap,
-    HBITMAP iconBitmap,
+    const shopui::BitmapPixels& slotBitmap,
+    const shopui::BitmapPixels& hoverBitmap,
+    const shopui::BitmapPixels* iconBitmap,
     const RECT& cellRect,
     const ITEM_INFO* item,
     bool hovered)
 {
-    DrawBitmapTransparent(hdc, slotBitmap, cellRect);
+    DrawBitmapPixelsStretched(hdc, slotBitmap, cellRect);
 
     if (!item) {
         return;
     }
 
-    if (hovered && hoverBitmap) {
+    if (hovered && hoverBitmap.IsValid()) {
         RECT hoverRect{ cellRect.left + 2, cellRect.bottom - 17, cellRect.right - 2, cellRect.bottom - 2 };
-        DrawBitmapTransparent(hdc, hoverBitmap, hoverRect);
+        DrawBitmapPixelsStretched(hdc, hoverBitmap, hoverRect);
     }
 
-    if (iconBitmap) {
+    if (iconBitmap && iconBitmap->IsValid()) {
         RECT iconRect{ cellRect.left + 4, cellRect.top + 4, cellRect.right - 4, cellRect.bottom - 4 };
-        DrawBitmapTransparent(hdc, iconBitmap, iconRect);
+        shopui::DrawBitmapPixelsTransparent(hdc, *iconBitmap, iconRect);
     } else {
         std::string shortName = item->GetDisplayName();
         if (shortName.size() > 6) {
@@ -447,18 +482,31 @@ void DrawItemSlot(HDC hdc,
 
 void DrawItemHoverTooltip(HDC hdc, const RECT& clientRect, const RECT& itemRect, const ITEM_INFO& item)
 {
-    const std::string tooltipText = BuildHoverTooltipText(item);
+    const std::string tooltipText = shopui::BuildItemHoverText(item);
+#if RO_ENABLE_QT6_UI
+    const QFont font = BuildItemTooltipFont();
+    const QString label = QString::fromLocal8Bit(tooltipText.c_str());
+    const QFontMetrics metrics(font);
+    const int textWidth = metrics.horizontalAdvance(label);
+    const int textHeight = metrics.height();
+#else
     DrawDC drawDc(hdc);
     drawDc.SetFont(FONT_DEFAULT, 14, 0);
     SetBkMode(hdc, TRANSPARENT);
 
     SIZE textSize{};
     drawDc.GetTextExtentPoint32A(tooltipText.c_str(), static_cast<int>(tooltipText.size()), &textSize);
+#endif
 
     const int tooltipPaddingX = 8;
     const int tooltipPaddingY = 6;
+#if RO_ENABLE_QT6_UI
+    const int tooltipHeight = textHeight + tooltipPaddingY * 2;
+    const int tooltipWidth = textWidth + tooltipPaddingX * 2;
+#else
     const int tooltipHeight = textSize.cy + tooltipPaddingY * 2;
     const int tooltipWidth = textSize.cx + tooltipPaddingX * 2;
+#endif
     int tooltipLeft = itemRect.left + ((itemRect.right - itemRect.left) - tooltipWidth) / 2;
     int tooltipTop = itemRect.top - tooltipHeight + 2;
     const int minTooltipLeft = static_cast<int>(clientRect.left) + 2;
@@ -471,11 +519,29 @@ void DrawItemHoverTooltip(HDC hdc, const RECT& clientRect, const RECT& itemRect,
     RECT tooltipRect{ tooltipLeft, tooltipTop, tooltipLeft + tooltipWidth, tooltipTop + tooltipHeight };
     FillRectAlpha(hdc, tooltipRect, RGB(48, 48, 48), 180);
     FrameRectColor(hdc, tooltipRect, RGB(96, 96, 96));
+#if RO_ENABLE_QT6_UI
+    const int width = tooltipRect.right - tooltipRect.left;
+    const int height = tooltipRect.bottom - tooltipRect.top;
+    std::vector<unsigned int> pixels(static_cast<size_t>(width) * static_cast<size_t>(height), 0u);
+    QImage image(reinterpret_cast<uchar*>(pixels.data()), width, height, width * static_cast<int>(sizeof(unsigned int)), QImage::Format_ARGB32);
+    if (image.isNull()) {
+        return;
+    }
+
+    QPainter painter(&image);
+    painter.setRenderHint(QPainter::Antialiasing, false);
+    painter.setRenderHint(QPainter::TextAntialiasing, false);
+    painter.setFont(font);
+    painter.setPen(QColor(255, 255, 255));
+    painter.drawText(tooltipPaddingX, tooltipPaddingY + metrics.ascent(), label);
+    AlphaBlendArgbToHdc(hdc, tooltipRect.left, tooltipRect.top, width, height, pixels.data(), width, height);
+#else
     drawDc.SetTextColor(RGB(255, 255, 255));
     drawDc.TextOutA(tooltipRect.left + tooltipPaddingX,
         tooltipRect.top + tooltipPaddingY,
         tooltipText.c_str(),
         static_cast<int>(tooltipText.size()));
+#endif
 }
 
 std::vector<std::string> BuildItemIconCandidates(const ITEM_INFO& item)
@@ -530,15 +596,15 @@ UIItemWnd::UIItemWnd()
       m_viewOffset(0),
       m_hoveredItemIndex(-1),
       m_fullHeight(kWindowHeight),
-    m_hoverOverlayItem(nullptr),
-    m_hoverOverlayRect{},
+      m_hoverOverlayItem(nullptr),
+      m_hoverOverlayRect{},
       m_systemButtons{ nullptr, nullptr, nullptr },
-      m_backgroundLeft(nullptr),
-      m_backgroundMid(nullptr),
-      m_backgroundRight(nullptr),
-    m_titleBarBitmap(nullptr),
-      m_tabBitmaps{ nullptr, nullptr, nullptr },
-      m_hoverBitmap(nullptr),
+      m_backgroundLeft(),
+      m_backgroundMid(),
+      m_backgroundRight(),
+      m_titleBarBitmap(),
+      m_tabBitmaps{},
+      m_hoverBitmap(),
       m_dragArmed(false),
       m_dragStartPoint{},
       m_dragItemId(0),
@@ -626,6 +692,11 @@ void UIItemWnd::OnCreate(int x, int y)
     m_controlsCreated = true;
     LoadAssets();
 
+    if (IsQtUiRuntimeEnabled()) {
+        LayoutChildren();
+        return;
+    }
+
     struct ButtonSpec {
         const char* offName;
         const char* onName;
@@ -665,45 +736,24 @@ void UIItemWnd::OnDraw()
     }
 
     EnsureCreated();
-    const std::vector<const ITEM_INFO*> filteredItems = GetFilteredItems();
-    if (filteredItems.empty()) {
-        m_hoveredItemIndex = -1;
-    } else {
-        m_hoveredItemIndex = std::min(m_hoveredItemIndex, static_cast<int>(filteredItems.size()) - 1);
+    RefreshVisibleItemsForInteractionState();
+
+    if (IsQtUiRuntimeEnabled()) {
+        m_lastVisualStateToken = BuildVisualStateToken();
+        m_hasVisualStateToken = true;
+        m_isDirty = 0;
+        return;
     }
-    m_viewOffset = std::min(m_viewOffset, GetMaxViewOffset(static_cast<int>(filteredItems.size())));
-    m_viewOffset = std::max(m_viewOffset, 0);
-    m_visibleItems.clear();
-    m_hoverOverlayItem = nullptr;
-    m_hoverOverlayRect = RECT{};
 
     if (m_h > kMiniHeight) {
-        const CGameMode* gameMode = g_modeMgr.GetCurrentGameMode();
-        const bool hideDraggedItem = gameMode
-            && gameMode->m_dragType == static_cast<int>(DragType::ShortcutItem)
-            && gameMode->m_dragInfo.itemIndex != 0;
-        const int columns = GetItemColumns();
-        const int rows = GetItemRows();
-        const int firstIndex = m_viewOffset * columns;
-        const int slotCount = columns * rows;
-        for (int drawIndex = 0; drawIndex < slotCount; ++drawIndex) {
-            const int itemIndex = firstIndex + drawIndex;
-            if (itemIndex < 0 || itemIndex >= static_cast<int>(filteredItems.size())) {
-                continue;
+        for (const VisibleItem& visibleItem : m_visibleItems) {
+            if (visibleItem.item) {
+                GetItemIcon(*visibleItem.item);
             }
-            const ITEM_INFO* item = filteredItems[itemIndex];
-            if (!item) {
-                continue;
-            }
-            GetItemIcon(*item);
         }
     }
 
-    HDC hdc = UIWindow::GetSharedDrawDC();
-    const bool useShared = hdc != nullptr;
-    if (!hdc && g_hMainWnd) {
-        hdc = GetDC(g_hMainWnd);
-    }
+    HDC hdc = AcquireDrawTarget();
     if (!hdc) {
         return;
     }
@@ -718,47 +768,26 @@ void UIItemWnd::OnDraw()
     for (int yPos = bodyTop; yPos < m_y + m_h; yPos += 8) {
         RECT leftRect{ m_x, yPos, m_x + 20, std::min(yPos + 8, m_y + m_h) };
         RECT rightRect{ m_x + m_w - 20, yPos, m_x + m_w, std::min(yPos + 8, m_y + m_h) };
-        DrawBitmapTransparent(hdc, m_backgroundLeft, leftRect);
-        DrawBitmapTransparent(hdc, m_backgroundRight, rightRect);
+        DrawBitmapPixelsStretched(hdc, m_backgroundLeft, leftRect);
+        DrawBitmapPixelsStretched(hdc, m_backgroundRight, rightRect);
     }
 
     const std::string titleText = GetTitleText();
     RECT titleStrip{ m_x, m_y, m_x + m_w, m_y + kTitleBarHeight };
-    DrawBitmapTransparent(hdc, m_titleBarBitmap, titleStrip);
+    DrawBitmapPixelsStretched(hdc, m_titleBarBitmap, titleStrip);
     DrawWindowText(hdc, m_x + 18, m_y + 3, titleText, RGB(255, 255, 255));
     DrawWindowText(hdc, m_x + 17, m_y + 2, titleText, RGB(0, 0, 0));
 
     RECT activeTabStrip{ m_x, m_y + kGridTop, m_x + kTabWidth, m_y + kGridTop + kTabHeight };
-    DrawBitmapTransparent(hdc, m_tabBitmaps[m_currentTab], activeTabStrip);
+    DrawBitmapPixelsStretched(hdc, m_tabBitmaps[m_currentTab], activeTabStrip);
 
     if (m_h > kMiniHeight) {
-        const CGameMode* gameMode = g_modeMgr.GetCurrentGameMode();
-        const bool hideDraggedItem = gameMode
-            && gameMode->m_dragType == static_cast<int>(DragType::ShortcutItem)
-            && gameMode->m_dragInfo.itemIndex != 0;
         const int columns = GetItemColumns();
-        const int rows = GetItemRows();
-        const int firstIndex = m_viewOffset * columns;
-        const int slotCount = columns * rows;
 
-        for (int drawIndex = 0; drawIndex < slotCount; ++drawIndex) {
-            const int itemIndex = firstIndex + drawIndex;
-            const int column = drawIndex % columns;
-            const int row = drawIndex / columns;
-            RECT cellRect{
-                m_x + kGridLeft + column * kGridCell,
-                m_y + kGridTop + row * kGridCell,
-                m_x + kGridLeft + (column + 1) * kGridCell,
-                m_y + kGridTop + (row + 1) * kGridCell,
-            };
-
-            const ITEM_INFO* item = itemIndex < static_cast<int>(filteredItems.size())
-                ? filteredItems[itemIndex]
-                : nullptr;
-            const bool isDraggedSource = item
-                && hideDraggedItem
-                && item->m_itemIndex == gameMode->m_dragInfo.itemIndex;
-            const ITEM_INFO* drawItem = isDraggedSource ? nullptr : item;
+        for (size_t drawIndex = 0; drawIndex < m_visibleItems.size(); ++drawIndex) {
+            const int itemIndex = m_viewOffset * columns + static_cast<int>(drawIndex);
+            const RECT& cellRect = m_visibleItems[drawIndex].rect;
+            const ITEM_INFO* const drawItem = m_visibleItems[drawIndex].item;
             const bool hovered = drawItem && itemIndex == m_hoveredItemIndex;
             DrawItemSlot(hdc,
                 m_backgroundMid,
@@ -772,27 +801,33 @@ void UIItemWnd::OnDraw()
                 m_hoverOverlayItem = drawItem;
                 m_hoverOverlayRect = cellRect;
             }
-
-            m_visibleItems.push_back({ drawItem, cellRect });
         }
 
+        const int totalSlotCount = GetInventorySlotCapacity();
         RECT scrollbarRect{ m_x + m_w - 14, m_y + kGridTop, m_x + m_w - 4, m_y + m_h - kGridBottomMargin };
         FillRectColor(hdc, scrollbarRect, RGB(227, 231, 238));
         FrameRectColor(hdc, scrollbarRect, RGB(164, 173, 189));
 
-        const int maxOffset = std::max(1, GetMaxViewOffset(static_cast<int>(filteredItems.size())) + 1);
+        const int maxOffset = std::max(1, GetMaxViewOffset(totalSlotCount) + 1);
         const int trackHeight = scrollbarRect.bottom - scrollbarRect.top - 8;
         const int thumbHeight = std::max(14, trackHeight / maxOffset);
         const int thumbTop = scrollbarRect.top + 4 + ((trackHeight - thumbHeight) * m_viewOffset) / maxOffset;
         RECT thumbRect{ scrollbarRect.left + 2, thumbTop, scrollbarRect.right - 2, thumbTop + thumbHeight };
         FillRectColor(hdc, thumbRect, RGB(129, 146, 199));
         FrameRectColor(hdc, thumbRect, RGB(63, 86, 132));
+
+        RECT footerRect{ m_x, m_y + m_h - kGridBottomMargin, m_x + m_w, m_y + m_h };
+        FillRectColor(hdc, footerRect, RGB(221, 215, 202));
+        FrameRectColor(hdc, footerRect, RGB(188, 180, 167));
+
+        const int itemCount = GetInventoryItemCount();
+        char footerText[32]{};
+        std::snprintf(footerText, sizeof(footerText), "%d / %d", itemCount, totalSlotCount);
+        DrawWindowText(hdc, m_x + m_w - 50, footerRect.top + 5, footerText, RGB(74, 74, 74));
     }
 
-    DrawChildren();
-    if (!useShared) {
-        ReleaseDC(g_hMainWnd, hdc);
-    }
+    DrawChildrenToHdc(hdc);
+    ReleaseDrawTarget(hdc);
 
     m_lastVisualStateToken = BuildVisualStateToken();
     m_hasVisualStateToken = true;
@@ -801,6 +836,10 @@ void UIItemWnd::OnDraw()
 
 void UIItemWnd::DrawHoverOverlay(HDC hdc, const RECT& clientRect) const
 {
+    if (IsQtUiRuntimeEnabled()) {
+        return;
+    }
+
     if (!hdc || m_show == 0 || !m_hoverOverlayItem) {
         return;
     }
@@ -852,6 +891,16 @@ void UIItemWnd::OnLBtnDown(int x, int y)
     m_dragItemIndex = 0;
     m_dragItemEquipLocation = 0;
 
+    if (IsQtUiRuntimeEnabled()) {
+        const RECT baseRect = MakeItemRect(m_x, m_y, 3, 3, kQtButtonWidth, kQtButtonHeight);
+        const RECT miniRect = MakeItemRect(m_x, m_y, 247, 3, kQtButtonWidth, kQtButtonHeight);
+        const RECT closeRect = MakeItemRect(m_x, m_y, 265, 3, kQtButtonWidth, kQtButtonHeight);
+        if (IsPointInRect(baseRect, x, y) || IsPointInRect(miniRect, x, y) || IsPointInRect(closeRect, x, y)) {
+            UIWindow::OnLBtnDown(x, y);
+            return;
+        }
+    }
+
     if (y >= m_y && y < m_y + kTitleBarHeight) {
         UIFrameWnd::OnLBtnDown(x, y);
         return;
@@ -867,7 +916,7 @@ void UIItemWnd::OnLBtnDown(int x, int y)
         && x < m_x + m_w - 4
         && y >= m_y + kGridTop
         && y < m_y + m_h - kGridBottomMargin) {
-        const int maxOffset = GetMaxViewOffset(static_cast<int>(GetFilteredItems().size()));
+        const int maxOffset = GetMaxViewOffset(GetInventorySlotCapacity());
         if (maxOffset > 0) {
             const int trackTop = m_y + kGridTop + 4;
             const int trackHeight = (m_y + m_h - kGridBottomMargin) - (m_y + kGridTop) - 8;
@@ -899,6 +948,34 @@ void UIItemWnd::OnLBtnUp(int x, int y)
     m_dragItemId = 0;
     m_dragItemIndex = 0;
     m_dragItemEquipLocation = 0;
+
+    if (IsQtUiRuntimeEnabled()) {
+        const bool wasDragging = m_isDragging != 0;
+        UIFrameWnd::OnLBtnUp(x, y);
+        if (wasDragging) {
+            return;
+        }
+
+        const RECT baseRect = MakeItemRect(m_x, m_y, 3, 3, kQtButtonWidth, kQtButtonHeight);
+        const RECT miniRect = MakeItemRect(m_x, m_y, 247, 3, kQtButtonWidth, kQtButtonHeight);
+        const RECT closeRect = MakeItemRect(m_x, m_y, 265, 3, kQtButtonWidth, kQtButtonHeight);
+
+        if (m_h == kMiniHeight && IsPointInRect(baseRect, x, y)) {
+            SendMsg(this, 6, kButtonIdBase, 0, 0);
+            return;
+        }
+        if (m_h > kMiniHeight && IsPointInRect(miniRect, x, y)) {
+            SendMsg(this, 6, kButtonIdMini, 0, 0);
+            return;
+        }
+        if (IsPointInRect(closeRect, x, y)) {
+            SendMsg(this, 6, kButtonIdClose, 0, 0);
+            return;
+        }
+
+        return;
+    }
+
     UIFrameWnd::OnLBtnUp(x, y);
 }
 
@@ -925,12 +1002,22 @@ void UIItemWnd::OnMouseMove(int x, int y)
             m_dragArmed = false;
         }
     }
+    const int oldHoveredItemIndex = m_hoveredItemIndex;
+    RefreshVisibleItemsForInteractionState();
     UpdateHoveredItem(x, y);
+    if (m_hoveredItemIndex != oldHoveredItemIndex) {
+        Invalidate();
+    }
 }
 
 void UIItemWnd::OnMouseHover(int x, int y)
 {
+    const int oldHoveredItemIndex = m_hoveredItemIndex;
+    RefreshVisibleItemsForInteractionState();
     UpdateHoveredItem(x, y);
+    if (m_hoveredItemIndex != oldHoveredItemIndex) {
+        Invalidate();
+    }
 }
 
 void UIItemWnd::DragAndDrop(int x, int y, const DRAG_INFO* const dragInfo)
@@ -965,6 +1052,208 @@ void UIItemWnd::StoreInfo()
     SaveUiWindowPlacement("ItemWnd", m_x, m_y);
 }
 
+bool UIItemWnd::IsMiniMode() const
+{
+    return m_h == kMiniHeight;
+}
+
+bool UIItemWnd::GetDisplayDataForQt(DisplayData* outData) const
+{
+    if (!outData) {
+        return false;
+    }
+
+    DisplayData data{};
+    data.title = GetTitleText();
+    data.currentTab = m_currentTab;
+    data.currentItemCount = GetInventoryItemCount();
+    data.maxItemCount = GetInventorySlotCapacity();
+    data.viewOffset = m_viewOffset;
+
+    const std::vector<const ITEM_INFO*> filteredItems = GetFilteredItems();
+    data.maxViewOffset = GetMaxViewOffset(data.maxItemCount);
+
+    if (m_h > kMiniHeight) {
+        const CGameMode* gameMode = g_modeMgr.GetCurrentGameMode();
+        const bool hideDraggedItem = gameMode
+            && gameMode->m_dragType == static_cast<int>(DragType::ShortcutItem)
+            && gameMode->m_dragInfo.itemIndex != 0;
+        const int columns = GetItemColumns();
+        const int rows = GetItemRows();
+        const int firstIndex = m_viewOffset * columns;
+        const int slotCount = columns * rows;
+
+        data.displaySlots.reserve(static_cast<size_t>(slotCount));
+        for (int drawIndex = 0; drawIndex < slotCount; ++drawIndex) {
+            const int itemIndex = firstIndex + drawIndex;
+            const int column = drawIndex % columns;
+            const int row = drawIndex / columns;
+
+            DisplaySlot slot{};
+            slot.x = m_x + kGridLeft + column * kGridCell;
+            slot.y = m_y + kGridTop + row * kGridCell;
+            slot.width = kGridCell;
+            slot.height = kGridCell;
+
+            const ITEM_INFO* item = itemIndex < static_cast<int>(filteredItems.size())
+                ? filteredItems[itemIndex]
+                : nullptr;
+            const bool isDraggedSource = item
+                && hideDraggedItem
+                && item->m_itemIndex == gameMode->m_dragInfo.itemIndex;
+            const ITEM_INFO* drawItem = isDraggedSource ? nullptr : item;
+            if (drawItem) {
+                slot.occupied = true;
+                slot.hovered = itemIndex == m_hoveredItemIndex;
+                slot.count = drawItem->m_num;
+                slot.itemId = drawItem->GetItemId();
+                slot.label = BuildShortItemLabel(*drawItem);
+                slot.tooltip = shopui::BuildItemHoverText(*drawItem);
+            }
+            data.displaySlots.push_back(slot);
+        }
+
+        data.scrollBarVisible = data.maxViewOffset > 0;
+        data.scrollTrackX = m_x + m_w - 14;
+        data.scrollTrackY = m_y + kGridTop;
+        data.scrollTrackWidth = 10;
+        data.scrollTrackHeight = m_h - kGridTop - kGridBottomMargin;
+
+        if (data.scrollBarVisible && data.scrollTrackHeight > 8) {
+            const int offsetRange = std::max(1, data.maxViewOffset + 1);
+            const int trackHeight = data.scrollTrackHeight - 8;
+            const int thumbHeight = std::max(14, trackHeight / offsetRange);
+            const int thumbTop = data.scrollTrackY + 4
+                + ((trackHeight - thumbHeight) * data.viewOffset) / offsetRange;
+            data.scrollThumbX = data.scrollTrackX + 2;
+            data.scrollThumbY = thumbTop;
+            data.scrollThumbWidth = std::max(0, data.scrollTrackWidth - 4);
+            data.scrollThumbHeight = thumbHeight;
+        }
+    }
+
+    *outData = std::move(data);
+    return true;
+}
+
+bool UIItemWnd::GetHoveredItemForQt(shopui::ItemHoverInfo* outData) const
+{
+    if (!outData || m_show == 0 || IsMiniMode() || m_hoveredItemIndex < 0) {
+        return false;
+    }
+
+    const std::vector<const ITEM_INFO*> filteredItems = GetFilteredItems();
+    if (m_hoveredItemIndex >= static_cast<int>(filteredItems.size())) {
+        return false;
+    }
+
+    const ITEM_INFO* item = filteredItems[static_cast<size_t>(m_hoveredItemIndex)];
+    if (!item) {
+        return false;
+    }
+
+    const int columns = GetItemColumns();
+    if (columns <= 0) {
+        return false;
+    }
+
+    const int firstIndex = m_viewOffset * columns;
+    const int visibleIndex = m_hoveredItemIndex - firstIndex;
+    if (visibleIndex < 0) {
+        return false;
+    }
+
+    const int rows = GetItemRows();
+    const int slotCount = columns * rows;
+    if (visibleIndex >= slotCount) {
+        return false;
+    }
+
+    const int column = visibleIndex % columns;
+    const int row = visibleIndex / columns;
+
+    outData->anchorRect = RECT{
+        m_x + kGridLeft + column * kGridCell,
+        m_y + kGridTop + row * kGridCell,
+        m_x + kGridLeft + (column + 1) * kGridCell,
+        m_y + kGridTop + (row + 1) * kGridCell,
+    };
+    outData->text = shopui::BuildItemHoverText(*item);
+    outData->itemId = item->GetItemId();
+    return outData->IsValid();
+}
+
+int UIItemWnd::GetQtSystemButtonCount() const
+{
+    return 3;
+}
+
+bool UIItemWnd::GetQtSystemButtonDisplayForQt(int index, QtButtonDisplay* outData) const
+{
+    if (!outData || index < 0 || index >= GetQtSystemButtonCount()) {
+        return false;
+    }
+
+    switch (index) {
+    case 0:
+        outData->id = kButtonIdBase;
+        outData->x = m_x + 247;
+        outData->y = m_y + 3;
+        outData->width = kQtButtonWidth;
+        outData->height = kQtButtonHeight;
+        outData->label = "B";
+        outData->visible = IsMiniMode();
+        outData->active = false;
+        return true;
+    case 1:
+        outData->id = kButtonIdMini;
+        outData->x = m_x + 247;
+        outData->y = m_y + 3;
+        outData->width = kQtButtonWidth;
+        outData->height = kQtButtonHeight;
+        outData->label = "_";
+        outData->visible = !IsMiniMode();
+        outData->active = false;
+        return true;
+    case 2:
+        outData->id = kButtonIdClose;
+        outData->x = m_x + 265;
+        outData->y = m_y + 3;
+        outData->width = kQtButtonWidth;
+        outData->height = kQtButtonHeight;
+        outData->label = "X";
+        outData->visible = true;
+        outData->active = false;
+        return true;
+    default:
+        return false;
+    }
+}
+
+int UIItemWnd::GetQtTabCount() const
+{
+    return kTabCount;
+}
+
+bool UIItemWnd::GetQtTabDisplayForQt(int index, QtButtonDisplay* outData) const
+{
+    if (!outData || index < 0 || index >= GetQtTabCount()) {
+        return false;
+    }
+
+    static const std::array<const char*, kTabCount> kTabLabels = { "Use", "Eqp", "Etc" };
+
+    outData->id = index;
+    outData->x = m_x;
+    outData->y = m_y + 17 + index * 27;
+    outData->width = kTabWidth;
+    outData->height = 27;
+    outData->label = kTabLabels[static_cast<size_t>(index)];
+    outData->visible = !IsMiniMode();
+    outData->active = index == m_currentTab;
+    return true;
+}
+
 void UIItemWnd::EnsureCreated()
 {
     if (!m_controlsCreated) {
@@ -994,49 +1283,26 @@ void UIItemWnd::LayoutChildren()
 
 void UIItemWnd::LoadAssets()
 {
-    m_backgroundLeft = LoadBitmapFromGameData(ResolveUiAssetPath("itemwin_left.bmp"));
-    m_backgroundMid = LoadBitmapFromGameData(ResolveUiAssetPath("itemwin_mid.bmp"));
-    m_backgroundRight = LoadBitmapFromGameData(ResolveUiAssetPath("itemwin_right.bmp"));
-    m_titleBarBitmap = LoadBitmapFromGameData(ResolveUiAssetPath("titlebar_fix.bmp"));
-    m_tabBitmaps[0] = LoadBitmapFromGameData(ResolveUiAssetPath("tab_itm_01.bmp"));
-    m_tabBitmaps[1] = LoadBitmapFromGameData(ResolveUiAssetPath("tab_itm_02.bmp"));
-    m_tabBitmaps[2] = LoadBitmapFromGameData(ResolveUiAssetPath("tab_itm_03.bmp"));
-    m_hoverBitmap = LoadBitmapFromGameData(ResolveUiAssetPath("item_invert.bmp"));
+    m_backgroundLeft = LoadBitmapPixelsFromGameData(ResolveUiAssetPath("itemwin_left.bmp"));
+    m_backgroundMid = LoadBitmapPixelsFromGameData(ResolveUiAssetPath("itemwin_mid.bmp"));
+    m_backgroundRight = LoadBitmapPixelsFromGameData(ResolveUiAssetPath("itemwin_right.bmp"));
+    m_titleBarBitmap = LoadBitmapPixelsFromGameData(ResolveUiAssetPath("titlebar_fix.bmp"));
+    m_tabBitmaps[0] = LoadBitmapPixelsFromGameData(ResolveUiAssetPath("tab_itm_01.bmp"));
+    m_tabBitmaps[1] = LoadBitmapPixelsFromGameData(ResolveUiAssetPath("tab_itm_02.bmp"));
+    m_tabBitmaps[2] = LoadBitmapPixelsFromGameData(ResolveUiAssetPath("tab_itm_03.bmp"));
+    m_hoverBitmap = LoadBitmapPixelsFromGameData(ResolveUiAssetPath("item_invert.bmp"));
 }
 
 void UIItemWnd::ReleaseAssets()
 {
-    if (m_backgroundLeft) {
-        DeleteObject(m_backgroundLeft);
-        m_backgroundLeft = nullptr;
+    m_backgroundLeft.Clear();
+    m_backgroundMid.Clear();
+    m_backgroundRight.Clear();
+    m_titleBarBitmap.Clear();
+    for (shopui::BitmapPixels& bitmap : m_tabBitmaps) {
+        bitmap.Clear();
     }
-    if (m_backgroundMid) {
-        DeleteObject(m_backgroundMid);
-        m_backgroundMid = nullptr;
-    }
-    if (m_backgroundRight) {
-        DeleteObject(m_backgroundRight);
-        m_backgroundRight = nullptr;
-    }
-    if (m_titleBarBitmap) {
-        DeleteObject(m_titleBarBitmap);
-        m_titleBarBitmap = nullptr;
-    }
-    for (HBITMAP& bitmap : m_tabBitmaps) {
-        if (bitmap) {
-            DeleteObject(bitmap);
-            bitmap = nullptr;
-        }
-    }
-    if (m_hoverBitmap) {
-        DeleteObject(m_hoverBitmap);
-        m_hoverBitmap = nullptr;
-    }
-    for (auto& entry : m_iconCache) {
-        if (entry.second) {
-            DeleteObject(entry.second);
-        }
-    }
+    m_hoverBitmap.Clear();
     m_iconCache.clear();
 }
 
@@ -1053,6 +1319,56 @@ void UIItemWnd::SetCurrentTab(int tabIndex)
         m_currentTab = clamped;
         m_viewOffset = 0;
         m_hoveredItemIndex = -1;
+    }
+}
+
+void UIItemWnd::RefreshVisibleItemsForInteractionState()
+{
+    const std::vector<const ITEM_INFO*> filteredItems = GetFilteredItems();
+    if (filteredItems.empty()) {
+        m_hoveredItemIndex = -1;
+    } else {
+        m_hoveredItemIndex = std::min(m_hoveredItemIndex, static_cast<int>(filteredItems.size()) - 1);
+    }
+    m_viewOffset = std::min(m_viewOffset, GetMaxViewOffset(GetInventorySlotCapacity()));
+    m_viewOffset = std::max(m_viewOffset, 0);
+    m_visibleItems.clear();
+    m_hoverOverlayItem = nullptr;
+    m_hoverOverlayRect = RECT{};
+
+    if (m_h <= kMiniHeight) {
+        return;
+    }
+
+    const CGameMode* gameMode = g_modeMgr.GetCurrentGameMode();
+    const bool hideDraggedItem = gameMode
+        && gameMode->m_dragType == static_cast<int>(DragType::ShortcutItem)
+        && gameMode->m_dragInfo.itemIndex != 0;
+    const int columns = GetItemColumns();
+    const int rows = GetItemRows();
+    const int firstIndex = m_viewOffset * columns;
+    const int slotCount = columns * rows;
+    m_visibleItems.reserve(static_cast<size_t>(slotCount));
+
+    for (int drawIndex = 0; drawIndex < slotCount; ++drawIndex) {
+        const int itemIndex = firstIndex + drawIndex;
+        const int column = drawIndex % columns;
+        const int row = drawIndex / columns;
+        RECT cellRect{
+            m_x + kGridLeft + column * kGridCell,
+            m_y + kGridTop + row * kGridCell,
+            m_x + kGridLeft + (column + 1) * kGridCell,
+            m_y + kGridTop + (row + 1) * kGridCell,
+        };
+
+        const ITEM_INFO* item = itemIndex < static_cast<int>(filteredItems.size())
+            ? filteredItems[itemIndex]
+            : nullptr;
+        const bool isDraggedSource = item
+            && hideDraggedItem
+            && item->m_itemIndex == gameMode->m_dragInfo.itemIndex;
+        const ITEM_INFO* drawItem = isDraggedSource ? nullptr : item;
+        m_visibleItems.push_back({ drawItem, cellRect });
     }
 }
 
@@ -1097,6 +1413,23 @@ int UIItemWnd::GetItemRows() const
     return std::max(1, (m_h - kGridTop - kGridBottomMargin) / kGridCell);
 }
 
+int UIItemWnd::GetInventoryItemCount() const
+{
+    int count = 0;
+    const std::list<ITEM_INFO>& items = g_session.GetInventoryItems();
+    for (const ITEM_INFO& item : items) {
+        if (item.m_wearLocation == 0) {
+            ++count;
+        }
+    }
+    return count;
+}
+
+int UIItemWnd::GetInventorySlotCapacity() const
+{
+    return kInventorySlotCapacity;
+}
+
 int UIItemWnd::GetMaxViewOffset(int itemCount) const
 {
     const int columns = GetItemColumns();
@@ -1135,27 +1468,19 @@ std::vector<const ITEM_INFO*> UIItemWnd::GetFilteredItems() const
     return out;
 }
 
-HBITMAP UIItemWnd::GetItemIcon(const ITEM_INFO& item)
+const shopui::BitmapPixels* UIItemWnd::GetItemIcon(const ITEM_INFO& item)
 {
     const unsigned int itemId = item.GetItemId();
     const auto found = m_iconCache.find(itemId);
     if (found != m_iconCache.end()) {
-        return found->second;
+        return found->second.IsValid() ? &found->second : nullptr;
     }
 
-    HBITMAP bitmap = nullptr;
-    for (const std::string& candidate : BuildItemIconCandidates(item)) {
-        if (!g_fileMgr.IsDataExist(candidate.c_str())) {
-            continue;
-        }
-        bitmap = LoadBitmapFromGameData(candidate);
-        if (bitmap) {
-            break;
-        }
-    }
+    shopui::BitmapPixels bitmap;
+    shopui::TryLoadItemIconPixels(item, &bitmap);
 
-    m_iconCache[itemId] = bitmap;
-    return bitmap;
+    auto inserted = m_iconCache.emplace(itemId, std::move(bitmap));
+    return inserted.first->second.IsValid() ? &inserted.first->second : nullptr;
 }
 
 std::string UIItemWnd::GetTitleText() const

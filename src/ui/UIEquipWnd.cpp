@@ -1,5 +1,6 @@
 #include "UIEquipWnd.h"
 
+#include "DebugLog.h"
 #include "gamemode/GameMode.h"
 #include "gamemode/Mode.h"
 #include "UIItemWnd.h"
@@ -8,9 +9,11 @@
 #include "core/File.h"
 #include "item/Item.h"
 #include "main/WinMain.h"
+#include "qtui/QtUiRuntime.h"
 #include "render/DC.h"
 #include "render3d/Device.h"
 #include "res/ActRes.h"
+#include "res/Bitmap.h"
 #include "res/ImfRes.h"
 #include "res/PaletteRes.h"
 #include "res/Sprite.h"
@@ -19,8 +22,15 @@
 #include "world/GameActor.h"
 #include "world/World.h"
 
-#include <gdiplus.h>
 #include <windows.h>
+
+#if RO_ENABLE_QT6_UI
+#include <QFont>
+#include <QFontMetrics>
+#include <QImage>
+#include <QPainter>
+#include <QString>
+#endif
 
 #include <algorithm>
 #include <array>
@@ -31,15 +41,16 @@
 #include <string>
 #include <vector>
 
-#pragma comment(lib, "gdiplus.lib")
 #pragma comment(lib, "msimg32.lib")
 
 namespace {
 
 constexpr int kWindowWidth = 280;
-constexpr int kWindowHeight = 206;
+constexpr int kWindowHeight = 232;
 constexpr int kMiniHeight = 34;
 constexpr int kTitleBarHeight = 17;
+constexpr int kQtButtonWidth = 12;
+constexpr int kQtButtonHeight = 11;
 constexpr int kButtonIdBase = 134;
 constexpr int kButtonIdClose = 135;
 constexpr int kButtonIdMini = 136;
@@ -48,11 +59,15 @@ constexpr const char* kUiKorPrefix =
     "\xC0\xAF\xC0\xFA\xC0\xCE\xC5\xCD\xC6\xE4\xC0\xCC\xBD\xBA"
     "\\";
 
-constexpr int kSlotIconSize = 24;
+constexpr int kSlotIconSize = 32;
+constexpr int kSlotVerticalSpacing = 5;
+constexpr int kEquipSlotRowCount = 5;
+constexpr int kEquipSlotBaseY = 19;
+constexpr int kEquipSlotLegacyStep = 32;
 constexpr int kCenterPanelLeft = 98;
 constexpr int kCenterPanelRight = 182;
 constexpr int kCenterPanelTop = 32;
-constexpr int kCenterPanelBottom = 188;
+constexpr int kCenterPanelBottom = 204;
 
 struct EquipSlotDefLocal {
     int wearMask;
@@ -62,28 +77,44 @@ struct EquipSlotDefLocal {
 
 constexpr std::array<EquipSlotDefLocal, 10> kEquipSlots = {{
     { 256, 8, 19 },    // head upper
-    { 1, 8, 45 },      // head lower
-    { 4, 8, 97 },      // garment
-    { 8, 8, 123 },     // accessory left
-    { 512, 248, 19 },  // head mid
-    { 16, 248, 45 },   // armor
-    { 32, 248, 71 },   // shield
-    { 64, 248, 97 },   // shoes
-    { 128, 248, 123 }, // accessory right
-    { 2, 8, 71 },      // weapon
+    { 1, 8, 51 },      // head lower
+    { 4, 8, 115 },     // garment
+    { 8, 8, 147 },     // accessory left
+    { 512, 240, 19 },  // head mid
+    { 16, 240, 51 },   // armor
+    { 32, 240, 83 },   // shield
+    { 64, 240, 115 },  // shoes
+    { 128, 240, 147 }, // accessory right
+    { 2, 8, 83 },      // weapon
 }};
 
-ULONG_PTR EnsureGdiplusStarted()
+bool IsLeftEquipSlot(const EquipSlotDefLocal& slot)
 {
-    static ULONG_PTR s_token = 0;
-    static bool s_started = false;
-    if (!s_started) {
-        Gdiplus::GdiplusStartupInput startupInput;
-        if (Gdiplus::GdiplusStartup(&s_token, &startupInput, nullptr) == Gdiplus::Ok) {
-            s_started = true;
-        }
+    return slot.iconX < kCenterPanelLeft;
+}
+
+int GetEquipSlotX(const EquipSlotDefLocal& slot, int windowWidth)
+{
+    if (IsLeftEquipSlot(slot)) {
+        return (std::max)(0, (kCenterPanelLeft - kSlotIconSize) / 2);
     }
-    return s_token;
+
+    const int rightGutterWidth = (std::max)(0, windowWidth - kCenterPanelRight);
+    return kCenterPanelRight + (std::max)(0, (rightGutterWidth - kSlotIconSize) / 2);
+}
+
+int GetEquipSlotRow(const EquipSlotDefLocal& slot)
+{
+    return (std::max)(0, (slot.iconY - kEquipSlotBaseY) / kEquipSlotLegacyStep);
+}
+
+int GetEquipSlotY(const EquipSlotDefLocal& slot, int windowHeight)
+{
+    const int contentHeight = (std::max)(0, windowHeight - kTitleBarHeight);
+    const int totalSlotHeight = (kEquipSlotRowCount * kSlotIconSize)
+        + ((kEquipSlotRowCount - 1) * kSlotVerticalSpacing);
+    const int topOffset = kTitleBarHeight + (std::max)(0, (contentHeight - totalSlotHeight) / 2);
+    return topOffset + (GetEquipSlotRow(slot) * (kSlotIconSize + kSlotVerticalSpacing));
 }
 
 std::string ToLowerAscii(std::string value)
@@ -121,6 +152,17 @@ void HashTokenString(unsigned long long* hash, const std::string& value)
         HashTokenValue(hash, static_cast<unsigned long long>(ch));
     }
     HashTokenValue(hash, 0xFFull);
+}
+
+RECT MakeEquipRect(int x, int y, int left, int top, int width, int height)
+{
+    RECT rect{ x + left, y + top, x + left + width, y + top + height };
+    return rect;
+}
+
+bool IsPointInRect(const RECT& rect, int x, int y)
+{
+    return x >= rect.left && x < rect.right && y >= rect.top && y < rect.bottom;
 }
 
 void AddUniqueCandidate(std::vector<std::string>& out, const std::string& raw)
@@ -186,146 +228,50 @@ std::string ResolveUiAssetPath(const char* fileName)
     return NormalizeSlash(fileName ? fileName : "");
 }
 
-HBITMAP LoadBitmapFromGameData(const std::string& path)
+shopui::BitmapPixels LoadBitmapPixelsFromGameData(const std::string& path)
 {
-    if (path.empty() || !EnsureGdiplusStarted()) {
-        return nullptr;
-    }
-
-    int size = 0;
-    unsigned char* bytes = g_fileMgr.GetData(path.c_str(), &size);
-    if (!bytes || size <= 0) {
-        delete[] bytes;
-        return nullptr;
-    }
-
-    HBITMAP outBitmap = nullptr;
-    HGLOBAL mem = GlobalAlloc(GMEM_MOVEABLE, static_cast<SIZE_T>(size));
-    if (mem) {
-        void* dst = GlobalLock(mem);
-        if (dst) {
-            std::memcpy(dst, bytes, static_cast<size_t>(size));
-            GlobalUnlock(mem);
-
-            IStream* stream = nullptr;
-            if (CreateStreamOnHGlobal(mem, TRUE, &stream) == S_OK) {
-                auto* bitmap = Gdiplus::Bitmap::FromStream(stream, FALSE);
-                if (bitmap && bitmap->GetLastStatus() == Gdiplus::Ok) {
-                    bitmap->GetHBITMAP(RGB(0, 0, 0), &outBitmap);
-                }
-                delete bitmap;
-                stream->Release();
-            } else {
-                GlobalFree(mem);
-            }
-        } else {
-            GlobalFree(mem);
-        }
-    }
-
-    delete[] bytes;
-    return outBitmap;
+    return shopui::LoadBitmapPixelsFromGameData(path, true);
 }
 
-void DrawBitmapTransparent(HDC target, HBITMAP bitmap, const RECT& dst)
+void DrawBitmapPixelsStretched(HDC target, const shopui::BitmapPixels& bitmap, const RECT& dst)
 {
-    if (!target || !bitmap) {
+    if (!target || !bitmap.IsValid() || dst.right <= dst.left || dst.bottom <= dst.top) {
         return;
     }
-
-    BITMAP bm{};
-    if (!GetObjectA(bitmap, sizeof(bm), &bm) || bm.bmWidth <= 0 || bm.bmHeight <= 0) {
-        return;
-    }
-
-    HDC srcDC = CreateCompatibleDC(target);
-    if (!srcDC) {
-        return;
-    }
-
-    HGDIOBJ oldBitmap = SelectObject(srcDC, bitmap);
-    TransparentBlt(target,
-        dst.left,
-        dst.top,
-        dst.right - dst.left,
-        dst.bottom - dst.top,
-        srcDC,
-        0,
-        0,
-        bm.bmWidth,
-        bm.bmHeight,
-        RGB(255, 0, 255));
-    SelectObject(srcDC, oldBitmap);
-    DeleteDC(srcDC);
+    AlphaBlendArgbToHdc(target,
+                        dst.left,
+                        dst.top,
+                        dst.right - dst.left,
+                        dst.bottom - dst.top,
+                        bitmap.pixels.data(),
+                        bitmap.width,
+                        bitmap.height);
 }
 
-void DrawBitmapAlpha(HDC target, HBITMAP bitmap, const RECT& dst)
+void DrawBitmapPixelsSegmentTransparent(HDC target, const shopui::BitmapPixels& bitmap, const RECT& dst, int srcX, int srcY, int srcW, int srcH)
 {
-    if (!target || !bitmap || dst.right <= dst.left || dst.bottom <= dst.top) {
+    if (!target || !bitmap.IsValid() || srcW <= 0 || srcH <= 0 || dst.right <= dst.left || dst.bottom <= dst.top) {
+        return;
+    }
+    if (srcX < 0 || srcY < 0 || srcX + srcW > bitmap.width || srcY + srcH > bitmap.height) {
         return;
     }
 
-    BITMAP bm{};
-    if (!GetObjectA(bitmap, sizeof(bm), &bm) || bm.bmWidth <= 0 || bm.bmHeight <= 0) {
-        return;
+    std::vector<unsigned int> cropped(static_cast<size_t>(srcW) * static_cast<size_t>(srcH));
+    for (int row = 0; row < srcH; ++row) {
+        const unsigned int* srcRow = bitmap.pixels.data() + static_cast<size_t>(srcY + row) * static_cast<size_t>(bitmap.width) + static_cast<size_t>(srcX);
+        unsigned int* dstRow = cropped.data() + static_cast<size_t>(row) * static_cast<size_t>(srcW);
+        std::copy(srcRow, srcRow + srcW, dstRow);
     }
 
-    HDC srcDC = CreateCompatibleDC(target);
-    if (!srcDC) {
-        return;
-    }
-
-    HGDIOBJ oldBitmap = SelectObject(srcDC, bitmap);
-
-    BLENDFUNCTION blend{};
-    blend.BlendOp = AC_SRC_OVER;
-    blend.SourceConstantAlpha = 255;
-    blend.AlphaFormat = AC_SRC_ALPHA;
-
-    const BOOL ok = AlphaBlend(target,
-        dst.left,
-        dst.top,
-        dst.right - dst.left,
-        dst.bottom - dst.top,
-        srcDC,
-        0,
-        0,
-        bm.bmWidth,
-        bm.bmHeight,
-        blend);
-
-    if (!ok) {
-        DrawBitmapTransparent(target, bitmap, dst);
-    }
-
-    SelectObject(srcDC, oldBitmap);
-    DeleteDC(srcDC);
-}
-
-void DrawBitmapSegmentTransparent(HDC target, HBITMAP bitmap, const RECT& dst, int srcX, int srcY, int srcW, int srcH)
-{
-    if (!target || !bitmap || srcW <= 0 || srcH <= 0 || dst.right <= dst.left || dst.bottom <= dst.top) {
-        return;
-    }
-
-    HDC srcDC = CreateCompatibleDC(target);
-    if (!srcDC) {
-        return;
-    }
-    HGDIOBJ oldBitmap = SelectObject(srcDC, bitmap);
-    TransparentBlt(target,
-        dst.left,
-        dst.top,
-        dst.right - dst.left,
-        dst.bottom - dst.top,
-        srcDC,
-        srcX,
-        srcY,
-        srcW,
-        srcH,
-        RGB(255, 0, 255));
-    SelectObject(srcDC, oldBitmap);
-    DeleteDC(srcDC);
+    AlphaBlendArgbToHdc(target,
+                        dst.left,
+                        dst.top,
+                        dst.right - dst.left,
+                        dst.bottom - dst.top,
+                        cropped.data(),
+                        srcW,
+                        srcH);
 }
 
 void FillRectColor(HDC hdc, const RECT& rect, COLORREF color)
@@ -342,6 +288,83 @@ void FrameRectColor(HDC hdc, const RECT& rect, COLORREF color)
     DeleteObject(brush);
 }
 
+#if RO_ENABLE_QT6_UI
+QFont BuildEquipWindowFontFromHdc(HDC hdc, const char* fallbackFamily = "MS Sans Serif", int fallbackPixelSize = 13)
+{
+    LOGFONTA logFont{};
+    if (hdc) {
+        if (HGDIOBJ fontObject = GetCurrentObject(hdc, OBJ_FONT)) {
+            GetObjectA(fontObject, sizeof(logFont), &logFont);
+        }
+    }
+
+    const QString family = logFont.lfFaceName[0] != '\0'
+        ? QString::fromLocal8Bit(logFont.lfFaceName)
+        : QString::fromLocal8Bit(fallbackFamily);
+    QFont font(family);
+    font.setPixelSize(logFont.lfHeight != 0 ? (std::max)(1, static_cast<int>(std::abs(logFont.lfHeight))) : fallbackPixelSize);
+    font.setBold(logFont.lfWeight >= FW_BOLD);
+    font.setStyleStrategy(QFont::NoAntialias);
+    return font;
+}
+
+Qt::Alignment ToQtEquipTextAlignment(UINT format)
+{
+    Qt::Alignment alignment = Qt::AlignLeft | Qt::AlignTop;
+    if (format & DT_CENTER) {
+        alignment &= ~Qt::AlignLeft;
+        alignment |= Qt::AlignHCenter;
+    } else if (format & DT_RIGHT) {
+        alignment &= ~Qt::AlignLeft;
+        alignment |= Qt::AlignRight;
+    }
+
+    if (format & DT_VCENTER) {
+        alignment &= ~Qt::AlignTop;
+        alignment |= Qt::AlignVCenter;
+    } else if (format & DT_BOTTOM) {
+        alignment &= ~Qt::AlignTop;
+        alignment |= Qt::AlignBottom;
+    }
+
+    return alignment;
+}
+
+void DrawEquipWindowTextQt(HDC hdc, const RECT& rect, const std::string& text, COLORREF color, UINT format)
+{
+    if (!hdc || text.empty() || rect.right <= rect.left || rect.bottom <= rect.top) {
+        return;
+    }
+
+    QString label = QString::fromLocal8Bit(text.c_str());
+    if (label.isEmpty()) {
+        return;
+    }
+
+    const int width = rect.right - rect.left;
+    const int height = rect.bottom - rect.top;
+    const QFont font = BuildEquipWindowFontFromHdc(hdc);
+    if (format & DT_END_ELLIPSIS) {
+        const QFontMetrics metrics(font);
+        label = metrics.elidedText(label, Qt::ElideRight, width);
+    }
+
+    std::vector<unsigned int> pixels(static_cast<size_t>(width) * static_cast<size_t>(height), 0u);
+    QImage image(reinterpret_cast<uchar*>(pixels.data()), width, height, width * static_cast<int>(sizeof(unsigned int)), QImage::Format_ARGB32);
+    if (image.isNull()) {
+        return;
+    }
+
+    QPainter painter(&image);
+    painter.setRenderHint(QPainter::Antialiasing, false);
+    painter.setRenderHint(QPainter::TextAntialiasing, false);
+    painter.setFont(font);
+    painter.setPen(QColor(GetRValue(color), GetGValue(color), GetBValue(color)));
+    painter.drawText(QRect(0, 0, width, height), ToQtEquipTextAlignment(format) | Qt::TextSingleLine, label);
+    AlphaBlendArgbToHdc(hdc, rect.left, rect.top, width, height, pixels.data(), width, height);
+}
+#endif
+
 void DrawWindowText(HDC hdc, int x, int y, const std::string& text, COLORREF color, UINT format = DT_LEFT | DT_TOP | DT_SINGLELINE)
 {
     if (!hdc || text.empty()) {
@@ -352,7 +375,11 @@ void DrawWindowText(HDC hdc, int x, int y, const std::string& text, COLORREF col
     SetTextColor(hdc, color);
     RECT rect{ x, y, x + 260, y + 18 };
     HGDIOBJ oldFont = SelectObject(hdc, GetStockObject(DEFAULT_GUI_FONT));
+#if RO_ENABLE_QT6_UI
+    DrawEquipWindowTextQt(hdc, rect, text, color, format);
+#else
     DrawTextA(hdc, text.c_str(), -1, &rect, format);
+#endif
     SelectObject(hdc, oldFont);
 }
 
@@ -385,7 +412,11 @@ void DrawWindowTextRect(HDC hdc, const RECT& rect, const std::string& text, COLO
     SetBkMode(hdc, TRANSPARENT);
     SetTextColor(hdc, color);
     HGDIOBJ oldFont = SelectObject(hdc, s_sharpUiFont ? s_sharpUiFont : GetStockObject(DEFAULT_GUI_FONT));
+#if RO_ENABLE_QT6_UI
+    DrawEquipWindowTextQt(hdc, drawRect, text, color, format);
+#else
     DrawTextA(hdc, text.c_str(), -1, &drawRect, format);
+#endif
     SelectObject(hdc, oldFont);
 }
 
@@ -583,6 +614,167 @@ bool DrawEquipPreviewLayer(HDC hdc,
     return DrawActMotionToHdc(hdc, drawX + point.x, drawY + point.y, sprRes, &singleLayerMotion, palette);
 }
 
+#if RO_ENABLE_QT6_UI
+bool DrawEquipPreviewAccessoryMotionToArgb(unsigned int* pixels,
+    int width,
+    int height,
+    int drawX,
+    int drawY,
+    int curAction,
+    int bodyMotionIndex,
+    int headMotionIndex,
+    const std::string& bodyActName,
+    const std::string& headActName,
+    const std::string& accessoryActName,
+    const std::string& accessorySprName)
+{
+    if (!pixels || width <= 0 || height <= 0 || accessoryActName.empty() || accessorySprName.empty()) {
+        return false;
+    }
+
+    CActRes* bodyActRes = g_resMgr.GetAs<CActRes>(bodyActName.c_str());
+    CActRes* headActRes = g_resMgr.GetAs<CActRes>(headActName.c_str());
+    CActRes* accessoryActRes = g_resMgr.GetAs<CActRes>(accessoryActName.c_str());
+    CSprRes* accessorySprRes = g_resMgr.GetAs<CSprRes>(accessorySprName.c_str());
+    if (!bodyActRes || !headActRes || !accessoryActRes || !accessorySprRes) {
+        return false;
+    }
+
+    const CMotion* bodyMotion = bodyActRes->GetMotion(curAction, bodyMotionIndex);
+    const CMotion* headMotion = headActRes->GetMotion(curAction, headMotionIndex);
+    const CMotion* accessoryMotion = accessoryActRes->GetMotion(curAction, headMotionIndex);
+    if (!accessoryMotion) {
+        accessoryMotion = accessoryActRes->GetMotion(curAction, 0);
+    }
+    if (!bodyMotion || !headMotion || !accessoryMotion) {
+        return false;
+    }
+
+    POINT point{};
+    ApplyAttachPointDelta(bodyMotion, headMotion, &point);
+    ApplyAttachPointDelta(headMotion, accessoryMotion, &point);
+    return DrawActMotionToArgb(pixels, width, height, drawX + point.x, drawY + point.y, accessorySprRes, accessoryMotion, accessorySprRes->m_pal);
+}
+
+bool DrawEquipPreviewLayerToArgb(unsigned int* pixels,
+    int width,
+    int height,
+    int drawX,
+    int drawY,
+    int layerIndex,
+    int curAction,
+    int curMotion,
+    const std::string& actName,
+    const std::string& sprName,
+    const std::string& imfName,
+    const std::string& bodyActName,
+    const std::string& headActName,
+    int bodyMotionIndex,
+    int headMotionIndex,
+    const std::string& paletteName)
+{
+    if (!pixels || width <= 0 || height <= 0) {
+        return false;
+    }
+
+    CActRes* actRes = g_resMgr.GetAs<CActRes>(actName.c_str());
+    CSprRes* sprRes = g_resMgr.GetAs<CSprRes>(sprName.c_str());
+    CImfRes* imfRes = g_resMgr.GetAs<CImfRes>(imfName.c_str());
+    if (!actRes || !sprRes || !imfRes) {
+        return false;
+    }
+
+    int resolvedLayer = imfRes->GetLayer(layerIndex, curAction, curMotion);
+    if (resolvedLayer < 0) {
+        resolvedLayer = layerIndex;
+    }
+
+    const CMotion* motion = actRes->GetMotion(curAction, curMotion);
+    if (!motion || resolvedLayer >= static_cast<int>(motion->sprClips.size())) {
+        return false;
+    }
+
+    const POINT point = GetEquipPreviewLayerPoint(layerIndex,
+        resolvedLayer,
+        imfRes,
+        motion,
+        bodyActName,
+        headActName,
+        curAction,
+        bodyMotionIndex,
+        curMotion,
+        headMotionIndex);
+
+    std::array<unsigned int, 256> paletteOverride{};
+    unsigned int* palette = sprRes->m_pal;
+    if (!paletteName.empty() && BuildEquipPreviewPaletteOverride(paletteName, paletteOverride)) {
+        palette = paletteOverride.data();
+    }
+
+    CMotion singleLayerMotion{};
+    singleLayerMotion.sprClips.push_back(motion->sprClips[resolvedLayer]);
+    return DrawActMotionToArgb(pixels, width, height, drawX + point.x, drawY + point.y, sprRes, &singleLayerMotion, palette);
+}
+
+bool DrawEquipPreviewPlayerSpriteToArgb(unsigned int* pixels, int width, int height, int drawX, int drawY)
+{
+    if (!pixels || width <= 0 || height <= 0) {
+        return false;
+    }
+
+    char bodyAct[260] = {};
+    char bodySpr[260] = {};
+    char headAct[260] = {};
+    char headSpr[260] = {};
+    char accessoryBottomAct[260] = {};
+    char accessoryBottomSpr[260] = {};
+    char accessoryMidAct[260] = {};
+    char accessoryMidSpr[260] = {};
+    char accessoryTopAct[260] = {};
+    char accessoryTopSpr[260] = {};
+    char imfName[260] = {};
+    char bodyPalette[260] = {};
+    char headPalette[260] = {};
+
+    const int sex = g_session.GetSex();
+    int head = g_session.m_playerHead;
+    const int curAction = 0;
+    const int curMotion = 0;
+
+    const std::string bodyActName = g_session.GetJobActName(g_session.m_playerJob, sex, bodyAct);
+    const std::string bodySprName = g_session.GetJobSprName(g_session.m_playerJob, sex, bodySpr);
+    const std::string headActName = g_session.GetHeadActName(g_session.m_playerJob, &head, sex, headAct);
+    const std::string headSprName = g_session.GetHeadSprName(g_session.m_playerJob, &head, sex, headSpr);
+    const std::string accessoryBottomActName = g_session.GetAccessoryActName(g_session.m_playerJob, &head, sex, g_session.m_playerAccessory, accessoryBottomAct);
+    const std::string accessoryBottomSprName = g_session.GetAccessorySprName(g_session.m_playerJob, &head, sex, g_session.m_playerAccessory, accessoryBottomSpr);
+    const std::string accessoryMidActName = g_session.GetAccessoryActName(g_session.m_playerJob, &head, sex, g_session.m_playerAccessory3, accessoryMidAct);
+    const std::string accessoryMidSprName = g_session.GetAccessorySprName(g_session.m_playerJob, &head, sex, g_session.m_playerAccessory3, accessoryMidSpr);
+    const std::string accessoryTopActName = g_session.GetAccessoryActName(g_session.m_playerJob, &head, sex, g_session.m_playerAccessory2, accessoryTopAct);
+    const std::string accessoryTopSprName = g_session.GetAccessorySprName(g_session.m_playerJob, &head, sex, g_session.m_playerAccessory2, accessoryTopSpr);
+    const std::string imfPath = g_session.GetImfName(g_session.m_playerJob, head, sex, imfName);
+    const std::string bodyPaletteName = g_session.m_playerBodyPalette > 0
+        ? g_session.GetBodyPaletteName(g_session.m_playerJob, sex, g_session.m_playerBodyPalette, bodyPalette)
+        : std::string();
+    const std::string headPaletteName = g_session.m_playerHeadPalette > 0
+        ? g_session.GetHeadPaletteName(head, g_session.m_playerJob, sex, g_session.m_playerHeadPalette, headPalette)
+        : std::string();
+
+    bool drew = false;
+    drew |= DrawEquipPreviewLayerToArgb(pixels, width, height, drawX, drawY, 0, curAction, curMotion, bodyActName, bodySprName, imfPath, bodyActName, headActName, curMotion, curMotion, bodyPaletteName);
+    drew |= DrawEquipPreviewLayerToArgb(pixels, width, height, drawX, drawY, 1, curAction, curMotion, headActName, headSprName, imfPath, bodyActName, headActName, curMotion, curMotion, headPaletteName);
+    if (!accessoryBottomActName.empty() && !accessoryBottomSprName.empty()) {
+        drew |= DrawEquipPreviewAccessoryMotionToArgb(pixels, width, height, drawX, drawY, curAction, curMotion, curMotion, bodyActName, headActName, accessoryBottomActName, accessoryBottomSprName);
+    }
+    if (!accessoryMidActName.empty() && !accessoryMidSprName.empty()) {
+        drew |= DrawEquipPreviewAccessoryMotionToArgb(pixels, width, height, drawX, drawY, curAction, curMotion, curMotion, bodyActName, headActName, accessoryMidActName, accessoryMidSprName);
+    }
+    if (!accessoryTopActName.empty() && !accessoryTopSprName.empty()) {
+        drew |= DrawEquipPreviewAccessoryMotionToArgb(pixels, width, height, drawX, drawY, curAction, curMotion, curMotion, bodyActName, headActName, accessoryTopActName, accessoryTopSprName);
+    }
+    return drew;
+}
+#endif
+
 bool DrawEquipPreviewPlayerSprite(HDC hdc, int drawX, int drawY)
 {
     char bodyAct[260] = {};
@@ -678,77 +870,107 @@ bool DrawEquipPreviewPlayerSpriteFitted(HDC hdc, const RECT& previewArea)
     }
 
     constexpr int kComposeWidth = 160;
-    constexpr int kComposeHeight = 180;
+    constexpr int kComposeHeight = 260;
+    constexpr int kComposeAnchorBottomPadding = 84;
+    constexpr float kPreviewScaleBoost = 1.02f;
+    constexpr int kPreviewSidePadding = 2;
+    constexpr int kPreviewTopPadding = 4;
+    constexpr int kPreviewBottomPadding = 14;
 
-    BITMAPINFO bmi{};
-    bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-    bmi.bmiHeader.biWidth = kComposeWidth;
-    bmi.bmiHeader.biHeight = -kComposeHeight;
-    bmi.bmiHeader.biPlanes = 1;
-    bmi.bmiHeader.biBitCount = 32;
-    bmi.bmiHeader.biCompression = BI_RGB;
-
-    void* dibBits = nullptr;
-    HBITMAP dib = CreateDIBSection(hdc, &bmi, DIB_RGB_COLORS, &dibBits, nullptr, 0);
-    if (!dib || !dibBits) {
-        if (dib) {
-            DeleteObject(dib);
-        }
+    ArgbDibSurface composeSurface;
+    if (!composeSurface.EnsureSize(kComposeWidth, kComposeHeight)) {
         return false;
     }
 
-    std::memset(dibBits, 0, static_cast<size_t>(kComposeWidth) * static_cast<size_t>(kComposeHeight) * sizeof(unsigned int));
+    std::memset(composeSurface.GetBits(), 0, static_cast<size_t>(kComposeWidth) * static_cast<size_t>(kComposeHeight) * sizeof(unsigned int));
 
-    HDC memDc = CreateCompatibleDC(hdc);
-    if (!memDc) {
-        DeleteObject(dib);
-        return false;
-    }
-
-    HGDIOBJ oldBitmap = SelectObject(memDc, dib);
-    const bool drew = DrawEquipPreviewPlayerSprite(memDc, kComposeWidth / 2, kComposeHeight - 14);
+    const bool drew = DrawEquipPreviewPlayerSprite(
+        composeSurface.GetDC(),
+        kComposeWidth / 2,
+        kComposeHeight - kComposeAnchorBottomPadding);
     RECT srcBounds{};
-    const bool hasBounds = FindOpaqueBounds(static_cast<const unsigned int*>(dibBits), kComposeWidth, kComposeHeight, &srcBounds);
+    const bool hasBounds = FindOpaqueBounds(static_cast<const unsigned int*>(composeSurface.GetBits()), kComposeWidth, kComposeHeight, &srcBounds);
 
     if (drew && hasBounds) {
         const int srcW = srcBounds.right - srcBounds.left;
         const int srcH = srcBounds.bottom - srcBounds.top;
         const int areaW = previewArea.right - previewArea.left;
         const int areaH = previewArea.bottom - previewArea.top;
+        const int fitAreaLeft = previewArea.left + kPreviewSidePadding;
+        const int fitAreaTop = previewArea.top + kPreviewTopPadding;
+        const int fitAreaRight = previewArea.right - kPreviewSidePadding;
+        const int fitAreaBottom = previewArea.bottom - kPreviewBottomPadding;
+        const int fitAreaW = (std::max)(1, fitAreaRight - fitAreaLeft);
+        const int fitAreaH = (std::max)(1, fitAreaBottom - fitAreaTop);
 
         int drawW = srcW;
         int drawH = srcH;
-        if (drawW > areaW || drawH > areaH) {
-            const float scaleX = static_cast<float>(areaW) / static_cast<float>((std::max)(1, srcW));
-            const float scaleY = static_cast<float>(areaH) / static_cast<float>((std::max)(1, srcH));
+        if (drawW > fitAreaW || drawH > fitAreaH) {
+            const float scaleX = static_cast<float>(fitAreaW) / static_cast<float>((std::max)(1, srcW));
+            const float scaleY = static_cast<float>(fitAreaH) / static_cast<float>((std::max)(1, srcH));
             const float scale = (std::min)(scaleX, scaleY);
             drawW = (std::max)(1, static_cast<int>(static_cast<float>(srcW) * scale));
             drawH = (std::max)(1, static_cast<int>(static_cast<float>(srcH) * scale));
         }
 
-        const int dstX = previewArea.left + (areaW - drawW) / 2;
-        const int dstY = previewArea.top + (areaH - drawH) / 2;
+        drawW = (std::min)(fitAreaW, (std::max)(1, static_cast<int>(static_cast<float>(drawW) * kPreviewScaleBoost)));
+        drawH = (std::min)(fitAreaH, (std::max)(1, static_cast<int>(static_cast<float>(drawH) * kPreviewScaleBoost)));
 
-        BLENDFUNCTION blend{};
-        blend.BlendOp = AC_SRC_OVER;
-        blend.SourceConstantAlpha = 255;
-        blend.AlphaFormat = AC_SRC_ALPHA;
-        AlphaBlend(hdc,
-            dstX,
-            dstY,
-            drawW,
-            drawH,
-            memDc,
-            srcBounds.left,
-            srcBounds.top,
-            srcW,
-            srcH,
-            blend);
+        const int dstX = fitAreaLeft + (fitAreaW - drawW) / 2;
+        const int dstY = fitAreaTop;
+
+        if (drawW == srcW && drawH == srcH) {
+            AlphaBlendArgbToHdc(hdc,
+                dstX,
+                dstY,
+                drawW,
+                drawH,
+                static_cast<const unsigned int*>(composeSurface.GetBits()),
+                kComposeWidth,
+                kComposeHeight,
+                srcBounds.left,
+                srcBounds.top,
+                srcW,
+                srcH);
+        } else {
+            ArgbDibSurface scaledSurface;
+            if (!scaledSurface.EnsureSize(drawW, drawH)) {
+                return false;
+            }
+
+            std::memset(
+                scaledSurface.GetBits(),
+                0,
+                static_cast<size_t>(drawW) * static_cast<size_t>(drawH) * sizeof(unsigned int));
+
+            StretchArgbToHdc(scaledSurface.GetDC(),
+                0,
+                0,
+                drawW,
+                drawH,
+                static_cast<const unsigned int*>(composeSurface.GetBits()),
+                kComposeWidth,
+                kComposeHeight,
+                srcBounds.left,
+                srcBounds.top,
+                srcW,
+                srcH);
+
+            AlphaBlendArgbToHdc(hdc,
+                dstX,
+                dstY,
+                drawW,
+                drawH,
+                static_cast<const unsigned int*>(scaledSurface.GetBits()),
+                drawW,
+                drawH,
+                0,
+                0,
+                drawW,
+                drawH);
+        }
     }
 
-    SelectObject(memDc, oldBitmap);
-    DeleteDC(memDc);
-    DeleteObject(dib);
     return drew && hasBounds;
 }
 
@@ -804,13 +1026,14 @@ UIEquipWnd::UIEquipWnd()
     : m_controlsCreated(false),
       m_fullHeight(kWindowHeight),
       m_systemButtons{ nullptr, nullptr, nullptr },
-      m_backgroundLeft(nullptr),
-      m_backgroundMid(nullptr),
-      m_backgroundRight(nullptr),
-      m_backgroundFull(nullptr),
-      m_titleBarLeft(nullptr),
-      m_titleBarMid(nullptr),
-      m_titleBarRight(nullptr),
+      m_backgroundLeft(),
+      m_backgroundMid(),
+      m_backgroundRight(),
+      m_backgroundFull(),
+      m_titleBarLeft(),
+      m_titleBarMid(),
+      m_titleBarRight(),
+    m_hoveredSlot(-1),
       m_dragArmed(false),
       m_dragStartPoint{},
       m_dragItemId(0),
@@ -837,6 +1060,9 @@ UIEquipWnd::~UIEquipWnd()
 void UIEquipWnd::SetShow(int show)
 {
     UIWindow::SetShow(show);
+    if (show == 0) {
+        m_hoveredSlot = -1;
+    }
     if (show != 0) {
         EnsureCreated();
         LayoutChildren();
@@ -898,12 +1124,16 @@ void UIEquipWnd::OnCreate(int x, int y)
     m_controlsCreated = true;
     LoadAssets();
 
-    if (m_backgroundFull) {
-        BITMAP bgInfo{};
-        if (GetObjectA(m_backgroundFull, sizeof(bgInfo), &bgInfo) && bgInfo.bmWidth > 0 && bgInfo.bmHeight > 0) {
-            m_fullHeight = kTitleBarHeight + static_cast<int>(bgInfo.bmHeight);
-            Resize(static_cast<int>(bgInfo.bmWidth), m_fullHeight);
-        }
+    if (IsQtUiRuntimeEnabled()) {
+        m_fullHeight = kWindowHeight;
+        Resize(kWindowWidth, m_fullHeight);
+        LayoutChildren();
+        return;
+    }
+
+    if (m_backgroundFull.IsValid()) {
+        m_fullHeight = kTitleBarHeight + m_backgroundFull.height;
+        Resize(m_backgroundFull.width, m_fullHeight);
     }
 
     struct ButtonSpec {
@@ -955,11 +1185,14 @@ void UIEquipWnd::OnDraw()
         }
     }
 
-    HDC hdc = UIWindow::GetSharedDrawDC();
-    const bool useShared = hdc != nullptr;
-    if (!hdc && g_hMainWnd) {
-        hdc = GetDC(g_hMainWnd);
+    if (IsQtUiRuntimeEnabled()) {
+        m_lastVisualStateToken = BuildVisualStateToken();
+        m_hasVisualStateToken = true;
+        m_isDirty = 0;
+        return;
     }
+
+    HDC hdc = AcquireDrawTarget();
     if (!hdc) {
         return;
     }
@@ -968,17 +1201,14 @@ void UIEquipWnd::OnDraw()
     FillRectColor(hdc, windowRect, RGB(255, 255, 255));
 
     const int bodyTop = m_y + kTitleBarHeight;
-    if (m_backgroundFull) {
-        BITMAP bgInfo{};
-        if (GetObjectA(m_backgroundFull, sizeof(bgInfo), &bgInfo) && bgInfo.bmWidth > 0 && bgInfo.bmHeight > 0) {
-            RECT bgRect{
-                m_x,
-                bodyTop,
-                m_x + bgInfo.bmWidth,
-                bodyTop + bgInfo.bmHeight
-            };
-            DrawBitmapTransparent(hdc, m_backgroundFull, bgRect);
-        }
+    if (m_backgroundFull.IsValid()) {
+        RECT bgRect{
+            m_x,
+            bodyTop,
+            m_x + m_backgroundFull.width,
+            bodyTop + m_backgroundFull.height
+        };
+        DrawBitmapPixelsStretched(hdc, m_backgroundFull, bgRect);
     } else {
         RECT bodyRect{ m_x, bodyTop, m_x + m_w, m_y + m_h };
         FillRectColor(hdc, bodyRect, RGB(255, 255, 255));
@@ -986,37 +1216,30 @@ void UIEquipWnd::OnDraw()
         for (int yPos = bodyTop; yPos < m_y + m_h; yPos += 8) {
             RECT leftRect{ m_x, yPos, m_x + 20, std::min(yPos + 8, m_y + m_h) };
             RECT rightRect{ m_x + m_w - 20, yPos, m_x + m_w, std::min(yPos + 8, m_y + m_h) };
-            DrawBitmapTransparent(hdc, m_backgroundLeft, leftRect);
-            DrawBitmapTransparent(hdc, m_backgroundRight, rightRect);
+            DrawBitmapPixelsStretched(hdc, m_backgroundLeft, leftRect);
+            DrawBitmapPixelsStretched(hdc, m_backgroundRight, rightRect);
         }
     }
 
     const RECT titleStrip{ m_x, m_y, m_x + m_w, m_y + kTitleBarHeight };
-    if (m_titleBarLeft && m_titleBarMid && m_titleBarRight) {
-        BITMAP leftInfo{};
-        BITMAP midInfo{};
-        BITMAP rightInfo{};
-        GetObjectA(m_titleBarLeft, sizeof(leftInfo), &leftInfo);
-        GetObjectA(m_titleBarMid, sizeof(midInfo), &midInfo);
-        GetObjectA(m_titleBarRight, sizeof(rightInfo), &rightInfo);
-
-        const int leftW = (std::max)(0, static_cast<int>(leftInfo.bmWidth));
-        const int rightW = (std::max)(0, static_cast<int>(rightInfo.bmWidth));
+    if (m_titleBarLeft.IsValid() && m_titleBarMid.IsValid() && m_titleBarRight.IsValid()) {
+        const int leftW = (std::max)(0, m_titleBarLeft.width);
+        const int rightW = (std::max)(0, m_titleBarRight.width);
         const int midW = (std::max)(0, static_cast<int>(titleStrip.right - titleStrip.left - leftW - rightW));
         if (leftW > 0) {
             RECT dst{ titleStrip.left, titleStrip.top, titleStrip.left + leftW, titleStrip.bottom };
-            DrawBitmapSegmentTransparent(hdc, m_titleBarLeft, dst, 0, 0, static_cast<int>(leftInfo.bmWidth), (std::max)(1, static_cast<int>(leftInfo.bmHeight)));
+            DrawBitmapPixelsSegmentTransparent(hdc, m_titleBarLeft, dst, 0, 0, leftW, (std::max)(1, m_titleBarLeft.height));
         }
         if (midW > 0) {
             RECT dst{ titleStrip.left + leftW, titleStrip.top, titleStrip.left + leftW + midW, titleStrip.bottom };
-            DrawBitmapSegmentTransparent(hdc, m_titleBarMid, dst, 0, 0, (std::max)(1, static_cast<int>(midInfo.bmWidth)), (std::max)(1, static_cast<int>(midInfo.bmHeight)));
+            DrawBitmapPixelsSegmentTransparent(hdc, m_titleBarMid, dst, 0, 0, (std::max)(1, m_titleBarMid.width), (std::max)(1, m_titleBarMid.height));
         }
         if (rightW > 0) {
             RECT dst{ titleStrip.right - rightW, titleStrip.top, titleStrip.right, titleStrip.bottom };
-            DrawBitmapSegmentTransparent(hdc, m_titleBarRight, dst, 0, 0, static_cast<int>(rightInfo.bmWidth), (std::max)(1, static_cast<int>(rightInfo.bmHeight)));
+            DrawBitmapPixelsSegmentTransparent(hdc, m_titleBarRight, dst, 0, 0, rightW, (std::max)(1, m_titleBarRight.height));
         }
-    } else if (m_backgroundMid) {
-        DrawBitmapTransparent(hdc, m_backgroundMid, titleStrip);
+    } else if (m_backgroundMid.IsValid()) {
+        DrawBitmapPixelsStretched(hdc, m_backgroundMid, titleStrip);
     }
     DrawWindowText(hdc, m_x + 18, m_y + 3, "Equipment", RGB(255, 255, 255));
     DrawWindowText(hdc, m_x + 17, m_y + 2, "Equipment", RGB(0, 0, 0));
@@ -1039,11 +1262,13 @@ void UIEquipWnd::OnDraw()
         }
 
         for (size_t i = 0; i < kEquipSlots.size(); ++i) {
+            const int slotX = GetEquipSlotX(kEquipSlots[i], m_w);
+            const int slotY = GetEquipSlotY(kEquipSlots[i], m_h);
             RECT slotRect{
-                m_x + kEquipSlots[i].iconX,
-                m_y + kEquipSlots[i].iconY,
-                m_x + kEquipSlots[i].iconX + kSlotIconSize,
-                m_y + kEquipSlots[i].iconY + kSlotIconSize
+                m_x + slotX,
+                m_y + slotY,
+                m_x + slotX + kSlotIconSize,
+                m_y + slotY + kSlotIconSize
             };
             const ITEM_INFO* drawItem = slotItems[i];
             if (drawItem
@@ -1052,11 +1277,11 @@ void UIEquipWnd::OnDraw()
                 drawItem = nullptr;
             }
             if (drawItem) {
-                if (HBITMAP icon = GetItemIcon(*drawItem)) {
-                    DrawBitmapTransparent(hdc, icon, slotRect);
+                if (const shopui::BitmapPixels* icon = GetItemIcon(*drawItem)) {
+                    shopui::DrawBitmapPixelsTransparent(hdc, *icon, slotRect);
                 }
 
-                const bool leftColumn = kEquipSlots[i].iconX < kCenterPanelLeft;
+                const bool leftColumn = IsLeftEquipSlot(kEquipSlots[i]);
                 RECT textRect{};
                 if (leftColumn) {
                     textRect.left = slotRect.right + 4;
@@ -1075,10 +1300,8 @@ void UIEquipWnd::OnDraw()
         }
     }
 
-    DrawChildren();
-    if (!useShared) {
-        ReleaseDC(g_hMainWnd, hdc);
-    }
+    DrawChildrenToHdc(hdc);
+    ReleaseDrawTarget(hdc);
 
     m_lastVisualStateToken = BuildVisualStateToken();
     m_hasVisualStateToken = true;
@@ -1091,6 +1314,16 @@ void UIEquipWnd::OnLBtnDown(int x, int y)
     m_dragItemId = 0;
     m_dragItemIndex = 0;
     m_dragItemEquipLocation = 0;
+
+    if (IsQtUiRuntimeEnabled()) {
+        const RECT baseRect = MakeEquipRect(m_x, m_y, 3, 3, kQtButtonWidth, kQtButtonHeight);
+        const RECT miniRect = MakeEquipRect(m_x, m_y, 247, 3, kQtButtonWidth, kQtButtonHeight);
+        const RECT closeRect = MakeEquipRect(m_x, m_y, 265, 3, kQtButtonWidth, kQtButtonHeight);
+        if (IsPointInRect(baseRect, x, y) || IsPointInRect(miniRect, x, y) || IsPointInRect(closeRect, x, y)) {
+            UIWindow::OnLBtnDown(x, y);
+            return;
+        }
+    }
 
     if (y >= m_y && y < m_y + kTitleBarHeight) {
         UIFrameWnd::OnLBtnDown(x, y);
@@ -1109,10 +1342,10 @@ void UIEquipWnd::OnLBtnDown(int x, int y)
         }
 
         RECT slotRect{
-            m_x + kEquipSlots[i].iconX,
-            m_y + kEquipSlots[i].iconY,
-            m_x + kEquipSlots[i].iconX + kSlotIconSize,
-            m_y + kEquipSlots[i].iconY + kSlotIconSize
+            m_x + GetEquipSlotX(kEquipSlots[i], m_w),
+            m_y + GetEquipSlotY(kEquipSlots[i], m_h),
+            m_x + GetEquipSlotX(kEquipSlots[i], m_w) + kSlotIconSize,
+            m_y + GetEquipSlotY(kEquipSlots[i], m_h) + kSlotIconSize
         };
         if (x >= slotRect.left && x < slotRect.right && y >= slotRect.top && y < slotRect.bottom) {
             m_dragArmed = true;
@@ -1131,12 +1364,41 @@ void UIEquipWnd::OnLBtnUp(int x, int y)
     m_dragItemId = 0;
     m_dragItemIndex = 0;
     m_dragItemEquipLocation = 0;
+
+    if (IsQtUiRuntimeEnabled()) {
+        const bool wasDragging = m_isDragging != 0;
+        UIFrameWnd::OnLBtnUp(x, y);
+        if (wasDragging) {
+            return;
+        }
+
+        const RECT baseRect = MakeEquipRect(m_x, m_y, 3, 3, kQtButtonWidth, kQtButtonHeight);
+        const RECT miniRect = MakeEquipRect(m_x, m_y, 247, 3, kQtButtonWidth, kQtButtonHeight);
+        const RECT closeRect = MakeEquipRect(m_x, m_y, 265, 3, kQtButtonWidth, kQtButtonHeight);
+
+        if (m_h == kMiniHeight && IsPointInRect(baseRect, x, y)) {
+            SendMsg(this, 6, kButtonIdBase, 0, 0);
+            return;
+        }
+        if (m_h > kMiniHeight && IsPointInRect(miniRect, x, y)) {
+            SendMsg(this, 6, kButtonIdMini, 0, 0);
+            return;
+        }
+        if (IsPointInRect(closeRect, x, y)) {
+            SendMsg(this, 6, kButtonIdClose, 0, 0);
+            return;
+        }
+
+        return;
+    }
+
     UIFrameWnd::OnLBtnUp(x, y);
 }
 
 void UIEquipWnd::OnMouseMove(int x, int y)
 {
     UIFrameWnd::OnMouseMove(x, y);
+    UpdateHoveredSlot(x, y);
     if (!m_dragArmed) {
         return;
     }
@@ -1167,6 +1429,11 @@ void UIEquipWnd::OnMouseMove(int x, int y)
     m_dragArmed = false;
 }
 
+void UIEquipWnd::OnMouseHover(int x, int y)
+{
+    UpdateHoveredSlot(x, y);
+}
+
 void UIEquipWnd::OnLBtnDblClk(int x, int y)
 {
     if (y >= m_y && y < m_y + kTitleBarHeight) {
@@ -1181,11 +1448,13 @@ void UIEquipWnd::OnLBtnDblClk(int x, int y)
                 continue;
             }
 
+            const int slotX = GetEquipSlotX(kEquipSlots[i], m_w);
+            const int slotY = GetEquipSlotY(kEquipSlots[i], m_h);
             RECT slotRect{
-                m_x + kEquipSlots[i].iconX,
-                m_y + kEquipSlots[i].iconY,
-                m_x + kEquipSlots[i].iconX + kSlotIconSize,
-                m_y + kEquipSlots[i].iconY + kSlotIconSize
+                m_x + slotX,
+                m_y + slotY,
+                m_x + slotX + kSlotIconSize,
+                m_y + slotY + kSlotIconSize
             };
             if (x >= slotRect.left && x < slotRect.right && y >= slotRect.top && y < slotRect.bottom) {
                 if (g_modeMgr.SendMsg(
@@ -1235,6 +1504,202 @@ void UIEquipWnd::StoreInfo()
     SaveUiWindowPlacement("EquipWnd", m_x, m_y);
 }
 
+bool UIEquipWnd::IsMiniMode() const
+{
+    return m_h == kMiniHeight;
+}
+
+bool UIEquipWnd::GetDisplayDataForQt(DisplayData* outData) const
+{
+    if (!outData) {
+        return false;
+    }
+
+    DisplayData data{};
+    if (m_h > kMiniHeight) {
+        const CGameMode* gameMode = g_modeMgr.GetCurrentGameMode();
+        const bool hideDraggedItem = gameMode
+            && gameMode->m_dragType == static_cast<int>(DragType::ShortcutItem)
+            && gameMode->m_dragInfo.source == static_cast<int>(DragSource::EquipmentWindow)
+            && gameMode->m_dragInfo.itemIndex != 0;
+        const std::vector<const ITEM_INFO*> slotItems = BuildSlotAssignments();
+        data.displaySlots.reserve(kEquipSlots.size());
+        for (size_t i = 0; i < kEquipSlots.size(); ++i) {
+            const int slotX = GetEquipSlotX(kEquipSlots[i], m_w);
+            const int slotY = GetEquipSlotY(kEquipSlots[i], m_h);
+            DisplaySlot slot{};
+            slot.x = m_x + slotX;
+            slot.y = m_y + slotY;
+            slot.width = kSlotIconSize;
+            slot.height = kSlotIconSize;
+            slot.leftColumn = IsLeftEquipSlot(kEquipSlots[i]);
+
+            const ITEM_INFO* drawItem = slotItems[i];
+            if (drawItem
+                && hideDraggedItem
+                && drawItem->m_itemIndex == gameMode->m_dragInfo.itemIndex) {
+                drawItem = nullptr;
+            }
+            if (drawItem) {
+                slot.occupied = true;
+                slot.hovered = static_cast<int>(i) == m_hoveredSlot;
+                slot.itemId = drawItem->GetItemId();
+                slot.label = drawItem->GetEquipDisplayName();
+            }
+            data.displaySlots.push_back(slot);
+        }
+    }
+
+    *outData = std::move(data);
+    return true;
+}
+
+bool UIEquipWnd::GetHoveredItemForQt(shopui::ItemHoverInfo* outData) const
+{
+    if (!outData || m_show == 0 || IsMiniMode() || m_hoveredSlot < 0 || m_hoveredSlot >= static_cast<int>(kEquipSlots.size())) {
+        return false;
+    }
+
+    const std::vector<const ITEM_INFO*> slotItems = BuildSlotAssignments();
+    const ITEM_INFO* item = slotItems[static_cast<size_t>(m_hoveredSlot)];
+    if (!item) {
+        return false;
+    }
+
+    outData->anchorRect = RECT{
+        m_x + GetEquipSlotX(kEquipSlots[static_cast<size_t>(m_hoveredSlot)], m_w),
+        m_y + GetEquipSlotY(kEquipSlots[static_cast<size_t>(m_hoveredSlot)], m_h),
+        m_x + GetEquipSlotX(kEquipSlots[static_cast<size_t>(m_hoveredSlot)], m_w) + kSlotIconSize,
+        m_y + GetEquipSlotY(kEquipSlots[static_cast<size_t>(m_hoveredSlot)], m_h) + kSlotIconSize,
+    };
+    outData->text = shopui::BuildItemHoverText(*item);
+    outData->itemId = item->GetItemId();
+    return outData->IsValid();
+}
+
+int UIEquipWnd::GetQtSystemButtonCount() const
+{
+    return 3;
+}
+
+bool UIEquipWnd::GetQtSystemButtonDisplayForQt(int index, QtButtonDisplay* outData) const
+{
+    if (!outData || index < 0 || index >= GetQtSystemButtonCount()) {
+        return false;
+    }
+
+    switch (index) {
+    case 0:
+        outData->id = kButtonIdBase;
+        outData->x = m_x + 247;
+        outData->y = m_y + 3;
+        outData->width = kQtButtonWidth;
+        outData->height = kQtButtonHeight;
+        outData->label = "B";
+        outData->visible = IsMiniMode();
+        return true;
+    case 1:
+        outData->id = kButtonIdMini;
+        outData->x = m_x + 247;
+        outData->y = m_y + 3;
+        outData->width = kQtButtonWidth;
+        outData->height = kQtButtonHeight;
+        outData->label = "_";
+        outData->visible = !IsMiniMode();
+        return true;
+    case 2:
+        outData->id = kButtonIdClose;
+        outData->x = m_x + 265;
+        outData->y = m_y + 3;
+        outData->width = kQtButtonWidth;
+        outData->height = kQtButtonHeight;
+        outData->label = "X";
+        outData->visible = true;
+        return true;
+    default:
+        return false;
+    }
+}
+
+bool UIEquipWnd::BuildQtPreviewImage(QImage* outImage) const
+{
+#if RO_ENABLE_QT6_UI
+    if (!outImage) {
+        return false;
+    }
+
+    constexpr int kQtComposeWidth = 160;
+    constexpr int kQtComposeHeight = 260;
+    constexpr int kQtComposeAnchorBottomPadding = 90;
+    constexpr int kQtPreviewSidePadding = 8;
+    constexpr int kQtPreviewTopPadding = 10;
+    constexpr int kQtPreviewBottomPadding = 14;
+
+    std::vector<unsigned int> previewPixels(
+        static_cast<size_t>(kQtComposeWidth) * static_cast<size_t>(kQtComposeHeight),
+        0u);
+    const bool drew = DrawEquipPreviewPlayerSpriteToArgb(
+        previewPixels.data(),
+        kQtComposeWidth,
+        kQtComposeHeight,
+        kQtComposeWidth / 2,
+        kQtComposeHeight - kQtComposeAnchorBottomPadding);
+
+    RECT opaqueBounds{};
+    const bool hasOpaqueBounds = drew
+        && FindOpaqueBounds(
+            previewPixels.data(),
+            kQtComposeWidth,
+            kQtComposeHeight,
+            &opaqueBounds);
+
+    if (!drew || !hasOpaqueBounds) {
+        static int s_logCount = 0;
+        if (s_logCount < 8) {
+            ++s_logCount;
+            DbgLog("[QtPreview] equip drew=%d bounds=%d job=%d head=%d sex=%d bodyPal=%d headPal=%d acc=%d/%d/%d\n",
+                drew ? 1 : 0,
+                hasOpaqueBounds ? 1 : 0,
+                g_session.m_playerJob,
+                g_session.m_playerHead,
+                g_session.GetSex(),
+                g_session.m_playerBodyPalette,
+                g_session.m_playerHeadPalette,
+                g_session.m_playerAccessory,
+                g_session.m_playerAccessory2,
+                g_session.m_playerAccessory3);
+        }
+    }
+
+    const QImage source(
+        reinterpret_cast<const uchar*>(previewPixels.data()),
+        kQtComposeWidth,
+        kQtComposeHeight,
+        kQtComposeWidth * static_cast<int>(sizeof(unsigned int)),
+        QImage::Format_ARGB32);
+
+    if (!hasOpaqueBounds) {
+        *outImage = source.copy();
+        return !outImage->isNull();
+    }
+
+    const int cropLeft = (std::max)(0, static_cast<int>(opaqueBounds.left) - kQtPreviewSidePadding);
+    const int cropTop = (std::max)(0, static_cast<int>(opaqueBounds.top) - kQtPreviewTopPadding);
+    const int cropRight = (std::min)(kQtComposeWidth, static_cast<int>(opaqueBounds.right) + kQtPreviewSidePadding);
+    const int cropBottom = (std::min)(kQtComposeHeight, static_cast<int>(opaqueBounds.bottom) + kQtPreviewBottomPadding);
+    *outImage = source.copy(cropLeft, cropTop, cropRight - cropLeft, cropBottom - cropTop);
+    return !outImage->isNull();
+#else
+    (void)outImage;
+    return false;
+#endif
+}
+
+unsigned long long UIEquipWnd::GetQtPreviewRevision() const
+{
+    return BuildVisualStateToken();
+}
+
 void UIEquipWnd::EnsureCreated()
 {
     if (!m_controlsCreated) {
@@ -1264,50 +1729,24 @@ void UIEquipWnd::LayoutChildren()
 
 void UIEquipWnd::LoadAssets()
 {
-    m_backgroundLeft = LoadBitmapFromGameData(ResolveUiAssetPath("itemwin_left.bmp"));
-    m_backgroundMid = LoadBitmapFromGameData(ResolveUiAssetPath("itemwin_mid.bmp"));
-    m_backgroundRight = LoadBitmapFromGameData(ResolveUiAssetPath("itemwin_right.bmp"));
-    m_backgroundFull = LoadBitmapFromGameData(ResolveUiAssetPath("equipwin_bg.bmp"));
-    m_titleBarLeft = LoadBitmapFromGameData(ResolveUiAssetPath("titlebar_left.bmp"));
-    m_titleBarMid = LoadBitmapFromGameData(ResolveUiAssetPath("titlebar_mid.bmp"));
-    m_titleBarRight = LoadBitmapFromGameData(ResolveUiAssetPath("titlebar_right.bmp"));
+    m_backgroundLeft = LoadBitmapPixelsFromGameData(ResolveUiAssetPath("itemwin_left.bmp"));
+    m_backgroundMid = LoadBitmapPixelsFromGameData(ResolveUiAssetPath("itemwin_mid.bmp"));
+    m_backgroundRight = LoadBitmapPixelsFromGameData(ResolveUiAssetPath("itemwin_right.bmp"));
+    m_backgroundFull = LoadBitmapPixelsFromGameData(ResolveUiAssetPath("equipwin_bg.bmp"));
+    m_titleBarLeft = LoadBitmapPixelsFromGameData(ResolveUiAssetPath("titlebar_left.bmp"));
+    m_titleBarMid = LoadBitmapPixelsFromGameData(ResolveUiAssetPath("titlebar_mid.bmp"));
+    m_titleBarRight = LoadBitmapPixelsFromGameData(ResolveUiAssetPath("titlebar_right.bmp"));
 }
 
 void UIEquipWnd::ReleaseAssets()
 {
-    if (m_backgroundLeft) {
-        DeleteObject(m_backgroundLeft);
-        m_backgroundLeft = nullptr;
-    }
-    if (m_backgroundMid) {
-        DeleteObject(m_backgroundMid);
-        m_backgroundMid = nullptr;
-    }
-    if (m_backgroundRight) {
-        DeleteObject(m_backgroundRight);
-        m_backgroundRight = nullptr;
-    }
-    if (m_backgroundFull) {
-        DeleteObject(m_backgroundFull);
-        m_backgroundFull = nullptr;
-    }
-    if (m_titleBarLeft) {
-        DeleteObject(m_titleBarLeft);
-        m_titleBarLeft = nullptr;
-    }
-    if (m_titleBarMid) {
-        DeleteObject(m_titleBarMid);
-        m_titleBarMid = nullptr;
-    }
-    if (m_titleBarRight) {
-        DeleteObject(m_titleBarRight);
-        m_titleBarRight = nullptr;
-    }
-    for (auto& entry : m_iconCache) {
-        if (entry.second) {
-            DeleteObject(entry.second);
-        }
-    }
+    m_backgroundLeft.Clear();
+    m_backgroundMid.Clear();
+    m_backgroundRight.Clear();
+    m_backgroundFull.Clear();
+    m_titleBarLeft.Clear();
+    m_titleBarMid.Clear();
+    m_titleBarRight.Clear();
     m_iconCache.clear();
 }
 
@@ -1315,6 +1754,40 @@ void UIEquipWnd::SetMiniMode(bool miniMode)
 {
     Resize(kWindowWidth, miniMode ? kMiniHeight : m_fullHeight);
     LayoutChildren();
+}
+
+void UIEquipWnd::UpdateHoveredSlot(int globalX, int globalY)
+{
+    const int oldHoveredSlot = m_hoveredSlot;
+    m_hoveredSlot = -1;
+    if (IsMiniMode()) {
+        if (oldHoveredSlot != m_hoveredSlot) {
+            Invalidate();
+        }
+        return;
+    }
+
+    for (size_t i = 0; i < kEquipSlots.size(); ++i) {
+        const int slotX = GetEquipSlotX(kEquipSlots[i], m_w);
+        const int slotY = GetEquipSlotY(kEquipSlots[i], m_h);
+        const RECT slotRect{
+            m_x + slotX,
+            m_y + slotY,
+            m_x + slotX + kSlotIconSize,
+            m_y + slotY + kSlotIconSize
+        };
+        if (globalX >= slotRect.left && globalX < slotRect.right && globalY >= slotRect.top && globalY < slotRect.bottom) {
+            m_hoveredSlot = static_cast<int>(i);
+            if (oldHoveredSlot != m_hoveredSlot) {
+                Invalidate();
+            }
+            return;
+        }
+    }
+
+    if (oldHoveredSlot != m_hoveredSlot) {
+        Invalidate();
+    }
 }
 
 std::vector<const ITEM_INFO*> UIEquipWnd::BuildSlotAssignments() const
@@ -1390,27 +1863,19 @@ std::vector<const ITEM_INFO*> UIEquipWnd::BuildSlotAssignments() const
 }
 
 
-HBITMAP UIEquipWnd::GetItemIcon(const ITEM_INFO& item)
+const shopui::BitmapPixels* UIEquipWnd::GetItemIcon(const ITEM_INFO& item)
 {
     const unsigned int itemId = item.GetItemId();
     const auto found = m_iconCache.find(itemId);
     if (found != m_iconCache.end()) {
-        return found->second;
+        return found->second.IsValid() ? &found->second : nullptr;
     }
 
-    HBITMAP bitmap = nullptr;
-    for (const std::string& candidate : BuildItemIconCandidates(item)) {
-        if (!g_fileMgr.IsDataExist(candidate.c_str())) {
-            continue;
-        }
-        bitmap = LoadBitmapFromGameData(candidate);
-        if (bitmap) {
-            break;
-        }
-    }
+    shopui::BitmapPixels bitmap;
+    shopui::TryLoadItemIconPixels(item, &bitmap);
 
-    m_iconCache[itemId] = bitmap;
-    return bitmap;
+    auto inserted = m_iconCache.emplace(itemId, std::move(bitmap));
+    return inserted.first->second.IsValid() ? &inserted.first->second : nullptr;
 }
 
 unsigned long long UIEquipWnd::BuildVisualStateToken() const
@@ -1421,6 +1886,7 @@ unsigned long long UIEquipWnd::BuildVisualStateToken() const
     HashTokenValue(&hash, static_cast<unsigned long long>(m_y));
     HashTokenValue(&hash, static_cast<unsigned long long>(m_w));
     HashTokenValue(&hash, static_cast<unsigned long long>(m_h));
+    HashTokenValue(&hash, static_cast<unsigned long long>(static_cast<unsigned int>(m_hoveredSlot + 1)));
     if (const CGameMode* gameMode = g_modeMgr.GetCurrentGameMode()) {
         HashTokenValue(&hash, static_cast<unsigned long long>(gameMode->m_dragType));
         HashTokenValue(&hash, static_cast<unsigned long long>(gameMode->m_dragInfo.source));

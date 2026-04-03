@@ -18,7 +18,7 @@
 #include <cstdlib>  // itoa
 #include <cassert>
 #include <vector>
-#include <windows.h>
+#include "platform/WindowsCompat.h"
 #include <zlib.h>
 #include "../DebugLog.h"
 

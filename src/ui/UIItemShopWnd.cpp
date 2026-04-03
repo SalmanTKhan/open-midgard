@@ -5,6 +5,7 @@
 #include "gamemode/GameMode.h"
 #include "gamemode/Mode.h"
 #include "main/WinMain.h"
+#include "qtui/QtUiRuntime.h"
 #include "session/Session.h"
 
 #include <windows.h>
@@ -43,11 +44,7 @@ UIItemShopWnd::UIItemShopWnd()
 
 UIItemShopWnd::~UIItemShopWnd()
 {
-    for (auto& entry : m_iconCache) {
-        if (entry.second) {
-            DeleteObject(entry.second);
-        }
-    }
+    m_iconCache.clear();
 }
 
 void UIItemShopWnd::SetShow(int show)
@@ -119,32 +116,38 @@ int UIItemShopWnd::HitTestSourceRow(int x, int y) const
     return rowIndex;
 }
 
-HBITMAP UIItemShopWnd::GetItemIcon(const ITEM_INFO& item)
+const shopui::BitmapPixels* UIItemShopWnd::GetItemIcon(const ITEM_INFO& item)
 {
     const unsigned int itemId = item.GetItemId();
     const auto found = m_iconCache.find(itemId);
     if (found != m_iconCache.end()) {
-        return found->second;
+        return found->second.IsValid() ? &found->second : nullptr;
     }
 
-    HBITMAP bitmap = nullptr;
+    shopui::BitmapPixels bitmap;
     for (const std::string& candidate : shopui::BuildItemIconCandidates(item)) {
         if (!g_fileMgr.IsDataExist(candidate.c_str())) {
             continue;
         }
-        bitmap = shopui::LoadBitmapFromGameData(candidate);
-        if (bitmap) {
+        bitmap = shopui::LoadBitmapPixelsFromGameData(candidate, true);
+        if (bitmap.IsValid()) {
             break;
         }
     }
 
-    m_iconCache[itemId] = bitmap;
-    return bitmap;
+    auto inserted = m_iconCache.emplace(itemId, std::move(bitmap));
+    return inserted.first->second.IsValid() ? &inserted.first->second : nullptr;
 }
 
 void UIItemShopWnd::OnDraw()
 {
-    HDC hdc = GetSharedDrawDC();
+    if (IsQtUiRuntimeEnabled()) {
+        m_lastDrawStateToken = BuildDisplayStateToken();
+        m_hasDrawStateToken = true;
+        return;
+    }
+
+    HDC hdc = AcquireDrawTarget();
     if (!hdc || m_show == 0) {
         return;
     }
@@ -182,8 +185,8 @@ void UIItemShopWnd::OnDraw()
         }
 
         RECT iconRect = shopui::MakeRect(rowRect.left + 3, rowRect.top + 1, 16, 16);
-        if (HBITMAP icon = GetItemIcon(row.itemInfo)) {
-            shopui::DrawBitmapTransparent(hdc, icon, iconRect);
+        if (const shopui::BitmapPixels* icon = GetItemIcon(row.itemInfo)) {
+            shopui::DrawBitmapPixelsTransparent(hdc, *icon, iconRect);
         }
 
         const std::string itemName = shopui::GetItemDisplayName(row.itemInfo);
@@ -210,6 +213,7 @@ void UIItemShopWnd::OnDraw()
 
     m_lastDrawStateToken = BuildDisplayStateToken();
     m_hasDrawStateToken = true;
+    ReleaseDrawTarget(hdc);
 }
 
 void UIItemShopWnd::OnLBtnDown(int x, int y)
@@ -274,6 +278,21 @@ void UIItemShopWnd::HandleKeyDown(int virtualKey)
         m_viewOffset = selectedRow - GetVisibleRowCount() + 1;
     }
     m_viewOffset = (std::max)(0, (std::min)(GetMaxViewOffset(), m_viewOffset));
+}
+
+int UIItemShopWnd::GetViewOffset() const
+{
+    return m_viewOffset;
+}
+
+int UIItemShopWnd::GetHoverRow() const
+{
+    return m_hoverRow;
+}
+
+int UIItemShopWnd::GetVisibleRowCountForQt() const
+{
+    return GetVisibleRowCount();
 }
 
 unsigned long long UIItemShopWnd::BuildDisplayStateToken() const

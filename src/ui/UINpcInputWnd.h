@@ -28,6 +28,12 @@ public:
     bool HandleKeyDown(int virtualKey);
     UIEditCtrl* GetEditCtrl() const;
     u32 GetNpcId() const;
+    InputMode GetInputMode() const;
+    const char* GetInputText() const;
+    bool IsOkPressed() const;
+    bool IsCancelPressed() const;
+    bool GetOkRectForQt(RECT* outRect) const;
+    bool GetCancelRectForQt(RECT* outRect) const;
 
 private:
     enum class ClickTarget {

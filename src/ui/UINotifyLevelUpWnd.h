@@ -15,6 +15,9 @@ public:
     void OnDraw() override;
     void OnProcess() override;
     msgresult_t SendMsg(UIWindow* sender, int msg, msgparam_t wparam, msgparam_t lparam, msgparam_t extra) override;
+    bool HandleQtMouseDown(int x, int y) const;
+    bool HandleQtMouseUp(int x, int y);
+    bool IsJobLevelNotice() const;
 
 protected:
     virtual int GetTargetWindowId() const;

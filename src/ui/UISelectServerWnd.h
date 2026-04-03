@@ -3,7 +3,7 @@
 #include "UIFrameWnd.h"
 
 #include <vector>
-#include <windows.h>
+#include "platform/WindowsCompat.h"
 
 class UISelectServerWnd : public UIFrameWnd {
 public:
@@ -17,11 +17,14 @@ public:
     void OnLBtnDblClk(int x, int y) override;
     void OnMouseMove(int x, int y) override;
     void OnKeyDown(int virtualKey);
+    bool HandleQtMouseDown(int x, int y);
+    int GetHoverIndex() const { return m_hoverIndex; }
 
 private:
     void EnsureCreated();
     void SyncGeometry();
     int ComputeWindowHeight() const;
+    void RebuildEntryRects();
     int HitTestEntry(int x, int y) const;
 
     bool m_controlsCreated;

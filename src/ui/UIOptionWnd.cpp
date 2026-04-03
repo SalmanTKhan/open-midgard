@@ -3,9 +3,11 @@
 #include "audio/Audio.h"
 #include "core/File.h"
 #include "main/WinMain.h"
+#include "qtui/QtUiRuntime.h"
+#include "render/DC.h"
+#include "res/Bitmap.h"
 #include "ui/UIWindowMgr.h"
 
-#include <gdiplus.h>
 #include <windows.h>
 
 #include <algorithm>
@@ -15,7 +17,13 @@
 #include <string>
 #include <vector>
 
-#pragma comment(lib, "gdiplus.lib")
+#if RO_ENABLE_QT6_UI
+#include <QFont>
+#include <QFontMetrics>
+#include <QImage>
+#include <QPainter>
+#include <QString>
+#endif
 
 namespace {
 
@@ -48,6 +56,7 @@ constexpr int kSliderMax = 127;
 constexpr int kTabHeight = 18;
 constexpr int kGraphicsRowHeight = 24;
 constexpr int kWindowCornerRadius = 10;
+constexpr int kToggleSize = 16;
 
 constexpr COLORREF kFallbackTitleBarColor = RGB(98, 114, 158);
 constexpr COLORREF kFallbackBodyColor = RGB(244, 247, 252);
@@ -82,91 +91,39 @@ constexpr std::array<RenderBackendType, 4> kRendererEntries = {
     RenderBackendType::Vulkan,
 };
 
-ULONG_PTR EnsureGdiplusStarted()
+shopui::BitmapPixels LoadBitmapPixelsFromGameData(const char* path)
 {
-    static ULONG_PTR s_token = 0;
-    static bool s_started = false;
-    if (!s_started) {
-        Gdiplus::GdiplusStartupInput startupInput;
-        if (Gdiplus::GdiplusStartup(&s_token, &startupInput, nullptr) == Gdiplus::Ok) {
-            s_started = true;
-        }
-    }
-    return s_token;
+    return shopui::LoadBitmapPixelsFromGameData(path ? path : "", false);
 }
 
-HBITMAP LoadBitmapFromGameData(const char* path)
+void DrawBitmapPixelsStretched(HDC target, const shopui::BitmapPixels& bmp, const RECT& dst)
 {
-    if (!path || !*path || !EnsureGdiplusStarted()) {
-        return nullptr;
-    }
-
-    int size = 0;
-    unsigned char* bytes = g_fileMgr.GetData(path, &size);
-    if (!bytes || size <= 0) {
-        delete[] bytes;
-        return nullptr;
-    }
-
-    HBITMAP outBmp = nullptr;
-    HGLOBAL mem = GlobalAlloc(GMEM_MOVEABLE, static_cast<SIZE_T>(size));
-    if (mem) {
-        void* dst = GlobalLock(mem);
-        if (dst) {
-            std::memcpy(dst, bytes, static_cast<size_t>(size));
-            GlobalUnlock(mem);
-
-            IStream* stream = nullptr;
-            if (CreateStreamOnHGlobal(mem, TRUE, &stream) == S_OK) {
-                auto* bmp = Gdiplus::Bitmap::FromStream(stream, FALSE);
-                if (bmp && bmp->GetLastStatus() == Gdiplus::Ok) {
-                    bmp->GetHBITMAP(RGB(0, 0, 0), &outBmp);
-                }
-                delete bmp;
-                stream->Release();
-            } else {
-                GlobalFree(mem);
-            }
-        } else {
-            GlobalFree(mem);
-        }
-    }
-
-    delete[] bytes;
-    return outBmp;
-}
-
-void DrawBitmapStretched(HDC target, HBITMAP bmp, const RECT& dst)
-{
-    if (!target || !bmp) {
+    if (!target || !bmp.IsValid()) {
         return;
     }
 
-    BITMAP bm{};
-    if (!GetObjectA(bmp, sizeof(bm), &bm) || bm.bmWidth <= 0 || bm.bmHeight <= 0) {
-        return;
-    }
+    BITMAPINFO bmi{};
+    bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    bmi.bmiHeader.biWidth = bmp.width;
+    bmi.bmiHeader.biHeight = -bmp.height;
+    bmi.bmiHeader.biPlanes = 1;
+    bmi.bmiHeader.biBitCount = 32;
+    bmi.bmiHeader.biCompression = BI_RGB;
 
-    HDC srcDC = CreateCompatibleDC(target);
-    if (!srcDC) {
-        return;
-    }
-
-    HGDIOBJ old = SelectObject(srcDC, bmp);
     SetStretchBltMode(target, HALFTONE);
-    StretchBlt(target,
+    StretchDIBits(target,
         dst.left,
         dst.top,
         dst.right - dst.left,
         dst.bottom - dst.top,
-        srcDC,
         0,
         0,
-        bm.bmWidth,
-        bm.bmHeight,
+        bmp.width,
+        bmp.height,
+        bmp.pixels.data(),
+        &bmi,
+        DIB_RGB_COLORS,
         SRCCOPY);
-    SelectObject(srcDC, old);
-    DeleteDC(srcDC);
 }
 
 std::string ToLowerAscii(std::string value)
@@ -303,13 +260,109 @@ void DrawWindowTitleText(HDC hdc, int x, int y, int windowRight, const char* tex
         return;
     }
 
+#if RO_ENABLE_QT6_UI
+    LOGFONTA logFont{};
+    if (HGDIOBJ fontObject = GetCurrentObject(hdc, OBJ_FONT)) {
+        GetObjectA(fontObject, sizeof(logFont), &logFont);
+    }
+    const QString label = QString::fromLocal8Bit(text ? text : "");
+    if (label.isEmpty()) {
+        return;
+    }
+    const QString family = logFont.lfFaceName[0] != '\0'
+        ? QString::fromLocal8Bit(logFont.lfFaceName)
+        : QStringLiteral("MS Sans Serif");
+    QFont font(family);
+    font.setPixelSize(logFont.lfHeight != 0 ? (std::max)(1, static_cast<int>(std::abs(logFont.lfHeight))) : 12);
+    font.setBold(logFont.lfWeight >= FW_BOLD);
+    font.setStyleStrategy(QFont::NoAntialias);
+    const QFontMetrics metrics(font);
+    const int width = (std::max)(1, (std::min)(windowRight - x - 4, metrics.horizontalAdvance(label)));
+    const int height = (std::max)(1, metrics.height());
+    std::vector<unsigned int> pixels(static_cast<size_t>(width) * static_cast<size_t>(height), 0u);
+    QImage image(reinterpret_cast<uchar*>(pixels.data()), width, height, width * static_cast<int>(sizeof(unsigned int)), QImage::Format_ARGB32);
+    if (!image.isNull()) {
+        QPainter painter(&image);
+        painter.setRenderHint(QPainter::Antialiasing, false);
+        painter.setRenderHint(QPainter::TextAntialiasing, false);
+        painter.setFont(font);
+        painter.setPen(QColor(GetRValue(color), GetGValue(color), GetBValue(color)));
+        painter.drawText(0, metrics.ascent(), label);
+        AlphaBlendArgbToHdc(hdc, x, y, width, height, pixels.data(), width, height);
+    }
+#else
     RECT rect = { x, y, windowRight - 4, y + 16 };
     SetBkMode(hdc, TRANSPARENT);
     SetTextColor(hdc, color);
     HGDIOBJ oldFont = SelectObject(hdc, GetStockObject(DEFAULT_GUI_FONT));
     DrawTextA(hdc, text ? text : "", -1, &rect, DT_LEFT | DT_TOP | DT_SINGLELINE);
     SelectObject(hdc, oldFont);
+#endif
 }
+
+#if RO_ENABLE_QT6_UI
+QFont BuildUiOptionFontFromHdc(HDC hdc)
+{
+    LOGFONTA logFont{};
+    if (hdc) {
+        if (HGDIOBJ fontObject = GetCurrentObject(hdc, OBJ_FONT)) {
+            GetObjectA(fontObject, sizeof(logFont), &logFont);
+        }
+    }
+
+    const QString family = logFont.lfFaceName[0] != '\0'
+        ? QString::fromLocal8Bit(logFont.lfFaceName)
+        : QStringLiteral("MS Sans Serif");
+    QFont font(family);
+    font.setPixelSize(logFont.lfHeight != 0 ? (std::max)(1, static_cast<int>(std::abs(logFont.lfHeight))) : 12);
+    font.setBold(logFont.lfWeight >= FW_BOLD);
+    font.setItalic(logFont.lfItalic != 0);
+    font.setUnderline(logFont.lfUnderline != 0);
+    font.setStrikeOut(logFont.lfStrikeOut != 0);
+    font.setStyleStrategy(QFont::NoAntialias);
+    return font;
+}
+
+int MeasureUiOptionTextWidth(HDC hdc, const char* text)
+{
+    const QString label = QString::fromLocal8Bit(text ? text : "");
+    if (label.isEmpty()) {
+        return 0;
+    }
+    const QFontMetrics metrics(BuildUiOptionFontFromHdc(hdc));
+    return (std::max)(1, metrics.horizontalAdvance(label));
+}
+
+void DrawUiOptionText(HDC hdc, int x, int y, const char* text, COLORREF color)
+{
+    if (!hdc) {
+        return;
+    }
+
+    const QString label = QString::fromLocal8Bit(text ? text : "");
+    if (label.isEmpty()) {
+        return;
+    }
+
+    const QFont font = BuildUiOptionFontFromHdc(hdc);
+    const QFontMetrics metrics(font);
+    const int width = (std::max)(1, metrics.horizontalAdvance(label));
+    const int height = (std::max)(1, metrics.height());
+    std::vector<unsigned int> pixels(static_cast<size_t>(width) * static_cast<size_t>(height), 0u);
+    QImage image(reinterpret_cast<uchar*>(pixels.data()), width, height, width * static_cast<int>(sizeof(unsigned int)), QImage::Format_ARGB32);
+    if (image.isNull()) {
+        return;
+    }
+
+    QPainter painter(&image);
+    painter.setRenderHint(QPainter::Antialiasing, false);
+    painter.setRenderHint(QPainter::TextAntialiasing, false);
+    painter.setFont(font);
+    painter.setPen(QColor(GetRValue(color), GetGValue(color), GetBValue(color)));
+    painter.drawText(0, metrics.ascent(), label);
+    AlphaBlendArgbToHdc(hdc, x, y, width, height, pixels.data(), width, height);
+}
+#endif
 
 int ClampSliderValue(int value)
 {
@@ -451,8 +504,8 @@ void ApplySavedAudioSettings()
 UIOptionWnd::UIOptionWnd()
     : m_controlsCreated(false),
       m_assetsProbed(false),
-      m_frameBitmap(nullptr),
-      m_bodyBitmap(nullptr),
+      m_frameBitmap(),
+      m_bodyBitmap(),
       m_bgmOnCheckBox(nullptr),
       m_soundOnCheckBox(nullptr),
       m_noCtrlCheckBox(nullptr),
@@ -492,14 +545,8 @@ UIOptionWnd::~UIOptionWnd()
 
 void UIOptionWnd::ClearResources()
 {
-    if (m_frameBitmap) {
-        DeleteObject(m_frameBitmap);
-        m_frameBitmap = nullptr;
-    }
-    if (m_bodyBitmap) {
-        DeleteObject(m_bodyBitmap);
-        m_bodyBitmap = nullptr;
-    }
+    m_frameBitmap.Clear();
+    m_bodyBitmap.Clear();
     m_frameBitmapPath.clear();
     m_bodyBitmapPath.clear();
 }
@@ -519,7 +566,7 @@ void UIOptionWnd::EnsureResources()
         "win_option_t.bmp",
     });
     if (!m_frameBitmapPath.empty()) {
-        m_frameBitmap = LoadBitmapFromGameData(m_frameBitmapPath.c_str());
+        m_frameBitmap = LoadBitmapPixelsFromGameData(m_frameBitmapPath.c_str());
     }
 
     m_bodyBitmapPath = ResolveUiAssetPath({
@@ -529,7 +576,7 @@ void UIOptionWnd::EnsureResources()
         "option_sub.bmp",
     });
     if (!m_bodyBitmapPath.empty()) {
-        m_bodyBitmap = LoadBitmapFromGameData(m_bodyBitmapPath.c_str());
+        m_bodyBitmap = LoadBitmapPixelsFromGameData(m_bodyBitmapPath.c_str());
     }
 }
 
@@ -553,12 +600,12 @@ void UIOptionWnd::RefreshResolutionEntries()
             }
         }
         if (!exists) {
-            m_resolutionEntries.push_back({ static_cast<int>(displayMode.dmPelsWidth), static_cast<int>(displayMode.dmPelsHeight) });
+            m_resolutionEntries.push_back(ResolutionEntry{ static_cast<int>(displayMode.dmPelsWidth), static_cast<int>(displayMode.dmPelsHeight) });
         }
     }
 
     if (FindResolutionIndex(m_graphicsSettings.width, m_graphicsSettings.height) < 0) {
-        m_resolutionEntries.push_back({ m_graphicsSettings.width, m_graphicsSettings.height });
+        m_resolutionEntries.push_back(ResolutionEntry{ m_graphicsSettings.width, m_graphicsSettings.height });
     }
 
     std::sort(m_resolutionEntries.begin(), m_resolutionEntries.end(), [](const ResolutionEntry& lhs, const ResolutionEntry& rhs) {
@@ -768,37 +815,40 @@ void UIOptionWnd::LayoutControls()
 {
     const bool showAudio = !m_collapsed && m_activeTab == TabId_Audio;
     const bool showGame = !m_collapsed && m_activeTab == TabId_Game;
-    const RECT contentRect = GetContentRect();
 
     if (m_bgmOnCheckBox) {
-        const RECT sliderRect = GetBgmSliderRect();
-        m_bgmOnCheckBox->Move(sliderRect.right + 10, sliderRect.top - 2);
+        const RECT toggleRect = GetAudioToggleRect(0);
+        m_bgmOnCheckBox->Move(toggleRect.left, toggleRect.top);
         m_bgmOnCheckBox->SetShow(showAudio ? 1 : 0);
         m_bgmOnCheckBox->SetCheck(m_bgmEnabled == 0);
     }
     if (m_soundOnCheckBox) {
-        const RECT sliderRect = GetSoundSliderRect();
-        m_soundOnCheckBox->Move(sliderRect.right + 10, sliderRect.top - 2);
+        const RECT toggleRect = GetAudioToggleRect(1);
+        m_soundOnCheckBox->Move(toggleRect.left, toggleRect.top);
         m_soundOnCheckBox->SetShow(showAudio ? 1 : 0);
         m_soundOnCheckBox->SetCheck(m_soundEnabled == 0);
     }
     if (m_noCtrlCheckBox) {
-        m_noCtrlCheckBox->Move(contentRect.left + 16, contentRect.top + 16);
+        const RECT toggleRect = GetGameToggleRect(0);
+        m_noCtrlCheckBox->Move(toggleRect.left, toggleRect.top);
         m_noCtrlCheckBox->SetShow(showGame ? 1 : 0);
         m_noCtrlCheckBox->SetCheck(m_noCtrl);
     }
     if (m_attackSnapCheckBox) {
-        m_attackSnapCheckBox->Move(contentRect.left + 16, contentRect.top + 42);
+        const RECT toggleRect = GetGameToggleRect(1);
+        m_attackSnapCheckBox->Move(toggleRect.left, toggleRect.top);
         m_attackSnapCheckBox->SetShow(showGame ? 1 : 0);
         m_attackSnapCheckBox->SetCheck(m_attackSnap);
     }
     if (m_skillSnapCheckBox) {
-        m_skillSnapCheckBox->Move(contentRect.left + 16, contentRect.top + 68);
+        const RECT toggleRect = GetGameToggleRect(2);
+        m_skillSnapCheckBox->Move(toggleRect.left, toggleRect.top);
         m_skillSnapCheckBox->SetShow(showGame ? 1 : 0);
         m_skillSnapCheckBox->SetCheck(m_skillSnap);
     }
     if (m_itemSnapCheckBox) {
-        m_itemSnapCheckBox->Move(contentRect.left + 16, contentRect.top + 94);
+        const RECT toggleRect = GetGameToggleRect(3);
+        m_itemSnapCheckBox->Move(toggleRect.left, toggleRect.top);
         m_itemSnapCheckBox->SetShow(showGame ? 1 : 0);
         m_itemSnapCheckBox->SetCheck(m_itemSnap);
     }
@@ -950,6 +1000,21 @@ RECT UIOptionWnd::GetSoundSliderRect() const
     return rc;
 }
 
+RECT UIOptionWnd::GetAudioToggleRect(int toggleIndex) const
+{
+    const RECT sliderRect = toggleIndex == 0 ? GetBgmSliderRect() : GetSoundSliderRect();
+    RECT rc = { sliderRect.right + 10, sliderRect.top - 2, sliderRect.right + 10 + kToggleSize, sliderRect.top - 2 + kToggleSize };
+    return rc;
+}
+
+RECT UIOptionWnd::GetGameToggleRect(int toggleIndex) const
+{
+    const RECT contentRect = GetContentRect();
+    const int top = contentRect.top + 16 + toggleIndex * 26;
+    RECT rc = { contentRect.left + 16, top, contentRect.left + 16 + kToggleSize, top + kToggleSize };
+    return rc;
+}
+
 RECT UIOptionWnd::GetSliderKnobRect(const RECT& sliderRect, int value) const
 {
     const int trackStart = sliderRect.left + 4;
@@ -974,7 +1039,11 @@ void UIOptionWnd::DrawSlider(HDC hdc, const RECT& sliderRect, int value, const c
 
     SetBkMode(hdc, TRANSPARENT);
     SetTextColor(hdc, RGB(0, 0, 0));
+#if RO_ENABLE_QT6_UI
+    DrawUiOptionText(hdc, sliderRect.left - 44, sliderRect.top - 1, label, RGB(0, 0, 0));
+#else
     TextOutA(hdc, sliderRect.left - 44, sliderRect.top - 1, label, static_cast<int>(std::strlen(label)));
+#endif
 }
 
 void UIOptionWnd::DrawHeaderButton(HDC hdc, const RECT& rect, const char* text) const
@@ -983,7 +1052,11 @@ void UIOptionWnd::DrawHeaderButton(HDC hdc, const RECT& rect, const char* text) 
     DrawRectFrame(hdc, rect, kHeaderButtonBorderColor);
     SetBkMode(hdc, TRANSPARENT);
     SetTextColor(hdc, kHeaderButtonTextColor);
+#if RO_ENABLE_QT6_UI
+    DrawUiOptionText(hdc, rect.left + 3, rect.top - 1, text, kHeaderButtonTextColor);
+#else
     TextOutA(hdc, rect.left + 3, rect.top - 1, text, static_cast<int>(std::strlen(text)));
+#endif
 }
 
 void UIOptionWnd::DrawTabButton(HDC hdc, const RECT& rect, const char* text, bool active) const
@@ -992,7 +1065,11 @@ void UIOptionWnd::DrawTabButton(HDC hdc, const RECT& rect, const char* text, boo
     DrawRectFrame(hdc, rect, active ? kActiveTabBorderColor : kInactiveTabBorderColor);
     SetBkMode(hdc, TRANSPARENT);
     SetTextColor(hdc, RGB(0, 0, 0));
+#if RO_ENABLE_QT6_UI
+    DrawUiOptionText(hdc, rect.left + 10, rect.top + 3, text, RGB(0, 0, 0));
+#else
     TextOutA(hdc, rect.left + 10, rect.top + 3, text, static_cast<int>(std::strlen(text)));
+#endif
 }
 
 void UIOptionWnd::DrawSettingRow(HDC hdc, int rowIndex, const char* label, const std::string& value) const
@@ -1002,12 +1079,18 @@ void UIOptionWnd::DrawSettingRow(HDC hdc, int rowIndex, const char* label, const
     DrawRectFrame(hdc, rowRect, kSettingRowBorderColor);
     SetBkMode(hdc, TRANSPARENT);
     SetTextColor(hdc, RGB(0, 0, 0));
+#if RO_ENABLE_QT6_UI
+    DrawUiOptionText(hdc, rowRect.left + 8, rowRect.top + 4, label, RGB(0, 0, 0));
+    const int valueX = rowRect.right - 60 - MeasureUiOptionTextWidth(hdc, value.c_str());
+    DrawUiOptionText(hdc, valueX, rowRect.top + 4, value.c_str(), RGB(0, 0, 0));
+#else
     TextOutA(hdc, rowRect.left + 8, rowRect.top + 4, label, static_cast<int>(std::strlen(label)));
 
     SIZE valueSize{};
     GetTextExtentPoint32A(hdc, value.c_str(), static_cast<int>(value.size()), &valueSize);
     const int valueX = rowRect.right - 60 - valueSize.cx;
     TextOutA(hdc, valueX, rowRect.top + 4, value.c_str(), static_cast<int>(value.size()));
+#endif
 
     DrawHeaderButton(hdc, GetRowPrevButtonRect(rowIndex), "<");
     DrawHeaderButton(hdc, GetRowNextButtonRect(rowIndex), ">");
@@ -1172,19 +1255,21 @@ void UIOptionWnd::OnCreate(int cx, int cy)
         checkBox->SetBitmap(
             ResolveUiAssetPath({ "chk_saveon.bmp", "checkon.bmp", "chk_on.bmp" }).c_str(),
             ResolveUiAssetPath({ "chk_saveoff.bmp", "checkoff.bmp", "chk_off.bmp" }).c_str());
-        checkBox->Create(checkBox->m_w > 0 ? checkBox->m_w : 16, checkBox->m_h > 0 ? checkBox->m_h : 16);
+        checkBox->Create(checkBox->m_w > 0 ? checkBox->m_w : kToggleSize, checkBox->m_h > 0 ? checkBox->m_h : kToggleSize);
         checkBox->m_id = id;
         checkBox->SetCheck(checked);
         AddChild(checkBox);
         return checkBox;
     };
 
-    m_bgmOnCheckBox = makeCheckBox(kCheckIdBgm, m_bgmEnabled == 0);
-    m_soundOnCheckBox = makeCheckBox(kCheckIdSound, m_soundEnabled == 0);
-    m_noCtrlCheckBox = makeCheckBox(kCheckIdNoCtrl, m_noCtrl);
-    m_attackSnapCheckBox = makeCheckBox(kCheckIdAttack, m_attackSnap);
-    m_skillSnapCheckBox = makeCheckBox(kCheckIdSkill, m_skillSnap);
-    m_itemSnapCheckBox = makeCheckBox(kCheckIdItem, m_itemSnap);
+    if (!IsQtUiRuntimeEnabled()) {
+        m_bgmOnCheckBox = makeCheckBox(kCheckIdBgm, m_bgmEnabled == 0);
+        m_soundOnCheckBox = makeCheckBox(kCheckIdSound, m_soundEnabled == 0);
+        m_noCtrlCheckBox = makeCheckBox(kCheckIdNoCtrl, m_noCtrl);
+        m_attackSnapCheckBox = makeCheckBox(kCheckIdAttack, m_attackSnap);
+        m_skillSnapCheckBox = makeCheckBox(kCheckIdSkill, m_skillSnap);
+        m_itemSnapCheckBox = makeCheckBox(kCheckIdItem, m_itemSnap);
+    }
 
     LayoutControls();
     ApplyAudioSettings();
@@ -1198,8 +1283,7 @@ void UIOptionWnd::OnDraw()
 
     EnsureResources();
 
-    const bool useShared = (UIWindow::GetSharedDrawDC() != nullptr);
-    HDC hdc = useShared ? UIWindow::GetSharedDrawDC() : GetDC(g_hMainWnd);
+    HDC hdc = AcquireDrawTarget();
     if (!hdc) {
         return;
     }
@@ -1212,6 +1296,12 @@ void UIOptionWnd::OnDraw()
         OnCreate(clientW, clientH);
     }
 
+    if (IsQtUiRuntimeEnabled()) {
+        ReleaseDrawTarget(hdc);
+        m_isDirty = 0;
+        return;
+    }
+
     const RECT titleRect = GetTitleBarRect();
     const RECT bodyRect = GetBodyRect();
     RECT windowRect = { m_x, m_y, m_x + m_w, m_y + m_h };
@@ -1222,15 +1312,15 @@ void UIOptionWnd::OnDraw()
         SelectClipRgn(hdc, clipRegion);
     }
 
-    if (m_frameBitmap) {
-        DrawBitmapStretched(hdc, m_frameBitmap, titleRect);
+    if (m_frameBitmap.IsValid()) {
+        DrawBitmapPixelsStretched(hdc, m_frameBitmap, titleRect);
     } else {
         FillRectColor(hdc, titleRect, kFallbackTitleBarColor);
     }
 
     if (!m_collapsed) {
-        if (m_bodyBitmap) {
-            DrawBitmapStretched(hdc, m_bodyBitmap, bodyRect);
+        if (m_bodyBitmap.IsValid()) {
+            DrawBitmapPixelsStretched(hdc, m_bodyBitmap, bodyRect);
         } else {
             FillRectColor(hdc, bodyRect, kFallbackBodyColor);
         }
@@ -1260,23 +1350,47 @@ void UIOptionWnd::OnDraw()
             DrawSlider(hdc, GetBgmSliderRect(), m_bgmVolume, "BGM");
             DrawSlider(hdc, GetSoundSliderRect(), m_soundVolume, "Sound");
             if (m_bgmOnCheckBox) {
+#if RO_ENABLE_QT6_UI
+                DrawUiOptionText(hdc, m_bgmOnCheckBox->m_x + 18, m_bgmOnCheckBox->m_y - 1, "Mute", RGB(0, 0, 0));
+#else
                 TextOutA(hdc, m_bgmOnCheckBox->m_x + 18, m_bgmOnCheckBox->m_y - 1, "Mute", 4);
+#endif
             }
             if (m_soundOnCheckBox) {
+#if RO_ENABLE_QT6_UI
+                DrawUiOptionText(hdc, m_soundOnCheckBox->m_x + 18, m_soundOnCheckBox->m_y - 1, "Mute", RGB(0, 0, 0));
+#else
                 TextOutA(hdc, m_soundOnCheckBox->m_x + 18, m_soundOnCheckBox->m_y - 1, "Mute", 4);
+#endif
             }
         } else if (m_activeTab == TabId_Game) {
             if (m_noCtrlCheckBox) {
+#if RO_ENABLE_QT6_UI
+                DrawUiOptionText(hdc, m_noCtrlCheckBox->m_x + 18, m_noCtrlCheckBox->m_y - 1, "Disable Ctrl+Click movement", RGB(0, 0, 0));
+#else
                 TextOutA(hdc, m_noCtrlCheckBox->m_x + 18, m_noCtrlCheckBox->m_y - 1, "Disable Ctrl+Click movement", 26);
+#endif
             }
             if (m_attackSnapCheckBox) {
+#if RO_ENABLE_QT6_UI
+                DrawUiOptionText(hdc, m_attackSnapCheckBox->m_x + 18, m_attackSnapCheckBox->m_y - 1, "Attack target snap", RGB(0, 0, 0));
+#else
                 TextOutA(hdc, m_attackSnapCheckBox->m_x + 18, m_attackSnapCheckBox->m_y - 1, "Attack target snap", 18);
+#endif
             }
             if (m_skillSnapCheckBox) {
+#if RO_ENABLE_QT6_UI
+                DrawUiOptionText(hdc, m_skillSnapCheckBox->m_x + 18, m_skillSnapCheckBox->m_y - 1, "Skill target snap", RGB(0, 0, 0));
+#else
                 TextOutA(hdc, m_skillSnapCheckBox->m_x + 18, m_skillSnapCheckBox->m_y - 1, "Skill target snap", 17);
+#endif
             }
             if (m_itemSnapCheckBox) {
+#if RO_ENABLE_QT6_UI
+                DrawUiOptionText(hdc, m_itemSnapCheckBox->m_x + 18, m_itemSnapCheckBox->m_y - 1, "Item target snap", RGB(0, 0, 0));
+#else
                 TextOutA(hdc, m_itemSnapCheckBox->m_x + 18, m_itemSnapCheckBox->m_y - 1, "Item target snap", 16);
+#endif
             }
         } else if (m_activeTab == TabId_Graphics) {
             const std::vector<GraphicsRowId> rows = GetVisibleGraphicsRows();
@@ -1321,11 +1435,8 @@ void UIOptionWnd::OnDraw()
     SelectObject(hdc, oldPen);
     DeleteObject(borderPen);
 
-    DrawChildren();
-
-    if (!useShared) {
-        ReleaseDC(g_hMainWnd, hdc);
-    }
+    DrawChildrenToHdc(hdc);
+    ReleaseDrawTarget(hdc);
 }
 
 void UIOptionWnd::OnLBtnDown(int x, int y)
@@ -1397,6 +1508,10 @@ void UIOptionWnd::OnLBtnDown(int x, int y)
             }
             return;
         }
+
+        if (HandleQtToggleClick(x, y)) {
+            return;
+        }
     }
 
     if (y < m_y + kTitleBarHeight) {
@@ -1459,6 +1574,55 @@ void UIOptionWnd::OnLBtnUp(int x, int y)
     m_dragMode = DragMode_None;
 }
 
+bool UIOptionWnd::HandleQtToggleClick(int x, int y)
+{
+    if (m_activeTab == TabId_Audio) {
+        if (PointInRectXY(GetAudioToggleRect(0), x, y)) {
+            m_bgmEnabled = (m_bgmEnabled != 0) ? 0 : 1;
+            LayoutControls();
+            Invalidate();
+            ApplyAudioSettings();
+            SaveSettings();
+            return true;
+        }
+        if (PointInRectXY(GetAudioToggleRect(1), x, y)) {
+            m_soundEnabled = (m_soundEnabled != 0) ? 0 : 1;
+            LayoutControls();
+            Invalidate();
+            ApplyAudioSettings();
+            SaveSettings();
+            return true;
+        }
+        return false;
+    }
+
+    if (m_activeTab != TabId_Game) {
+        return false;
+    }
+
+    int* gameToggleValues[] = {
+        &m_noCtrl,
+        &m_attackSnap,
+        &m_skillSnap,
+        &m_itemSnap,
+    };
+
+    for (int index = 0; index < static_cast<int>(std::size(gameToggleValues)); ++index) {
+        if (!PointInRectXY(GetGameToggleRect(index), x, y)) {
+            continue;
+        }
+
+        int* const value = gameToggleValues[index];
+        *value = (*value != 0) ? 0 : 1;
+        LayoutControls();
+        Invalidate();
+        SaveSettings();
+        return true;
+    }
+
+    return false;
+}
+
 void UIOptionWnd::OnLBtnDblClk(int x, int y)
 {
     (void)x;
@@ -1511,4 +1675,182 @@ void UIOptionWnd::OnKeyDown(int virtualKey)
         SetShow(0);
         SaveSettings();
     }
+}
+
+bool UIOptionWnd::GetDisplayDataForQt(DisplayData* outData) const
+{
+    if (!outData) {
+        return false;
+    }
+
+    DisplayData data{};
+    data.collapsed = m_collapsed != 0;
+    data.activeTab = m_activeTab;
+
+    const RECT contentRect = GetContentRect();
+    data.contentX = contentRect.left;
+    data.contentY = contentRect.top;
+    data.contentWidth = contentRect.right - contentRect.left;
+    data.contentHeight = contentRect.bottom - contentRect.top;
+
+    const RECT miniRect = GetMiniButtonRect();
+    const RECT closeRect = GetCloseButtonRect();
+    data.systemButtons.reserve(2);
+
+    DisplayButton miniButton{};
+    miniButton.x = miniRect.left;
+    miniButton.y = miniRect.top;
+    miniButton.width = miniRect.right - miniRect.left;
+    miniButton.height = miniRect.bottom - miniRect.top;
+    miniButton.label = "_";
+    data.systemButtons.push_back(std::move(miniButton));
+
+    DisplayButton closeButton{};
+    closeButton.x = closeRect.left;
+    closeButton.y = closeRect.top;
+    closeButton.width = closeRect.right - closeRect.left;
+    closeButton.height = closeRect.bottom - closeRect.top;
+    closeButton.label = "X";
+    data.systemButtons.push_back(std::move(closeButton));
+
+    data.tabs.reserve(TabId_Count);
+    static const char* const kTabLabels[TabId_Count] = { "Game", "Graphics", "Audio" };
+    for (int tabIndex = 0; tabIndex < TabId_Count; ++tabIndex) {
+        const RECT tabRect = GetTabRect(tabIndex);
+        DisplayTab tab{};
+        tab.x = tabRect.left;
+        tab.y = tabRect.top;
+        tab.width = tabRect.right - tabRect.left;
+        tab.height = tabRect.bottom - tabRect.top;
+        tab.active = m_activeTab == tabIndex;
+        tab.label = kTabLabels[tabIndex];
+        data.tabs.push_back(std::move(tab));
+    }
+
+    if (HasPendingGraphicsRestart()) {
+        const RECT restartRect = GetRestartButtonRect();
+        data.restartButton.visible = true;
+        data.restartButton.x = restartRect.left;
+        data.restartButton.y = restartRect.top;
+        data.restartButton.width = restartRect.right - restartRect.left;
+        data.restartButton.height = restartRect.bottom - restartRect.top;
+        data.restartButton.label = "Restart";
+    }
+
+    if (!data.collapsed) {
+        if (m_activeTab == TabId_Audio) {
+            const RECT bgmRect = GetBgmSliderRect();
+            DisplaySlider bgm{};
+            bgm.x = bgmRect.left;
+            bgm.y = bgmRect.top;
+            bgm.width = bgmRect.right - bgmRect.left;
+            bgm.height = bgmRect.bottom - bgmRect.top;
+            bgm.value = m_bgmVolume;
+            bgm.label = "BGM";
+            data.sliders.push_back(std::move(bgm));
+
+            const RECT soundRect = GetSoundSliderRect();
+            DisplaySlider sound{};
+            sound.x = soundRect.left;
+            sound.y = soundRect.top;
+            sound.width = soundRect.right - soundRect.left;
+            sound.height = soundRect.bottom - soundRect.top;
+            sound.value = m_soundVolume;
+            sound.label = "Sound";
+            data.sliders.push_back(std::move(sound));
+
+            DisplayToggle bgmToggle{};
+            const RECT bgmToggleRect = GetAudioToggleRect(0);
+            bgmToggle.x = bgmToggleRect.left;
+            bgmToggle.y = bgmToggleRect.top;
+            bgmToggle.width = bgmToggleRect.right - bgmToggleRect.left;
+            bgmToggle.height = bgmToggleRect.bottom - bgmToggleRect.top;
+            bgmToggle.checked = m_bgmEnabled == 0;
+            bgmToggle.label = "Mute";
+            data.toggles.push_back(std::move(bgmToggle));
+
+            DisplayToggle soundToggle{};
+            const RECT soundToggleRect = GetAudioToggleRect(1);
+            soundToggle.x = soundToggleRect.left;
+            soundToggle.y = soundToggleRect.top;
+            soundToggle.width = soundToggleRect.right - soundToggleRect.left;
+            soundToggle.height = soundToggleRect.bottom - soundToggleRect.top;
+            soundToggle.checked = m_soundEnabled == 0;
+            soundToggle.label = "Mute";
+            data.toggles.push_back(std::move(soundToggle));
+        } else if (m_activeTab == TabId_Game) {
+            struct ToggleDef {
+                int index;
+                bool checked;
+                const char* label;
+            };
+            const ToggleDef toggleDefs[] = {
+                { 0, m_noCtrl != 0, "Disable Ctrl+Click movement" },
+                { 1, m_attackSnap != 0, "Attack target snap" },
+                { 2, m_skillSnap != 0, "Skill target snap" },
+                { 3, m_itemSnap != 0, "Item target snap" },
+            };
+            for (const ToggleDef& def : toggleDefs) {
+                const RECT toggleRect = GetGameToggleRect(def.index);
+                DisplayToggle toggle{};
+                toggle.x = toggleRect.left;
+                toggle.y = toggleRect.top;
+                toggle.width = toggleRect.right - toggleRect.left;
+                toggle.height = toggleRect.bottom - toggleRect.top;
+                toggle.checked = def.checked;
+                toggle.label = def.label;
+                data.toggles.push_back(std::move(toggle));
+            }
+        } else if (m_activeTab == TabId_Graphics) {
+            const std::vector<GraphicsRowId> rows = GetVisibleGraphicsRows();
+            data.graphicsRows.reserve(rows.size());
+            for (size_t index = 0; index < rows.size(); ++index) {
+                DisplayGraphicsRow row{};
+                const RECT rowRect = GetRowRect(static_cast<int>(index));
+                const RECT prevRect = GetRowPrevButtonRect(static_cast<int>(index));
+                const RECT nextRect = GetRowNextButtonRect(static_cast<int>(index));
+                row.x = rowRect.left;
+                row.y = rowRect.top;
+                row.width = rowRect.right - rowRect.left;
+                row.height = rowRect.bottom - rowRect.top;
+                row.prevX = prevRect.left;
+                row.prevY = prevRect.top;
+                row.prevWidth = prevRect.right - prevRect.left;
+                row.prevHeight = prevRect.bottom - prevRect.top;
+                row.nextX = nextRect.left;
+                row.nextY = nextRect.top;
+                row.nextWidth = nextRect.right - nextRect.left;
+                row.nextHeight = nextRect.bottom - nextRect.top;
+                row.prevLabel = "<";
+                row.nextLabel = ">";
+                switch (rows[index]) {
+                case GraphicsRow_Resolution:
+                    row.label = "Resolution";
+                    break;
+                case GraphicsRow_Renderer:
+                    row.label = "Renderer";
+                    break;
+                case GraphicsRow_WindowMode:
+                    row.label = "Window mode";
+                    break;
+                case GraphicsRow_AntiAliasing:
+                    row.label = "3D AA";
+                    break;
+                case GraphicsRow_TextureUpscale:
+                    row.label = "Texture upscale";
+                    break;
+                case GraphicsRow_AnisotropicFiltering:
+                    row.label = "Anisotropic";
+                    break;
+                default:
+                    break;
+                }
+                row.value = GetGraphicsRowValue(rows[index]);
+                data.graphicsRows.push_back(std::move(row));
+            }
+        }
+    }
+
+    *outData = std::move(data);
+    return true;
 }

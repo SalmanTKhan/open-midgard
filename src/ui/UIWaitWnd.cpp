@@ -1,5 +1,7 @@
 #include "UIWaitWnd.h"
 
+#include "qtui/QtUiRuntime.h"
+
 UIWaitWnd::UIWaitWnd() : m_fontHeight(0), m_fontType(0) {}
 UIWaitWnd::~UIWaitWnd() {}
 
@@ -13,11 +15,16 @@ void UIWaitWnd::OnCreate(int x, int y) {
 }
 
 void UIWaitWnd::OnDraw() {
-    // Draw the "waiting" message on screen
+    if (IsQtUiRuntimeEnabled()) {
+        return;
+    }
 }
 
 void UIWaitWnd::SetMsg(const char* waitMsg, int fontHeight, int fontType) {
-    if (waitMsg) m_waitMsg = waitMsg;
+    if (waitMsg) {
+        m_waitMsg = waitMsg;
+    }
     m_fontHeight = fontHeight;
     m_fontType = fontType;
+    Invalidate();
 }

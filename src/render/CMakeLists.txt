@@ -17,3 +17,10 @@ target_link_libraries(ro_render PUBLIC
     ro_res
     ro_render3d
 )
+
+if(RO_ENABLE_QT6_UI)
+    target_link_libraries(ro_render PUBLIC
+        Qt6::Core
+        Qt6::Gui
+    )
+endif()

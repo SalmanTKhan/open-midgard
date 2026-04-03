@@ -1,6 +1,6 @@
 #pragma once
 
-#include <windows.h>
+#include "platform/WindowsCompat.h"
 #include <vector>
 #include "Renderer.h"
 
@@ -74,6 +74,7 @@ private:
     int m_fontHeight;
     unsigned char m_bold;
     int m_charset;
+    COLORREF m_textColor;
 };
 
 // Global drawing functions

@@ -1,10 +1,10 @@
 #pragma once
 // Minimal debug logger – writes to a per-process log file in the working directory.
 // Include and call DbgLog(...) wherever needed. Remove file when done debugging.
+#include "platform/WindowsCompat.h"
 #include <cstdio>
 #include <cstdarg>
 #include <cstring>
-#include <windows.h>
 
 inline void DbgLog(const char* fmt, ...)
 {

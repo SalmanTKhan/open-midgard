@@ -2,7 +2,7 @@
 
 #include <string>
 
-#include <windows.h>
+#include "platform/WindowsCompat.h"
 
 // Renders NPC script / packet text with ^RRGGBB color switches (six hex digits after ^).
 // Say dialog: color persists across lines until the next page (new draw starts at black).

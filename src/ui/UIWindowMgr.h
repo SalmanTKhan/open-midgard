@@ -1,4 +1,5 @@
 #pragma once
+#include "render/DC.h"
 #include "UIWindow.h"
 #include <map>
 
@@ -12,6 +13,7 @@ class UILoginWnd;
 class UISelectServerWnd;
 class UISelectCharWnd;
 class UIMakeCharWnd;
+class UIWaitWnd;
 class UIItemWnd;
 class UIQuestWnd;
 class UIBasicInfoWnd;
@@ -85,10 +87,13 @@ public:
     void Reset();
     void OnProcess();
     void OnDraw();
+    void DrawVisibleWindowsToHdc(HDC targetDC, bool includeRoMap);
     bool HasDirtyVisualState() const;
     bool HasDirtyVisualStateExcludingRoMap() const;
     bool HasRoMapDirtyVisualState() const;
-    void OnDrawExcludingRoMap();
+    void ClearDirtyVisualState();
+    void ClearDirtyVisualStateExcludingRoMap();
+    void OnDrawExcludingRoMapToHdc(HDC targetDC);
     bool DrawRoMapToHdc(HDC targetDC, int x, int y);
     bool GetRoMapRect(RECT* outRect) const;
     void RenderWallPaper();
@@ -98,7 +103,6 @@ public:
     void ShowLoadingScreen(const std::string& wallpaperName, const std::string& message, float progress);
     void UpdateLoadingScreen(const std::string& message, float progress);
     void HideLoadingScreen();
-    void SetComposeCursorState(int cursorActNum, u32 mouseAnimStartTick, bool enabled);
     void SendMsg(int msg, msgparam_t wparam, msgparam_t lparam);
     void PushChatEvent(const char* text, u32 color, u8 channel, u32 tick = 0);
     void SetLoginStatus(const std::string& status);
@@ -170,6 +174,7 @@ public:
     UISelectServerWnd* m_selectServerWnd;
     UISelectCharWnd* m_selectCharWnd;
     UIMakeCharWnd* m_makeCharWnd;
+    UIWaitWnd* m_waitWnd;
     UIChooseWnd* m_chooseWnd;
     UIOptionWnd* m_optionWnd;
     UIItemWnd* m_itemWnd;
@@ -183,21 +188,14 @@ public:
     std::string m_loginWallpaper;
     std::string m_loadedWallpaperPath;
     CSurface* m_wallpaperSurface;
-    HDC m_uiComposeDC;
-    HBITMAP m_uiComposeBitmap;
-    void* m_uiComposeBits;
-    int m_uiComposeWidth;
-    int m_uiComposeHeight;
-    int m_composeCursorActNum;
-    u32 m_composeCursorStartTick;
-    bool m_composeCursorEnabled;
+    ArgbDibSurface m_uiComposeSurface;
 
     std::vector<UIChatEvent> m_chatEvents;
 
 private:
     UIWindow* HitTestWindow(int x, int y) const;
     void ReleaseComposeSurface();
-    bool EnsureComposeSurface(HDC referenceDC, int width, int height);
+    bool EnsureComposeSurface(int width, int height);
 };
 
 extern UIWindowMgr g_windowMgr;

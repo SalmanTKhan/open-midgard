@@ -3,12 +3,16 @@
 // WinMain.h  –  Application entry point and Win32 window management
 // Clean C++17 rewrite.
 //===========================================================================
+#include "Types.h"
 #include "render3d/RenderBackend.h"
-#include <windows.h>
 
 // Win32 window / app lifecycle
+#if RO_PLATFORM_WINDOWS
 int  __stdcall  WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
                          char* lpCmdLine, int nCmdShow);
+#else
+int             main(int argc, char** argv);
+#endif
 bool            InitApp(HINSTANCE hInstance, int nCmdShow);
 int             ReadRegistry();
 LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);

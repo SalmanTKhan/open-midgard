@@ -22,6 +22,13 @@ public:
     void HideMenu();
     bool HandleKeyDown(int virtualKey);
     u32 GetNpcId() const;
+    const std::vector<std::string>& GetOptions() const;
+    int GetSelectedIndex() const;
+    int GetHoverIndex() const;
+    bool IsOkPressed() const;
+    bool IsCancelPressed() const;
+    bool GetOkRectForQt(RECT* outRect) const;
+    bool GetCancelRectForQt(RECT* outRect) const;
 
 private:
     enum class ClickTarget {

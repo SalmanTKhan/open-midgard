@@ -4,106 +4,105 @@
 #include "gamemode/LoginMode.h"
 #include "gamemode/Mode.h"
 #include "main/WinMain.h"
+#include "qtui/QtUiRuntime.h"
+#include "res/Bitmap.h"
 #include "ui/UIWindowMgr.h"
 #include "DebugLog.h"
 
-#include <gdiplus.h>
 #include <windows.h>
 
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <map>
 #include <vector>
-
-#pragma comment(lib, "gdiplus.lib")
 
 namespace {
 
-ULONG_PTR EnsureGdiplusStarted()
+constexpr int kLoginFieldLeft = 92;
+constexpr int kLoginFieldTop = 29;
+constexpr int kPasswordFieldTop = 61;
+constexpr int kFieldWidth = 125;
+constexpr int kFieldHeight = 18;
+constexpr int kSaveCheckLeft = 232;
+constexpr int kSaveCheckTop = 33;
+constexpr int kSaveCheckSize = 16;
+
+struct LoginButtonHitArea {
+    int id;
+    int x;
+    int y;
+    int width;
+    int height;
+    const char* label;
+};
+
+constexpr LoginButtonHitArea kQtLoginButtonAreas[] = {
+    { 201, 4, 96, 52, 20, "Request" },
+    { 219, 137, 96, 44, 20, "Intro" },
+    { 120, 189, 96, 40, 20, "Connect" },
+    { 155, 234, 96, 40, 20, "Exit" },
+};
+
+shopui::BitmapPixels LoadBitmapPixelsFromGameData(const char* path)
 {
-    static ULONG_PTR s_token = 0;
-    static bool s_started = false;
-    if (!s_started) {
-        Gdiplus::GdiplusStartupInput startupInput;
-        if (Gdiplus::GdiplusStartup(&s_token, &startupInput, nullptr) == Gdiplus::Ok) {
-            s_started = true;
-        }
-    }
-    return s_token;
+    return shopui::LoadBitmapPixelsFromGameData(path ? path : "", false);
 }
 
-HBITMAP LoadBitmapFromGameData(const char* path)
+bool ContainsPoint(int left, int top, int width, int height, int x, int y)
 {
-    if (!path || !*path || !EnsureGdiplusStarted()) {
-        return nullptr;
-    }
-
-    int size = 0;
-    unsigned char* bytes = g_fileMgr.GetData(path, &size);
-    if (!bytes || size <= 0) {
-        delete[] bytes;
-        return nullptr;
-    }
-
-    HBITMAP outBmp = nullptr;
-    HGLOBAL mem = GlobalAlloc(GMEM_MOVEABLE, static_cast<SIZE_T>(size));
-    if (mem) {
-        void* dst = GlobalLock(mem);
-        if (dst) {
-            std::memcpy(dst, bytes, static_cast<size_t>(size));
-            GlobalUnlock(mem);
-
-            IStream* stream = nullptr;
-            if (CreateStreamOnHGlobal(mem, TRUE, &stream) == S_OK) {
-                auto* bmp = Gdiplus::Bitmap::FromStream(stream, FALSE);
-                if (bmp && bmp->GetLastStatus() == Gdiplus::Ok) {
-                    bmp->GetHBITMAP(RGB(0, 0, 0), &outBmp);
-                }
-                delete bmp;
-                stream->Release();
-            } else {
-                GlobalFree(mem);
-            }
-        } else {
-            GlobalFree(mem);
-        }
-    }
-
-    delete[] bytes;
-    return outBmp;
+    return x >= left && x < left + width && y >= top && y < top + height;
 }
 
-void DrawBitmapStretched(HDC target, HBITMAP bmp, const RECT& dst)
+std::string GetNormalizedFileNameLower(std::string value)
 {
-    if (!target || !bmp) {
+    value = shopui::NormalizeSlash(std::move(value));
+    const size_t slashPos = value.find_last_of('\\');
+    if (slashPos != std::string::npos && slashPos + 1 < value.size()) {
+        value = value.substr(slashPos + 1);
+    }
+    return shopui::ToLowerAscii(std::move(value));
+}
+
+bool IsClassicLoginPanelAssetName(const std::string& value)
+{
+    const std::string fileName = GetNormalizedFileNameLower(value);
+    return fileName == "win_login.bmp"
+        || fileName == "loginwin.bmp"
+        || fileName == "win_login_interface.bmp"
+        || fileName == "login_interface.bmp"
+        || fileName == "win_msgbox.bmp";
+}
+
+void DrawBitmapPixelsStretched(HDC target, const shopui::BitmapPixels& bmp, const RECT& dst)
+{
+    if (!target || !bmp.IsValid() || dst.right <= dst.left || dst.bottom <= dst.top) {
         return;
     }
 
-    BITMAP bm{};
-    if (!GetObjectA(bmp, sizeof(bm), &bm) || bm.bmWidth <= 0 || bm.bmHeight <= 0) {
-        return;
-    }
+    BITMAPINFO bmi{};
+    bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    bmi.bmiHeader.biWidth = bmp.width;
+    bmi.bmiHeader.biHeight = -bmp.height;
+    bmi.bmiHeader.biPlanes = 1;
+    bmi.bmiHeader.biBitCount = 32;
+    bmi.bmiHeader.biCompression = BI_RGB;
 
-    HDC srcDC = CreateCompatibleDC(target);
-    if (!srcDC) {
-        return;
-    }
-
-    HGDIOBJ old = SelectObject(srcDC, bmp);
-    SetStretchBltMode(target, HALFTONE);
-    StretchBlt(target,
+    const int oldStretchMode = SetStretchBltMode(target, HALFTONE);
+    StretchDIBits(target,
         dst.left,
         dst.top,
         dst.right - dst.left,
         dst.bottom - dst.top,
-        srcDC,
         0,
         0,
-        bm.bmWidth,
-        bm.bmHeight,
+        bmp.width,
+        bmp.height,
+        bmp.pixels.data(),
+        &bmi,
+        DIB_RGB_COLORS,
         SRCCOPY);
-    SelectObject(srcDC, old);
-    DeleteDC(srcDC);
+    SetStretchBltMode(target, oldStretchMode);
 }
 
 std::string ToLowerAscii(std::string value)
@@ -118,6 +117,92 @@ std::string NormalizeSlash(std::string value)
 {
     std::replace(value.begin(), value.end(), '/', '\\');
     return value;
+}
+
+const std::vector<std::string>& GetArchiveNamesByExtension(const char* ext)
+{
+    static std::map<std::string, std::vector<std::string>> s_byExt;
+    const std::string key = ToLowerAscii(ext ? ext : "");
+    auto it = s_byExt.find(key);
+    if (it != s_byExt.end()) {
+        return it->second;
+    }
+
+    std::vector<std::string> names;
+    g_fileMgr.CollectDataNamesByExtension(key.c_str(), names);
+    auto inserted = s_byExt.emplace(key, std::move(names));
+    return inserted.first->second;
+}
+
+std::string GetLowerFileExtension(const std::string& value)
+{
+    const std::string normalized = NormalizeSlash(value);
+    const size_t dotPos = normalized.find_last_of('.');
+    if (dotPos == std::string::npos || dotPos + 1 >= normalized.size()) {
+        return {};
+    }
+    return ToLowerAscii(normalized.substr(dotPos + 1));
+}
+
+int ScoreArchiveUiPath(const std::string& requestedPath, const std::string& resolvedPath)
+{
+    const std::string loweredRequested = ToLowerAscii(NormalizeSlash(requestedPath));
+    const std::string loweredResolved = ToLowerAscii(NormalizeSlash(resolvedPath));
+    int score = 0;
+
+    if (loweredResolved == loweredRequested) {
+        score += 10000;
+    }
+    if (loweredResolved.rfind("data\\", 0) == 0) {
+        score += 800;
+    }
+    if (loweredResolved.find("\\texture\\") != std::string::npos) {
+        score += 300;
+    }
+    if (loweredResolved.find("\\login_interface\\") != std::string::npos) {
+        score += 400;
+    }
+    if (loweredResolved.find("\\basic_interface\\") != std::string::npos) {
+        score += 350;
+    }
+    if (loweredResolved.find("\\interface\\") != std::string::npos) {
+        score += 200;
+    }
+    if (loweredResolved.find("\xC0\xAF\xC0\xFA\xC0\xCE\xC5\xCD\xC6\xE4\xC0\xCC\xBD\xBA") != std::string::npos) {
+        score += 450;
+    }
+
+    return score;
+}
+
+std::string ResolveArchiveAssetByFileName(const std::string& requestedPath)
+{
+    const std::string extension = GetLowerFileExtension(requestedPath);
+    if (extension.empty()) {
+        return {};
+    }
+
+    const std::string requestedFileName = GetNormalizedFileNameLower(requestedPath);
+    if (requestedFileName.empty()) {
+        return {};
+    }
+
+    const std::vector<std::string>& names = GetArchiveNamesByExtension(extension.c_str());
+    int bestScore = -1;
+    std::string bestPath;
+    for (const std::string& name : names) {
+        if (GetNormalizedFileNameLower(name) != requestedFileName) {
+            continue;
+        }
+
+        const int score = ScoreArchiveUiPath(requestedPath, name);
+        if (score > bestScore) {
+            bestScore = score;
+            bestPath = name;
+        }
+    }
+
+    return bestPath;
 }
 
 constexpr char kLoginRegPath[] = "Software\\Gravity Soft\\Ragnarok Online";
@@ -170,6 +255,7 @@ void LoadRememberedUserId(std::string* userId, bool* enabled)
 
     DWORD enabledValue = 0;
     DWORD enabledSize = sizeof(enabledValue);
+    bool hasEnabledValue = false;
     if (enabled && RegQueryValueExA(
             key,
             kRememberUserIdEnabledValue,
@@ -178,8 +264,10 @@ void LoadRememberedUserId(std::string* userId, bool* enabled)
             reinterpret_cast<BYTE*>(&enabledValue),
             &enabledSize) == ERROR_SUCCESS) {
         *enabled = (enabledValue != 0);
+        hasEnabledValue = true;
     }
 
+    bool hasUserIdValue = false;
     if (userId) {
         char buffer[64] = {};
         DWORD size = sizeof(buffer);
@@ -191,7 +279,12 @@ void LoadRememberedUserId(std::string* userId, bool* enabled)
                 reinterpret_cast<BYTE*>(buffer),
                 &size) == ERROR_SUCCESS) {
             *userId = buffer;
+            hasUserIdValue = true;
         }
+    }
+
+    if (enabled && hasUserIdValue && !hasEnabledValue) {
+        *enabled = true;
     }
 
     RegCloseKey(key);
@@ -231,12 +324,10 @@ std::vector<std::string> BuildWallpaperCandidates(const std::string& requestedWa
     const char* directDefaults[] = {
         "ad_title.jpg",
         "rag_title.jpg",
-        "win_login.bmp",
         "title.bmp",
         "title.jpg",
         "login_background.jpg",
         "login_background.bmp",
-        "loginwin.bmp",
         nullptr
     };
 
@@ -388,18 +479,37 @@ std::vector<std::string> BuildUiAssetCandidates(const char* fileName)
     return out;
 }
 
-HBITMAP LoadFirstBitmapFromCandidates(const std::vector<std::string>& candidates, std::string* outPath)
+shopui::BitmapPixels LoadFirstBitmapPixelsFromCandidates(const std::vector<std::string>& candidates, std::string* outPath)
 {
     for (const std::string& candidate : candidates) {
-        HBITMAP bmp = LoadBitmapFromGameData(candidate.c_str());
-        if (bmp) {
+        shopui::BitmapPixels bmp = LoadBitmapPixelsFromGameData(candidate.c_str());
+        if (bmp.IsValid()) {
             if (outPath) {
                 *outPath = candidate;
             }
             return bmp;
         }
     }
-    return nullptr;
+
+    std::vector<std::string> fallbackCandidates;
+    for (const std::string& candidate : candidates) {
+        const std::string resolved = ResolveArchiveAssetByFileName(candidate);
+        if (!resolved.empty()) {
+            AddUniqueCandidate(fallbackCandidates, resolved);
+        }
+    }
+
+    for (const std::string& candidate : fallbackCandidates) {
+        shopui::BitmapPixels bmp = LoadBitmapPixelsFromGameData(candidate.c_str());
+        if (bmp.IsValid()) {
+            if (outPath) {
+                *outPath = candidate;
+            }
+            return bmp;
+        }
+    }
+
+    return {};
 }
 
 std::string ResolveUiAssetPath(const char* fileName)
@@ -422,22 +532,195 @@ std::string ResolveUiAssetPath(const char* fileName)
 UILoginWnd::UILoginWnd()
     : m_controlsCreated(false),
       m_assetsProbed(false),
-      m_wallpaperBmp(nullptr),
-      m_composeDC(nullptr),
-      m_composeBitmap(nullptr),
-      m_composeWidth(0),
-      m_composeHeight(0),
+      m_wallpaperBmp(),
+      m_composeSurface(),
+      m_saveAccountChecked(false),
       m_login(nullptr),
       m_password(nullptr),
       m_cancelButton(nullptr),
-        m_saveAccountCheck(nullptr) {
-    m_uiAssets.fill(nullptr);
+        m_saveAccountCheck(nullptr),
+      m_hasRememberedUserIdSnapshot(false),
+      m_lastRememberedUserIdEnabled(false) {
+    m_uiAssets.fill(shopui::BitmapPixels{});
 }
 
 UILoginWnd::~UILoginWnd()
 {
+    if (m_login && m_login->m_parent != this) {
+        delete m_login;
+        m_login = nullptr;
+    }
+    if (m_password && m_password->m_parent != this) {
+        delete m_password;
+        m_password = nullptr;
+    }
+    if (m_saveAccountCheck && m_saveAccountCheck->m_parent != this) {
+        delete m_saveAccountCheck;
+        m_saveAccountCheck = nullptr;
+    }
+    if (m_cancelButton && m_cancelButton->m_parent != this) {
+        delete m_cancelButton;
+        m_cancelButton = nullptr;
+    }
     ReleaseComposeSurface();
     ClearUiAssets();
+}
+
+void SetLoginFieldFocus(UIEditCtrl* login, UIEditCtrl* password, bool focusPassword)
+{
+    if (login) {
+        login->m_hasFocus = !focusPassword;
+        login->Invalidate();
+    }
+    if (password) {
+        password->m_hasFocus = focusPassword;
+        password->Invalidate();
+    }
+    g_windowMgr.m_editWindow = focusPassword
+        ? static_cast<UIWindow*>(password)
+        : static_cast<UIWindow*>(login);
+}
+
+const char* UILoginWnd::GetLoginText() const
+{
+    return m_login ? m_login->GetText() : "";
+}
+
+int UILoginWnd::GetPasswordLength() const
+{
+    const char* text = m_password ? m_password->GetText() : "";
+    return text ? static_cast<int>(std::strlen(text)) : 0;
+}
+
+bool UILoginWnd::IsSaveAccountChecked() const
+{
+    return m_saveAccountCheck ? (m_saveAccountCheck->m_isChecked != 0) : m_saveAccountChecked;
+}
+
+bool UILoginWnd::IsPasswordFocused() const
+{
+    return m_password && m_password->m_hasFocus;
+}
+
+int UILoginWnd::GetQtButtonCount() const
+{
+    return static_cast<int>(std::size(kQtLoginButtonAreas));
+}
+
+bool UILoginWnd::GetQtButtonDisplayForQt(int index, QtButtonDisplay* outButton) const
+{
+    if (!outButton || index < 0 || index >= GetQtButtonCount()) {
+        return false;
+    }
+
+    const LoginButtonHitArea& button = kQtLoginButtonAreas[index];
+    outButton->id = button.id;
+    outButton->x = m_x + button.x;
+    outButton->y = m_y + button.y;
+    outButton->width = button.width;
+    outButton->height = button.height;
+    outButton->label = button.label;
+    return true;
+}
+
+bool UILoginWnd::HandleQtMouseDown(int x, int y)
+{
+    if (m_show == 0) {
+        return false;
+    }
+
+    if (!m_controlsCreated && g_hMainWnd) {
+        RECT clientRect{};
+        GetClientRect(g_hMainWnd, &clientRect);
+        OnCreate(clientRect.right - clientRect.left, clientRect.bottom - clientRect.top);
+    }
+
+    const int localX = x - m_x;
+    const int localY = y - m_y;
+    if (localX < 0 || localY < 0 || localX >= m_w || localY >= m_h) {
+        return false;
+    }
+
+    if (ContainsPoint(kLoginFieldLeft, kLoginFieldTop, kFieldWidth, kFieldHeight, localX, localY)) {
+        SetLoginFieldFocus(m_login, m_password, false);
+        return true;
+    }
+
+    if (ContainsPoint(kLoginFieldLeft, kPasswordFieldTop, kFieldWidth, kFieldHeight, localX, localY)) {
+        SetLoginFieldFocus(m_login, m_password, true);
+        return true;
+    }
+
+    if (ContainsPoint(kSaveCheckLeft, kSaveCheckTop, kSaveCheckSize, kSaveCheckSize, localX, localY)) {
+        m_saveAccountChecked = !m_saveAccountChecked;
+        if (m_saveAccountCheck) {
+            m_saveAccountCheck->SetCheck(m_saveAccountChecked ? 1 : 0);
+        }
+        StoreRememberedUserId(m_login ? m_login->GetText() : "", m_saveAccountChecked);
+        g_modeMgr.SendMsg(CLoginMode::LoginMsg_SaveAccount, m_saveAccountChecked ? 1 : 0, 0, m_saveAccountChecked ? 1 : 0);
+        return true;
+    }
+
+    for (const LoginButtonHitArea& button : kQtLoginButtonAreas) {
+        if (ContainsPoint(button.x, button.y, button.width, button.height, localX, localY)) {
+            SendMsg(nullptr, 6, button.id, 0, 0);
+            return true;
+        }
+    }
+
+    return false;
+}
+
+void UILoginWnd::EnsureQtLayout()
+{
+    if (!g_hMainWnd) {
+        return;
+    }
+
+    RECT clientRect{};
+    if (!GetClientRect(g_hMainWnd, &clientRect)) {
+        return;
+    }
+
+    OnCreate(clientRect.right - clientRect.left, clientRect.bottom - clientRect.top);
+}
+
+bool UILoginWnd::GetQtPanelBitmap(const unsigned int** pixels, int* width, int* height)
+{
+    if (!pixels || !width || !height) {
+        return false;
+    }
+
+    *pixels = nullptr;
+    *width = 0;
+    *height = 0;
+
+    EnsureResourceCache();
+    const shopui::BitmapPixels& panel = m_uiAssets[UiPanel];
+    if (!panel.IsValid() || panel.pixels.empty()) {
+        return false;
+    }
+
+    *pixels = panel.pixels.data();
+    *width = panel.width;
+    *height = panel.height;
+    return true;
+}
+
+void UILoginWnd::RefreshRememberedUserIdStorage()
+{
+    const bool enabled = IsSaveAccountChecked();
+    const std::string userId = m_login ? m_login->GetText() : "";
+    if (m_hasRememberedUserIdSnapshot
+        && m_lastRememberedUserIdEnabled == enabled
+        && m_lastRememberedUserId == userId) {
+        return;
+    }
+
+    StoreRememberedUserId(userId.c_str(), enabled);
+    m_hasRememberedUserIdSnapshot = true;
+    m_lastRememberedUserIdEnabled = enabled;
+    m_lastRememberedUserId = userId;
 }
 
 void UILoginWnd::OnCreate(int cx, int cy)
@@ -467,23 +750,25 @@ void UILoginWnd::OnCreate(int cx, int cy)
         { "btn_intro.bmp", "btn_intro_a.bmp", "btn_intro_b.bmp", 219, 137, 96 },
     };
 
-    for (const ButtonSpec& spec : specs) {
-        auto* button = new UIBitmapButton();
-        button->SetBitmapName(ResolveUiAssetPath(spec.normal).c_str(), 0);
-        button->SetBitmapName(ResolveUiAssetPath(spec.hover).c_str(), 1);
-        button->SetBitmapName(ResolveUiAssetPath(spec.pressed).c_str(), 2);
-        const int buttonWidth = button->m_bitmapWidth > 0 ? button->m_bitmapWidth : 40;
-        const int buttonHeight = button->m_bitmapHeight > 0 ? button->m_bitmapHeight : 20;
-        if (spec.x < 0 || spec.y < 0 || spec.x + buttonWidth > m_w || spec.y + buttonHeight > m_h) {
-            delete button;
-            continue;
-        }
-        button->Create(buttonWidth, buttonHeight);
-        button->Move(m_x + spec.x, m_y + spec.y);
-        button->m_id = spec.id;
-        AddChild(button);
-        if (spec.id == 119) {
-            m_cancelButton = button;
+    if (!IsQtUiRuntimeEnabled()) {
+        for (const ButtonSpec& spec : specs) {
+            auto* button = new UIBitmapButton();
+            button->SetBitmapName(ResolveUiAssetPath(spec.normal).c_str(), 0);
+            button->SetBitmapName(ResolveUiAssetPath(spec.hover).c_str(), 1);
+            button->SetBitmapName(ResolveUiAssetPath(spec.pressed).c_str(), 2);
+            const int buttonWidth = button->m_bitmapWidth > 0 ? button->m_bitmapWidth : 40;
+            const int buttonHeight = button->m_bitmapHeight > 0 ? button->m_bitmapHeight : 20;
+            if (spec.x < 0 || spec.y < 0 || spec.x + buttonWidth > m_w || spec.y + buttonHeight > m_h) {
+                delete button;
+                continue;
+            }
+            button->Create(buttonWidth, buttonHeight);
+            button->Move(m_x + spec.x, m_y + spec.y);
+            button->m_id = spec.id;
+            AddChild(button);
+            if (spec.id == 119) {
+                m_cancelButton = button;
+            }
         }
     }
 
@@ -495,55 +780,51 @@ void UILoginWnd::OnCreate(int cx, int cy)
     m_password->Move(m_x + 92, m_y + 61);
     m_password->m_maskchar = '*';
     m_password->SetFrameColor(242, 242, 242);
-    AddChild(m_password);
+    if (!IsQtUiRuntimeEnabled()) {
+        AddChild(m_password);
+    }
 
     m_login = new UIEditCtrl();
     m_login->Create(kLoginFieldWidth, 18);
     m_login->m_maxchar = 24;
     m_login->Move(m_x + 92, m_y + 29);
     m_login->SetFrameColor(242, 242, 242);
-    AddChild(m_login);
+    if (!IsQtUiRuntimeEnabled()) {
+        AddChild(m_login);
+    }
 
     std::string rememberedUserId;
     bool rememberUserId = false;
     LoadRememberedUserId(&rememberedUserId, &rememberUserId);
+    m_saveAccountChecked = rememberUserId;
     if (rememberUserId && !rememberedUserId.empty()) {
         m_login->SetText(rememberedUserId.c_str());
     }
+    m_hasRememberedUserIdSnapshot = true;
+    m_lastRememberedUserIdEnabled = rememberUserId;
+    m_lastRememberedUserId = rememberedUserId;
 
-    m_saveAccountCheck = new UICheckBox();
-    m_saveAccountCheck->SetBitmap(
-        ResolveUiAssetPath("chk_saveon.bmp").c_str(),
-        ResolveUiAssetPath("chk_saveoff.bmp").c_str());
-    m_saveAccountCheck->Create(m_saveAccountCheck->m_w > 0 ? m_saveAccountCheck->m_w : 16,
-        m_saveAccountCheck->m_h > 0 ? m_saveAccountCheck->m_h : 16);
-    m_saveAccountCheck->Move(m_x + 232, m_y + 33);
-    m_saveAccountCheck->SetCheck(rememberUserId ? 1 : 0);
-    AddChild(m_saveAccountCheck);
+    if (!IsQtUiRuntimeEnabled()) {
+        m_saveAccountCheck = new UICheckBox();
+        m_saveAccountCheck->SetBitmap(
+            ResolveUiAssetPath("chk_saveon.bmp").c_str(),
+            ResolveUiAssetPath("chk_saveoff.bmp").c_str());
+        m_saveAccountCheck->Create(m_saveAccountCheck->m_w > 0 ? m_saveAccountCheck->m_w : 16,
+            m_saveAccountCheck->m_h > 0 ? m_saveAccountCheck->m_h : 16);
+        m_saveAccountCheck->Move(m_x + 232, m_y + 33);
+        m_saveAccountCheck->SetCheck(rememberUserId ? 1 : 0);
+        AddChild(m_saveAccountCheck);
+    }
 
     const bool focusPassword = (m_login && m_login->GetText() && m_login->GetText()[0] != '\0');
-    if (m_login) {
-        m_login->m_hasFocus = !focusPassword;
-        m_login->Invalidate();
-    }
-    if (m_password) {
-        m_password->m_hasFocus = focusPassword;
-        m_password->Invalidate();
-    }
-    g_windowMgr.m_editWindow = focusPassword ? static_cast<UIWindow*>(m_password) : static_cast<UIWindow*>(m_login);
+    SetLoginFieldFocus(m_login, m_password, focusPassword);
 }
 
 void UILoginWnd::ClearUiAssets()
 {
-    if (m_wallpaperBmp) {
-        DeleteObject(m_wallpaperBmp);
-        m_wallpaperBmp = nullptr;
-    }
-    for (HBITMAP& bmp : m_uiAssets) {
-        if (bmp) {
-            DeleteObject(bmp);
-            bmp = nullptr;
-        }
+    m_wallpaperBmp.Clear();
+    for (shopui::BitmapPixels& bmp : m_uiAssets) {
+        bmp.Clear();
     }
     for (std::string& path : m_uiAssetPaths) {
         path.clear();
@@ -560,45 +841,12 @@ void UILoginWnd::SetWallpaperName(const std::string& wallpaperName)
 
 void UILoginWnd::ReleaseComposeSurface()
 {
-    if (m_composeBitmap) {
-        DeleteObject(m_composeBitmap);
-        m_composeBitmap = nullptr;
-    }
-    if (m_composeDC) {
-        DeleteDC(m_composeDC);
-        m_composeDC = nullptr;
-    }
-    m_composeWidth = 0;
-    m_composeHeight = 0;
+    m_composeSurface.Release();
 }
 
-bool UILoginWnd::EnsureComposeSurface(HDC referenceDC, int width, int height)
+bool UILoginWnd::EnsureComposeSurface(int width, int height)
 {
-    if (!referenceDC || width <= 0 || height <= 0) {
-        return false;
-    }
-
-    if (m_composeDC && m_composeBitmap && m_composeWidth == width && m_composeHeight == height) {
-        return true;
-    }
-
-    ReleaseComposeSurface();
-
-    m_composeDC = CreateCompatibleDC(referenceDC);
-    if (!m_composeDC) {
-        return false;
-    }
-
-    m_composeBitmap = CreateCompatibleBitmap(referenceDC, width, height);
-    if (!m_composeBitmap) {
-        ReleaseComposeSurface();
-        return false;
-    }
-
-    SelectObject(m_composeDC, m_composeBitmap);
-    m_composeWidth = width;
-    m_composeHeight = height;
-    return true;
+    return m_composeSurface.EnsureSize(width, height);
 }
 
 void UILoginWnd::EnsureResourceCache()
@@ -610,8 +858,8 @@ void UILoginWnd::EnsureResourceCache()
 
     const std::vector<std::string> candidates = BuildWallpaperCandidates(m_requestedWallpaper);
     for (const std::string& candidate : candidates) {
-        HBITMAP bmp = LoadBitmapFromGameData(candidate.c_str());
-        if (bmp) {
+        shopui::BitmapPixels bmp = LoadBitmapPixelsFromGameData(candidate.c_str());
+        if (bmp.IsValid()) {
             m_wallpaperBmp = bmp;
             m_wallpaperPath = candidate;
             break;
@@ -626,11 +874,18 @@ void UILoginWnd::EnsureResourceCache()
         "win_msgbox.bmp",
         nullptr
     };
-    for (int i = 0; panelNames[i] && !m_uiAssets[UiPanel]; ++i) {
-        m_uiAssets[UiPanel] = LoadFirstBitmapFromCandidates(
+    for (int i = 0; panelNames[i] && !m_uiAssets[UiPanel].IsValid(); ++i) {
+        m_uiAssets[UiPanel] = LoadFirstBitmapPixelsFromCandidates(
             BuildUiAssetCandidates(panelNames[i]), &m_uiAssetPaths[UiPanel]);
     }
-    if (m_uiAssets[UiPanel]) {
+    if (!m_uiAssets[UiPanel].IsValid()
+        && m_wallpaperBmp.IsValid()
+        && IsClassicLoginPanelAssetName(m_wallpaperPath)) {
+        m_uiAssets[UiPanel] = m_wallpaperBmp;
+        m_uiAssetPaths[UiPanel] = m_wallpaperPath;
+        DbgLog("[LoginUIAsset] PANEL REUSE WALLPAPER: %s\n", m_uiAssetPaths[UiPanel].c_str());
+    }
+    if (m_uiAssets[UiPanel].IsValid()) {
         DbgLog("[LoginUIAsset] PANEL HIT: %s\n", m_uiAssetPaths[UiPanel].c_str());
     } else {
         DbgLog("[LoginUIAsset] PANEL MISS\n");
@@ -643,11 +898,11 @@ void UILoginWnd::EnsureResourceCache()
         "ad_title.jpg",
         nullptr
     };
-    for (int i = 0; logoNames[i] && !m_uiAssets[UiLogo]; ++i) {
-        m_uiAssets[UiLogo] = LoadFirstBitmapFromCandidates(
+    for (int i = 0; logoNames[i] && !m_uiAssets[UiLogo].IsValid(); ++i) {
+        m_uiAssets[UiLogo] = LoadFirstBitmapPixelsFromCandidates(
             BuildUiAssetCandidates(logoNames[i]), &m_uiAssetPaths[UiLogo]);
     }
-    if (m_uiAssets[UiLogo]) {
+    if (m_uiAssets[UiLogo].IsValid()) {
         DbgLog("[LoginUIAsset] LOGO HIT: %s\n", m_uiAssetPaths[UiLogo].c_str());
     } else {
         DbgLog("[LoginUIAsset] LOGO MISS\n");
@@ -661,11 +916,11 @@ void UILoginWnd::EnsureResourceCache()
         "btn_ok.bmp",
         nullptr
     };
-    for (int i = 0; buttonNames[i] && !m_uiAssets[UiButton]; ++i) {
-        m_uiAssets[UiButton] = LoadFirstBitmapFromCandidates(
+    for (int i = 0; buttonNames[i] && !m_uiAssets[UiButton].IsValid(); ++i) {
+        m_uiAssets[UiButton] = LoadFirstBitmapPixelsFromCandidates(
             BuildUiAssetCandidates(buttonNames[i]), &m_uiAssetPaths[UiButton]);
     }
-    if (m_uiAssets[UiButton]) {
+    if (m_uiAssets[UiButton].IsValid()) {
         DbgLog("[LoginUIAsset] BUTTON HIT: %s\n", m_uiAssetPaths[UiButton].c_str());
     } else {
         DbgLog("[LoginUIAsset] BUTTON MISS\n");
@@ -676,11 +931,11 @@ void UILoginWnd::EnsureResourceCache()
         "btn_edit_a.bmp",
         nullptr
     };
-    for (int i = 0; fieldNames[i] && !m_uiAssets[UiField]; ++i) {
-        m_uiAssets[UiField] = LoadFirstBitmapFromCandidates(
+    for (int i = 0; fieldNames[i] && !m_uiAssets[UiField].IsValid(); ++i) {
+        m_uiAssets[UiField] = LoadFirstBitmapPixelsFromCandidates(
             BuildUiAssetCandidates(fieldNames[i]), &m_uiAssetPaths[UiField]);
     }
-    if (m_uiAssets[UiField]) {
+    if (m_uiAssets[UiField].IsValid()) {
         DbgLog("[LoginUIAsset] FIELD HIT: %s\n", m_uiAssetPaths[UiField].c_str());
     } else {
         DbgLog("[LoginUIAsset] FIELD MISS\n");
@@ -695,21 +950,12 @@ void UILoginWnd::OnDraw()
 
     EnsureResourceCache();
 
-    const bool useShared = (UIWindow::GetSharedDrawDC() != nullptr);
-    HDC targetDC = useShared ? UIWindow::GetSharedDrawDC() : GetDC(g_hMainWnd);
-    if (!targetDC) {
-        return;
-    }
-
     RECT rcClient{};
     GetClientRect(g_hMainWnd, &rcClient);
 
     const int clientW = rcClient.right - rcClient.left;
     const int clientH = rcClient.bottom - rcClient.top;
     if (clientW <= 0 || clientH <= 0) {
-        if (!useShared) {
-            ReleaseDC(g_hMainWnd, targetDC);
-        }
         return;
     }
 
@@ -717,24 +963,32 @@ void UILoginWnd::OnDraw()
         OnCreate(clientW, clientH);
     }
 
-    HDC drawDC = targetDC;
-    const bool useCompose = EnsureComposeSurface(targetDC, clientW, clientH);
+    if (IsQtUiRuntimeEnabled()) {
+        return;
+    }
+
+    const bool useCompose = EnsureComposeSurface(clientW, clientH);
+    HDC targetDC = nullptr;
+    HDC drawDC = nullptr;
     if (useCompose) {
-        drawDC = m_composeDC;
-    }
-
-    if (m_wallpaperBmp) {
-        DrawBitmapStretched(drawDC, m_wallpaperBmp, rcClient);
-    }
-
-    BITMAP bm{};
-    RECT rcPanel = { m_x, m_y, m_x + m_w, m_y + m_h };
-    if (m_uiAssets[UiPanel]) {
-        if (GetObjectA(m_uiAssets[UiPanel], sizeof(bm), &bm) && bm.bmWidth > 0 && bm.bmHeight > 0) {
-            rcPanel.right = rcPanel.left + bm.bmWidth;
-            rcPanel.bottom = rcPanel.top + bm.bmHeight;
+        drawDC = m_composeSurface.GetDC();
+    } else {
+        targetDC = AcquireDrawTarget();
+        if (!targetDC) {
+            return;
         }
-        DrawBitmapStretched(drawDC, m_uiAssets[UiPanel], rcPanel);
+        drawDC = targetDC;
+    }
+
+    if (m_wallpaperBmp.IsValid()) {
+        DrawBitmapPixelsStretched(drawDC, m_wallpaperBmp, rcClient);
+    }
+
+    RECT rcPanel = { m_x, m_y, m_x + m_w, m_y + m_h };
+    if (m_uiAssets[UiPanel].IsValid()) {
+        rcPanel.right = rcPanel.left + m_uiAssets[UiPanel].width;
+        rcPanel.bottom = rcPanel.top + m_uiAssets[UiPanel].height;
+        DrawBitmapPixelsStretched(drawDC, m_uiAssets[UiPanel], rcPanel);
     } else {
         HBRUSH panelBg = CreateSolidBrush(RGB(235, 235, 228));
         FillRect(drawDC, &rcPanel, panelBg);
@@ -742,17 +996,14 @@ void UILoginWnd::OnDraw()
         FrameRect(drawDC, &rcPanel, (HBRUSH)GetStockObject(BLACK_BRUSH));
     }
 
-    HDC prevSharedDC = UIWindow::GetSharedDrawDC();
-    UIWindow::SetSharedDrawDC(drawDC);
-    DrawChildren();
-    UIWindow::SetSharedDrawDC(prevSharedDC);
+    DrawChildrenToHdc(drawDC);
 
     if (useCompose) {
-        BitBlt(targetDC, 0, 0, clientW, clientH, drawDC, 0, 0, SRCCOPY);
-    }
-
-    if (!useShared) {
-        ReleaseDC(g_hMainWnd, targetDC);
+        if (!BlitArgbBitsToDrawTarget(m_composeSurface.GetBits(), clientW, clientH)) {
+            return;
+        }
+    } else {
+        ReleaseDrawTarget(targetDC);
     }
 }
 
@@ -767,7 +1018,7 @@ msgresult_t UILoginWnd::SendMsg(UIWindow* sender, int msg, msgparam_t wparam, ms
             PlayUiButtonSound();
             StoreRememberedUserId(
                 m_login ? m_login->GetText() : "",
-                m_saveAccountCheck && m_saveAccountCheck->m_isChecked != 0);
+                IsSaveAccountChecked());
             g_modeMgr.SendMsg(CLoginMode::LoginMsg_SetPassword,
                 reinterpret_cast<msgparam_t>(m_password ? m_password->GetText() : ""), 0, 0);
             g_modeMgr.SendMsg(CLoginMode::LoginMsg_SetUserId,
@@ -796,11 +1047,12 @@ msgresult_t UILoginWnd::SendMsg(UIWindow* sender, int msg, msgparam_t wparam, ms
 
         // Check if it's from the save-account checkbox (its m_id may not be a well-known value)
         if (sender == m_saveAccountCheck) {
+            m_saveAccountChecked = (m_saveAccountCheck && m_saveAccountCheck->m_isChecked != 0);
             StoreRememberedUserId(
                 m_login ? m_login->GetText() : "",
-                m_saveAccountCheck->m_isChecked != 0);
+                m_saveAccountChecked);
             return g_modeMgr.SendMsg(CLoginMode::LoginMsg_SaveAccount,
-                m_saveAccountCheck->m_isChecked, 0, m_saveAccountCheck->m_isChecked);
+                m_saveAccountChecked ? 1 : 0, 0, m_saveAccountChecked ? 1 : 0);
         }
     }
 
@@ -811,7 +1063,7 @@ msgresult_t UILoginWnd::SendMsg(UIWindow* sender, int msg, msgparam_t wparam, ms
         case 120:
             StoreRememberedUserId(
                 m_login ? m_login->GetText() : "",
-                m_saveAccountCheck && m_saveAccountCheck->m_isChecked != 0);
+                IsSaveAccountChecked());
             g_modeMgr.SendMsg(CLoginMode::LoginMsg_SetPassword,
                 reinterpret_cast<msgparam_t>(m_password ? m_password->GetText() : ""), 0, 0);
             g_modeMgr.SendMsg(CLoginMode::LoginMsg_SetUserId,
@@ -829,11 +1081,12 @@ msgresult_t UILoginWnd::SendMsg(UIWindow* sender, int msg, msgparam_t wparam, ms
             break;
         }
         if (sender == m_saveAccountCheck) {
+            m_saveAccountChecked = (m_saveAccountCheck && m_saveAccountCheck->m_isChecked != 0);
             StoreRememberedUserId(
                 m_login ? m_login->GetText() : "",
-                m_saveAccountCheck->m_isChecked != 0);
+                m_saveAccountChecked);
             return g_modeMgr.SendMsg(CLoginMode::LoginMsg_SaveAccount,
-                m_saveAccountCheck->m_isChecked, extra, m_saveAccountCheck->m_isChecked);
+                m_saveAccountChecked ? 1 : 0, extra, m_saveAccountChecked ? 1 : 0);
         }
     }
 

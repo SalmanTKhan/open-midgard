@@ -3,15 +3,24 @@
 #include "core/File.h"
 #include "render/DC.h"
 #include "render3d/Device.h"
+#include "res/Bitmap.h"
 #include "res/PaletteRes.h"
 #include "session/Session.h"
 #include "gamemode/LoginMode.h"
 #include "gamemode/Mode.h"
+#include "DebugLog.h"
 #include "main/WinMain.h"
+#include "qtui/QtUiRuntime.h"
 #include "ui/UIWindowMgr.h"
 
-#include <gdiplus.h>
 #include <windows.h>
+
+#if RO_ENABLE_QT6_UI
+#include <QFont>
+#include <QImage>
+#include <QPainter>
+#include <QString>
+#endif
 
 #include <algorithm>
 #include <array>
@@ -20,87 +29,222 @@
 #include <cstring>
 #include <vector>
 
-#pragma comment(lib, "gdiplus.lib")
-
 namespace {
 
-ULONG_PTR EnsureGdiplusStarted()
+constexpr int kMakeCharNameLeft = 62;
+constexpr int kMakeCharNameTop = 244;
+constexpr int kMakeCharNameWidth = 100;
+constexpr int kMakeCharNameHeight = 18;
+constexpr int kMakeCharOkX = 483;
+constexpr int kMakeCharOkY = 318;
+constexpr int kMakeCharOkW = 44;
+constexpr int kMakeCharOkH = 22;
+constexpr int kMakeCharCancelX = 530;
+constexpr int kMakeCharCancelY = 318;
+constexpr int kMakeCharCancelW = 44;
+constexpr int kMakeCharCancelH = 22;
+constexpr int kMakeCharStatIds[6] = { 139, 142, 140, 144, 141, 143 };
+constexpr int kMakeCharStatX[6] = { 270, 270, 190, 349, 349, 190 };
+constexpr int kMakeCharStatY[6] = { 50, 244, 104, 190, 104, 190 };
+constexpr int kMakeCharHairIds[3] = { 161, 160, 213 };
+constexpr int kMakeCharHairX[3] = { 48, 130, 89 };
+constexpr int kMakeCharHairY[3] = { 135, 135, 101 };
+constexpr int kMakeCharSmallButtonW = 16;
+constexpr int kMakeCharSmallButtonH = 14;
+constexpr const char* kMakeCharStatBmp[6] = {
+    "arw-str0.bmp",
+    "arw-int0.bmp",
+    "arw-agi0.bmp",
+    "arw-luk0.bmp",
+    "arw-vit0.bmp",
+    "arw-dex0.bmp"
+};
+constexpr const char* kMakeCharHairBmp[3] = {
+    "scroll1left.bmp",
+    "scroll1right.bmp",
+    "scroll0up.bmp"
+};
+constexpr const char* kMakeCharStatBmpPressed[6] = {
+    "arw-str1.bmp",
+    "arw-int1.bmp",
+    "arw-agi1.bmp",
+    "arw-luk1.bmp",
+    "arw-vit1.bmp",
+    "arw-dex1.bmp"
+};
+
+std::vector<std::string> BuildUiAssetCandidates(const char* fileName);
+shopui::BitmapPixels LoadFirstBitmapPixelsFromCandidates(const std::vector<std::string>& candidates, std::string* outPath);
+std::string ResolveUiAssetPath(const char* fileName);
+
+shopui::BitmapPixels LoadBitmapPixelsFromGameData(const char* path)
 {
-    static ULONG_PTR s_token = 0;
-    static bool s_started = false;
-    if (!s_started) {
-        Gdiplus::GdiplusStartupInput startupInput;
-        if (Gdiplus::GdiplusStartup(&s_token, &startupInput, nullptr) == Gdiplus::Ok) {
-            s_started = true;
-        }
-    }
-    return s_token;
+    return shopui::LoadBitmapPixelsFromGameData(path ? path : "", true);
 }
 
-HBITMAP LoadBitmapFromGameData(const char* path)
+bool LoadMakeCharQtButtonBitmap(int index, bool pressed, shopui::BitmapPixels* out)
 {
-    if (!path || !*path || !EnsureGdiplusStarted()) {
-        return nullptr;
+    if (!out) {
+        return false;
     }
 
-    int size = 0;
-    unsigned char* bytes = g_fileMgr.GetData(path, &size);
-    if (!bytes || size <= 0) {
-        delete[] bytes;
-        return nullptr;
+    const char* assetName = nullptr;
+    if (index >= 0 && index < 6) {
+        assetName = pressed ? kMakeCharStatBmpPressed[index] : kMakeCharStatBmp[index];
+    } else if (index >= 6 && index < 9) {
+        assetName = kMakeCharHairBmp[index - 6];
+    } else if (index == 9) {
+        assetName = pressed ? "btn_ok_a.bmp" : "btn_ok.bmp";
+    } else if (index == 10) {
+        assetName = pressed ? "btn_cancel_a.bmp" : "btn_cancel.bmp";
     }
 
-    HBITMAP outBmp = nullptr;
-    HGLOBAL mem = GlobalAlloc(GMEM_MOVEABLE, static_cast<SIZE_T>(size));
-    if (mem) {
-        void* dst = GlobalLock(mem);
-        if (dst) {
-            std::memcpy(dst, bytes, static_cast<size_t>(size));
-            GlobalUnlock(mem);
+    if (!assetName) {
+        return false;
+    }
 
-            IStream* stream = nullptr;
-            if (CreateStreamOnHGlobal(mem, TRUE, &stream) == S_OK) {
-                auto* bmp = Gdiplus::Bitmap::FromStream(stream, FALSE);
-                if (bmp && bmp->GetLastStatus() == Gdiplus::Ok) {
-                    bmp->GetHBITMAP(RGB(0, 0, 0), &outBmp);
+    static bool loggedMiss[11][2] = {};
+    static bool loggedHit[11][2] = {};
+    const int pressedIndex = pressed ? 1 : 0;
+
+    const std::string resolvedPath = ResolveUiAssetPath(assetName);
+    if (resolvedPath.empty()) {
+        if (!loggedMiss[index][pressedIndex]) {
+            DbgLog("[MakeCharQt] BUTTON MISS index=%d pressed=%d asset=%s\n", index, pressed ? 1 : 0, assetName);
+            loggedMiss[index][pressedIndex] = true;
+        }
+        return false;
+    }
+
+    *out = LoadBitmapPixelsFromGameData(resolvedPath.c_str());
+    if (!out->IsValid()) {
+        if (!loggedMiss[index][pressedIndex]) {
+            DbgLog("[MakeCharQt] BUTTON LOAD FAIL index=%d pressed=%d asset=%s path=%s\n",
+                index,
+                pressed ? 1 : 0,
+                assetName,
+                resolvedPath.c_str());
+            loggedMiss[index][pressedIndex] = true;
+        }
+        return false;
+    }
+
+    // These legacy UI button BMPs use transparency as a cutout, not soft alpha.
+    // Force all non-transparent pixels to fully opaque so the Qt image path
+    // matches the original UI button presentation.
+    for (unsigned int& pixel : out->pixels) {
+        if ((pixel >> 24) != 0u) {
+            pixel = 0xFF000000u | (pixel & 0x00FFFFFFu);
+        }
+    }
+
+    if (!loggedHit[index][pressedIndex]) {
+        int minX = out->width;
+        int minY = out->height;
+        int maxX = -1;
+        int maxY = -1;
+        unsigned int opaqueCount = 0;
+        for (int y = 0; y < out->height; ++y) {
+            for (int x = 0; x < out->width; ++x) {
+                const unsigned int pixel = out->pixels[static_cast<size_t>(y) * static_cast<size_t>(out->width) + static_cast<size_t>(x)];
+                if ((pixel >> 24) != 0u) {
+                    ++opaqueCount;
+                    minX = (std::min)(minX, x);
+                    minY = (std::min)(minY, y);
+                    maxX = (std::max)(maxX, x);
+                    maxY = (std::max)(maxY, y);
                 }
-                delete bmp;
-                stream->Release();
-            } else {
-                GlobalFree(mem);
             }
-        } else {
-            GlobalFree(mem);
+        }
+        DbgLog("[MakeCharQt] BUTTON HIT index=%d pressed=%d asset=%s path=%s size=%dx%d\n",
+            index,
+            pressed ? 1 : 0,
+            assetName,
+            resolvedPath.c_str(),
+            out->width,
+            out->height);
+        DbgLog("[MakeCharQt] BUTTON ALPHA index=%d pressed=%d opaque=%u bounds=(%d,%d)-(%d,%d)\n",
+            index,
+            pressed ? 1 : 0,
+            opaqueCount,
+            minX,
+            minY,
+            maxX,
+            maxY);
+        loggedHit[index][pressedIndex] = true;
+    }
+    return true;
+}
+
+void DrawBitmapPixelsStretched(HDC target, const shopui::BitmapPixels& bmp, const RECT& dst)
+{
+    if (!target || !bmp.IsValid() || dst.right <= dst.left || dst.bottom <= dst.top) {
+        return;
+    }
+
+    BITMAPINFO bmi{};
+    bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    bmi.bmiHeader.biWidth = bmp.width;
+    bmi.bmiHeader.biHeight = -bmp.height;
+    bmi.bmiHeader.biPlanes = 1;
+    bmi.bmiHeader.biBitCount = 32;
+    bmi.bmiHeader.biCompression = BI_RGB;
+
+    const int oldStretchMode = SetStretchBltMode(target, HALFTONE);
+    StretchDIBits(target, dst.left, dst.top, dst.right - dst.left, dst.bottom - dst.top,
+        0, 0, bmp.width, bmp.height, bmp.pixels.data(), &bmi, DIB_RGB_COLORS, SRCCOPY);
+    SetStretchBltMode(target, oldStretchMode);
+}
+
+#if RO_ENABLE_QT6_UI
+QFont BuildMakeCharFontFromHdc(HDC hdc)
+{
+    LOGFONTA logFont{};
+    if (hdc) {
+        if (HGDIOBJ fontObject = GetCurrentObject(hdc, OBJ_FONT)) {
+            GetObjectA(fontObject, sizeof(logFont), &logFont);
         }
     }
 
-    delete[] bytes;
-    return outBmp;
+    const QString family = logFont.lfFaceName[0] != '\0'
+        ? QString::fromLocal8Bit(logFont.lfFaceName)
+        : QStringLiteral("Tahoma");
+    QFont font(family);
+    font.setPixelSize(logFont.lfHeight != 0 ? (std::max)(1, static_cast<int>(std::abs(logFont.lfHeight))) : 11);
+    font.setBold(logFont.lfWeight >= FW_BOLD);
+    font.setStyleStrategy(QFont::NoAntialias);
+    return font;
 }
 
-void DrawBitmapStretched(HDC target, HBITMAP bmp, const RECT& dst)
+void DrawMakeCharText(HDC hdc, const RECT& rect, const char* text, COLORREF color, Qt::Alignment alignment)
 {
-    if (!target || !bmp) {
+    if (!hdc || !text || rect.right <= rect.left || rect.bottom <= rect.top) {
         return;
     }
 
-    BITMAP bm{};
-    if (!GetObjectA(bmp, sizeof(bm), &bm) || bm.bmWidth <= 0 || bm.bmHeight <= 0) {
+    const QString label = QString::fromLocal8Bit(text);
+    if (label.isEmpty()) {
         return;
     }
 
-    HDC srcDC = CreateCompatibleDC(target);
-    if (!srcDC) {
+    const int width = rect.right - rect.left;
+    const int height = rect.bottom - rect.top;
+    std::vector<unsigned int> pixels(static_cast<size_t>(width) * static_cast<size_t>(height), 0u);
+    QImage image(reinterpret_cast<uchar*>(pixels.data()), width, height, width * static_cast<int>(sizeof(unsigned int)), QImage::Format_ARGB32);
+    if (image.isNull()) {
         return;
     }
 
-    HGDIOBJ old = SelectObject(srcDC, bmp);
-    SetStretchBltMode(target, HALFTONE);
-    StretchBlt(target, dst.left, dst.top, dst.right - dst.left, dst.bottom - dst.top,
-        srcDC, 0, 0, bm.bmWidth, bm.bmHeight, SRCCOPY);
-    SelectObject(srcDC, old);
-    DeleteDC(srcDC);
+    QPainter painter(&image);
+    painter.setRenderHint(QPainter::Antialiasing, false);
+    painter.setRenderHint(QPainter::TextAntialiasing, false);
+    painter.setFont(BuildMakeCharFontFromHdc(hdc));
+    painter.setPen(QColor(GetRValue(color), GetGValue(color), GetBValue(color)));
+    painter.drawText(QRect(0, 0, width, height), alignment | Qt::TextSingleLine, label);
+    AlphaBlendArgbToHdc(hdc, rect.left, rect.top, width, height, pixels.data(), width, height);
 }
+
+#endif
 
 std::string ToLowerAscii(std::string value)
 {
@@ -210,18 +354,18 @@ std::vector<std::string> BuildUiAssetCandidates(const char* fileName)
     return out;
 }
 
-HBITMAP LoadFirstBitmapFromCandidates(const std::vector<std::string>& candidates, std::string* outPath)
+shopui::BitmapPixels LoadFirstBitmapPixelsFromCandidates(const std::vector<std::string>& candidates, std::string* outPath)
 {
     for (const std::string& candidate : candidates) {
-        HBITMAP bmp = LoadBitmapFromGameData(candidate.c_str());
-        if (bmp) {
+        shopui::BitmapPixels bmp = LoadBitmapPixelsFromGameData(candidate.c_str());
+        if (bmp.IsValid()) {
             if (outPath) {
                 *outPath = candidate;
             }
             return bmp;
         }
     }
-    return nullptr;
+    return {};
 }
 
 std::string ResolveUiAssetPath(const char* fileName)
@@ -329,12 +473,13 @@ bool DrawPreviewLayer(HDC hdc, const UIMakeCharWnd::PreviewState& preview, int l
 }
 
 UIMakeCharWnd::UIMakeCharWnd()
-    : m_controlsCreated(false), m_assetsProbed(false), m_backgroundBmp(nullptr),
-            m_composeDC(nullptr), m_composeBitmap(nullptr), m_composeWidth(0), m_composeHeight(0),
+    : m_controlsCreated(false), m_assetsProbed(false), m_backgroundBmp(),
+      m_composeSurface(),
       m_nameEditCtrl(nullptr), m_okButton(nullptr), m_cancelButton(nullptr),
       m_stats{5, 5, 5, 5, 5, 5}, m_hairIdx(1), m_hairColor(0),
       m_statBtns{nullptr, nullptr, nullptr, nullptr, nullptr, nullptr},
-      m_hairBtns{nullptr, nullptr, nullptr}, m_lastPreviewAdvanceTick(0)
+      m_hairBtns{nullptr, nullptr, nullptr}, m_lastPreviewAdvanceTick(0),
+      m_pressedQtButtonIndex(-1)
 {
     m_defPushId = 118;
     m_defCancelPushId = 119;
@@ -342,60 +487,183 @@ UIMakeCharWnd::UIMakeCharWnd()
 
 UIMakeCharWnd::~UIMakeCharWnd()
 {
+    if (m_nameEditCtrl && m_nameEditCtrl->m_parent != this) {
+        delete m_nameEditCtrl;
+        m_nameEditCtrl = nullptr;
+    }
     ReleaseComposeSurface();
     ClearAssets();
 }
 
+bool UIMakeCharWnd::HandleQtMouseDown(int x, int y)
+{
+    if (!g_hMainWnd || m_show == 0) {
+        return false;
+    }
+
+    RECT rcClient{};
+    GetClientRect(g_hMainWnd, &rcClient);
+    const int clientW = rcClient.right - rcClient.left;
+    const int clientH = rcClient.bottom - rcClient.top;
+    if (!m_controlsCreated && clientW > 0 && clientH > 0) {
+        OnCreate(clientW, clientH);
+    }
+
+    if (x < m_x || y < m_y || x >= m_x + m_w || y >= m_y + m_h) {
+        SetQtPressedButtonIndex(-1);
+        return false;
+    }
+
+    int buttonIndex = -1;
+    HitQtButton(x, y, &buttonIndex);
+    SetQtPressedButtonIndex(buttonIndex);
+
+    if (m_nameEditCtrl
+        && x >= m_x + kMakeCharNameLeft && x < m_x + kMakeCharNameLeft + kMakeCharNameWidth
+        && y >= m_y + kMakeCharNameTop && y < m_y + kMakeCharNameTop + kMakeCharNameHeight) {
+        m_nameEditCtrl->m_hasFocus = true;
+        m_nameEditCtrl->Invalidate();
+        g_windowMgr.m_editWindow = m_nameEditCtrl;
+    }
+
+    return true;
+}
+
+bool UIMakeCharWnd::HandleQtMouseUp(int x, int y)
+{
+    const int pressedButtonIndex = m_pressedQtButtonIndex;
+    int releasedButtonIndex = -1;
+    const bool insidePanel = x >= m_x && y >= m_y && x < m_x + m_w && y < m_y + m_h;
+    if (insidePanel) {
+        HitQtButton(x, y, &releasedButtonIndex);
+    }
+
+    SetQtPressedButtonIndex(-1);
+
+    if (pressedButtonIndex >= 0 && releasedButtonIndex == pressedButtonIndex) {
+        QtButtonDisplay buttonDisplay{};
+        if (GetQtButtonDisplayForQt(pressedButtonIndex, &buttonDisplay)) {
+            SendMsg(nullptr, 6, buttonDisplay.id, 0, 0);
+            return true;
+        }
+    }
+
+    return insidePanel || pressedButtonIndex >= 0;
+}
+
+bool UIMakeCharWnd::GetMakeCharDisplay(MakeCharDisplay* out) const
+{
+    if (!out) {
+        return false;
+    }
+
+    MakeCharDisplay display{};
+    display.name = m_nameEditCtrl && m_nameEditCtrl->GetText() ? m_nameEditCtrl->GetText() : "";
+    display.nameFocused = m_nameEditCtrl && m_nameEditCtrl->m_hasFocus;
+    for (int i = 0; i < 6; ++i) {
+        display.stats[i] = m_stats[i];
+    }
+    display.hairIndex = m_hairIdx;
+    display.hairColor = m_hairColor;
+    *out = display;
+    return true;
+}
+
+int UIMakeCharWnd::GetQtButtonCount() const
+{
+    return 11;
+}
+
+bool UIMakeCharWnd::GetQtButtonDisplayForQt(int index, QtButtonDisplay* out) const
+{
+    if (!out || index < 0 || index >= GetQtButtonCount()) {
+        return false;
+    }
+
+    const unsigned int* pixels = nullptr;
+    int bitmapWidth = 0;
+    int bitmapHeight = 0;
+    const bool hasBitmap = const_cast<UIMakeCharWnd*>(this)->GetQtButtonBitmap(index, &pixels, &bitmapWidth, &bitmapHeight);
+    (void)pixels;
+    out->pressed = (index == m_pressedQtButtonIndex);
+
+    if (index < 6) {
+        out->id = kMakeCharStatIds[index];
+        out->x = m_x + kMakeCharStatX[index];
+        out->y = m_y + kMakeCharStatY[index];
+        out->width = hasBitmap ? bitmapWidth : kMakeCharSmallButtonW;
+        out->height = hasBitmap ? bitmapHeight : kMakeCharSmallButtonH;
+        out->label = "+";
+        return true;
+    }
+
+    if (index < 9) {
+        const int hairIndex = index - 6;
+        out->id = kMakeCharHairIds[hairIndex];
+        out->x = m_x + kMakeCharHairX[hairIndex];
+        out->y = m_y + kMakeCharHairY[hairIndex];
+        out->width = hasBitmap ? bitmapWidth : kMakeCharSmallButtonW;
+        out->height = hasBitmap ? bitmapHeight : kMakeCharSmallButtonH;
+        out->label = hairIndex == 0 ? "<" : (hairIndex == 1 ? ">" : "^");
+        return true;
+    }
+
+    if (index == 9) {
+        out->id = 118;
+        out->x = m_x + kMakeCharOkX;
+        out->y = m_y + kMakeCharOkY;
+        out->width = hasBitmap ? bitmapWidth : kMakeCharOkW;
+        out->height = hasBitmap ? bitmapHeight : kMakeCharOkH;
+        out->label = "OK";
+        return true;
+    }
+
+    out->id = 119;
+    out->x = m_x + kMakeCharCancelX;
+    out->y = m_y + kMakeCharCancelY;
+    out->width = hasBitmap ? bitmapWidth : kMakeCharCancelW;
+    out->height = hasBitmap ? bitmapHeight : kMakeCharCancelH;
+    out->label = "Cancel";
+    return true;
+}
+
+int UIMakeCharWnd::GetQtStatFieldCount() const
+{
+    return 6;
+}
+
+bool UIMakeCharWnd::GetQtStatFieldDisplayForQt(int index, QtStatFieldDisplay* out) const
+{
+    if (!out || index < 0 || index >= GetQtStatFieldCount()) {
+        return false;
+    }
+
+    static const int kValueY[6] = { 40, 56, 72, 88, 104, 120 };
+    static const char* kLabels[6] = { "STR", "AGI", "VIT", "INT", "DEX", "LUK" };
+
+    out->x = m_x + 456;
+    out->y = m_y + kValueY[index];
+    out->width = 58;
+    out->height = 13;
+    out->label = kLabels[index];
+    out->value = m_stats[index];
+    return true;
+}
+
 void UIMakeCharWnd::ClearAssets()
 {
-    if (m_backgroundBmp) {
-        DeleteObject(m_backgroundBmp);
-        m_backgroundBmp = nullptr;
-    }
+    m_backgroundBmp.Clear();
     m_backgroundPath.clear();
 }
 
 void UIMakeCharWnd::ReleaseComposeSurface()
 {
-    if (m_composeBitmap) {
-        DeleteObject(m_composeBitmap);
-        m_composeBitmap = nullptr;
-    }
-    if (m_composeDC) {
-        DeleteDC(m_composeDC);
-        m_composeDC = nullptr;
-    }
-    m_composeWidth = 0;
-    m_composeHeight = 0;
+    m_composeSurface.Release();
 }
 
-bool UIMakeCharWnd::EnsureComposeSurface(HDC referenceDC, int width, int height)
+bool UIMakeCharWnd::EnsureComposeSurface(int width, int height)
 {
-    if (!referenceDC || width <= 0 || height <= 0) {
-        return false;
-    }
-
-    if (m_composeDC && m_composeBitmap && m_composeWidth == width && m_composeHeight == height) {
-        return true;
-    }
-
-    ReleaseComposeSurface();
-
-    m_composeDC = CreateCompatibleDC(referenceDC);
-    if (!m_composeDC) {
-        return false;
-    }
-
-    m_composeBitmap = CreateCompatibleBitmap(referenceDC, width, height);
-    if (!m_composeBitmap) {
-        ReleaseComposeSurface();
-        return false;
-    }
-
-    SelectObject(m_composeDC, m_composeBitmap);
-    m_composeWidth = width;
-    m_composeHeight = height;
-    return true;
+    return m_composeSurface.EnsureSize(width, height);
 }
 
 void UIMakeCharWnd::EnsureResourceCache()
@@ -413,8 +681,8 @@ void UIMakeCharWnd::EnsureResourceCache()
         nullptr
     };
 
-    for (int i = 0; panelNames[i] && !m_backgroundBmp; ++i) {
-        m_backgroundBmp = LoadFirstBitmapFromCandidates(BuildUiAssetCandidates(panelNames[i]), &m_backgroundPath);
+    for (int i = 0; panelNames[i] && !m_backgroundBmp.IsValid(); ++i) {
+        m_backgroundBmp = LoadFirstBitmapPixelsFromCandidates(BuildUiAssetCandidates(panelNames[i]), &m_backgroundPath);
     }
 }
 
@@ -460,14 +728,6 @@ void UIMakeCharWnd::EnsureButtons()
     static const int kStatY[6]   = {  50, 244, 104, 190, 104, 190 };
     // Ref arw-xxx bitmaps: normal state = arw-xxx0.bmp, pressed = arw-xxx1.bmp.
     // Each button is labeled with the stat it FEEDS INTO.
-    static const char* kStatBmp[6] = {
-        "arw-str0.bmp",  // 139: Int→Str
-        "arw-int0.bmp",  // 142: Str→Int
-        "arw-agi0.bmp",  // 140: Luk→Agi
-        "arw-luk0.bmp",  // 144: Agi→Luk
-        "arw-vit0.bmp",  // 141: Dex→Vit
-        "arw-dex0.bmp"   // 143: Vit→Dex
-    };
     static const char* kStatBmpPressed[6] = {
         "arw-str1.bmp",
         "arw-int1.bmp",
@@ -479,9 +739,9 @@ void UIMakeCharWnd::EnsureButtons()
     for (int i = 0; i < 6; ++i) {
         if (m_statBtns[i]) continue;
         auto* btn = new UIBitmapButton();
-        btn->SetBitmapName(ResolveUiAssetPath(kStatBmp[i]).c_str(), 0);
+        btn->SetBitmapName(ResolveUiAssetPath(kMakeCharStatBmp[i]).c_str(), 0);
         btn->SetBitmapName(ResolveUiAssetPath(kStatBmpPressed[i]).c_str(), 1);
-        btn->SetBitmapName(ResolveUiAssetPath(kStatBmp[i]).c_str(), 2);  // disabled = normal
+        btn->SetBitmapName(ResolveUiAssetPath(kMakeCharStatBmp[i]).c_str(), 2);  // disabled = normal
         btn->Create(btn->m_bitmapWidth > 0 ? btn->m_bitmapWidth : 16,
                     btn->m_bitmapHeight > 0 ? btn->m_bitmapHeight : 14);
         btn->Move(m_x + kStatX[i], m_y + kStatY[i]);
@@ -497,13 +757,10 @@ void UIMakeCharWnd::EnsureButtons()
     static const int kHairIds[3]  = { 161, 160, 213 };
     static const int kHairX[3]    = {  48, 130,  89 };
     static const int kHairY[3]    = { 135, 135, 101 };
-    static const char* kHairBmp[3] = {
-        "scroll1left.bmp", "scroll1right.bmp", "scroll0up.bmp"
-    };
     for (int i = 0; i < 3; ++i) {
         if (m_hairBtns[i]) continue;
         auto* btn = new UIBitmapButton();
-        btn->SetBitmapName(ResolveUiAssetPath(kHairBmp[i]).c_str(), 0);
+        btn->SetBitmapName(ResolveUiAssetPath(kMakeCharHairBmp[i]).c_str(), 0);
         btn->Create(btn->m_bitmapWidth > 0 ? btn->m_bitmapWidth : 16,
                     btn->m_bitmapHeight > 0 ? btn->m_bitmapHeight : 14);
         btn->Move(m_x + kHairX[i], m_y + kHairY[i]);
@@ -562,6 +819,169 @@ void UIMakeCharWnd::DrawHexagon(HDC hdc) const
     DeleteObject(statFill);   DeleteObject(axisPen);
 }
 
+#if RO_ENABLE_QT6_UI
+void UIMakeCharWnd::DrawQtHexagon(QImage* image) const
+{
+    if (!image || image->isNull()) {
+        return;
+    }
+
+    static const int kMaxX[6] = { 288, 356, 356, 288, 220, 220 };
+    static const int kMaxY[6] = {  86, 126, 206, 244, 206, 126 };
+    static const int kStatMap[6] = { 0, 2, 5, 3, 4, 1 };
+    static const QPoint kCenter(288, 166);
+
+    QPoint maxPoints[6];
+    QPoint valuePoints[6];
+    for (int i = 0; i < 6; ++i) {
+        const int statValue = (std::max)(0, (std::min)(m_stats[kStatMap[i]], 9));
+        maxPoints[i] = QPoint(kMaxX[i], kMaxY[i]);
+        valuePoints[i] = QPoint(
+            statValue * (kMaxX[i] - kCenter.x()) / 9 + kCenter.x(),
+            statValue * (kMaxY[i] - kCenter.y()) / 9 + kCenter.y());
+    }
+
+    QPainter painter(image);
+    painter.setRenderHint(QPainter::Antialiasing, false);
+
+    painter.setPen(QPen(QColor(140, 105, 82), 1));
+    painter.setBrush(Qt::NoBrush);
+    painter.drawPolygon(maxPoints, 6);
+
+    painter.setPen(QPen(QColor(0xA0, 0x60, 0x20), 1));
+    painter.setBrush(QBrush(QColor(0xCE, 0x97, 0x7C)));
+    painter.drawPolygon(valuePoints, 6);
+
+    painter.setPen(QPen(QColor(160, 120, 90), 1));
+    painter.setBrush(Qt::NoBrush);
+    for (int i = 0; i < 6; ++i) {
+        painter.drawLine(kCenter, maxPoints[i]);
+    }
+}
+
+void UIMakeCharWnd::DrawQtPreview(QImage* image)
+{
+    if (!image || image->isNull()) {
+        return;
+    }
+
+    ArgbDibSurface previewSurface;
+    if (!previewSurface.EnsureSize(image->width(), image->height()) || !previewSurface.GetPixels()) {
+        return;
+    }
+
+    std::fill_n(
+        previewSurface.GetPixels(),
+        static_cast<size_t>(previewSurface.GetWidth()) * static_cast<size_t>(previewSurface.GetHeight()),
+        0u);
+
+    POINT oldOrigin{};
+    SetViewportOrgEx(previewSurface.GetDC(), -m_x, -m_y, &oldOrigin);
+    DrawPreview(previewSurface.GetDC(), m_preview);
+    SetViewportOrgEx(previewSurface.GetDC(), oldOrigin.x, oldOrigin.y, nullptr);
+
+    const QImage overlay(
+        reinterpret_cast<const uchar*>(previewSurface.GetPixels()),
+        previewSurface.GetWidth(),
+        previewSurface.GetHeight(),
+        previewSurface.GetWidth() * static_cast<int>(sizeof(unsigned int)),
+        QImage::Format_ARGB32);
+    QPainter painter(image);
+    painter.drawImage(0, 0, overlay);
+}
+#endif
+
+void UIMakeCharWnd::EnsureQtLayout()
+{
+    if (!g_hMainWnd) {
+        return;
+    }
+
+    RECT clientRect{};
+    if (!GetClientRect(g_hMainWnd, &clientRect)) {
+        return;
+    }
+
+    OnCreate(clientRect.right - clientRect.left, clientRect.bottom - clientRect.top);
+}
+
+bool UIMakeCharWnd::GetQtBackgroundBitmap(const unsigned int** pixels, int* width, int* height)
+{
+    EnsureResourceCache();
+    if (!m_backgroundBmp.IsValid()) {
+        return false;
+    }
+
+    if (pixels) {
+        *pixels = m_backgroundBmp.pixels.data();
+    }
+    if (width) {
+        *width = m_backgroundBmp.width;
+    }
+    if (height) {
+        *height = m_backgroundBmp.height;
+    }
+    return true;
+}
+
+bool UIMakeCharWnd::GetQtButtonBitmap(int index, const unsigned int** pixels, int* width, int* height)
+{
+    static shopui::BitmapPixels cachedButtons[11][2];
+
+    if (index < 0 || index >= 11) {
+        return false;
+    }
+    const int pressedIndex = index == m_pressedQtButtonIndex ? 1 : 0;
+    if (!cachedButtons[index][pressedIndex].IsValid()) {
+        LoadMakeCharQtButtonBitmap(index, pressedIndex != 0, &cachedButtons[index][pressedIndex]);
+    }
+    if (!cachedButtons[index][pressedIndex].IsValid()) {
+        return false;
+    }
+
+    if (pixels) {
+        *pixels = cachedButtons[index][pressedIndex].pixels.data();
+    }
+    if (width) {
+        *width = cachedButtons[index][pressedIndex].width;
+    }
+    if (height) {
+        *height = cachedButtons[index][pressedIndex].height;
+    }
+    return true;
+}
+
+bool UIMakeCharWnd::HitQtButton(int x, int y, int* outIndex) const
+{
+    if (outIndex) {
+        *outIndex = -1;
+    }
+
+    for (int index = 0; index < GetQtButtonCount(); ++index) {
+        QtButtonDisplay buttonDisplay{};
+        if (!GetQtButtonDisplayForQt(index, &buttonDisplay)) {
+            continue;
+        }
+        if (x >= buttonDisplay.x && x < buttonDisplay.x + buttonDisplay.width
+            && y >= buttonDisplay.y && y < buttonDisplay.y + buttonDisplay.height) {
+            if (outIndex) {
+                *outIndex = index;
+            }
+            return true;
+        }
+    }
+    return false;
+}
+
+void UIMakeCharWnd::SetQtPressedButtonIndex(int index)
+{
+    if (m_pressedQtButtonIndex == index) {
+        return;
+    }
+    m_pressedQtButtonIndex = index;
+    Invalidate();
+}
+
 void UIMakeCharWnd::OnCreate(int cx, int cy)
 {
     if (m_controlsCreated) {
@@ -579,7 +999,9 @@ void UIMakeCharWnd::OnCreate(int cx, int cy)
     m_nameEditCtrl->m_maxchar = 24;
     m_nameEditCtrl->SetFrameColor(242, 242, 242);
     m_nameEditCtrl->m_hasFocus = true;
-    AddChild(m_nameEditCtrl);
+    if (!IsQtUiRuntimeEnabled()) {
+        AddChild(m_nameEditCtrl);
+    }
 
     const CLoginMode* loginMode = g_modeMgr.GetCurrentLoginMode();
     const char* savedName = loginMode ? loginMode->GetMakingCharName() : nullptr;
@@ -588,7 +1010,9 @@ void UIMakeCharWnd::OnCreate(int cx, int cy)
     }
 
     g_windowMgr.m_editWindow = m_nameEditCtrl;
-    EnsureButtons();
+    if (!IsQtUiRuntimeEnabled()) {
+        EnsureButtons();
+    }
     RebuildPreview();
 }
 
@@ -679,25 +1103,29 @@ void UIMakeCharWnd::OnDraw()
         OnCreate(clientW, clientH);
     }
 
-    const bool useShared = (UIWindow::GetSharedDrawDC() != nullptr);
-    HDC targetDC = useShared ? UIWindow::GetSharedDrawDC() : GetDC(g_hMainWnd);
-    if (!targetDC) {
+    if (IsQtUiRuntimeEnabled()) {
         return;
     }
 
-    HDC hdc = targetDC;
-    const bool useCompose = !useShared && EnsureComposeSurface(targetDC, clientW, clientH);
+    const bool useCompose = EnsureComposeSurface(clientW, clientH);
+    HDC targetDC = nullptr;
+    HDC hdc = nullptr;
     if (useCompose) {
-        PatBlt(m_composeDC, 0, 0, clientW, clientH, BLACKNESS);
-        g_windowMgr.DrawWallpaperToDC(m_composeDC, clientW, clientH);
-        hdc = m_composeDC;
-    } else if (!useShared) {
+        PatBlt(m_composeSurface.GetDC(), 0, 0, clientW, clientH, BLACKNESS);
+        g_windowMgr.DrawWallpaperToDC(m_composeSurface.GetDC(), clientW, clientH);
+        hdc = m_composeSurface.GetDC();
+    } else {
+        targetDC = AcquireDrawTarget();
+        if (!targetDC) {
+            return;
+        }
+        hdc = targetDC;
         g_windowMgr.DrawWallpaperToDC(hdc, clientW, clientH);
     }
 
     RECT panel = MakeRect(m_x, m_y, m_w, m_h);
-    if (m_backgroundBmp) {
-        DrawBitmapStretched(hdc, m_backgroundBmp, panel);
+    if (m_backgroundBmp.IsValid()) {
+        DrawBitmapPixelsStretched(hdc, m_backgroundBmp, panel);
     } else {
         HBRUSH bg = CreateSolidBrush(RGB(255, 255, 255));
         FillRect(hdc, &panel, bg);
@@ -728,7 +1156,11 @@ void UIMakeCharWnd::OnDraw()
         for (int i = 0; i < 6; ++i) {
             std::snprintf(buf, sizeof(buf), "%d", m_stats[kStatIdx[i]]);
             RECT valueRc = MakeRect(valueX, m_y + kValueY[i], 30, 13);
+#if RO_ENABLE_QT6_UI
+            DrawMakeCharText(hdc, valueRc, buf, RGB(60, 36, 20), Qt::AlignCenter | Qt::AlignVCenter);
+#else
             DrawTextA(hdc, buf, -1, &valueRc, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+#endif
         }
         if (oldFont) {
             SelectObject(hdc, oldFont);
@@ -740,17 +1172,14 @@ void UIMakeCharWnd::OnDraw()
 
     DrawPreview(hdc, m_preview);
 
-    HDC prevShared = UIWindow::GetSharedDrawDC();
-    UIWindow::SetSharedDrawDC(hdc);
-    DrawChildren();
-    UIWindow::SetSharedDrawDC(prevShared);
+    DrawChildrenToHdc(hdc);
 
     if (useCompose) {
-        BitBlt(targetDC, 0, 0, clientW, clientH, hdc, 0, 0, SRCCOPY);
-    }
-
-    if (!useShared) {
-        ReleaseDC(g_hMainWnd, targetDC);
+        if (!BlitArgbBitsToDrawTarget(m_composeSurface.GetBits(), clientW, clientH)) {
+            return;
+        }
+    } else {
+        ReleaseDrawTarget(targetDC);
     }
 }
 

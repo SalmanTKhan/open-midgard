@@ -1297,6 +1297,107 @@ int CSession::GetWeaponTypeByItemId(int itemId) const
     return 17;
 }
 
+int CSession::MakeWeaponTypeByItemId(int primaryWeaponItemId, int secondaryWeaponItemId) const
+{
+    int primary = primaryWeaponItemId;
+    int secondary = secondaryWeaponItemId;
+    int result = 0;
+
+    if (primary == 0) {
+        primary = secondary;
+        secondary = 0;
+        if (primary == 0) {
+            return result;
+        }
+    }
+
+    if ((primary < 1100 || primary >= 1150) && (primary < 13400 || primary >= 13500)) {
+        if (primary < 1200 || primary >= 1250) {
+            if (primary < 1300 || primary >= 1350) {
+                if (primary >= 13000 && primary < 13100) {
+                    result = 1;
+                    if (secondary < 1200 || secondary >= 1250) {
+                        if (secondary < 1100 || secondary >= 1150) {
+                            if (secondary < 13000 || secondary >= 13100) {
+                                if (secondary < 13400 || secondary >= 13500) {
+                                    if (secondary >= 1300 && secondary < 1350) {
+                                        return 29;
+                                    }
+                                } else {
+                                    return 28;
+                                }
+                            } else {
+                                return 25;
+                            }
+                        } else {
+                            return 28;
+                        }
+                    } else {
+                        return 25;
+                    }
+                }
+            } else {
+                result = 6;
+                if (secondary >= 1300 && secondary < 1350) {
+                    return 27;
+                }
+            }
+        } else {
+            result = 1;
+            if (secondary < 1200 || secondary >= 1250) {
+                if (secondary < 13000 || secondary >= 13100) {
+                    if (secondary < 1100 || secondary >= 1150) {
+                        if (secondary < 13400 || secondary >= 13500) {
+                            if (secondary >= 1300 && secondary < 1350) {
+                                return 29;
+                            }
+                        } else {
+                            return 28;
+                        }
+                    } else {
+                        return 28;
+                    }
+                } else {
+                    return 25;
+                }
+            } else {
+                return 25;
+            }
+        }
+    } else {
+        result = 2;
+        if (secondary < 1100 || secondary >= 1150) {
+            if (secondary < 13400 || secondary >= 13500) {
+                if (secondary >= 1300 && secondary < 1350) {
+                    return 30;
+                }
+            } else {
+                return 26;
+            }
+        } else {
+            return 26;
+        }
+    }
+
+    return result;
+}
+
+unsigned int CSession::GetEquippedLeftHandWeaponItemId() const
+{
+    for (const ITEM_INFO& item : m_inventoryItems) {
+        if (item.m_wearLocation == 0) {
+            continue;
+        }
+        if ((item.m_wearLocation & 32) != 0) {
+            const unsigned int itemId = item.GetItemId();
+            if (GetWeaponTypeByItemId(static_cast<int>(itemId)) > 0) {
+                return itemId;
+            }
+        }
+    }
+    return 0;
+}
+
 unsigned int CSession::GetEquippedRightHandWeaponItemId() const
 {
     for (const ITEM_INFO& item : m_inventoryItems) {

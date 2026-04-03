@@ -3,26 +3,50 @@
 #include "RenderDevice.h"
 #include "DebugLog.h"
 
+#if RO_HAS_NATIVE_D3D11
 #include <d3d11.h>
+#endif
+#if RO_HAS_NATIVE_D3D12
 #include <d3d12.h>
 #include <dxgi1_4.h>
+#endif
+#if RO_PLATFORM_WINDOWS
+#include <windows.h>
+#else
+#include <dlfcn.h>
+#endif
 #include <algorithm>
 #include <cctype>
 #include <cstring>
+#include <iterator>
 
+#if RO_HAS_NATIVE_D3D11
 #pragma comment(lib, "d3d11.lib")
+#endif
+#if RO_HAS_NATIVE_D3D12
 #pragma comment(lib, "d3d12.lib")
 #pragma comment(lib, "dxgi.lib")
+#endif
 
 namespace {
 
+#if RO_PLATFORM_WINDOWS
 constexpr char kRenderBackendRegPath[] = "Software\\Gravity Soft\\Ragnarok Online";
 constexpr char kRenderBackendValueName[] = "RenderBackend";
+#endif
+#if RO_HAS_NATIVE_D3D11
 constexpr RenderBackendType kDefaultConfiguredBackend = RenderBackendType::Direct3D11;
+#elif RO_HAS_VULKAN
+constexpr RenderBackendType kDefaultConfiguredBackend = RenderBackendType::Vulkan;
+#else
+constexpr RenderBackendType kDefaultConfiguredBackend = RenderBackendType::LegacyDirect3D7;
+#endif
 
 bool IsBackendAllowedOnCurrentBuild(RenderBackendType backend)
 {
-#if defined(_WIN64)
+#if !RO_PLATFORM_WINDOWS
+    return backend == RenderBackendType::Vulkan;
+#elif defined(_WIN64)
     return backend != RenderBackendType::LegacyDirect3D7;
 #else
     return true;
@@ -31,12 +55,18 @@ bool IsBackendAllowedOnCurrentBuild(RenderBackendType backend)
 
 RenderBackendType GetFallbackBackendForCurrentBuild()
 {
+#if !RO_PLATFORM_WINDOWS
+    constexpr RenderBackendType kOrderedCandidates[] = {
+        RenderBackendType::Vulkan,
+    };
+#else
     constexpr RenderBackendType kOrderedCandidates[] = {
         RenderBackendType::Direct3D11,
         RenderBackendType::Direct3D12,
         RenderBackendType::Vulkan,
         RenderBackendType::LegacyDirect3D7,
     };
+#endif
 
     for (RenderBackendType candidate : kOrderedCandidates) {
         if (IsBackendAllowedOnCurrentBuild(candidate)
@@ -77,6 +107,46 @@ struct RenderBackendSupportCache {
 
 RenderBackendSupportCache g_supportCache = { -1, -1, -1 };
 
+#if RO_PLATFORM_WINDOWS
+using DynamicLibraryHandle = HMODULE;
+
+DynamicLibraryHandle LoadDynamicLibrary(const char* path)
+{
+    return LoadLibraryA(path);
+}
+
+void* LoadDynamicSymbol(DynamicLibraryHandle library, const char* name)
+{
+    return reinterpret_cast<void*>(GetProcAddress(library, name));
+}
+
+void UnloadDynamicLibrary(DynamicLibraryHandle library)
+{
+    if (library) {
+        FreeLibrary(library);
+    }
+}
+#else
+using DynamicLibraryHandle = void*;
+
+DynamicLibraryHandle LoadDynamicLibrary(const char* path)
+{
+    return dlopen(path, RTLD_LAZY | RTLD_LOCAL);
+}
+
+void* LoadDynamicSymbol(DynamicLibraryHandle library, const char* name)
+{
+    return library ? dlsym(library, name) : nullptr;
+}
+
+void UnloadDynamicLibrary(DynamicLibraryHandle library)
+{
+    if (library) {
+        dlclose(library);
+    }
+}
+#endif
+
 RenderBackendType ParseRenderBackendName(const char* value)
 {
     if (!value || !*value) {
@@ -116,6 +186,7 @@ bool IsValidStoredBackend(DWORD rawValue)
 
 bool ProbeD3D11Support()
 {
+#if RO_HAS_NATIVE_D3D11
     const D3D_FEATURE_LEVEL featureLevels[] = {
         D3D_FEATURE_LEVEL_11_0,
         D3D_FEATURE_LEVEL_10_1,
@@ -153,10 +224,14 @@ bool ProbeD3D11Support()
     SafeRelease(context);
     SafeRelease(device);
     return SUCCEEDED(hr);
+#else
+    return false;
+#endif
 }
 
 bool ProbeD3D12Support()
 {
+#if RO_HAS_NATIVE_D3D12
     IDXGIFactory4* factory = nullptr;
     HRESULT hr = CreateDXGIFactory2(0, IID_PPV_ARGS(&factory));
     if (FAILED(hr) || !factory) {
@@ -177,20 +252,41 @@ bool ProbeD3D12Support()
     SafeRelease(device);
     SafeRelease(factory);
     return SUCCEEDED(hr);
+#else
+    return false;
+#endif
 }
 
 bool ProbeVulkanSupport()
 {
 #if RO_HAS_VULKAN
-    HMODULE module = LoadLibraryA("vulkan-1.dll");
-    if (!module) {
-        return false;
+    static const char* const kVulkanLoaderCandidates[] = {
+#if RO_PLATFORM_WINDOWS
+        "vulkan-1.dll",
+#elif defined(__APPLE__)
+        "libvulkan.1.dylib",
+        "libMoltenVK.dylib",
+#else
+        "libvulkan.so.1",
+        "libvulkan.so",
+#endif
+    };
+
+    for (const char* candidate : kVulkanLoaderCandidates) {
+        DynamicLibraryHandle module = LoadDynamicLibrary(candidate);
+        if (!module) {
+            continue;
+        }
+
+        const void* getInstanceProcAddr = LoadDynamicSymbol(module, "vkGetInstanceProcAddr");
+        const void* createInstance = LoadDynamicSymbol(module, "vkCreateInstance");
+        UnloadDynamicLibrary(module);
+        if (getInstanceProcAddr && createInstance) {
+            return true;
+        }
     }
 
-    const FARPROC getInstanceProcAddr = GetProcAddress(module, "vkGetInstanceProcAddr");
-    const FARPROC createInstance = GetProcAddress(module, "vkCreateInstance");
-    FreeLibrary(module);
-    return getInstanceProcAddr != nullptr && createInstance != nullptr;
+    return false;
 #else
     return false;
 #endif
@@ -218,9 +314,13 @@ bool IsRenderBackendImplemented(RenderBackendType backend)
 {
     switch (backend) {
     case RenderBackendType::LegacyDirect3D7:
+        return RO_PLATFORM_WINDOWS != 0;
+
     case RenderBackendType::Direct3D11:
+        return RO_HAS_NATIVE_D3D11 != 0;
+
     case RenderBackendType::Direct3D12:
-        return true;
+        return RO_HAS_NATIVE_D3D12 != 0;
 
     case RenderBackendType::Vulkan:
         return RO_HAS_VULKAN != 0;
@@ -238,7 +338,7 @@ bool IsRenderBackendSupported(RenderBackendType backend)
 
     switch (backend) {
     case RenderBackendType::LegacyDirect3D7:
-        return true;
+        return RO_PLATFORM_WINDOWS != 0;
 
     case RenderBackendType::Direct3D11:
         if (g_supportCache.d3d11 < 0) {
@@ -268,6 +368,9 @@ bool IsRenderBackendSupported(RenderBackendType backend)
 
 RenderBackendType GetConfiguredRenderBackend()
 {
+#if !RO_PLATFORM_WINDOWS
+    return kDefaultConfiguredBackend;
+#else
     HKEY key = nullptr;
     if (RegOpenKeyExA(HKEY_CURRENT_USER, kRenderBackendRegPath, 0, KEY_READ, &key) != ERROR_SUCCESS) {
         return kDefaultConfiguredBackend;
@@ -289,10 +392,15 @@ RenderBackendType GetConfiguredRenderBackend()
     }
 
     return NormalizeBackendForCurrentBuild(static_cast<RenderBackendType>(rawValue));
+#endif
 }
 
 bool SetConfiguredRenderBackend(RenderBackendType backend)
 {
+#if !RO_PLATFORM_WINDOWS
+    (void)backend;
+    return false;
+#else
     HKEY key = nullptr;
     if (RegCreateKeyExA(HKEY_CURRENT_USER, kRenderBackendRegPath, 0, nullptr, 0, KEY_SET_VALUE, nullptr, &key, nullptr) != ERROR_SUCCESS) {
         return false;
@@ -309,6 +417,7 @@ bool SetConfiguredRenderBackend(RenderBackendType backend)
         sizeof(rawValue));
     RegCloseKey(key);
     return status == ERROR_SUCCESS;
+#endif
 }
 
 RenderBackendType GetRequestedRenderBackend()
@@ -321,7 +430,7 @@ RenderBackendType GetRequestedRenderBackend()
     return NormalizeBackendForCurrentBuild(ParseRenderBackendName(buffer));
 }
 
-bool InitializeRenderBackend(HWND hwnd, RenderBackendBootstrapResult* outResult)
+bool InitializeRenderBackend(RoNativeWindowHandle hwnd, RenderBackendBootstrapResult* outResult)
 {
     return GetRenderDevice().Initialize(hwnd, outResult);
 }

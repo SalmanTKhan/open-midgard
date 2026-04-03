@@ -13,10 +13,15 @@ public:
     void OnCreate(int cx, int cy) override;
     void OnDraw() override;
     void OnLBtnDown(int x, int y) override;
+    void OnLBtnUp(int x, int y) override;
     void OnLBtnDblClk(int x, int y) override;
     void OnMouseMove(int x, int y) override;
     msgresult_t SendMsg(UIWindow* sender, int msg, msgparam_t wparam, msgparam_t lparam, msgparam_t extra) override;
     void OnKeyDown(int virtualKey);
+    int GetSelectedIndex() const;
+    int GetPressedIndex() const;
+    int GetEntryCount() const;
+    const char* GetEntryLabelForQt(int index) const;
 
 private:
     enum MenuEntry {
@@ -29,6 +34,8 @@ private:
 
     void EnsureCreated();
     void LayoutButtons();
+    RECT GetEntryRect(int index) const;
+    int HitTestEntry(int x, int y) const;
     void SyncSelectionVisuals();
     void UpdateSelectedIndexFromHover() const;
     void CloseMenu();
@@ -37,4 +44,5 @@ private:
     bool m_controlsCreated;
     UIBitmapButton* m_entryButtons[MenuEntry_Count];
     int m_selectedIndex;
+    int m_pressedIndex;
 };

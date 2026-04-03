@@ -809,7 +809,7 @@ CTexture* GetSoftGlowTexture(bool cloud)
     }
 
     constexpr int kSize = 64;
-    std::vector<unsigned long> pixels(static_cast<size_t>(kSize) * kSize, 0u);
+    std::vector<unsigned int> pixels(static_cast<size_t>(kSize) * kSize, 0u);
     for (int y = 0; y < kSize; ++y) {
         for (int x = 0; x < kSize; ++x) {
             const float fx = (static_cast<float>(x) + 0.5f) / static_cast<float>(kSize) * 2.0f - 1.0f;
@@ -843,7 +843,7 @@ CTexture* GetSoftDiscTexture()
     }
 
     constexpr int kSize = 64;
-    std::vector<unsigned long> pixels(static_cast<size_t>(kSize) * kSize, 0u);
+    std::vector<unsigned int> pixels(static_cast<size_t>(kSize) * kSize, 0u);
     for (int y = 0; y < kSize; ++y) {
         for (int x = 0; x < kSize; ++x) {
             const float fx = (static_cast<float>(x) + 0.5f) / static_cast<float>(kSize) * 2.0f - 1.0f;
@@ -1221,30 +1221,26 @@ const BakedEffectSpriteFrame* GetBakedEffectSpriteFrame(const std::string& actPa
             if (const CMotion* motion = actRes->GetMotion(actionIndex, motionIndex)) {
                 constexpr int kCanvasSize = 384;
                 constexpr int kCanvasCenter = kCanvasSize / 2;
-                CDCBitmap bitmap(kCanvasSize, kCanvasSize);
-                bitmap.ClearSurface(nullptr, 0u);
+                std::vector<unsigned int> canvasPixels(static_cast<size_t>(kCanvasSize) * static_cast<size_t>(kCanvasSize), 0u);
+                BlitMotionToArgb(canvasPixels.data(), kCanvasSize, kCanvasSize, kCanvasCenter, kCanvasCenter, sprRes, motion, sprRes->m_pal);
 
-                HDC hdc = nullptr;
-                if (bitmap.GetDC(&hdc) && hdc && DrawActMotionToHdc(hdc, kCanvasCenter, kCanvasCenter, sprRes, motion, sprRes->m_pal)) {
-                    RECT bounds{};
-                    if (FindOpaqueBounds(bitmap.GetImageData(), kCanvasSize, kCanvasSize, &bounds)) {
-                        baked.width = (std::max)(1, static_cast<int>(bounds.right - bounds.left));
-                        baked.height = (std::max)(1, static_cast<int>(bounds.bottom - bounds.top));
-                        baked.pivotX = static_cast<float>(kCanvasCenter - bounds.left);
-                        baked.pivotY = static_cast<float>(kCanvasCenter - bounds.top);
+                RECT bounds{};
+                if (FindOpaqueBounds(canvasPixels.data(), kCanvasSize, kCanvasSize, &bounds)) {
+                    baked.width = (std::max)(1, static_cast<int>(bounds.right - bounds.left));
+                    baked.height = (std::max)(1, static_cast<int>(bounds.bottom - bounds.top));
+                    baked.pivotX = static_cast<float>(kCanvasCenter - bounds.left);
+                    baked.pivotY = static_cast<float>(kCanvasCenter - bounds.top);
 
-                        std::vector<unsigned int> pixels(static_cast<size_t>(baked.width) * static_cast<size_t>(baked.height), 0u);
-                        for (int y = 0; y < baked.height; ++y) {
-                            const unsigned int* src = bitmap.GetImageData() + static_cast<size_t>(bounds.top + y) * kCanvasSize + bounds.left;
-                            unsigned int* dst = pixels.data() + static_cast<size_t>(y) * baked.width;
-                            std::memcpy(dst, src, static_cast<size_t>(baked.width) * sizeof(unsigned int));
-                        }
-                        UnpremultiplyPixels(pixels);
-                        baked.texture = g_texMgr.CreateTexture(baked.width, baked.height, reinterpret_cast<unsigned long*>(pixels.data()), PF_A8R8G8B8, false);
-                        baked.isValid = baked.texture && baked.texture != &CTexMgr::s_dummy_texture;
+                    std::vector<unsigned int> pixels(static_cast<size_t>(baked.width) * static_cast<size_t>(baked.height), 0u);
+                    for (int y = 0; y < baked.height; ++y) {
+                        const unsigned int* src = canvasPixels.data() + static_cast<size_t>(bounds.top + y) * kCanvasSize + bounds.left;
+                        unsigned int* dst = pixels.data() + static_cast<size_t>(y) * baked.width;
+                        std::memcpy(dst, src, static_cast<size_t>(baked.width) * sizeof(unsigned int));
                     }
+                    UnpremultiplyPixels(pixels);
+                    baked.texture = g_texMgr.CreateTexture(baked.width, baked.height, pixels.data(), PF_A8R8G8B8, false);
+                    baked.isValid = baked.texture && baked.texture != &CTexMgr::s_dummy_texture;
                 }
-                bitmap.ReleaseDC(hdc);
             }
         }
     }
@@ -2895,6 +2891,59 @@ float CRagEffect::ResolveBaseRotation() const
         return m_master->m_roty;
     }
     return m_longitude;
+}
+
+bool CRagEffect::ResolveCullSphere(vector3d* outCenter, float* outRadius) const
+{
+    if (!outCenter || !outRadius) {
+        return false;
+    }
+
+    vector3d base = ResolveBasePosition();
+    vector3d center = base;
+    float radius = 96.0f;
+    switch (m_handler) {
+    case Handler::Portal:
+    case Handler::ReadyPortal:
+    case Handler::WarpZone:
+    case Handler::Portal2:
+    case Handler::ReadyPortal2:
+    case Handler::WarpZone2:
+        radius = 180.0f;
+        break;
+    case Handler::MapMagicZone:
+        radius = (std::max)(120.0f, std::fabs(m_param[0]) * 2.0f + 48.0f);
+        break;
+    case Handler::MapParticle:
+        radius = 128.0f;
+        break;
+    case Handler::EzStr:
+    case Handler::Entry2:
+    case Handler::JobLevelUp50:
+    case Handler::SuperAngel:
+    case Handler::SightAura:
+    case Handler::FireBoltRain:
+        radius = 140.0f;
+        break;
+    case Handler::None:
+    default:
+        radius = 96.0f;
+        break;
+    }
+
+    if (m_hasTargetPos) {
+        center.x = (base.x + m_targetPos.x) * 0.5f;
+        center.y = (base.y + m_targetPos.y) * 0.5f;
+        center.z = (base.z + m_targetPos.z) * 0.5f;
+        const float dx = m_targetPos.x - base.x;
+        const float dy = m_targetPos.y - base.y;
+        const float dz = m_targetPos.z - base.z;
+        radius += std::sqrt(dx * dx + dy * dy + dz * dz) * 0.5f;
+    }
+
+    *outCenter = center;
+    *outRadius = radius;
+    return true;
 }
 
 void CRagEffect::SpawnPortal()

@@ -1,12 +1,22 @@
 #include "UINpcInputWnd.h"
 
+#include "render/DC.h"
 #include "UIWindow.h"
 #include "UIWindowMgr.h"
 #include "gamemode/GameMode.h"
 #include "gamemode/Mode.h"
 #include "main/WinMain.h"
+#include "qtui/QtUiRuntime.h"
 
 #include <windows.h>
+
+#if RO_ENABLE_QT6_UI
+#include <QFont>
+#include <QFontMetrics>
+#include <QImage>
+#include <QPainter>
+#include <QString>
+#endif
 
 #include <cstdlib>
 
@@ -65,6 +75,55 @@ RECT MakeRect(int left, int top, int width, int height)
     return rect;
 }
 
+#if RO_ENABLE_QT6_UI
+QFont BuildNpcInputFontFromHdc(HDC hdc)
+{
+    LOGFONTA logFont{};
+    if (hdc) {
+        if (HGDIOBJ fontObject = GetCurrentObject(hdc, OBJ_FONT)) {
+            GetObjectA(fontObject, sizeof(logFont), &logFont);
+        }
+    }
+
+    const QString family = logFont.lfFaceName[0] != '\0'
+        ? QString::fromLocal8Bit(logFont.lfFaceName)
+        : QStringLiteral("MS Sans Serif");
+    QFont font(family);
+    font.setPixelSize(logFont.lfHeight != 0 ? (std::max)(1, static_cast<int>(std::abs(logFont.lfHeight))) : 13);
+    font.setBold(logFont.lfWeight >= FW_BOLD);
+    font.setStyleStrategy(QFont::NoAntialias);
+    return font;
+}
+
+void DrawNpcInputText(HDC hdc, const RECT& rect, const char* text, COLORREF color, Qt::Alignment alignment)
+{
+    if (!hdc || !text || rect.right <= rect.left || rect.bottom <= rect.top) {
+        return;
+    }
+
+    const QString label = QString::fromLocal8Bit(text);
+    if (label.isEmpty()) {
+        return;
+    }
+
+    const int width = rect.right - rect.left;
+    const int height = rect.bottom - rect.top;
+    std::vector<unsigned int> pixels(static_cast<size_t>(width) * static_cast<size_t>(height), 0u);
+    QImage image(reinterpret_cast<uchar*>(pixels.data()), width, height, width * static_cast<int>(sizeof(unsigned int)), QImage::Format_ARGB32);
+    if (image.isNull()) {
+        return;
+    }
+
+    QPainter painter(&image);
+    painter.setRenderHint(QPainter::Antialiasing, false);
+    painter.setRenderHint(QPainter::TextAntialiasing, false);
+    painter.setFont(BuildNpcInputFontFromHdc(hdc));
+    painter.setPen(QColor(GetRValue(color), GetGValue(color), GetBValue(color)));
+    painter.drawText(QRect(0, 0, width, height), alignment | Qt::TextSingleLine, label);
+    AlphaBlendArgbToHdc(hdc, rect.left, rect.top, width, height, pixels.data(), width, height);
+}
+#endif
+
 } // namespace
 
 UINpcInputWnd::UINpcInputWnd()
@@ -76,7 +135,9 @@ UINpcInputWnd::UINpcInputWnd()
     Create(kInputWidth, kInputHeight);
     m_editCtrl->Create(m_w - kPadding * 2, kEditHeight);
     m_editCtrl->m_id = 1;
-    AddChild(m_editCtrl);
+    if (!IsQtUiRuntimeEnabled()) {
+        AddChild(m_editCtrl);
+    }
 
     int defaultX = 195;
     int defaultY = 250;
@@ -87,7 +148,13 @@ UINpcInputWnd::UINpcInputWnd()
     UIWindow::SetShow(0);
 }
 
-UINpcInputWnd::~UINpcInputWnd() = default;
+UINpcInputWnd::~UINpcInputWnd()
+{
+    if (m_editCtrl && m_editCtrl->m_parent != this) {
+        delete m_editCtrl;
+        m_editCtrl = nullptr;
+    }
+}
 
 void UINpcInputWnd::SetShow(int show)
 {
@@ -119,6 +186,44 @@ UIEditCtrl* UINpcInputWnd::GetEditCtrl() const
 u32 UINpcInputWnd::GetNpcId() const
 {
     return m_npcId;
+}
+
+UINpcInputWnd::InputMode UINpcInputWnd::GetInputMode() const
+{
+    return m_mode;
+}
+
+const char* UINpcInputWnd::GetInputText() const
+{
+    return m_editCtrl ? m_editCtrl->GetText() : "";
+}
+
+bool UINpcInputWnd::IsOkPressed() const
+{
+    return m_pressedTarget == ClickTarget::Ok;
+}
+
+bool UINpcInputWnd::IsCancelPressed() const
+{
+    return m_pressedTarget == ClickTarget::Cancel;
+}
+
+bool UINpcInputWnd::GetOkRectForQt(RECT* outRect) const
+{
+    if (!outRect) {
+        return false;
+    }
+    *outRect = GetOkRect();
+    return true;
+}
+
+bool UINpcInputWnd::GetCancelRectForQt(RECT* outRect) const
+{
+    if (!outRect) {
+        return false;
+    }
+    *outRect = GetCancelRect();
+    return true;
 }
 
 void UINpcInputWnd::LayoutControls()
@@ -176,20 +281,24 @@ void UINpcInputWnd::DrawButton(HDC hdc, const RECT& rect, const char* label, boo
     RECT textRect = rect;
     SetBkMode(hdc, TRANSPARENT);
     SetTextColor(hdc, RGB(0, 0, 0));
+#if RO_ENABLE_QT6_UI
+    DrawNpcInputText(hdc, textRect, label, RGB(0, 0, 0), Qt::AlignCenter | Qt::AlignVCenter);
+#else
     DrawTextA(hdc, label, -1, &textRect, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+#endif
 }
 
 void UINpcInputWnd::OnDraw()
 {
+    if (IsQtUiRuntimeEnabled()) {
+        return;
+    }
+
     if (!g_hMainWnd || m_show == 0) {
         return;
     }
 
-    HDC hdc = UIWindow::GetSharedDrawDC();
-    const bool useShared = (hdc != nullptr);
-    if (!useShared) {
-        hdc = GetDC(g_hMainWnd);
-    }
+    HDC hdc = AcquireDrawTarget();
     if (!hdc) {
         return;
     }
@@ -204,20 +313,19 @@ void UINpcInputWnd::OnDraw()
     const char* label = (m_mode == InputMode::Number) ? "Enter a number" : "Enter text";
     SetBkMode(hdc, TRANSPARENT);
     SetTextColor(hdc, RGB(0, 0, 0));
+#if RO_ENABLE_QT6_UI
+    DrawNpcInputText(hdc, labelRect, label, RGB(0, 0, 0), Qt::AlignLeft | Qt::AlignTop);
+#else
     DrawTextA(hdc, label, -1, &labelRect, DT_LEFT | DT_TOP | DT_SINGLELINE);
+#endif
 
-    HDC previousShared = UIWindow::GetSharedDrawDC();
-    UIWindow::SetSharedDrawDC(hdc);
-    DrawChildren();
-    UIWindow::SetSharedDrawDC(previousShared);
+    DrawChildrenToHdc(hdc);
 
     DrawButton(hdc, GetOkRect(), "OK", m_pressedTarget == ClickTarget::Ok);
     DrawButton(hdc, GetCancelRect(), "Cancel", m_pressedTarget == ClickTarget::Cancel);
 
     SelectObject(hdc, oldFont);
-    if (!useShared) {
-        ReleaseDC(g_hMainWnd, hdc);
-    }
+    ReleaseDrawTarget(hdc);
 }
 
 void UINpcInputWnd::OpenForMode(u32 npcId, InputMode mode)
@@ -320,6 +428,15 @@ void UINpcInputWnd::OnLBtnDown(int x, int y)
     if (IsPointInRect(GetCancelRect(), x, y)) {
         m_pressedTarget = ClickTarget::Cancel;
         Invalidate();
+        return;
+    }
+
+    const RECT editRect = MakeRect(m_x + kPadding, m_y + kPadding + 16, m_w - kPadding * 2, kEditHeight);
+    if (IsPointInRect(editRect, x, y)) {
+        if (m_editCtrl) {
+            m_editCtrl->m_hasFocus = true;
+            g_windowMgr.m_editWindow = m_editCtrl;
+        }
         return;
     }
 

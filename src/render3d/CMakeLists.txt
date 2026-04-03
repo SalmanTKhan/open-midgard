@@ -2,9 +2,7 @@
 
 add_library(ro_render3d STATIC
     D3dutil.h
-    D3dutil.cpp
     Device.h
-    Device.cpp
     GraphicsSettings.h
     GraphicsSettings.cpp
     ModernRenderState.h
@@ -12,8 +10,21 @@ add_library(ro_render3d STATIC
     RenderBackend.h
     RenderBackend.cpp
     RenderDevice.h
-    RenderDevice.cpp
 )
+
+if(WIN32)
+    target_sources(ro_render3d PRIVATE
+        D3dutil.cpp
+        Device.cpp
+        RenderDevice.cpp
+    )
+else()
+    target_sources(ro_render3d PRIVATE
+        D3dutil.cpp
+        Device_nonwin.cpp
+        RenderDevice.cpp
+    )
+endif()
 
 target_include_directories(ro_render3d PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(ro_render3d PUBLIC
@@ -21,8 +32,12 @@ target_link_libraries(ro_render3d PUBLIC
     ro_core
 )
 
+if(NOT WIN32 AND RO_ENABLE_QT6_UI)
+    target_link_libraries(ro_render3d PUBLIC Qt6::Gui)
+endif()
+
 set(RO_HAS_VULKAN 0)
-if(DEFINED ENV{VULKAN_SDK})
+if(WIN32 AND DEFINED ENV{VULKAN_SDK})
     set(VULKAN_SDK_DIR "$ENV{VULKAN_SDK}")
     set(VULKAN_INCLUDE_DIR "${VULKAN_SDK_DIR}/Include")
     if(EXISTS "${VULKAN_INCLUDE_DIR}/vulkan/vulkan.h")
@@ -31,6 +46,13 @@ if(DEFINED ENV{VULKAN_SDK})
         message(STATUS "Vulkan SDK detected for ro_render3d: ${VULKAN_SDK_DIR}")
     else()
         message(STATUS "VULKAN_SDK is set but Vulkan headers were not found for ro_render3d")
+    endif()
+elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    find_package(Vulkan REQUIRED)
+    if(TARGET Vulkan::Vulkan)
+        set(RO_HAS_VULKAN 1)
+        target_link_libraries(ro_render3d PUBLIC Vulkan::Vulkan)
+        message(STATUS "Vulkan package detected for ro_render3d: ${Vulkan_INCLUDE_DIRS}")
     endif()
 endif()
 

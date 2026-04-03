@@ -4,6 +4,7 @@
 #include "gamemode/GameMode.h"
 #include "gamemode/Mode.h"
 #include "main/WinMain.h"
+#include "qtui/QtUiRuntime.h"
 #include "ui/UIWindowMgr.h"
 
 #include <windows.h>
@@ -171,7 +172,8 @@ const char* GetEntryBitmapName(int index, int stateIndex)
 UIChooseWnd::UIChooseWnd()
     : m_controlsCreated(false),
       m_entryButtons{ nullptr, nullptr, nullptr, nullptr },
-    m_selectedIndex(MenuEntry_ReturnToGame)
+      m_selectedIndex(MenuEntry_ReturnToGame),
+      m_pressedIndex(-1)
 {
     m_defPushId = 0;
     m_defCancelPushId = 0;
@@ -185,6 +187,7 @@ void UIChooseWnd::SetShow(int show)
     UIWindow::SetShow(show);
 
     if (show == 0) {
+        m_pressedIndex = -1;
         for (UIBitmapButton* button : m_entryButtons) {
             if (button) {
                 button->m_state = 0;
@@ -227,6 +230,10 @@ void UIChooseWnd::OnCreate(int cx, int cy)
     Create(kDefaultWidth, kDefaultHeight);
     Move((cx - m_w) / 2, (cy - m_h) / 2);
 
+    if (IsQtUiRuntimeEnabled()) {
+        return;
+    }
+
     for (int index = 0; index < MenuEntry_Count; ++index) {
         auto* button = new UIBitmapButton();
         button->SetBitmapName(ResolveUiAssetPath(GetEntryBitmapName(index, 0)).c_str(), 0);
@@ -244,13 +251,32 @@ void UIChooseWnd::OnCreate(int cx, int cy)
 
 void UIChooseWnd::LayoutButtons()
 {
-    const int startX = m_x + (m_w - kButtonWidth) / 2;
-    const int startY = m_y + 12;
     for (int index = 0; index < MenuEntry_Count; ++index) {
         if (m_entryButtons[index]) {
-            m_entryButtons[index]->Move(startX, startY + index * (kButtonHeight + kButtonSpacing));
+            const RECT entryRect = GetEntryRect(index);
+            m_entryButtons[index]->Move(entryRect.left, entryRect.top);
         }
     }
+}
+
+RECT UIChooseWnd::GetEntryRect(int index) const
+{
+    return MakeRect(
+        m_x + (m_w - kButtonWidth) / 2,
+        m_y + 12 + index * (kButtonHeight + kButtonSpacing),
+        kButtonWidth,
+        kButtonHeight);
+}
+
+int UIChooseWnd::HitTestEntry(int x, int y) const
+{
+    for (int index = 0; index < MenuEntry_Count; ++index) {
+        const RECT entryRect = GetEntryRect(index);
+        if (x >= entryRect.left && x < entryRect.right && y >= entryRect.top && y < entryRect.bottom) {
+            return index;
+        }
+    }
+    return -1;
 }
 
 void UIChooseWnd::SyncSelectionVisuals()
@@ -316,15 +342,14 @@ msgresult_t UIChooseWnd::ActivateSelection()
 void UIChooseWnd::OnDraw()
 {
     EnsureCreated();
+    if (IsQtUiRuntimeEnabled()) {
+        return;
+    }
     if (!g_hMainWnd || m_show == 0) {
         return;
     }
 
-    HDC hdc = UIWindow::GetSharedDrawDC();
-    const bool useShared = (hdc != nullptr);
-    if (!useShared) {
-        hdc = GetDC(g_hMainWnd);
-    }
+    HDC hdc = AcquireDrawTarget();
     if (!hdc) {
         return;
     }
@@ -334,32 +359,52 @@ void UIChooseWnd::OnDraw()
     const RECT panel = MakeRect(m_x, m_y, m_w, m_h);
     FillRoundedRectColor(hdc, panel, RGB(255, 255, 255), kWindowCornerRadius);
 
-    HDC previousShared = UIWindow::GetSharedDrawDC();
-    UIWindow::SetSharedDrawDC(hdc);
-    DrawChildren();
-    UIWindow::SetSharedDrawDC(previousShared);
+    DrawChildrenToHdc(hdc);
 
-    if (!useShared) {
-        ReleaseDC(g_hMainWnd, hdc);
-    }
+    ReleaseDrawTarget(hdc);
 }
 
 void UIChooseWnd::OnLBtnDown(int x, int y)
 {
-    (void)x;
-    (void)y;
+    const int hitIndex = HitTestEntry(x, y);
+    m_pressedIndex = hitIndex;
+    if (hitIndex >= 0) {
+        m_selectedIndex = hitIndex;
+        SyncSelectionVisuals();
+    }
+}
+
+void UIChooseWnd::OnLBtnUp(int x, int y)
+{
+    const int pressedIndex = m_pressedIndex;
+    const int hitIndex = HitTestEntry(x, y);
+    m_pressedIndex = -1;
+    if (hitIndex >= 0) {
+        m_selectedIndex = hitIndex;
+        SyncSelectionVisuals();
+    }
+    if (pressedIndex >= 0 && pressedIndex == hitIndex) {
+        ActivateSelection();
+    }
 }
 
 void UIChooseWnd::OnLBtnDblClk(int x, int y)
 {
-    (void)x;
-    (void)y;
+    const int hitIndex = HitTestEntry(x, y);
+    if (hitIndex >= 0) {
+        m_selectedIndex = hitIndex;
+        SyncSelectionVisuals();
+        ActivateSelection();
+    }
 }
 
 void UIChooseWnd::OnMouseMove(int x, int y)
 {
-    (void)x;
-    (void)y;
+    const int hitIndex = HitTestEntry(x, y);
+    if (hitIndex >= 0 && hitIndex != m_selectedIndex) {
+        m_selectedIndex = hitIndex;
+        SyncSelectionVisuals();
+    }
 }
 
 msgresult_t UIChooseWnd::SendMsg(UIWindow* sender, int msg, msgparam_t wparam, msgparam_t lparam, msgparam_t extra)
@@ -405,5 +450,36 @@ void UIChooseWnd::OnKeyDown(int virtualKey)
 
     default:
         break;
+    }
+}
+
+int UIChooseWnd::GetSelectedIndex() const
+{
+    return m_selectedIndex;
+}
+
+int UIChooseWnd::GetPressedIndex() const
+{
+    return m_pressedIndex;
+}
+
+int UIChooseWnd::GetEntryCount() const
+{
+    return MenuEntry_Count;
+}
+
+const char* UIChooseWnd::GetEntryLabelForQt(int index) const
+{
+    switch (index) {
+    case MenuEntry_CharacterSelect:
+        return "Character Select";
+    case MenuEntry_ReturnToGame:
+        return "Return To Game";
+    case MenuEntry_ExitToWindows:
+        return "Exit To Windows";
+    case MenuEntry_ReturnToSavePoint:
+        return "Return To Save Point";
+    default:
+        return "";
     }
 }

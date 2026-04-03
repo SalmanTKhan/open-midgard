@@ -4,17 +4,25 @@
 #include "gamemode/LoginMode.h"
 #include "gamemode/Mode.h"
 #include "main/WinMain.h"
+#include "qtui/QtUiRuntime.h"
 #include "render/DC.h"
 #include "render3d/Device.h"
 #include "res/ActRes.h"
+#include "res/Bitmap.h"
 #include "res/ImfRes.h"
 #include "res/PaletteRes.h"
 #include "res/Sprite.h"
 #include "session/Session.h"
 #include "ui/UIWindowMgr.h"
 
-#include <gdiplus.h>
 #include <windows.h>
+
+#if RO_ENABLE_QT6_UI
+#include <QFont>
+#include <QImage>
+#include <QPainter>
+#include <QString>
+#endif
 
 #include <algorithm>
 #include <array>
@@ -22,8 +30,6 @@
 #include <cstdio>
 #include <cstring>
 #include <vector>
-
-#pragma comment(lib, "gdiplus.lib")
 
 namespace {
 
@@ -42,144 +48,145 @@ constexpr int kPageButtonXNext = 520;
 constexpr int kPageButtonY = 110;
 constexpr int kPageButtonWidth = 12;
 constexpr int kPageButtonHeight = 48;
+constexpr int kSelectCharButtonY = 318;
+constexpr int kSelectCharButtonHeight = 24;
+constexpr int kSelectCharCancelX = 484;
+constexpr int kSelectCharCancelW = 90;
+constexpr int kSelectCharPrimaryX = 404;
+constexpr int kSelectCharPrimaryW = 80;
+constexpr int kSelectCharDeleteX = 5;
+constexpr int kSelectCharDeleteW = 80;
+constexpr int kSelectCharChargeX = 314;
+constexpr int kSelectCharChargeW = 85;
 constexpr char kRegPath[] = "Software\\Gravity Soft\\Ragnarok Online";
 constexpr char kCurSlotValue[] = "CURSLOT";
 
-ULONG_PTR EnsureGdiplusStarted()
+shopui::BitmapPixels LoadBitmapPixelsFromGameData(const char* path)
 {
-    static ULONG_PTR s_token = 0;
-    static bool s_started = false;
-    if (!s_started) {
-        Gdiplus::GdiplusStartupInput startupInput;
-        if (Gdiplus::GdiplusStartup(&s_token, &startupInput, nullptr) == Gdiplus::Ok) {
-            s_started = true;
-        }
-    }
-    return s_token;
+    return shopui::LoadBitmapPixelsFromGameData(path ? path : "", true);
 }
 
-HBITMAP LoadBitmapFromGameData(const char* path)
+void DrawBitmapPixelsStretched(HDC target, const shopui::BitmapPixels& bmp, const RECT& dst)
 {
-    if (!path || !*path || !EnsureGdiplusStarted()) {
-        return nullptr;
-    }
-
-    int size = 0;
-    unsigned char* bytes = g_fileMgr.GetData(path, &size);
-    if (!bytes || size <= 0) {
-        delete[] bytes;
-        return nullptr;
-    }
-
-    HBITMAP outBmp = nullptr;
-    HGLOBAL mem = GlobalAlloc(GMEM_MOVEABLE, static_cast<SIZE_T>(size));
-    if (mem) {
-        void* dst = GlobalLock(mem);
-        if (dst) {
-            std::memcpy(dst, bytes, static_cast<size_t>(size));
-            GlobalUnlock(mem);
-
-            IStream* stream = nullptr;
-            if (CreateStreamOnHGlobal(mem, TRUE, &stream) == S_OK) {
-                auto* bmp = Gdiplus::Bitmap::FromStream(stream, FALSE);
-                if (bmp && bmp->GetLastStatus() == Gdiplus::Ok) {
-                    bmp->GetHBITMAP(RGB(0, 0, 0), &outBmp);
-                }
-                delete bmp;
-                stream->Release();
-            } else {
-                GlobalFree(mem);
-            }
-        } else {
-            GlobalFree(mem);
-        }
-    }
-
-    delete[] bytes;
-    return outBmp;
-}
-
-void DrawBitmapStretched(HDC target, HBITMAP bmp, const RECT& dst)
-{
-    if (!target || !bmp) {
+    if (!target || !bmp.IsValid() || dst.right <= dst.left || dst.bottom <= dst.top) {
         return;
     }
 
-    BITMAP bm{};
-    if (!GetObjectA(bmp, sizeof(bm), &bm) || bm.bmWidth <= 0 || bm.bmHeight <= 0) {
-        return;
-    }
+    BITMAPINFO bmi{};
+    bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    bmi.bmiHeader.biWidth = bmp.width;
+    bmi.bmiHeader.biHeight = -bmp.height;
+    bmi.bmiHeader.biPlanes = 1;
+    bmi.bmiHeader.biBitCount = 32;
+    bmi.bmiHeader.biCompression = BI_RGB;
 
-    HDC srcDC = CreateCompatibleDC(target);
-    if (!srcDC) {
-        return;
-    }
-
-    HGDIOBJ old = SelectObject(srcDC, bmp);
-    SetStretchBltMode(target, HALFTONE);
-    StretchBlt(target,
+    const int oldStretchMode = SetStretchBltMode(target, HALFTONE);
+    StretchDIBits(target,
         dst.left,
         dst.top,
         dst.right - dst.left,
         dst.bottom - dst.top,
-        srcDC,
         0,
         0,
-        bm.bmWidth,
-        bm.bmHeight,
+        bmp.width,
+        bmp.height,
+        bmp.pixels.data(),
+        &bmi,
+        DIB_RGB_COLORS,
         SRCCOPY);
-    SelectObject(srcDC, old);
-    DeleteDC(srcDC);
+    SetStretchBltMode(target, oldStretchMode);
 }
 
-void DrawBitmapTransparent(HDC target, HBITMAP bmp, const RECT& dst)
+void DrawBitmapPixelsOverlay(HDC target, const shopui::BitmapPixels& bmp, const RECT& dst)
 {
-    if (!target || !bmp) {
+    if (!target || !bmp.IsValid() || dst.right <= dst.left || dst.bottom <= dst.top) {
         return;
     }
-
-    BITMAP bm{};
-    if (!GetObjectA(bmp, sizeof(bm), &bm) || bm.bmWidth <= 0 || bm.bmHeight <= 0) {
-        return;
-    }
-
-    HDC srcDC = CreateCompatibleDC(target);
-    if (!srcDC) {
-        return;
-    }
-
-    HGDIOBJ old = SelectObject(srcDC, bmp);
-    TransparentBlt(target,
-        dst.left,
-        dst.top,
-        dst.right - dst.left,
-        dst.bottom - dst.top,
-        srcDC,
-        0,
-        0,
-        bm.bmWidth,
-        bm.bmHeight,
-        RGB(255, 0, 255));
-    SelectObject(srcDC, old);
-    DeleteDC(srcDC);
+    shopui::DrawBitmapPixelsTransparent(target, bmp, dst);
 }
 
-RECT MakeBitmapRectAtSlotOrigin(HBITMAP bmp, const RECT& outerRect)
+#if RO_ENABLE_QT6_UI
+QFont BuildSelectCharFontFromHdc(HDC hdc)
+{
+    LOGFONTA logFont{};
+    if (hdc) {
+        if (HGDIOBJ fontObject = GetCurrentObject(hdc, OBJ_FONT)) {
+            GetObjectA(fontObject, sizeof(logFont), &logFont);
+        }
+    }
+
+    const QString family = logFont.lfFaceName[0] != '\0'
+        ? QString::fromLocal8Bit(logFont.lfFaceName)
+        : QStringLiteral("MS Sans Serif");
+    QFont font(family);
+    font.setPixelSize(logFont.lfHeight != 0 ? (std::max)(1, static_cast<int>(std::abs(logFont.lfHeight))) : 13);
+    font.setBold(logFont.lfWeight >= FW_BOLD);
+    font.setStyleStrategy(QFont::NoAntialias);
+    return font;
+}
+
+Qt::Alignment ToQtSelectCharAlignment(UINT format)
+{
+    Qt::Alignment alignment = Qt::AlignLeft | Qt::AlignTop;
+    if (format & DT_CENTER) {
+        alignment &= ~Qt::AlignLeft;
+        alignment |= Qt::AlignHCenter;
+    } else if (format & DT_RIGHT) {
+        alignment &= ~Qt::AlignLeft;
+        alignment |= Qt::AlignRight;
+    }
+
+    if (format & DT_VCENTER) {
+        alignment &= ~Qt::AlignTop;
+        alignment |= Qt::AlignVCenter;
+    } else if (format & DT_BOTTOM) {
+        alignment &= ~Qt::AlignTop;
+        alignment |= Qt::AlignBottom;
+    }
+
+    return alignment;
+}
+
+void DrawSelectCharText(HDC hdc, const RECT& rect, const char* text, COLORREF color, UINT format)
+{
+    if (!hdc || !text || rect.right <= rect.left || rect.bottom <= rect.top) {
+        return;
+    }
+
+    const QString label = QString::fromLocal8Bit(text);
+    if (label.isEmpty()) {
+        return;
+    }
+
+    const int width = rect.right - rect.left;
+    const int height = rect.bottom - rect.top;
+    std::vector<unsigned int> pixels(static_cast<size_t>(width) * static_cast<size_t>(height), 0u);
+    QImage image(reinterpret_cast<uchar*>(pixels.data()), width, height, width * static_cast<int>(sizeof(unsigned int)), QImage::Format_ARGB32);
+    if (image.isNull()) {
+        return;
+    }
+
+    QPainter painter(&image);
+    painter.setRenderHint(QPainter::Antialiasing, false);
+    painter.setRenderHint(QPainter::TextAntialiasing, false);
+    painter.setFont(BuildSelectCharFontFromHdc(hdc));
+    painter.setPen(QColor(GetRValue(color), GetGValue(color), GetBValue(color)));
+    painter.drawText(QRect(0, 0, width, height), ToQtSelectCharAlignment(format) | Qt::TextSingleLine, label);
+    AlphaBlendArgbToHdc(hdc, rect.left, rect.top, width, height, pixels.data(), width, height);
+}
+#endif
+
+RECT MakeBitmapRectAtSlotOrigin(const shopui::BitmapPixels& bmp, const RECT& outerRect)
 {
     RECT result = outerRect;
-    if (!bmp) {
-        return result;
-    }
-
-    BITMAP bm{};
-    if (!GetObjectA(bmp, sizeof(bm), &bm) || bm.bmWidth <= 0 || bm.bmHeight <= 0) {
+    if (!bmp.IsValid()) {
         return result;
     }
 
     result.left = outerRect.left;
     result.top = outerRect.top;
-    result.right = result.left + bm.bmWidth;
-    result.bottom = result.top + bm.bmHeight;
+    result.right = result.left + bmp.width;
+    result.bottom = result.top + bmp.height;
     return result;
 }
 
@@ -291,18 +298,18 @@ std::vector<std::string> BuildUiAssetCandidates(const char* fileName)
     return out;
 }
 
-HBITMAP LoadFirstBitmapFromCandidates(const std::vector<std::string>& candidates, std::string* outPath)
+shopui::BitmapPixels LoadFirstBitmapPixelsFromCandidates(const std::vector<std::string>& candidates, std::string* outPath)
 {
     for (const std::string& candidate : candidates) {
-        HBITMAP bmp = LoadBitmapFromGameData(candidate.c_str());
-        if (bmp) {
+        shopui::BitmapPixels bmp = LoadBitmapPixelsFromGameData(candidate.c_str());
+        if (bmp.IsValid()) {
             if (outPath) {
                 *outPath = candidate;
             }
             return bmp;
         }
     }
-    return nullptr;
+    return {};
 }
 
 std::string ResolveUiAssetPath(const char* fileName)
@@ -505,6 +512,103 @@ bool DrawPreviewLayer(HDC hdc, const UISelectCharWnd::PreviewState& preview, int
     return DrawActMotionToHdc(hdc, preview.x + point.x, preview.y + point.y, sprRes, &singleLayerMotion, palette);
 }
 
+#if RO_ENABLE_QT6_UI
+bool DrawPreviewAccessoryMotionToArgb(unsigned int* pixels,
+    int width,
+    int height,
+    const UISelectCharWnd::PreviewState& preview,
+    const std::string& accessoryActName,
+    const std::string& accessorySprName)
+{
+    if (!pixels || width <= 0 || height <= 0 || accessoryActName.empty() || accessorySprName.empty()) {
+        return false;
+    }
+
+    CActRes* bodyActRes = g_resMgr.GetAs<CActRes>(preview.actName[0].c_str());
+    CActRes* headActRes = g_resMgr.GetAs<CActRes>(preview.actName[1].c_str());
+    CActRes* accessoryActRes = g_resMgr.GetAs<CActRes>(accessoryActName.c_str());
+    CSprRes* accessorySprRes = g_resMgr.GetAs<CSprRes>(accessorySprName.c_str());
+    if (!bodyActRes || !headActRes || !accessoryActRes || !accessorySprRes) {
+        return false;
+    }
+
+    const CMotion* bodyMotion = bodyActRes->GetMotion(preview.curAction, preview.curMotion);
+    const CMotion* headMotion = headActRes->GetMotion(preview.curAction, preview.curMotion);
+    const CMotion* accessoryMotion = accessoryActRes->GetMotion(preview.curAction, preview.curMotion);
+    if (!accessoryMotion) {
+        accessoryMotion = accessoryActRes->GetMotion(preview.curAction, 0);
+    }
+    if (!bodyMotion || !headMotion || !accessoryMotion) {
+        return false;
+    }
+
+    POINT point{};
+    ApplyAttachPointDelta(bodyMotion, headMotion, &point);
+    ApplyAttachPointDelta(headMotion, accessoryMotion, &point);
+    return DrawActMotionToArgb(
+        pixels,
+        width,
+        height,
+        preview.x - preview.ownerX + point.x,
+        preview.y - preview.ownerY + point.y,
+        accessorySprRes,
+        accessoryMotion,
+        accessorySprRes->m_pal);
+}
+
+bool DrawPreviewLayerToArgb(unsigned int* pixels, int width, int height, const UISelectCharWnd::PreviewState& preview, int layerIndex)
+{
+    if (!pixels || width <= 0 || height <= 0 || layerIndex < 0 || layerIndex > 4) {
+        return false;
+    }
+
+    CActRes* actRes = g_resMgr.GetAs<CActRes>(preview.actName[layerIndex].c_str());
+    CSprRes* sprRes = g_resMgr.GetAs<CSprRes>(preview.sprName[layerIndex].c_str());
+    CImfRes* imfRes = g_resMgr.GetAs<CImfRes>(preview.imfName.c_str());
+    if (!actRes || !sprRes || !imfRes) {
+        return false;
+    }
+
+    const int layerMotion = preview.curMotion;
+    int resolvedLayer = imfRes->GetLayer(layerIndex, preview.curAction, layerMotion);
+    if (resolvedLayer < 0) {
+        resolvedLayer = layerIndex;
+    }
+
+    const CMotion* motion = actRes->GetMotion(preview.curAction, layerMotion);
+    if (!motion || resolvedLayer >= static_cast<int>(motion->sprClips.size())) {
+        return false;
+    }
+
+    const POINT point = GetPreviewLayerPoint(preview, layerIndex, resolvedLayer, imfRes, motion, preview.curMotion, layerMotion, preview.curMotion);
+
+    std::array<unsigned int, 256> paletteOverride{};
+    unsigned int* palette = sprRes->m_pal;
+    if (layerIndex == 0 && preview.bodyPalette > 0 && !preview.bodyPaletteName.empty()) {
+        if (BuildPaletteOverride(preview.bodyPaletteName, paletteOverride)) {
+            palette = paletteOverride.data();
+        }
+    }
+    if (layerIndex == 1 && preview.headPalette > 0 && !preview.headPaletteName.empty()) {
+        if (BuildPaletteOverride(preview.headPaletteName, paletteOverride)) {
+            palette = paletteOverride.data();
+        }
+    }
+
+    CMotion singleLayerMotion{};
+    singleLayerMotion.sprClips.push_back(motion->sprClips[resolvedLayer]);
+    return DrawActMotionToArgb(
+        pixels,
+        width,
+        height,
+        preview.x - preview.ownerX + point.x,
+        preview.y - preview.ownerY + point.y,
+        sprRes,
+        &singleLayerMotion,
+        palette);
+}
+#endif
+
 void CopyCharacterName(const CHARACTER_INFO& info, char (&out)[25])
 {
     std::memcpy(out, info.name, 24);
@@ -540,9 +644,9 @@ const char* ResolveJobName(int job)
 } // namespace
 
 UISelectCharWnd::UISelectCharWnd()
-    : m_controlsCreated(false), m_assetsProbed(false), m_backgroundBmp(nullptr),
-      m_slotBmp(nullptr), m_slotSelectedBmp(nullptr),
-      m_composeDC(nullptr), m_composeBitmap(nullptr), m_composeWidth(0), m_composeHeight(0),
+    : m_controlsCreated(false), m_assetsProbed(false), m_backgroundBmp(),
+      m_slotBmp(), m_slotSelectedBmp(),
+      m_composeSurface(),
       m_okButton(nullptr), m_cancelButton(nullptr), m_makeButton(nullptr),
       m_deleteButton(nullptr), m_chargeButton(nullptr), m_selectedSlot(0), m_page(0),
       m_lastAnimTick(0), m_animAction(0)
@@ -557,64 +661,393 @@ UISelectCharWnd::~UISelectCharWnd()
     ClearAssets();
 }
 
+void UISelectCharWnd::EnsureQtLayout()
+{
+    if (!g_hMainWnd) {
+        return;
+    }
+
+    RECT clientRect{};
+    if (!GetClientRect(g_hMainWnd, &clientRect)) {
+        return;
+    }
+
+    OnCreate(clientRect.right - clientRect.left, clientRect.bottom - clientRect.top);
+}
+
+bool UISelectCharWnd::GetQtBackgroundBitmap(const unsigned int** pixels, int* width, int* height)
+{
+    if (!pixels || !width || !height) {
+        return false;
+    }
+
+    *pixels = nullptr;
+    *width = 0;
+    *height = 0;
+
+    EnsureResourceCache();
+    if (!m_backgroundBmp.IsValid() || m_backgroundBmp.pixels.empty()) {
+        return false;
+    }
+
+    *pixels = m_backgroundBmp.pixels.data();
+    *width = m_backgroundBmp.width;
+    *height = m_backgroundBmp.height;
+    return true;
+}
+
+bool UISelectCharWnd::GetQtSelectedSlotBitmap(const unsigned int** pixels, int* width, int* height)
+{
+    if (!pixels || !width || !height) {
+        return false;
+    }
+
+    *pixels = nullptr;
+    *width = 0;
+    *height = 0;
+
+    EnsureResourceCache();
+    if (!m_slotSelectedBmp.IsValid() || m_slotSelectedBmp.pixels.empty()) {
+        return false;
+    }
+
+    *pixels = m_slotSelectedBmp.pixels.data();
+    *width = m_slotSelectedBmp.width;
+    *height = m_slotSelectedBmp.height;
+    return true;
+}
+
+int UISelectCharWnd::GetCurrentPageCount() const
+{
+    return GetPageCount();
+}
+
+bool UISelectCharWnd::GetVisibleSlotDisplay(int visibleIndex, VisibleSlotDisplay* out) const
+{
+    if (!out || visibleIndex < 0 || visibleIndex >= kVisibleSlotsPerPage) {
+        return false;
+    }
+
+    *out = VisibleSlotDisplay{};
+    const int slotNumber = GetVisibleSlotStart() + visibleIndex;
+    out->slotNumber = slotNumber;
+    out->selected = (slotNumber == m_selectedSlot);
+    out->x = m_x + kSlotLeft + visibleIndex * (kSlotWidth + kSlotGap);
+    out->y = m_y + kSlotTop;
+    out->width = kSlotWidth;
+    out->height = kSlotHeight;
+
+    const int charIndex = FindCharacterIndexForSlot(slotNumber);
+    CHARACTER_INFO* chars = GetCharacters();
+    if (charIndex < 0 || !chars) {
+        return true;
+    }
+
+    const CHARACTER_INFO& info = chars[charIndex];
+    char nameBuf[25]{};
+    CopyCharacterName(info, nameBuf);
+    out->occupied = true;
+    out->name = nameBuf;
+    out->job = ResolveJobName(info.job);
+    out->level = info.level;
+    return true;
+}
+
+bool UISelectCharWnd::GetSelectedCharacterDisplay(SelectedCharacterDisplay* out) const
+{
+    if (!out) {
+        return false;
+    }
+
+    *out = SelectedCharacterDisplay{};
+    CHARACTER_INFO* chars = GetCharacters();
+    const int selectedIndex = FindCharacterIndexForSlot(m_selectedSlot);
+    if (selectedIndex < 0 || !chars) {
+        return true;
+    }
+
+    const CHARACTER_INFO& info = chars[selectedIndex];
+    char nameBuf[25]{};
+    CopyCharacterName(info, nameBuf);
+    out->valid = true;
+    out->name = nameBuf;
+    out->job = ResolveJobName(info.job);
+    out->level = info.level;
+    out->exp = info.exp;
+    out->hp = info.hp;
+    out->sp = info.sp;
+    out->str = info.Str;
+    out->agi = info.Agi;
+    out->vit = info.Vit;
+    out->intStat = info.Int;
+    out->dex = info.Dex;
+    out->luk = info.Luk;
+    return true;
+}
+
+int UISelectCharWnd::GetQtActionButtonCount() const
+{
+    return 4;
+}
+
+bool UISelectCharWnd::GetQtActionButtonDisplayForQt(int index, QtButtonDisplay* out) const
+{
+    if (!out || index < 0 || index >= GetQtActionButtonCount()) {
+        return false;
+    }
+
+    const bool selectedEmpty = (FindCharacterIndexForSlot(m_selectedSlot) < 0);
+    switch (index) {
+    case 0:
+        out->id = 145;
+        out->x = m_x + kSelectCharDeleteX;
+        out->y = m_y + kSelectCharButtonY;
+        out->width = kSelectCharDeleteW;
+        out->height = kSelectCharButtonHeight;
+        out->label = "Delete";
+        out->visible = !selectedEmpty;
+        return true;
+    case 1:
+        out->id = 218;
+        out->x = m_x + kSelectCharChargeX;
+        out->y = m_y + kSelectCharButtonY;
+        out->width = kSelectCharChargeW;
+        out->height = kSelectCharButtonHeight;
+        out->label = "Charge";
+        out->visible = true;
+        return true;
+    case 2:
+        out->id = selectedEmpty ? 137 : 118;
+        out->x = m_x + kSelectCharPrimaryX;
+        out->y = m_y + kSelectCharButtonY;
+        out->width = kSelectCharPrimaryW;
+        out->height = kSelectCharButtonHeight;
+        out->label = selectedEmpty ? "Make" : "OK";
+        out->visible = true;
+        return true;
+    case 3:
+        out->id = 119;
+        out->x = m_x + kSelectCharCancelX;
+        out->y = m_y + kSelectCharButtonY;
+        out->width = kSelectCharCancelW;
+        out->height = kSelectCharButtonHeight;
+        out->label = "Cancel";
+        out->visible = true;
+        return true;
+    default:
+        return false;
+    }
+}
+
+int UISelectCharWnd::GetQtPageButtonCount() const
+{
+    return 2;
+}
+
+bool UISelectCharWnd::GetQtPageButtonDisplayForQt(int index, QtButtonDisplay* out) const
+{
+    if (!out || index < 0 || index >= GetQtPageButtonCount()) {
+        return false;
+    }
+
+    out->id = index == 0 ? -1 : 1;
+    out->x = m_x + (index == 0 ? kPageButtonXPrev : kPageButtonXNext);
+    out->y = m_y + kPageButtonY;
+    out->width = kPageButtonWidth;
+    out->height = kPageButtonHeight;
+    out->label = index == 0 ? "<" : ">";
+    out->visible = GetPageCount() > 1;
+    return true;
+}
+
+int UISelectCharWnd::GetQtSelectedDetailFieldCount() const
+{
+    return 12;
+}
+
+bool UISelectCharWnd::GetQtSelectedDetailFieldDisplayForQt(int index, QtDetailFieldDisplay* out) const
+{
+    if (!out || index < 0 || index >= GetQtSelectedDetailFieldCount()) {
+        return false;
+    }
+
+    SelectedCharacterDisplay selected{};
+    if (!GetSelectedCharacterDisplay(&selected) || !selected.valid) {
+        return false;
+    }
+
+    *out = QtDetailFieldDisplay{};
+    out->width = 140;
+    out->height = 14;
+
+    char value[64]{};
+    switch (index) {
+    case 0:
+        out->x = m_x + 69;
+        out->y = m_y + 206;
+        out->text = selected.name;
+        return true;
+    case 1:
+        out->x = m_x + 69;
+        out->y = m_y + 222;
+        out->text = selected.job;
+        return true;
+    case 2:
+        out->x = m_x + 69;
+        out->y = m_y + 238;
+        std::snprintf(value, sizeof(value), "%d", selected.level);
+        out->text = value;
+        return true;
+    case 3:
+        out->x = m_x + 69;
+        out->y = m_y + 254;
+        std::snprintf(value, sizeof(value), "%u", selected.exp);
+        out->text = value;
+        return true;
+    case 4:
+        out->x = m_x + 69;
+        out->y = m_y + 270;
+        std::snprintf(value, sizeof(value), "%d", selected.hp);
+        out->text = value;
+        return true;
+    case 5:
+        out->x = m_x + 69;
+        out->y = m_y + 286;
+        std::snprintf(value, sizeof(value), "%d", selected.sp);
+        out->text = value;
+        return true;
+    case 6:
+        out->x = m_x + 213;
+        out->y = m_y + 206;
+        std::snprintf(value, sizeof(value), "%d", selected.str);
+        out->text = value;
+        return true;
+    case 7:
+        out->x = m_x + 213;
+        out->y = m_y + 222;
+        std::snprintf(value, sizeof(value), "%d", selected.agi);
+        out->text = value;
+        return true;
+    case 8:
+        out->x = m_x + 213;
+        out->y = m_y + 238;
+        std::snprintf(value, sizeof(value), "%d", selected.vit);
+        out->text = value;
+        return true;
+    case 9:
+        out->x = m_x + 213;
+        out->y = m_y + 254;
+        std::snprintf(value, sizeof(value), "%d", selected.intStat);
+        out->text = value;
+        return true;
+    case 10:
+        out->x = m_x + 213;
+        out->y = m_y + 270;
+        std::snprintf(value, sizeof(value), "%d", selected.dex);
+        out->text = value;
+        return true;
+    case 11:
+        out->x = m_x + 213;
+        out->y = m_y + 286;
+        std::snprintf(value, sizeof(value), "%d", selected.luk);
+        out->text = value;
+        return true;
+    default:
+        return false;
+    }
+}
+
+bool UISelectCharWnd::HandleQtMouseDown(int x, int y)
+{
+    if (!g_hMainWnd || m_show == 0) {
+        return false;
+    }
+
+    RECT rcClient{};
+    GetClientRect(g_hMainWnd, &rcClient);
+    const int clientW = rcClient.right - rcClient.left;
+    const int clientH = rcClient.bottom - rcClient.top;
+    if (clientW > 0 && clientH > 0) {
+        OnCreate(clientW, clientH);
+    }
+
+    ClampSelection();
+    UpdateActionButtons();
+    if (x < m_x || y < m_y || x >= m_x + m_w || y >= m_y + m_h) {
+        return false;
+    }
+    return true;
+}
+
+bool UISelectCharWnd::HandleQtDoubleClick(int x, int y)
+{
+    if (!HandleQtMouseDown(x, y)) {
+        return false;
+    }
+
+    const int slot = HitSlot(x, y);
+    if (slot < 0) {
+        return false;
+    }
+
+    SetSelectedSlot(slot);
+    if (FindCharacterIndexForSlot(slot) < 0) {
+        return true;
+    }
+
+    SendMsg(nullptr, 6, 118, 0, 0);
+    return true;
+}
+
+bool UISelectCharWnd::HandleQtMouseUp(int x, int y)
+{
+    if (!HandleQtMouseDown(x, y)) {
+        return false;
+    }
+
+    const bool selectedEmpty = (FindCharacterIndexForSlot(m_selectedSlot) < 0);
+    const auto hitRect = [this, x, y](int left, int top, int width, int height) {
+        return x >= m_x + left && x < m_x + left + width
+            && y >= m_y + top && y < m_y + top + height;
+    };
+
+    if (hitRect(kSelectCharCancelX, kSelectCharButtonY, kSelectCharCancelW, kSelectCharButtonHeight)) {
+        SendMsg(nullptr, 6, 119, 0, 0);
+        return true;
+    }
+    if (hitRect(kSelectCharPrimaryX, kSelectCharButtonY, kSelectCharPrimaryW, kSelectCharButtonHeight)) {
+        SendMsg(nullptr, 6, selectedEmpty ? 137 : 118, 0, 0);
+        return true;
+    }
+    if (!selectedEmpty && hitRect(kSelectCharDeleteX, kSelectCharButtonY, kSelectCharDeleteW, kSelectCharButtonHeight)) {
+        SendMsg(nullptr, 6, 145, 0, 0);
+        return true;
+    }
+    if (hitRect(kSelectCharChargeX, kSelectCharButtonY, kSelectCharChargeW, kSelectCharButtonHeight)) {
+        SendMsg(nullptr, 6, 218, 0, 0);
+        return true;
+    }
+
+    OnLBtnUp(x, y);
+    return true;
+}
+
 void UISelectCharWnd::ClearAssets()
 {
-    if (m_backgroundBmp) {
-        DeleteObject(m_backgroundBmp);
-        m_backgroundBmp = nullptr;
-    }
+    m_backgroundBmp.Clear();
     m_backgroundPath.clear();
-    if (m_slotBmp) {
-        DeleteObject(m_slotBmp);
-        m_slotBmp = nullptr;
-    }
-    if (m_slotSelectedBmp) {
-        DeleteObject(m_slotSelectedBmp);
-        m_slotSelectedBmp = nullptr;
-    }
+    m_slotBmp.Clear();
+    m_slotSelectedBmp.Clear();
 }
 
 void UISelectCharWnd::ReleaseComposeSurface()
 {
-    if (m_composeBitmap) {
-        DeleteObject(m_composeBitmap);
-        m_composeBitmap = nullptr;
-    }
-    if (m_composeDC) {
-        DeleteDC(m_composeDC);
-        m_composeDC = nullptr;
-    }
-    m_composeWidth = 0;
-    m_composeHeight = 0;
+    m_composeSurface.Release();
 }
 
-bool UISelectCharWnd::EnsureComposeSurface(HDC referenceDC, int width, int height)
+bool UISelectCharWnd::EnsureComposeSurface(int width, int height)
 {
-    if (!referenceDC || width <= 0 || height <= 0) {
-        return false;
-    }
-
-    if (m_composeDC && m_composeBitmap && m_composeWidth == width && m_composeHeight == height) {
-        return true;
-    }
-
-    ReleaseComposeSurface();
-
-    m_composeDC = CreateCompatibleDC(referenceDC);
-    if (!m_composeDC) {
-        return false;
-    }
-
-    m_composeBitmap = CreateCompatibleBitmap(referenceDC, width, height);
-    if (!m_composeBitmap) {
-        ReleaseComposeSurface();
-        return false;
-    }
-
-    SelectObject(m_composeDC, m_composeBitmap);
-    m_composeWidth = width;
-    m_composeHeight = height;
-    return true;
+    return m_composeSurface.EnsureSize(width, height);
 }
 
 void UISelectCharWnd::EnsureResourceCache()
@@ -632,8 +1065,8 @@ void UISelectCharWnd::EnsureResourceCache()
         nullptr
     };
 
-    for (int i = 0; panelNames[i] && !m_backgroundBmp; ++i) {
-        m_backgroundBmp = LoadFirstBitmapFromCandidates(BuildUiAssetCandidates(panelNames[i]), &m_backgroundPath);
+    for (int i = 0; panelNames[i] && !m_backgroundBmp.IsValid(); ++i) {
+        m_backgroundBmp = LoadFirstBitmapPixelsFromCandidates(BuildUiAssetCandidates(panelNames[i]), &m_backgroundPath);
     }
 
     const char* selSlotBmpNames[] = {
@@ -643,8 +1076,8 @@ void UISelectCharWnd::EnsureResourceCache()
         "selslot_on.bmp",
         nullptr
     };
-    for (int i = 0; selSlotBmpNames[i] && !m_slotSelectedBmp; ++i) {
-        m_slotSelectedBmp = LoadFirstBitmapFromCandidates(BuildUiAssetCandidates(selSlotBmpNames[i]), nullptr);
+    for (int i = 0; selSlotBmpNames[i] && !m_slotSelectedBmp.IsValid(); ++i) {
+        m_slotSelectedBmp = LoadFirstBitmapPixelsFromCandidates(BuildUiAssetCandidates(selSlotBmpNames[i]), nullptr);
     }
 }
 
@@ -694,9 +1127,13 @@ void UISelectCharWnd::EnsureButtons()
 
 void UISelectCharWnd::UpdateActionButtons()
 {
-    EnsureButtons();
-
     const bool selectedEmpty = (FindCharacterIndexForSlot(m_selectedSlot) < 0);
+    if (IsQtUiRuntimeEnabled()) {
+        m_defPushId = selectedEmpty ? 137 : 118;
+        return;
+    }
+
+    EnsureButtons();
     if (m_okButton) {
         m_okButton->SetShow(selectedEmpty ? 0 : 1);
     }
@@ -726,7 +1163,6 @@ void UISelectCharWnd::OnCreate(int cx, int cy)
 
     Move((cx - 640) / 2 + 33, (cy - 480) / 2 + 65);
     ClampSelection();
-    EnsureButtons();
     UpdateActionButtons();
 }
 
@@ -912,6 +1348,8 @@ void UISelectCharWnd::BuildPreviewForSlot(int visibleIndex, const CHARACTER_INFO
     PreviewState& preview = m_visiblePreviews[visibleIndex];
     preview = PreviewState{};
     preview.valid = true;
+    preview.ownerX = m_x;
+    preview.ownerY = m_y;
     preview.x = m_x + kPreviewBaseX + visibleIndex * kSlotWidth;
     preview.y = m_y + kPreviewBaseY;
     preview.baseAction = 0;
@@ -980,6 +1418,42 @@ void UISelectCharWnd::DrawPreview(HDC hdc, const PreviewState& preview) const
     DrawPreviewAccessoryMotion(hdc, preview, preview.actName[3], preview.sprName[3]);
     DrawPreviewAccessoryMotion(hdc, preview, preview.actName[4], preview.sprName[4]);
 }
+
+#if RO_ENABLE_QT6_UI
+void UISelectCharWnd::DrawQtPreviews(QImage* image)
+{
+    if (!image || image->isNull()) {
+        return;
+    }
+
+    ClampSelection();
+    RebuildVisiblePreviews();
+
+    std::vector<unsigned int> overlayPixels(
+        static_cast<size_t>(image->width()) * static_cast<size_t>(image->height()),
+        0u);
+    if (overlayPixels.empty()) {
+        return;
+    }
+
+    for (const PreviewState& preview : m_visiblePreviews) {
+        DrawPreviewLayerToArgb(overlayPixels.data(), image->width(), image->height(), preview, 0);
+        DrawPreviewLayerToArgb(overlayPixels.data(), image->width(), image->height(), preview, 1);
+        DrawPreviewAccessoryMotionToArgb(overlayPixels.data(), image->width(), image->height(), preview, preview.actName[2], preview.sprName[2]);
+        DrawPreviewAccessoryMotionToArgb(overlayPixels.data(), image->width(), image->height(), preview, preview.actName[3], preview.sprName[3]);
+        DrawPreviewAccessoryMotionToArgb(overlayPixels.data(), image->width(), image->height(), preview, preview.actName[4], preview.sprName[4]);
+    }
+
+    const QImage overlay(
+        reinterpret_cast<const uchar*>(overlayPixels.data()),
+        image->width(),
+        image->height(),
+        image->width() * static_cast<int>(sizeof(unsigned int)),
+        QImage::Format_ARGB32);
+    QPainter painter(image);
+    painter.drawImage(0, 0, overlay);
+}
+#endif
 
 int UISelectCharWnd::HitSlot(int x, int y) const
 {
@@ -1115,25 +1589,29 @@ void UISelectCharWnd::OnDraw()
     UpdateActionButtons();
     RebuildVisiblePreviews();
 
-    const bool useShared = (UIWindow::GetSharedDrawDC() != nullptr);
-    HDC targetDC = useShared ? UIWindow::GetSharedDrawDC() : GetDC(g_hMainWnd);
-    if (!targetDC) {
+    if (IsQtUiRuntimeEnabled()) {
         return;
     }
 
-    HDC hdc = targetDC;
-    const bool useCompose = EnsureComposeSurface(targetDC, clientW, clientH);
+    const bool useCompose = EnsureComposeSurface(clientW, clientH);
+    HDC targetDC = nullptr;
+    HDC hdc = nullptr;
     if (useCompose) {
-        PatBlt(m_composeDC, 0, 0, clientW, clientH, BLACKNESS);
-        g_windowMgr.DrawWallpaperToDC(m_composeDC, clientW, clientH);
-        hdc = m_composeDC;
+        PatBlt(m_composeSurface.GetDC(), 0, 0, clientW, clientH, BLACKNESS);
+        g_windowMgr.DrawWallpaperToDC(m_composeSurface.GetDC(), clientW, clientH);
+        hdc = m_composeSurface.GetDC();
     } else {
+        targetDC = AcquireDrawTarget();
+        if (!targetDC) {
+            return;
+        }
+        hdc = targetDC;
         g_windowMgr.DrawWallpaperToDC(hdc, clientW, clientH);
     }
 
     const RECT panel = MakeRect(m_x, m_y, m_w, m_h);
-    if (m_backgroundBmp) {
-        DrawBitmapStretched(hdc, m_backgroundBmp, panel);
+    if (m_backgroundBmp.IsValid()) {
+        DrawBitmapPixelsStretched(hdc, m_backgroundBmp, panel);
     } else {
         FillRectColor(hdc, panel, RGB(255, 255, 255));
         DrawRectFrame(hdc, panel, RGB(78, 58, 41));
@@ -1147,8 +1625,13 @@ void UISelectCharWnd::OnDraw()
         RECT nextRc = MakeRect(m_x + kPageButtonXNext, m_y + kPageButtonY, kPageButtonWidth, kPageButtonHeight);
         DrawRectFrame(hdc, prevRc, RGB(120, 96, 68));
         DrawRectFrame(hdc, nextRc, RGB(120, 96, 68));
+#if RO_ENABLE_QT6_UI
+        DrawSelectCharText(hdc, prevRc, "<", RGB(94, 56, 38), DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+        DrawSelectCharText(hdc, nextRc, ">", RGB(94, 56, 38), DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+#else
         DrawTextA(hdc, "<", -1, &prevRc, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
         DrawTextA(hdc, ">", -1, &nextRc, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+#endif
     }
 
     CHARACTER_INFO* chars = GetCharacters();
@@ -1161,8 +1644,8 @@ void UISelectCharWnd::OnDraw()
             m_y + kSlotTop,
             kSlotWidth,
             kSlotHeight);
-        if (slotNumber == m_selectedSlot && m_slotSelectedBmp) {
-            DrawBitmapTransparent(hdc, m_slotSelectedBmp, MakeBitmapRectAtSlotOrigin(m_slotSelectedBmp, slotRect));
+        if (slotNumber == m_selectedSlot && m_slotSelectedBmp.IsValid()) {
+            DrawBitmapPixelsOverlay(hdc, m_slotSelectedBmp, MakeBitmapRectAtSlotOrigin(m_slotSelectedBmp, slotRect));
         }
     }
 
@@ -1178,7 +1661,11 @@ void UISelectCharWnd::OnDraw()
         char line[64];
         auto drawLabel = [&](int rx, int ry, const char* text) {
             RECT rc = MakeRect(m_x + rx, m_y + ry, 140, 14);
+#if RO_ENABLE_QT6_UI
+            DrawSelectCharText(hdc, rc, text, RGB(80, 50, 30), DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+#else
             DrawTextA(hdc, text, -1, &rc, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+#endif
         };
 
         SetTextColor(hdc, RGB(80, 50, 30));
@@ -1201,16 +1688,13 @@ void UISelectCharWnd::OnDraw()
         std::snprintf(line, sizeof(line), "%d", info.Luk); drawLabel(213, 286, line);
     }
 
-    HDC prevShared = UIWindow::GetSharedDrawDC();
-    UIWindow::SetSharedDrawDC(hdc);
-    DrawChildren();
-    UIWindow::SetSharedDrawDC(prevShared);
+    DrawChildrenToHdc(hdc);
 
     if (useCompose) {
-        BitBlt(targetDC, 0, 0, clientW, clientH, hdc, 0, 0, SRCCOPY);
-    }
-
-    if (!useShared) {
-        ReleaseDC(g_hMainWnd, targetDC);
+        if (!BlitArgbBitsToDrawTarget(m_composeSurface.GetBits(), clientW, clientH)) {
+            return;
+        }
+    } else {
+        ReleaseDrawTarget(targetDC);
     }
 }

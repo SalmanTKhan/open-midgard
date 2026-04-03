@@ -5,16 +5,24 @@
 #include "DebugLog.h"
 #include "GraphicsSettings.h"
 #include "ModernRenderState.h"
+#include "qtui/QtPlatformWindow.h"
 #include "render/Renderer.h"
 #include "res/Texture.h"
 #include "VulkanSmaaShaders.generated.h"
 #include "VulkanShaders.generated.h"
 
+#if RO_HAS_NATIVE_D3D12
 #include <d3d12.h>
+#endif
+#if RO_HAS_NATIVE_D3D11
 #include <d3d11.h>
 #include <d3dcompiler.h>
+#endif
+#if RO_HAS_NATIVE_D3D11 || RO_HAS_NATIVE_D3D12
 #include <dxgi1_4.h>
+#endif
 #include <algorithm>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -22,17 +30,221 @@
 #include <vector>
 
 #if RO_HAS_VULKAN
+#if RO_PLATFORM_WINDOWS
 #define VK_USE_PLATFORM_WIN32_KHR
+#endif
 #define VK_NO_PROTOTYPES
 #include <vulkan/vulkan.h>
+#if !RO_PLATFORM_WINDOWS && RO_ENABLE_QT6_UI
+#include <QVulkanInstance>
+#include <QWindow>
+#endif
 #endif
 
+#if RO_HAS_NATIVE_D3D12
 #pragma comment(lib, "d3d12.lib")
+#endif
+#if RO_HAS_NATIVE_D3D11
 #pragma comment(lib, "d3d11.lib")
 #pragma comment(lib, "d3dcompiler.lib")
+#endif
+#if RO_HAS_NATIVE_D3D11 || RO_HAS_NATIVE_D3D12
 #pragma comment(lib, "dxgi.lib")
+#endif
 
 namespace {
+
+double VulkanNowMs()
+{
+    using Clock = std::chrono::steady_clock;
+    const Clock::time_point now = Clock::now();
+    return std::chrono::duration<double, std::milli>(now.time_since_epoch()).count();
+}
+
+#if RO_HAS_VULKAN
+constexpr std::uint64_t kVulkanPerfLogIntervalFrames = 120ull;
+
+struct VulkanPerfStats {
+    std::uint64_t presentedFrames = 0;
+    double frameFenceWaitMs = 0.0;
+    double frameReleaseTransferMs = 0.0;
+    double frameResetFenceMs = 0.0;
+    double frameResetDescriptorPoolMs = 0.0;
+    double frameAcquireImageMs = 0.0;
+    double frameResetCommandBufferMs = 0.0;
+    double frameBeginCommandBufferMs = 0.0;
+    double presentSubmitMs = 0.0;
+    double presentQueuePresentMs = 0.0;
+    std::uint64_t backBufferUploads = 0;
+    double backBufferUploadMs = 0.0;
+    double backBufferStageAllocMs = 0.0;
+    double backBufferMapCopyMs = 0.0;
+    std::uint64_t textureUploads = 0;
+    double textureUploadMs = 0.0;
+    double textureStageAllocMs = 0.0;
+    double textureMapCopyMs = 0.0;
+    std::uint64_t immediateCommandBuffers = 0;
+    double immediateFrameFenceWaitMs = 0.0;
+    double immediateFenceWaitMs = 0.0;
+    double immediateSubmitWaitMs = 0.0;
+    std::uint64_t immediateDetailedLogs = 0;
+};
+
+VulkanPerfStats g_vulkanPerfStats;
+
+void MaybeLogVulkanPerfStats()
+{
+    if (g_vulkanPerfStats.presentedFrames == 0
+        || (g_vulkanPerfStats.presentedFrames % kVulkanPerfLogIntervalFrames) != 0) {
+        return;
+    }
+
+    const double frameCount = static_cast<double>((std::max)(std::uint64_t{1}, g_vulkanPerfStats.presentedFrames));
+    const double backBufferUploads = static_cast<double>((std::max)(std::uint64_t{1}, g_vulkanPerfStats.backBufferUploads));
+    const double textureUploads = static_cast<double>((std::max)(std::uint64_t{1}, g_vulkanPerfStats.textureUploads));
+    const double immediateCount = static_cast<double>((std::max)(std::uint64_t{1}, g_vulkanPerfStats.immediateCommandBuffers));
+
+    DbgLog(
+        "[Render][VulkanPerf] frames=%llu frameWait=%.3fms release=%.3fms resetFence=%.3fms resetDesc=%.3fms acquire=%.3fms resetCmd=%.3fms beginCmd=%.3fms submit=%.3fms present=%.3fms backUploads=%llu upload=%.3fms stage=%.3fms mapcopy=%.3fms texUploads=%llu upload=%.3fms stage=%.3fms mapcopy=%.3fms immediate=%llu frameWait=%.3fms fenceWait=%.3fms submitWait=%.3fms\n",
+        static_cast<unsigned long long>(g_vulkanPerfStats.presentedFrames),
+        g_vulkanPerfStats.frameFenceWaitMs / frameCount,
+        g_vulkanPerfStats.frameReleaseTransferMs / frameCount,
+        g_vulkanPerfStats.frameResetFenceMs / frameCount,
+        g_vulkanPerfStats.frameResetDescriptorPoolMs / frameCount,
+        g_vulkanPerfStats.frameAcquireImageMs / frameCount,
+        g_vulkanPerfStats.frameResetCommandBufferMs / frameCount,
+        g_vulkanPerfStats.frameBeginCommandBufferMs / frameCount,
+        g_vulkanPerfStats.presentSubmitMs / frameCount,
+        g_vulkanPerfStats.presentQueuePresentMs / frameCount,
+        static_cast<unsigned long long>(g_vulkanPerfStats.backBufferUploads),
+        g_vulkanPerfStats.backBufferUploadMs / backBufferUploads,
+        g_vulkanPerfStats.backBufferStageAllocMs / backBufferUploads,
+        g_vulkanPerfStats.backBufferMapCopyMs / backBufferUploads,
+        static_cast<unsigned long long>(g_vulkanPerfStats.textureUploads),
+        g_vulkanPerfStats.textureUploadMs / textureUploads,
+        g_vulkanPerfStats.textureStageAllocMs / textureUploads,
+        g_vulkanPerfStats.textureMapCopyMs / textureUploads,
+        static_cast<unsigned long long>(g_vulkanPerfStats.immediateCommandBuffers),
+        g_vulkanPerfStats.immediateFrameFenceWaitMs / immediateCount,
+        g_vulkanPerfStats.immediateFenceWaitMs / immediateCount,
+        g_vulkanPerfStats.immediateSubmitWaitMs / immediateCount);
+
+    g_vulkanPerfStats = VulkanPerfStats{};
+}
+#endif
+
+QtUiRenderTargetInfo MakeUnavailableQtUiRenderTargetInfo(RenderBackendType backend, int width, int height)
+{
+    QtUiRenderTargetInfo info{};
+    info.backend = backend;
+    info.width = width > 0 ? static_cast<unsigned int>(width) : 0u;
+    info.height = height > 0 ? static_cast<unsigned int>(height) : 0u;
+    return info;
+}
+
+#if RO_HAS_VULKAN
+void* VulkanDispatchHandleToVoidPtr(VkInstance handle)
+{
+    return reinterpret_cast<void*>(handle);
+}
+
+void* VulkanDispatchHandleToVoidPtr(VkPhysicalDevice handle)
+{
+    return reinterpret_cast<void*>(handle);
+}
+
+void* VulkanDispatchHandleToVoidPtr(VkDevice handle)
+{
+    return reinterpret_cast<void*>(handle);
+}
+
+void* VulkanDispatchHandleToVoidPtr(VkQueue handle)
+{
+    return reinterpret_cast<void*>(handle);
+}
+
+void* VulkanNonDispatchHandleToVoidPtr(VkImage handle)
+{
+    return reinterpret_cast<void*>(handle);
+}
+
+void* VulkanNonDispatchHandleToVoidPtr(VkImageView handle)
+{
+    return reinterpret_cast<void*>(handle);
+}
+#endif
+
+class UnsupportedModernRenderDevice : public IRenderDevice {
+public:
+    explicit UnsupportedModernRenderDevice(RenderBackendType backend)
+        : m_backend(backend), m_hwnd(nullptr), m_renderWidth(0), m_renderHeight(0)
+    {
+    }
+
+    RenderBackendType GetBackendType() const override { return m_backend; }
+
+    bool Initialize(HWND hwnd, RenderBackendBootstrapResult* outResult) override
+    {
+        m_hwnd = hwnd;
+        RefreshRenderSize();
+        if (outResult) {
+            outResult->backend = m_backend;
+            outResult->initHr = static_cast<int>(E_NOTIMPL);
+        }
+        return false;
+    }
+
+    void Shutdown() override
+    {
+        m_hwnd = nullptr;
+        m_renderWidth = 0;
+        m_renderHeight = 0;
+    }
+
+    void RefreshRenderSize() override
+    {
+        if (!m_hwnd) {
+            m_renderWidth = 0;
+            m_renderHeight = 0;
+            return;
+        }
+
+        RECT clientRect{};
+        GetClientRect(m_hwnd, &clientRect);
+        m_renderWidth = (std::max)(1, static_cast<int>(clientRect.right - clientRect.left));
+        m_renderHeight = (std::max)(1, static_cast<int>(clientRect.bottom - clientRect.top));
+    }
+
+    int GetRenderWidth() const override { return m_renderWidth; }
+    int GetRenderHeight() const override { return m_renderHeight; }
+    HWND GetWindowHandle() const override { return m_hwnd; }
+    IDirect3DDevice7* GetLegacyDevice() const override { return nullptr; }
+    int ClearColor(unsigned int color) override { (void)color; return -1; }
+    int ClearDepth() override { return -1; }
+    int Present(bool vertSync) override { (void)vertSync; return -1; }
+    bool UpdateBackBufferFromMemory(const void* bgraPixels, int width, int height, int pitch) override { (void)bgraPixels; (void)width; (void)height; (void)pitch; return false; }
+    bool BeginScene() override { return false; }
+    bool PrepareOverlayPass() override { return false; }
+    void EndScene() override {}
+    void SetTransform(D3DTRANSFORMSTATETYPE state, const D3DMATRIX* matrix) override { (void)state; (void)matrix; }
+    void SetRenderState(D3DRENDERSTATETYPE state, DWORD value) override { (void)state; (void)value; }
+    void SetTextureStageState(DWORD stage, D3DTEXTURESTAGESTATETYPE type, DWORD value) override { (void)stage; (void)type; (void)value; }
+    void BindTexture(DWORD stage, CTexture* texture) override { (void)stage; (void)texture; }
+    void DrawPrimitive(D3DPRIMITIVETYPE primitiveType, DWORD vertexFormat, const void* vertices, DWORD vertexCount, DWORD flags) override { (void)primitiveType; (void)vertexFormat; (void)vertices; (void)vertexCount; (void)flags; }
+    void DrawIndexedPrimitive(D3DPRIMITIVETYPE primitiveType, DWORD vertexFormat, const void* vertices, DWORD vertexCount, const unsigned short* indices, DWORD indexCount, DWORD flags) override { (void)primitiveType; (void)vertexFormat; (void)vertices; (void)vertexCount; (void)indices; (void)indexCount; (void)flags; }
+    void AdjustTextureSize(unsigned int* width, unsigned int* height) override { (void)width; (void)height; }
+    void ReleaseTextureResource(CTexture* texture) override { (void)texture; }
+    bool CreateTextureResource(CTexture* texture, unsigned int requestedWidth, unsigned int requestedHeight, int pixelFormat, unsigned int* outSurfaceWidth, unsigned int* outSurfaceHeight) override { (void)texture; (void)requestedWidth; (void)requestedHeight; (void)pixelFormat; if (outSurfaceWidth) { *outSurfaceWidth = 0; } if (outSurfaceHeight) { *outSurfaceHeight = 0; } return false; }
+    bool UpdateTextureResource(CTexture* texture, int x, int y, int w, int h, const unsigned int* data, bool skipColorKey, int pitch) override { (void)texture; (void)x; (void)y; (void)w; (void)h; (void)data; (void)skipColorKey; (void)pitch; return false; }
+    bool GetQtUiRenderTargetInfo(QtUiRenderTargetInfo* outInfo) const override { if (outInfo) { *outInfo = MakeUnavailableQtUiRenderTargetInfo(m_backend, m_renderWidth, m_renderHeight); } return false; }
+    bool GetQtUiTextureTargetInfo(const CTexture* texture, QtUiRenderTargetInfo* outInfo) const override { (void)texture; if (outInfo) { *outInfo = MakeUnavailableQtUiRenderTargetInfo(m_backend, m_renderWidth, m_renderHeight); } return false; }
+
+private:
+    RenderBackendType m_backend;
+    HWND m_hwnd;
+    int m_renderWidth;
+    int m_renderHeight;
+};
 
 #if RO_HAS_VULKAN
 HMODULE g_vulkanModule = nullptr;
@@ -40,6 +252,7 @@ HMODULE g_vulkanModule = nullptr;
 PFN_vkGetInstanceProcAddr vkGetInstanceProcAddr = nullptr;
 PFN_vkGetDeviceProcAddr vkGetDeviceProcAddr = nullptr;
 PFN_vkCreateInstance vkCreateInstance = nullptr;
+PFN_vkEnumerateInstanceExtensionProperties vkEnumerateInstanceExtensionProperties = nullptr;
 PFN_vkDestroyInstance vkDestroyInstance = nullptr;
 PFN_vkEnumeratePhysicalDevices vkEnumeratePhysicalDevices = nullptr;
 PFN_vkGetPhysicalDeviceQueueFamilyProperties vkGetPhysicalDeviceQueueFamilyProperties = nullptr;
@@ -112,7 +325,6 @@ PFN_vkCmdDrawIndexed vkCmdDrawIndexed = nullptr;
 PFN_vkCmdPipelineBarrier vkCmdPipelineBarrier = nullptr;
 PFN_vkCmdCopyImage vkCmdCopyImage = nullptr;
 PFN_vkCmdCopyBufferToImage vkCmdCopyBufferToImage = nullptr;
-PFN_vkCreateWin32SurfaceKHR vkCreateWin32SurfaceKHR = nullptr;
 PFN_vkDestroySurfaceKHR vkDestroySurfaceKHR = nullptr;
 PFN_vkGetPhysicalDeviceSurfaceSupportKHR vkGetPhysicalDeviceSurfaceSupportKHR = nullptr;
 PFN_vkGetPhysicalDeviceSurfaceCapabilitiesKHR vkGetPhysicalDeviceSurfaceCapabilitiesKHR = nullptr;
@@ -131,10 +343,14 @@ bool LoadVulkanLoader()
     }
 
     if (!g_vulkanModule) {
+#if RO_PLATFORM_WINDOWS
         g_vulkanModule = LoadLibraryA("vulkan-1.dll");
+#else
+        g_vulkanModule = LoadLibraryA("libvulkan.so.1");
+#endif
     }
     if (!g_vulkanModule) {
-        DbgLog("[Render] Vulkan loader 'vulkan-1.dll' not found.\n");
+        DbgLog("[Render] Vulkan loader not found.\n");
         return false;
     }
 
@@ -145,7 +361,9 @@ bool LoadVulkanLoader()
     }
 
     vkCreateInstance = reinterpret_cast<PFN_vkCreateInstance>(vkGetInstanceProcAddr(nullptr, "vkCreateInstance"));
-    return vkCreateInstance != nullptr;
+    vkEnumerateInstanceExtensionProperties = reinterpret_cast<PFN_vkEnumerateInstanceExtensionProperties>(
+        vkGetInstanceProcAddr(nullptr, "vkEnumerateInstanceExtensionProperties"));
+    return vkCreateInstance != nullptr && vkEnumerateInstanceExtensionProperties != nullptr;
 }
 
 bool LoadVulkanInstanceFunctions(VkInstance instance)
@@ -162,7 +380,6 @@ bool LoadVulkanInstanceFunctions(VkInstance instance)
     vkGetPhysicalDeviceProperties = reinterpret_cast<PFN_vkGetPhysicalDeviceProperties>(vkGetInstanceProcAddr(instance, "vkGetPhysicalDeviceProperties"));
     vkEnumerateDeviceExtensionProperties = reinterpret_cast<PFN_vkEnumerateDeviceExtensionProperties>(vkGetInstanceProcAddr(instance, "vkEnumerateDeviceExtensionProperties"));
     vkCreateDevice = reinterpret_cast<PFN_vkCreateDevice>(vkGetInstanceProcAddr(instance, "vkCreateDevice"));
-    vkCreateWin32SurfaceKHR = reinterpret_cast<PFN_vkCreateWin32SurfaceKHR>(vkGetInstanceProcAddr(instance, "vkCreateWin32SurfaceKHR"));
     vkDestroySurfaceKHR = reinterpret_cast<PFN_vkDestroySurfaceKHR>(vkGetInstanceProcAddr(instance, "vkDestroySurfaceKHR"));
     vkGetPhysicalDeviceSurfaceSupportKHR = reinterpret_cast<PFN_vkGetPhysicalDeviceSurfaceSupportKHR>(vkGetInstanceProcAddr(instance, "vkGetPhysicalDeviceSurfaceSupportKHR"));
     vkGetPhysicalDeviceSurfaceCapabilitiesKHR = reinterpret_cast<PFN_vkGetPhysicalDeviceSurfaceCapabilitiesKHR>(vkGetInstanceProcAddr(instance, "vkGetPhysicalDeviceSurfaceCapabilitiesKHR"));
@@ -178,13 +395,36 @@ bool LoadVulkanInstanceFunctions(VkInstance instance)
         && vkGetPhysicalDeviceProperties
         && vkEnumerateDeviceExtensionProperties
         && vkCreateDevice
-        && vkCreateWin32SurfaceKHR
         && vkDestroySurfaceKHR
         && vkGetPhysicalDeviceSurfaceSupportKHR
         && vkGetPhysicalDeviceSurfaceCapabilitiesKHR
         && vkGetPhysicalDeviceSurfaceFormatsKHR
         && vkGetPhysicalDeviceSurfacePresentModesKHR
         && vkGetDeviceProcAddr;
+}
+
+bool HasInstanceExtension(const char* extensionName)
+{
+    if (!vkEnumerateInstanceExtensionProperties || !extensionName) {
+        return false;
+    }
+
+    uint32_t extensionCount = 0;
+    if (vkEnumerateInstanceExtensionProperties(nullptr, &extensionCount, nullptr) != VK_SUCCESS || extensionCount == 0) {
+        return false;
+    }
+
+    std::vector<VkExtensionProperties> extensions(extensionCount);
+    if (vkEnumerateInstanceExtensionProperties(nullptr, &extensionCount, extensions.data()) != VK_SUCCESS) {
+        return false;
+    }
+
+    for (const VkExtensionProperties& extension : extensions) {
+        if (std::strcmp(extension.extensionName, extensionName) == 0) {
+            return true;
+        }
+    }
+    return false;
 }
 
 bool LoadVulkanDeviceFunctions(VkDevice device)
@@ -546,6 +786,7 @@ void WritePackedPixel(unsigned char* dst, unsigned int bytesPerPixel, unsigned i
     }
 }
 
+#if RO_HAS_NATIVE_D3D11 || RO_HAS_NATIVE_D3D12
 D3D11_BLEND ConvertBlendFactor(D3DBLEND blend)
 {
     switch (blend) {
@@ -708,6 +949,7 @@ bool CompilePostProcessShaderBlob(const char* source, AntiAliasingMode mode, con
     const char* entryPoint = GetPostProcessPixelShaderEntryPoint(mode);
     return entryPoint && CompileShaderBlob(source, entryPoint, target, outBlob);
 }
+#endif
 
 struct VulkanPostShaderProgram {
     const uint8_t* vertexBytes;
@@ -992,6 +1234,7 @@ float4 PSMainSMAANeighborhood(VSOutputPost input) : SV_Target
 )";
 }
 
+#if RO_HAS_NATIVE_D3D11 || RO_HAS_NATIVE_D3D12
 bool CompileShaderBlob(const char* source, const char* entryPoint, const char* target, ID3DBlob** outBlob)
 {
     if (!source || !entryPoint || !target || !outBlob) {
@@ -1033,7 +1276,9 @@ bool CompileShaderBlob(const char* source, const char* entryPoint, const char* t
     *outBlob = shaderBlob;
     return true;
 }
+#endif
 
+#if RO_PLATFORM_WINDOWS
 class LegacyRenderDevice final : public IRenderDevice {
 public:
     LegacyRenderDevice()
@@ -1046,6 +1291,23 @@ public:
     RenderBackendType GetBackendType() const override
     {
         return RenderBackendType::LegacyDirect3D7;
+    }
+
+    bool GetQtUiRenderTargetInfo(QtUiRenderTargetInfo* outInfo) const override
+    {
+        if (outInfo) {
+            *outInfo = MakeUnavailableQtUiRenderTargetInfo(RenderBackendType::LegacyDirect3D7, m_renderWidth, m_renderHeight);
+        }
+        return false;
+    }
+
+    bool GetQtUiTextureTargetInfo(const CTexture* texture, QtUiRenderTargetInfo* outInfo) const override
+    {
+        (void)texture;
+        if (outInfo) {
+            *outInfo = MakeUnavailableQtUiRenderTargetInfo(RenderBackendType::LegacyDirect3D7, m_renderWidth, m_renderHeight);
+        }
+        return false;
     }
 
     bool Initialize(HWND hwnd, RenderBackendBootstrapResult* outResult) override
@@ -1098,8 +1360,8 @@ public:
 
         RECT clientRect{};
         GetClientRect(m_hwnd, &clientRect);
-        m_renderWidth = (std::max)(1L, clientRect.right - clientRect.left);
-        m_renderHeight = (std::max)(1L, clientRect.bottom - clientRect.top);
+        m_renderWidth = (std::max)(1, static_cast<int>(clientRect.right - clientRect.left));
+        m_renderHeight = (std::max)(1, static_cast<int>(clientRect.bottom - clientRect.top));
     }
 
     int GetRenderWidth() const override
@@ -1137,13 +1399,12 @@ public:
         return g_3dDevice.ShowFrame(vertSync);
     }
 
-    bool AcquireBackBufferDC(HDC* outDc) override
+    bool UpdateBackBufferFromMemory(const void* bgraPixels, int width, int height, int pitch) override
     {
-        if (!outDc) {
+        if (!bgraPixels || width <= 0 || height <= 0 || pitch <= 0) {
             return false;
         }
 
-        *outDc = nullptr;
         IDirectDrawSurface7* backBuffer = g_3dDevice.m_pddsBackBuffer;
         if (!backBuffer) {
             return false;
@@ -1151,33 +1412,6 @@ public:
 
         HDC dc = nullptr;
         if (FAILED(backBuffer->GetDC(&dc)) || !dc) {
-            return false;
-        }
-
-        *outDc = dc;
-        return true;
-    }
-
-    void ReleaseBackBufferDC(HDC dc) override
-    {
-        if (!dc) {
-            return;
-        }
-
-        IDirectDrawSurface7* backBuffer = g_3dDevice.m_pddsBackBuffer;
-        if (backBuffer) {
-            backBuffer->ReleaseDC(dc);
-        }
-    }
-
-    bool UpdateBackBufferFromMemory(const void* bgraPixels, int width, int height, int pitch) override
-    {
-        if (!bgraPixels || width <= 0 || height <= 0 || pitch <= 0) {
-            return false;
-        }
-
-        HDC dc = nullptr;
-        if (!AcquireBackBufferDC(&dc) || !dc) {
             return false;
         }
 
@@ -1215,7 +1449,7 @@ public:
             &bmi,
             DIB_RGB_COLORS,
             SRCCOPY);
-        ReleaseBackBufferDC(dc);
+        backBuffer->ReleaseDC(dc);
         if (blitResult == GDI_ERROR) {
             return false;
         }
@@ -1403,19 +1637,28 @@ private:
     int m_renderHeight;
     RenderBackendBootstrapResult m_bootstrap;
 };
+#else
+class LegacyRenderDevice final : public UnsupportedModernRenderDevice {
+public:
+    LegacyRenderDevice()
+        : UnsupportedModernRenderDevice(RenderBackendType::LegacyDirect3D7)
+    {
+    }
+};
+#endif
 
+#if RO_HAS_NATIVE_D3D11
 class D3D11RenderDevice final : public IRenderDevice {
 public:
     D3D11RenderDevice()
         : m_hwnd(nullptr), m_renderWidth(0), m_renderHeight(0),
           m_swapChain(nullptr), m_device(nullptr), m_context(nullptr),
                                                                                 m_renderTargetView(nullptr), m_swapChainRenderTargetView(nullptr), m_sceneTexture(nullptr), m_sceneRenderTargetView(nullptr), m_sceneShaderResourceView(nullptr), m_smaaEdgeTexture(nullptr), m_smaaEdgeRenderTargetView(nullptr), m_smaaEdgeShaderResourceView(nullptr), m_smaaBlendWeightTexture(nullptr), m_smaaBlendWeightRenderTargetView(nullptr), m_smaaBlendWeightShaderResourceView(nullptr), m_depthStencilTexture(nullptr), m_depthStencilView(nullptr),
-          m_captureTexture(nullptr),
                                                                                 m_vertexShaderTl(nullptr), m_vertexShaderLm(nullptr), m_pixelShader(nullptr), m_postVertexShader(nullptr), m_fxaaPixelShader(nullptr), m_smaaEdgePixelShader(nullptr), m_smaaBlendWeightPixelShader(nullptr), m_smaaNeighborhoodPixelShader(nullptr),
           m_inputLayoutTl(nullptr), m_inputLayoutLm(nullptr), m_constantBuffer(nullptr),
           m_vertexBuffer(nullptr), m_vertexBufferSize(0), m_indexBuffer(nullptr), m_indexBufferSize(0),
                                         m_samplerState(nullptr), m_postSamplerState(nullptr), m_postBlendState(nullptr), m_postDepthStencilState(nullptr), m_postRasterizerState(nullptr),
-                    m_captureDc(nullptr), m_captureBitmap(nullptr), m_captureBits(nullptr), m_captureWidth(0), m_captureHeight(0), m_scenePresentDirty(false)
+                    m_scenePresentDirty(false)
     {
                 ResetModernFixedFunctionState(&m_pipelineState);
         m_boundTextures[0] = nullptr;
@@ -1425,6 +1668,56 @@ public:
     RenderBackendType GetBackendType() const override
     {
         return RenderBackendType::Direct3D11;
+    }
+
+    bool GetQtUiRenderTargetInfo(QtUiRenderTargetInfo* outInfo) const override
+    {
+        if (outInfo) {
+            *outInfo = MakeUnavailableQtUiRenderTargetInfo(RenderBackendType::Direct3D11, m_renderWidth, m_renderHeight);
+            outInfo->graphicsDevice = m_device;
+            outInfo->graphicsQueueOrContext = m_context;
+            outInfo->colorTarget = m_sceneTexture;
+            outInfo->colorTargetView = m_sceneRenderTargetView;
+            outInfo->minimumFeatureLevel = static_cast<uint32_t>(m_device ? m_device->GetFeatureLevel() : 0u);
+            if (m_sceneTexture) {
+                D3D11_TEXTURE2D_DESC desc{};
+                m_sceneTexture->GetDesc(&desc);
+                outInfo->width = desc.Width;
+                outInfo->height = desc.Height;
+                outInfo->colorFormat = static_cast<uint32_t>(desc.Format);
+                outInfo->targetSampleCount = desc.SampleDesc.Count > 0 ? desc.SampleDesc.Count : 1u;
+                outInfo->available = m_device != nullptr
+                    && m_context != nullptr
+                    && m_sceneTexture != nullptr
+                    && m_sceneRenderTargetView != nullptr;
+            }
+        }
+        return outInfo && outInfo->available;
+    }
+
+    bool GetQtUiTextureTargetInfo(const CTexture* texture, QtUiRenderTargetInfo* outInfo) const override
+    {
+        if (outInfo) {
+            *outInfo = MakeUnavailableQtUiRenderTargetInfo(RenderBackendType::Direct3D11, m_renderWidth, m_renderHeight);
+            outInfo->graphicsDevice = m_device;
+            outInfo->graphicsQueueOrContext = m_context;
+            outInfo->minimumFeatureLevel = static_cast<uint32_t>(m_device ? m_device->GetFeatureLevel() : 0u);
+            ID3D11Texture2D* textureObject = texture ? static_cast<ID3D11Texture2D*>(texture->m_backendTextureObject) : nullptr;
+            if (textureObject) {
+                D3D11_TEXTURE2D_DESC desc{};
+                textureObject->GetDesc(&desc);
+                outInfo->colorTarget = textureObject;
+                outInfo->colorTargetView = texture ? texture->m_backendTextureUpload : nullptr;
+                outInfo->width = desc.Width;
+                outInfo->height = desc.Height;
+                outInfo->colorFormat = static_cast<uint32_t>(desc.Format);
+                outInfo->targetSampleCount = desc.SampleDesc.Count > 0 ? desc.SampleDesc.Count : 1u;
+                outInfo->available = m_device != nullptr
+                    && m_context != nullptr
+                    && textureObject != nullptr;
+            }
+        }
+        return outInfo && outInfo->available;
     }
 
     bool Initialize(HWND hwnd, RenderBackendBootstrapResult* outResult) override
@@ -1512,7 +1805,6 @@ public:
     void Shutdown() override
     {
         ReleaseCachedStates();
-        ReleaseCaptureResources();
         ReleaseSceneRenderTargetResources();
         SafeRelease(m_postRasterizerState);
         SafeRelease(m_postDepthStencilState);
@@ -1560,8 +1852,8 @@ public:
 
         RECT clientRect{};
         GetClientRect(m_hwnd, &clientRect);
-        const int newWidth = (std::max)(1L, clientRect.right - clientRect.left);
-        const int newHeight = (std::max)(1L, clientRect.bottom - clientRect.top);
+        const int newWidth = (std::max)(1, static_cast<int>(clientRect.right - clientRect.left));
+        const int newHeight = (std::max)(1, static_cast<int>(clientRect.bottom - clientRect.top));
         if (newWidth != m_renderWidth || newHeight != m_renderHeight) {
             m_renderWidth = newWidth;
             m_renderHeight = newHeight;
@@ -1609,24 +1901,7 @@ public:
             return -1;
         }
         EnsureScenePresentedToBackBuffer();
-        CaptureRenderTargetSnapshot();
         return static_cast<int>(m_swapChain->Present(vertSync ? 1 : 0, 0));
-    }
-
-    bool AcquireBackBufferDC(HDC* outDc) override
-    {
-        if (!outDc) {
-            return false;
-        }
-        *outDc = nullptr;
-        CaptureRenderTargetSnapshot();
-        *outDc = m_captureDc;
-        return *outDc != nullptr;
-    }
-
-    void ReleaseBackBufferDC(HDC dc) override
-    {
-        (void)dc;
     }
 
     bool UpdateBackBufferFromMemory(const void* bgraPixels, int width, int height, int pitch) override
@@ -1741,7 +2016,7 @@ public:
         desc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
         desc.SampleDesc.Count = 1;
         desc.Usage = D3D11_USAGE_DEFAULT;
-        desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+        desc.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET;
 
         ID3D11Texture2D* textureObject = nullptr;
         HRESULT hr = m_device->CreateTexture2D(&desc, nullptr, &textureObject);
@@ -1750,9 +2025,18 @@ public:
             return false;
         }
 
+        ID3D11RenderTargetView* renderTargetView = nullptr;
+        hr = m_device->CreateRenderTargetView(textureObject, nullptr, &renderTargetView);
+        if (FAILED(hr) || !renderTargetView) {
+            SafeRelease(renderTargetView);
+            SafeRelease(textureObject);
+            return false;
+        }
+
         ID3D11ShaderResourceView* textureView = nullptr;
         hr = m_device->CreateShaderResourceView(textureObject, nullptr, &textureView);
         if (FAILED(hr) || !textureView) {
+            SafeRelease(renderTargetView);
             SafeRelease(textureView);
             SafeRelease(textureObject);
             return false;
@@ -1760,6 +2044,7 @@ public:
 
         texture->m_backendTextureObject = textureObject;
         texture->m_backendTextureView = textureView;
+        texture->m_backendTextureUpload = renderTargetView;
         if (outSurfaceWidth) {
             *outSurfaceWidth = desc.Width;
         }
@@ -1821,8 +2106,8 @@ private:
         if ((targetWidth <= 0 || targetHeight <= 0) && m_hwnd) {
             RECT clientRect{};
             GetClientRect(m_hwnd, &clientRect);
-            targetWidth = (std::max)(1L, clientRect.right - clientRect.left);
-            targetHeight = (std::max)(1L, clientRect.bottom - clientRect.top);
+            targetWidth = (std::max)(1, static_cast<int>(clientRect.right - clientRect.left));
+            targetHeight = (std::max)(1, static_cast<int>(clientRect.bottom - clientRect.top));
         }
         if (targetWidth <= 0 || targetHeight <= 0) {
             return false;
@@ -2379,8 +2664,8 @@ private:
         if ((m_renderWidth <= 0 || m_renderHeight <= 0) && m_hwnd) {
             RECT clientRect{};
             GetClientRect(m_hwnd, &clientRect);
-            m_renderWidth = (std::max)(1L, clientRect.right - clientRect.left);
-            m_renderHeight = (std::max)(1L, clientRect.bottom - clientRect.top);
+            m_renderWidth = (std::max)(1, static_cast<int>(clientRect.right - clientRect.left));
+            m_renderHeight = (std::max)(1, static_cast<int>(clientRect.bottom - clientRect.top));
         }
         SafeRelease(m_renderTargetView);
         ReleaseSceneRenderTargetResources();
@@ -2421,7 +2706,6 @@ private:
         if (!m_swapChain || m_renderWidth <= 0 || m_renderHeight <= 0) {
             return;
         }
-        ReleaseCaptureResources();
         SafeRelease(m_depthStencilView);
         SafeRelease(m_depthStencilTexture);
         SafeRelease(m_renderTargetView);
@@ -2437,118 +2721,6 @@ private:
             return;
         }
         RefreshRenderTarget();
-    }
-
-    void ReleaseCaptureResources()
-    {
-        SafeRelease(m_captureTexture);
-        if (m_captureBitmap) {
-            DeleteObject(m_captureBitmap);
-            m_captureBitmap = nullptr;
-        }
-        if (m_captureDc) {
-            DeleteDC(m_captureDc);
-            m_captureDc = nullptr;
-        }
-        m_captureBits = nullptr;
-        m_captureWidth = 0;
-        m_captureHeight = 0;
-    }
-
-    bool EnsureCaptureResources()
-    {
-        if (!m_device || m_renderWidth <= 0 || m_renderHeight <= 0) {
-            return false;
-        }
-
-        const bool sizeMatches = m_captureTexture && m_captureDc && m_captureBitmap
-            && m_captureWidth == m_renderWidth && m_captureHeight == m_renderHeight;
-        if (sizeMatches) {
-            return true;
-        }
-
-        ReleaseCaptureResources();
-
-        D3D11_TEXTURE2D_DESC desc{};
-        desc.Width = static_cast<UINT>(m_renderWidth);
-        desc.Height = static_cast<UINT>(m_renderHeight);
-        desc.MipLevels = 1;
-        desc.ArraySize = 1;
-        desc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
-        desc.SampleDesc.Count = 1;
-        desc.Usage = D3D11_USAGE_STAGING;
-        desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
-        HRESULT hr = m_device->CreateTexture2D(&desc, nullptr, &m_captureTexture);
-        if (FAILED(hr) || !m_captureTexture) {
-            ReleaseCaptureResources();
-            return false;
-        }
-
-        HDC screenDc = GetDC(nullptr);
-        if (!screenDc) {
-            ReleaseCaptureResources();
-            return false;
-        }
-
-        m_captureDc = CreateCompatibleDC(screenDc);
-        ReleaseDC(nullptr, screenDc);
-        if (!m_captureDc) {
-            ReleaseCaptureResources();
-            return false;
-        }
-
-        BITMAPINFO bmi{};
-        bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-        bmi.bmiHeader.biWidth = m_renderWidth;
-        bmi.bmiHeader.biHeight = -m_renderHeight;
-        bmi.bmiHeader.biPlanes = 1;
-        bmi.bmiHeader.biBitCount = 32;
-        bmi.bmiHeader.biCompression = BI_RGB;
-        m_captureBitmap = CreateDIBSection(m_captureDc, &bmi, DIB_RGB_COLORS, &m_captureBits, nullptr, 0);
-        if (!m_captureBitmap || !m_captureBits) {
-            ReleaseCaptureResources();
-            return false;
-        }
-
-        SelectObject(m_captureDc, m_captureBitmap);
-        m_captureWidth = m_renderWidth;
-        m_captureHeight = m_renderHeight;
-        return true;
-    }
-
-    void CaptureRenderTargetSnapshot()
-    {
-        if (!m_context || !m_swapChain || !EnsureCaptureResources()) {
-            return;
-        }
-
-        if (!EnsureScenePresentedToBackBuffer()) {
-            return;
-        }
-
-        ID3D11Texture2D* backBuffer = nullptr;
-        HRESULT hr = m_swapChain->GetBuffer(0, __uuidof(ID3D11Texture2D), reinterpret_cast<void**>(&backBuffer));
-        if (FAILED(hr) || !backBuffer) {
-            SafeRelease(backBuffer);
-            return;
-        }
-
-        m_context->CopyResource(m_captureTexture, backBuffer);
-        SafeRelease(backBuffer);
-
-        D3D11_MAPPED_SUBRESOURCE mapped{};
-        hr = m_context->Map(m_captureTexture, 0, D3D11_MAP_READ, 0, &mapped);
-        if (FAILED(hr) || !mapped.pData || !m_captureBits) {
-            return;
-        }
-
-        const size_t dstPitch = static_cast<size_t>(m_captureWidth) * sizeof(unsigned int);
-        for (int row = 0; row < m_captureHeight; ++row) {
-            const unsigned char* srcRow = static_cast<const unsigned char*>(mapped.pData) + static_cast<size_t>(row) * static_cast<size_t>(mapped.RowPitch);
-            unsigned char* dstRow = static_cast<unsigned char*>(m_captureBits) + static_cast<size_t>(row) * dstPitch;
-            std::memcpy(dstRow, srcRow, dstPitch);
-        }
-        m_context->Unmap(m_captureTexture, 0);
     }
 
     bool IsFxaaEnabled() const
@@ -2626,8 +2798,8 @@ private:
         if ((targetWidth <= 0 || targetHeight <= 0) && m_hwnd) {
             RECT clientRect{};
             GetClientRect(m_hwnd, &clientRect);
-            targetWidth = (std::max)(1L, clientRect.right - clientRect.left);
-            targetHeight = (std::max)(1L, clientRect.bottom - clientRect.top);
+            targetWidth = (std::max)(1, static_cast<int>(clientRect.right - clientRect.left));
+            targetHeight = (std::max)(1, static_cast<int>(clientRect.bottom - clientRect.top));
         }
         if (targetWidth <= 0 || targetHeight <= 0) {
             return false;
@@ -2767,7 +2939,6 @@ private:
     ID3D11ShaderResourceView* m_smaaBlendWeightShaderResourceView;
     ID3D11Texture2D* m_depthStencilTexture;
     ID3D11DepthStencilView* m_depthStencilView;
-    ID3D11Texture2D* m_captureTexture;
     ID3D11VertexShader* m_vertexShaderTl;
     ID3D11VertexShader* m_vertexShaderLm;
     ID3D11PixelShader* m_pixelShader;
@@ -2794,14 +2965,19 @@ private:
     std::vector<DepthStateEntry> m_depthStates;
     std::vector<RasterizerStateEntry> m_rasterizerStates;
     std::vector<SamplerStateEntry> m_samplerStates;
-    HDC m_captureDc;
-    HBITMAP m_captureBitmap;
-    void* m_captureBits;
-    int m_captureWidth;
-    int m_captureHeight;
     bool m_scenePresentDirty;
 };
+#else
+class D3D11RenderDevice final : public UnsupportedModernRenderDevice {
+public:
+    D3D11RenderDevice()
+        : UnsupportedModernRenderDevice(RenderBackendType::Direct3D11)
+    {
+    }
+};
+#endif
 
+#if RO_HAS_NATIVE_D3D12
 class D3D12RenderDevice final : public IRenderDevice {
 public:
     static constexpr UINT kFrameCount = 2;
@@ -2816,8 +2992,6 @@ public:
           m_fenceEvent(nullptr), m_fenceValue(0), m_frameIndex(0), m_rtvDescriptorSize(0), m_srvDescriptorSize(0), m_srvHeapCursor(0),
           m_rootSignature(nullptr),
                     m_vertexShaderTlBlob(nullptr), m_vertexShaderLmBlob(nullptr), m_pixelShaderBlob(nullptr), m_postVertexShaderBlob(nullptr), m_fxaaPixelShaderBlob(nullptr), m_smaaEdgePixelShaderBlob(nullptr), m_smaaBlendWeightPixelShaderBlob(nullptr), m_smaaNeighborhoodPixelShaderBlob(nullptr),
-                        m_captureReadbackBuffer(nullptr), m_captureDc(nullptr), m_captureBitmap(nullptr), m_captureBits(nullptr),
-            m_captureWidth(0), m_captureHeight(0), m_captureRowPitch(0),
                     m_frameCommandsOpen(false), m_loggedSrvHeapExhausted(false), m_scenePresentDirty(false)
     {
         ResetModernFixedFunctionState(&m_pipelineState);
@@ -2834,6 +3008,67 @@ public:
     RenderBackendType GetBackendType() const override
     {
         return RenderBackendType::Direct3D12;
+    }
+
+    bool GetQtUiRenderTargetInfo(QtUiRenderTargetInfo* outInfo) const override
+    {
+        if (outInfo) {
+            *outInfo = MakeUnavailableQtUiRenderTargetInfo(RenderBackendType::Direct3D12, m_renderWidth, m_renderHeight);
+            outInfo->graphicsDevice = m_device;
+            outInfo->graphicsQueueOrContext = m_commandQueue;
+            if (m_device) {
+                const LUID luid = m_device->GetAdapterLuid();
+                outInfo->adapterLuidLow = luid.LowPart;
+                outInfo->adapterLuidHigh = luid.HighPart;
+            }
+            outInfo->minimumFeatureLevel = static_cast<uint32_t>(D3D_FEATURE_LEVEL_11_0);
+            ID3D12Resource* colorTarget = IsScenePostProcessEnabled() && m_frameIndex < kFrameCount
+                ? m_sceneRenderTargets[m_frameIndex]
+                : GetCurrentBackBuffer();
+            outInfo->colorTarget = colorTarget;
+            outInfo->colorTargetView = nullptr;
+            if (colorTarget) {
+                const D3D12_RESOURCE_DESC desc = colorTarget->GetDesc();
+                outInfo->width = static_cast<unsigned int>(desc.Width);
+                outInfo->height = desc.Height;
+                outInfo->colorFormat = static_cast<uint32_t>(desc.Format);
+                outInfo->targetSampleCount = desc.SampleDesc.Count > 0 ? desc.SampleDesc.Count : 1u;
+                outInfo->colorTargetState = static_cast<uint32_t>(D3D12_RESOURCE_STATE_RENDER_TARGET);
+                outInfo->available = m_device != nullptr
+                    && m_commandQueue != nullptr
+                    && colorTarget != nullptr;
+            }
+        }
+        return outInfo && outInfo->available;
+    }
+
+    bool GetQtUiTextureTargetInfo(const CTexture* texture, QtUiRenderTargetInfo* outInfo) const override
+    {
+        if (outInfo) {
+            *outInfo = MakeUnavailableQtUiRenderTargetInfo(RenderBackendType::Direct3D12, m_renderWidth, m_renderHeight);
+            outInfo->graphicsDevice = m_device;
+            outInfo->graphicsQueueOrContext = m_commandQueue;
+            if (m_device) {
+                const LUID luid = m_device->GetAdapterLuid();
+                outInfo->adapterLuidLow = luid.LowPart;
+                outInfo->adapterLuidHigh = luid.HighPart;
+            }
+            outInfo->minimumFeatureLevel = static_cast<uint32_t>(D3D_FEATURE_LEVEL_11_0);
+            ID3D12Resource* textureObject = texture ? static_cast<ID3D12Resource*>(texture->m_backendTextureObject) : nullptr;
+            if (textureObject) {
+                const D3D12_RESOURCE_DESC desc = textureObject->GetDesc();
+                outInfo->colorTarget = textureObject;
+                outInfo->width = static_cast<unsigned int>(desc.Width);
+                outInfo->height = desc.Height;
+                outInfo->colorFormat = static_cast<uint32_t>(desc.Format);
+                outInfo->targetSampleCount = desc.SampleDesc.Count > 0 ? desc.SampleDesc.Count : 1u;
+                outInfo->colorTargetState = static_cast<uint32_t>(D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+                outInfo->available = m_device != nullptr
+                    && m_commandQueue != nullptr
+                    && textureObject != nullptr;
+            }
+        }
+        return outInfo && outInfo->available;
     }
 
     bool Initialize(HWND hwnd, RenderBackendBootstrapResult* outResult) override
@@ -3067,7 +3302,6 @@ public:
         WaitForGpu();
         ReleaseSwapChainResources();
         ReleasePendingUploadBuffers();
-        ReleaseCaptureResources();
         ReleaseCachedStates();
         ReleaseUploadPages(m_indexUploadPages);
         ReleaseUploadPages(m_vertexUploadPages);
@@ -3123,8 +3357,8 @@ public:
 
         RECT clientRect{};
         GetClientRect(m_hwnd, &clientRect);
-        const int newWidth = (std::max)(1L, clientRect.right - clientRect.left);
-        const int newHeight = (std::max)(1L, clientRect.bottom - clientRect.top);
+        const int newWidth = (std::max)(1, static_cast<int>(clientRect.right - clientRect.left));
+        const int newHeight = (std::max)(1, static_cast<int>(clientRect.bottom - clientRect.top));
         if (newWidth != m_renderWidth || newHeight != m_renderHeight) {
             m_renderWidth = newWidth;
             m_renderHeight = newHeight;
@@ -3199,19 +3433,6 @@ public:
         m_frameIndex = m_swapChain->GetCurrentBackBufferIndex();
         return static_cast<int>(presentHr);
     }
-    bool AcquireBackBufferDC(HDC* outDc) override
-    {
-        if (!outDc) {
-            return false;
-        }
-        *outDc = nullptr;
-        if (!CaptureRenderTargetSnapshot()) {
-            return false;
-        }
-        *outDc = m_captureDc;
-        return *outDc != nullptr;
-    }
-    void ReleaseBackBufferDC(HDC dc) override { (void)dc; }
     bool UpdateBackBufferFromMemory(const void* bgraPixels, int width, int height, int pitch) override
     {
         if (!bgraPixels || width <= 0 || height <= 0 || pitch <= 0 || !m_device || !m_swapChain) {
@@ -3362,6 +3583,7 @@ public:
         textureDesc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
         textureDesc.SampleDesc.Count = 1;
         textureDesc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
+        textureDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
 
         D3D12_HEAP_PROPERTIES heapProps{};
         heapProps.Type = D3D12_HEAP_TYPE_DEFAULT;
@@ -4220,164 +4442,6 @@ private:
         m_pendingUploadBuffers.clear();
     }
 
-    void ReleaseCaptureResources()
-    {
-        SafeRelease(m_captureReadbackBuffer);
-        if (m_captureBitmap) {
-            DeleteObject(m_captureBitmap);
-            m_captureBitmap = nullptr;
-        }
-        if (m_captureDc) {
-            DeleteDC(m_captureDc);
-            m_captureDc = nullptr;
-        }
-        m_captureBits = nullptr;
-        m_captureWidth = 0;
-        m_captureHeight = 0;
-        m_captureRowPitch = 0;
-    }
-
-    bool EnsureCaptureResources()
-    {
-        if (!m_device || m_renderWidth <= 0 || m_renderHeight <= 0) {
-            return false;
-        }
-
-        const UINT desiredRowPitch = AlignTo(static_cast<UINT>(m_renderWidth * static_cast<int>(sizeof(unsigned int))), D3D12_TEXTURE_DATA_PITCH_ALIGNMENT);
-        const bool sizeMatches = m_captureReadbackBuffer && m_captureDc && m_captureBitmap
-            && m_captureWidth == m_renderWidth && m_captureHeight == m_renderHeight && m_captureRowPitch == desiredRowPitch;
-        if (sizeMatches) {
-            return true;
-        }
-
-        ReleaseCaptureResources();
-
-        const UINT64 readbackSize = static_cast<UINT64>(desiredRowPitch) * static_cast<UINT64>(m_renderHeight);
-        D3D12_HEAP_PROPERTIES heapProps{};
-        heapProps.Type = D3D12_HEAP_TYPE_READBACK;
-
-        D3D12_RESOURCE_DESC resourceDesc{};
-        resourceDesc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
-        resourceDesc.Width = readbackSize;
-        resourceDesc.Height = 1;
-        resourceDesc.DepthOrArraySize = 1;
-        resourceDesc.MipLevels = 1;
-        resourceDesc.SampleDesc.Count = 1;
-        resourceDesc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
-
-        HRESULT hr = m_device->CreateCommittedResource(
-            &heapProps,
-            D3D12_HEAP_FLAG_NONE,
-            &resourceDesc,
-            D3D12_RESOURCE_STATE_COPY_DEST,
-            nullptr,
-            IID_PPV_ARGS(&m_captureReadbackBuffer));
-        if (FAILED(hr) || !m_captureReadbackBuffer) {
-            ReleaseCaptureResources();
-            return false;
-        }
-
-        HDC screenDc = GetDC(nullptr);
-        if (!screenDc) {
-            ReleaseCaptureResources();
-            return false;
-        }
-
-        m_captureDc = CreateCompatibleDC(screenDc);
-        ReleaseDC(nullptr, screenDc);
-        if (!m_captureDc) {
-            ReleaseCaptureResources();
-            return false;
-        }
-
-        BITMAPINFO bmi{};
-        bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-        bmi.bmiHeader.biWidth = m_renderWidth;
-        bmi.bmiHeader.biHeight = -m_renderHeight;
-        bmi.bmiHeader.biPlanes = 1;
-        bmi.bmiHeader.biBitCount = 32;
-        bmi.bmiHeader.biCompression = BI_RGB;
-        m_captureBitmap = CreateDIBSection(m_captureDc, &bmi, DIB_RGB_COLORS, &m_captureBits, nullptr, 0);
-        if (!m_captureBitmap || !m_captureBits) {
-            ReleaseCaptureResources();
-            return false;
-        }
-
-        SelectObject(m_captureDc, m_captureBitmap);
-        m_captureWidth = m_renderWidth;
-        m_captureHeight = m_renderHeight;
-        m_captureRowPitch = desiredRowPitch;
-        return true;
-    }
-
-    bool CaptureRenderTargetSnapshot()
-    {
-        if (!EnsureCaptureResources() || !GetCurrentBackBuffer()) {
-            return false;
-        }
-
-        if (!EnsureScenePresentedToBackBuffer() || !EnsureFrameCommandsStarted()) {
-            return false;
-        }
-
-        D3D12_TEXTURE_COPY_LOCATION srcLocation{};
-        srcLocation.pResource = GetCurrentBackBuffer();
-        srcLocation.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
-        srcLocation.SubresourceIndex = 0;
-
-        D3D12_TEXTURE_COPY_LOCATION dstLocation{};
-        dstLocation.pResource = m_captureReadbackBuffer;
-        dstLocation.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
-        dstLocation.PlacedFootprint.Offset = 0;
-        dstLocation.PlacedFootprint.Footprint.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
-        dstLocation.PlacedFootprint.Footprint.Width = static_cast<UINT>(m_renderWidth);
-        dstLocation.PlacedFootprint.Footprint.Height = static_cast<UINT>(m_renderHeight);
-        dstLocation.PlacedFootprint.Footprint.Depth = 1;
-        dstLocation.PlacedFootprint.Footprint.RowPitch = m_captureRowPitch;
-
-        const D3D12_RESOURCE_BARRIER toCopy = TransitionBarrier(
-            GetCurrentBackBuffer(),
-            D3D12_RESOURCE_STATE_RENDER_TARGET,
-            D3D12_RESOURCE_STATE_COPY_SOURCE);
-        m_commandList->ResourceBarrier(1, &toCopy);
-        m_commandList->CopyTextureRegion(&dstLocation, 0, 0, 0, &srcLocation, nullptr);
-        const D3D12_RESOURCE_BARRIER toPresent = TransitionBarrier(
-            GetCurrentBackBuffer(),
-            D3D12_RESOURCE_STATE_COPY_SOURCE,
-            D3D12_RESOURCE_STATE_PRESENT);
-        m_commandList->ResourceBarrier(1, &toPresent);
-
-        if (FAILED(m_commandList->Close())) {
-            return false;
-        }
-
-        ID3D12CommandList* commandLists[] = { m_commandList };
-        m_commandQueue->ExecuteCommandLists(1, commandLists);
-        m_frameCommandsOpen = false;
-        WaitForGpu();
-
-        void* mapped = nullptr;
-        D3D12_RANGE readRange{ 0, static_cast<SIZE_T>(m_captureRowPitch) * static_cast<SIZE_T>(m_captureHeight) };
-        HRESULT hr = m_captureReadbackBuffer->Map(0, &readRange, &mapped);
-        if (FAILED(hr) || !mapped || !m_captureBits) {
-            if (mapped) {
-                D3D12_RANGE writtenRange{};
-                m_captureReadbackBuffer->Unmap(0, &writtenRange);
-            }
-            return false;
-        }
-
-        const size_t dstPitch = static_cast<size_t>(m_captureWidth) * sizeof(unsigned int);
-        for (int row = 0; row < m_captureHeight; ++row) {
-            const unsigned char* srcRow = static_cast<const unsigned char*>(mapped) + static_cast<size_t>(row) * static_cast<size_t>(m_captureRowPitch);
-            unsigned char* dstRow = static_cast<unsigned char*>(m_captureBits) + static_cast<size_t>(row) * dstPitch;
-            std::memcpy(dstRow, srcRow, dstPitch);
-        }
-        D3D12_RANGE writtenRange{};
-        m_captureReadbackBuffer->Unmap(0, &writtenRange);
-        return true;
-    }
-
     void ReleaseCachedStates()
     {
         for (PipelineStateEntry& entry : m_pipelineStates) {
@@ -4725,7 +4789,6 @@ private:
 
         WaitForGpu();
         m_frameCommandsOpen = false;
-        ReleaseCaptureResources();
         ReleaseSwapChainResources();
         const HRESULT hr = m_swapChain->ResizeBuffers(
             kFrameCount,
@@ -4782,13 +4845,6 @@ private:
     std::vector<UploadPage> m_constantUploadPages;
     std::vector<UploadPage> m_vertexUploadPages;
     std::vector<UploadPage> m_indexUploadPages;
-    ID3D12Resource* m_captureReadbackBuffer;
-    HDC m_captureDc;
-    HBITMAP m_captureBitmap;
-    void* m_captureBits;
-    int m_captureWidth;
-    int m_captureHeight;
-    UINT m_captureRowPitch;
     ModernFixedFunctionState m_pipelineState;
     CTexture* m_boundTextures[kSrvSlotCount];
     std::vector<PipelineStateEntry> m_pipelineStates;
@@ -4797,6 +4853,15 @@ private:
     bool m_loggedSrvHeapExhausted;
     bool m_scenePresentDirty;
 };
+#else
+class D3D12RenderDevice final : public UnsupportedModernRenderDevice {
+public:
+    D3D12RenderDevice()
+        : UnsupportedModernRenderDevice(RenderBackendType::Direct3D12)
+    {
+    }
+};
+#endif
 
 class VulkanRenderDevice final : public IRenderDevice {
 public:
@@ -4813,12 +4878,15 @@ public:
                                         m_descriptorPool(VK_NULL_HANDLE), m_sampler(VK_NULL_HANDLE), m_postSampler(VK_NULL_HANDLE),
                                                                                 m_pipelineLayout(VK_NULL_HANDLE), m_postPipelineLayout(VK_NULL_HANDLE), m_postPipeline(VK_NULL_HANDLE), m_postSmaaEdgePipeline(VK_NULL_HANDLE), m_postSmaaBlendWeightPipeline(VK_NULL_HANDLE), m_postSmaaNeighborhoodPipeline(VK_NULL_HANDLE), m_vertexShaderTlModule(VK_NULL_HANDLE),
                                                                                 m_vertexShaderLmModule(VK_NULL_HANDLE), m_fragmentShaderModule(VK_NULL_HANDLE), m_postVertexShaderModule(VK_NULL_HANDLE), m_postFxaaFragmentShaderModule(VK_NULL_HANDLE), m_postSmaaEdgeFragmentShaderModule(VK_NULL_HANDLE), m_postSmaaBlendWeightFragmentShaderModule(VK_NULL_HANDLE), m_postSmaaNeighborhoodFragmentShaderModule(VK_NULL_HANDLE),
-                    m_commandPool(VK_NULL_HANDLE), m_immediateCommandPool(VK_NULL_HANDLE),
+                    m_commandPool(VK_NULL_HANDLE), m_immediateCommandPool(VK_NULL_HANDLE), m_pendingImmediateUploadCommandBuffer(VK_NULL_HANDLE),
           m_imageAvailableSemaphore(VK_NULL_HANDLE), m_renderFinishedSemaphore(VK_NULL_HANDLE),
           m_inFlightFence(VK_NULL_HANDLE), m_immediateFence(VK_NULL_HANDLE), m_graphicsQueueFamilyIndex(kInvalidQueueFamilyIndex),
           m_presentQueueFamilyIndex(kInvalidQueueFamilyIndex), m_currentImageIndex(0),
                     m_frameBegun(false), m_renderPassActive(false), m_pendingDepthClear(false), m_verticalSyncEnabled(false), m_overlayPassPrepared(false),
                     m_defaultTexture(nullptr), m_samplerAnisotropySupported(false), m_maxSamplerAnisotropy(1.0f)
+#if !RO_PLATFORM_WINDOWS && RO_ENABLE_QT6_UI
+                  , m_qtVulkanInstance(nullptr)
+#endif
     {
         m_bootstrap.backend = RenderBackendType::Vulkan;
         m_bootstrap.initHr = static_cast<int>(E_NOTIMPL);
@@ -4831,6 +4899,75 @@ public:
     RenderBackendType GetBackendType() const override
     {
         return RenderBackendType::Vulkan;
+    }
+
+    bool GetQtUiRenderTargetInfo(QtUiRenderTargetInfo* outInfo) const override
+    {
+        if (outInfo) {
+            *outInfo = MakeUnavailableQtUiRenderTargetInfo(RenderBackendType::Vulkan, m_renderWidth, m_renderHeight);
+#if RO_HAS_VULKAN
+            outInfo->graphicsInstance = VulkanDispatchHandleToVoidPtr(m_instance);
+            outInfo->graphicsPhysicalDevice = VulkanDispatchHandleToVoidPtr(m_physicalDevice);
+            outInfo->graphicsDevice = VulkanDispatchHandleToVoidPtr(m_device);
+            outInfo->graphicsQueueOrContext = VulkanDispatchHandleToVoidPtr(m_graphicsQueue);
+            outInfo->colorTarget = VulkanNonDispatchHandleToVoidPtr(m_sceneImage);
+            outInfo->colorTargetView = VulkanNonDispatchHandleToVoidPtr(m_sceneImageView);
+            outInfo->queueFamilyIndex = m_graphicsQueueFamilyIndex;
+            outInfo->colorFormat = static_cast<uint32_t>(VK_FORMAT_B8G8R8A8_UNORM);
+            outInfo->colorImageLayout = static_cast<uint32_t>(VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+            outInfo->available = m_instance != VK_NULL_HANDLE
+                && m_physicalDevice != VK_NULL_HANDLE
+                && m_device != VK_NULL_HANDLE
+                && m_graphicsQueue != VK_NULL_HANDLE
+                && m_sceneImage != VK_NULL_HANDLE
+                && m_sceneImageView != VK_NULL_HANDLE
+                && m_renderWidth > 0
+                && m_renderHeight > 0
+                && m_graphicsQueueFamilyIndex != kInvalidQueueFamilyIndex;
+#endif
+        }
+        return outInfo && outInfo->available;
+    }
+
+    bool GetQtUiTextureTargetInfo(const CTexture* texture, QtUiRenderTargetInfo* outInfo) const override
+    {
+        if (outInfo) {
+            *outInfo = MakeUnavailableQtUiRenderTargetInfo(RenderBackendType::Vulkan, m_renderWidth, m_renderHeight);
+#if RO_HAS_VULKAN
+            const VulkanTextureHandle* textureHandle = GetVulkanTextureHandle(texture);
+            outInfo->graphicsInstance = VulkanDispatchHandleToVoidPtr(m_instance);
+            outInfo->graphicsPhysicalDevice = VulkanDispatchHandleToVoidPtr(m_physicalDevice);
+            outInfo->graphicsDevice = VulkanDispatchHandleToVoidPtr(m_device);
+            outInfo->graphicsQueueOrContext = VulkanDispatchHandleToVoidPtr(m_graphicsQueue);
+            outInfo->queueFamilyIndex = m_graphicsQueueFamilyIndex;
+            outInfo->colorFormat = static_cast<uint32_t>(VK_FORMAT_B8G8R8A8_UNORM);
+            if (textureHandle) {
+                if (textureHandle->m_layout == VK_IMAGE_LAYOUT_UNDEFINED) {
+                    VulkanRenderDevice* mutableThis = const_cast<VulkanRenderDevice*>(this);
+                    VulkanTextureHandle* mutableTextureHandle = const_cast<VulkanTextureHandle*>(textureHandle);
+                    if (!mutableThis->InitializeTextureHandleLayout(mutableTextureHandle, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)) {
+                        return false;
+                    }
+                }
+                outInfo->colorTarget = VulkanNonDispatchHandleToVoidPtr(textureHandle->m_image);
+                outInfo->colorTargetView = VulkanNonDispatchHandleToVoidPtr(textureHandle->m_view);
+                outInfo->width = textureHandle->m_width;
+                outInfo->height = textureHandle->m_height;
+                outInfo->colorImageLayout = static_cast<uint32_t>(textureHandle->m_layout);
+                outInfo->available = m_instance != VK_NULL_HANDLE
+                    && m_physicalDevice != VK_NULL_HANDLE
+                    && m_device != VK_NULL_HANDLE
+                    && m_graphicsQueue != VK_NULL_HANDLE
+                    && textureHandle->m_image != VK_NULL_HANDLE
+                    && textureHandle->m_view != VK_NULL_HANDLE
+                    && textureHandle->m_layout != VK_IMAGE_LAYOUT_UNDEFINED
+                    && textureHandle->m_width > 0
+                    && textureHandle->m_height > 0
+                    && m_graphicsQueueFamilyIndex != kInvalidQueueFamilyIndex;
+            }
+#endif
+        }
+        return outInfo && outInfo->available;
     }
 
     bool Initialize(HWND hwnd, RenderBackendBootstrapResult* outResult) override
@@ -4933,6 +5070,8 @@ public:
             vkDeviceWaitIdle(m_device);
         }
 
+        DiscardPendingImmediateUploadBatch();
+
         ReleaseUploadPages(m_vertexUploadPages);
         ReleaseUploadPages(m_indexUploadPages);
         ReleaseAllTrackedTextures();
@@ -4971,6 +5110,10 @@ public:
             vkDestroySurfaceKHR(m_instance, m_surface, nullptr);
             m_surface = VK_NULL_HANDLE;
         }
+#if !RO_PLATFORM_WINDOWS && RO_ENABLE_QT6_UI
+        delete m_qtVulkanInstance;
+        m_qtVulkanInstance = nullptr;
+#endif
         if (m_instance != VK_NULL_HANDLE) {
             vkDestroyInstance(m_instance, nullptr);
             m_instance = VK_NULL_HANDLE;
@@ -5013,8 +5156,8 @@ public:
 
         RECT clientRect{};
         GetClientRect(m_hwnd, &clientRect);
-        const int newWidth = (std::max)(1L, clientRect.right - clientRect.left);
-        const int newHeight = (std::max)(1L, clientRect.bottom - clientRect.top);
+        const int newWidth = (std::max)(1, static_cast<int>(clientRect.right - clientRect.left));
+        const int newHeight = (std::max)(1, static_cast<int>(clientRect.bottom - clientRect.top));
         if (newWidth != m_renderWidth || newHeight != m_renderHeight) {
             m_renderWidth = newWidth;
             m_renderHeight = newHeight;
@@ -5035,7 +5178,7 @@ public:
         m_pendingClearColor.float32[1] = static_cast<float>((color >> 8) & 0xFFu) / 255.0f;
         m_pendingClearColor.float32[2] = static_cast<float>(color & 0xFFu) / 255.0f;
         m_pendingClearColor.float32[3] = static_cast<float>((color >> 24) & 0xFFu) / 255.0f;
-        return EnsureFrameStarted() ? 0 : -1;
+        return EnsureTransferFrameStarted() ? 0 : -1;
     }
 
     int ClearDepth() override
@@ -5115,7 +5258,9 @@ public:
         submitInfo.signalSemaphoreCount = 1;
         submitInfo.pSignalSemaphores = &m_renderFinishedSemaphore;
 
+        const double submitStartMs = VulkanNowMs();
         VkResult result = vkQueueSubmit(m_graphicsQueue, 1, &submitInfo, m_inFlightFence);
+        g_vulkanPerfStats.presentSubmitMs += VulkanNowMs() - submitStartMs;
         if (result != VK_SUCCESS) {
             DbgLog("[Render][Vulkan] vkQueueSubmit failed: %d\n", static_cast<int>(result));
             m_bootstrap.initHr = static_cast<int>(result);
@@ -5130,13 +5275,17 @@ public:
         presentInfo.swapchainCount = 1;
         presentInfo.pSwapchains = &m_swapChain;
         presentInfo.pImageIndices = &m_currentImageIndex;
+        const double presentStartMs = VulkanNowMs();
         result = vkQueuePresentKHR(m_presentQueue, &presentInfo);
+        g_vulkanPerfStats.presentQueuePresentMs += VulkanNowMs() - presentStartMs;
 
         m_frameBegun = false;
         m_pendingDepthClear = false;
         m_overlayPassPrepared = false;
 
         if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR) {
+            g_vulkanPerfStats.presentedFrames += 1;
+            MaybeLogVulkanPerfStats();
             ResizeSwapChain();
             return 0;
         }
@@ -5150,24 +5299,15 @@ public:
             ResizeSwapChain();
         }
 
+        g_vulkanPerfStats.presentedFrames += 1;
+        MaybeLogVulkanPerfStats();
+
         return vertSync ? 1 : 0;
-    }
-
-    bool AcquireBackBufferDC(HDC* outDc) override
-    {
-        if (outDc) {
-            *outDc = nullptr;
-        }
-        return false;
-    }
-
-    void ReleaseBackBufferDC(HDC dc) override
-    {
-        (void)dc;
     }
 
     bool UpdateBackBufferFromMemory(const void* bgraPixels, int width, int height, int pitch) override
     {
+        const double uploadStartMs = VulkanNowMs();
         if (!bgraPixels || width <= 0 || height <= 0 || pitch <= 0) {
             return false;
         }
@@ -5181,10 +5321,13 @@ public:
         const VkDeviceSize uploadSize = static_cast<VkDeviceSize>(width) * static_cast<VkDeviceSize>(height) * sizeof(unsigned int);
         VkBuffer stagingBuffer = VK_NULL_HANDLE;
         VkDeviceMemory stagingMemory = VK_NULL_HANDLE;
+        const double stageAllocStartMs = VulkanNowMs();
         if (!CreateStagingBuffer(uploadSize, &stagingBuffer, &stagingMemory)) {
             return false;
         }
+        g_vulkanPerfStats.backBufferStageAllocMs += VulkanNowMs() - stageAllocStartMs;
 
+        const double mapCopyStartMs = VulkanNowMs();
         void* mapped = nullptr;
         VkResult result = vkMapMemory(m_device, stagingMemory, 0, uploadSize, 0, &mapped);
         if (result != VK_SUCCESS || !mapped) {
@@ -5204,6 +5347,7 @@ public:
             std::memcpy(dstBytes + static_cast<size_t>(row) * dstPitch, srcRow, dstPitch);
         }
         vkUnmapMemory(m_device, stagingMemory);
+        g_vulkanPerfStats.backBufferMapCopyMs += VulkanNowMs() - mapCopyStartMs;
 
         if (!TransitionCurrentSwapChainImage(
                 VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
@@ -5245,6 +5389,8 @@ public:
 
         m_pendingReleaseBuffers.push_back(stagingBuffer);
         m_pendingReleaseMemory.push_back(stagingMemory);
+        g_vulkanPerfStats.backBufferUploads += 1;
+        g_vulkanPerfStats.backBufferUploadMs += VulkanNowMs() - uploadStartMs;
         return true;
     }
 
@@ -5450,13 +5596,31 @@ public:
                 h);
             return false;
         }
-        if (!UploadTextureRegion(textureHandle, x, y, w, h, data, skipColorKey, pitch, true)) {
-            DbgLog("[Render][Vulkan] UploadTextureRegion failed tex=%p update=%d,%d %dx%d immediate=1 frameBegun=%d renderPass=%d hr=%d\n",
+
+        const bool immediate = !m_frameBegun || m_renderPassActive;
+        if (immediate && g_vulkanPerfStats.immediateDetailedLogs < 16) {
+            const char* textureName = (texture && texture->m_texName[0] != '\0') ? texture->m_texName : "(unnamed)";
+            DbgLog("[Render][VulkanPerf][ImmediateUpload] name='%s' tex=%p update=%d,%d %dx%d frameBegun=%d renderPass=%d\n",
+                textureName,
                 static_cast<void*>(texture),
                 x,
                 y,
                 w,
                 h,
+                m_frameBegun ? 1 : 0,
+                m_renderPassActive ? 1 : 0);
+            g_vulkanPerfStats.immediateDetailedLogs += 1;
+        }
+
+        const char* textureName = (texture && texture->m_texName[0] != '\0') ? texture->m_texName : nullptr;
+        if (!UploadTextureRegion(textureHandle, x, y, w, h, data, skipColorKey, pitch, immediate, textureName)) {
+            DbgLog("[Render][Vulkan] UploadTextureRegion failed tex=%p update=%d,%d %dx%d immediate=%d frameBegun=%d renderPass=%d hr=%d\n",
+                static_cast<void*>(texture),
+                x,
+                y,
+                w,
+                h,
+                immediate ? 1 : 0,
                 m_frameBegun ? 1 : 0,
                 m_renderPassActive ? 1 : 0,
                 m_bootstrap.initHr);
@@ -5821,7 +5985,7 @@ private:
         }
 
         const unsigned int whitePixel = 0xFFFFFFFFu;
-        if (!UploadTextureRegion(m_defaultTexture, 0, 0, 1, 1, &whitePixel, true, sizeof(unsigned int), true)) {
+        if (!UploadTextureRegion(m_defaultTexture, 0, 0, 1, 1, &whitePixel, true, sizeof(unsigned int), true, "__default_white__")) {
             DestroyPipelineResources();
             return false;
         }
@@ -6413,7 +6577,7 @@ private:
         imageInfo.arrayLayers = 1;
         imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
         imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
-        imageInfo.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+        imageInfo.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
         imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
         imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 
@@ -6477,9 +6641,18 @@ private:
             return false;
         }
 
+        if (m_pendingImmediateUploadCommandBuffer != VK_NULL_HANDLE) {
+            if (!FlushPendingImmediateUploadBatch()) {
+                return false;
+            }
+        }
+
         *outCommandBuffer = VK_NULL_HANDLE;
+        g_vulkanPerfStats.immediateCommandBuffers += 1;
         if (!m_frameBegun && m_inFlightFence != VK_NULL_HANDLE) {
+            const double frameFenceWaitStartMs = VulkanNowMs();
             VkResult result = vkWaitForFences(m_device, 1, &m_inFlightFence, VK_TRUE, UINT64_MAX);
+            g_vulkanPerfStats.immediateFrameFenceWaitMs += VulkanNowMs() - frameFenceWaitStartMs;
             if (result != VK_SUCCESS) {
                 m_bootstrap.initHr = static_cast<int>(result);
                 return false;
@@ -6487,7 +6660,9 @@ private:
             ReleasePendingTransferResources();
         }
 
+        const double immediateFenceWaitStartMs = VulkanNowMs();
         VkResult result = vkWaitForFences(m_device, 1, &m_immediateFence, VK_TRUE, UINT64_MAX);
+        g_vulkanPerfStats.immediateFenceWaitMs += VulkanNowMs() - immediateFenceWaitStartMs;
         if (result != VK_SUCCESS) {
             m_bootstrap.initHr = static_cast<int>(result);
             return false;
@@ -6537,7 +6712,9 @@ private:
             result = vkQueueSubmit(m_graphicsQueue, 1, &submitInfo, m_immediateFence);
         }
         if (result == VK_SUCCESS) {
+            const double immediateSubmitWaitStartMs = VulkanNowMs();
             result = vkWaitForFences(m_device, 1, &m_immediateFence, VK_TRUE, UINT64_MAX);
+            g_vulkanPerfStats.immediateSubmitWaitMs += VulkanNowMs() - immediateSubmitWaitStartMs;
         }
         vkFreeCommandBuffers(m_device, m_immediateCommandPool, 1, &commandBuffer);
         if (result != VK_SUCCESS) {
@@ -6548,9 +6725,101 @@ private:
         return true;
     }
 
-    bool UploadTextureRegion(VulkanTextureHandle* textureHandle, int x, int y, int w, int h,
-        const unsigned int* data, bool skipColorKey, int pitch, bool immediate)
+    bool FlushPendingImmediateUploadBatch()
     {
+        if (m_pendingImmediateUploadCommandBuffer == VK_NULL_HANDLE) {
+            return true;
+        }
+
+        const VkCommandBuffer commandBuffer = m_pendingImmediateUploadCommandBuffer;
+        m_pendingImmediateUploadCommandBuffer = VK_NULL_HANDLE;
+        return EndImmediateCommandBuffer(commandBuffer);
+    }
+
+    void DiscardPendingImmediateUploadBatch()
+    {
+        if (m_pendingImmediateUploadCommandBuffer == VK_NULL_HANDLE) {
+            return;
+        }
+
+        if (m_device != VK_NULL_HANDLE && m_immediateCommandPool != VK_NULL_HANDLE) {
+            vkFreeCommandBuffers(m_device, m_immediateCommandPool, 1, &m_pendingImmediateUploadCommandBuffer);
+        }
+        m_pendingImmediateUploadCommandBuffer = VK_NULL_HANDLE;
+    }
+
+    bool BeginOrReuseImmediateUploadBatch(VkCommandBuffer* outCommandBuffer)
+    {
+        if (!outCommandBuffer) {
+            return false;
+        }
+
+        if (m_pendingImmediateUploadCommandBuffer != VK_NULL_HANDLE) {
+            *outCommandBuffer = m_pendingImmediateUploadCommandBuffer;
+            return true;
+        }
+
+        if (!BeginImmediateCommandBuffer(&m_pendingImmediateUploadCommandBuffer)) {
+            return false;
+        }
+
+        *outCommandBuffer = m_pendingImmediateUploadCommandBuffer;
+        return true;
+    }
+
+    bool InitializeTextureHandleLayout(VulkanTextureHandle* textureHandle, VkImageLayout newLayout)
+    {
+        if (!textureHandle || textureHandle->m_image == VK_NULL_HANDLE || newLayout == VK_IMAGE_LAYOUT_UNDEFINED) {
+            return false;
+        }
+        if (textureHandle->m_layout == newLayout) {
+            return true;
+        }
+
+        VkCommandBuffer commandBuffer = VK_NULL_HANDLE;
+        if (!BeginImmediateCommandBuffer(&commandBuffer)) {
+            return false;
+        }
+
+        VkImageMemoryBarrier barrier{};
+        barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+        barrier.srcAccessMask = AccessMaskForImageLayout(textureHandle->m_layout);
+        barrier.dstAccessMask = AccessMaskForImageLayout(newLayout);
+        barrier.oldLayout = textureHandle->m_layout;
+        barrier.newLayout = newLayout;
+        barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        barrier.image = textureHandle->m_image;
+        barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        barrier.subresourceRange.baseMipLevel = 0;
+        barrier.subresourceRange.levelCount = 1;
+        barrier.subresourceRange.baseArrayLayer = 0;
+        barrier.subresourceRange.layerCount = 1;
+
+        vkCmdPipelineBarrier(
+            commandBuffer,
+            PipelineStageForImageLayout(textureHandle->m_layout),
+            PipelineStageForImageLayout(newLayout),
+            0,
+            0,
+            nullptr,
+            0,
+            nullptr,
+            1,
+            &barrier);
+
+        if (!EndImmediateCommandBuffer(commandBuffer)) {
+            return false;
+        }
+
+        textureHandle->m_layout = newLayout;
+        return true;
+    }
+
+    bool UploadTextureRegion(VulkanTextureHandle* textureHandle, int x, int y, int w, int h,
+        const unsigned int* data, bool skipColorKey, int pitch, bool immediate, const char* textureName)
+    {
+        const double uploadStartMs = VulkanNowMs();
         if (!textureHandle || !data || w <= 0 || h <= 0) {
             return false;
         }
@@ -6572,10 +6841,13 @@ private:
         const VkDeviceSize uploadSize = static_cast<VkDeviceSize>(w) * static_cast<VkDeviceSize>(h) * sizeof(unsigned int);
         VkBuffer stagingBuffer = VK_NULL_HANDLE;
         VkDeviceMemory stagingMemory = VK_NULL_HANDLE;
+        const double stageAllocStartMs = VulkanNowMs();
         if (!CreateStagingBuffer(uploadSize, &stagingBuffer, &stagingMemory)) {
             return false;
         }
+        g_vulkanPerfStats.textureStageAllocMs += VulkanNowMs() - stageAllocStartMs;
 
+        const double mapCopyStartMs = VulkanNowMs();
         void* mapped = nullptr;
         VkResult result = vkMapMemory(m_device, stagingMemory, 0, uploadSize, 0, &mapped);
         if (result != VK_SUCCESS || !mapped) {
@@ -6590,10 +6862,28 @@ private:
 
         std::memcpy(mapped, uploadPixels.data(), static_cast<size_t>(uploadSize));
         vkUnmapMemory(m_device, stagingMemory);
+    g_vulkanPerfStats.textureMapCopyMs += VulkanNowMs() - mapCopyStartMs;
 
+        const bool isLightmapAtlasUpload = textureHandle != nullptr
+            && textureName != nullptr
+            && std::strncmp(textureName, "__lightmap_atlas_", 17) == 0;
+        const bool isCachedFileTextureUpload = textureHandle != nullptr
+            && textureName != nullptr
+            && (std::strncmp(textureName, "@ck:", 4) == 0 || std::strncmp(textureName, "@bk:", 4) == 0);
+        const bool isBillboardUpload = textureHandle != nullptr
+            && textureName != nullptr
+            && (std::strncmp(textureName, "__actor_billboard__", 19) == 0
+                || std::strncmp(textureName, "__item_billboard__", 18) == 0);
+        const bool batchedImmediate = immediate
+            && !m_frameBegun
+            && !m_renderPassActive
+            && (isLightmapAtlasUpload || isCachedFileTextureUpload || isBillboardUpload);
         VkCommandBuffer commandBuffer = immediate ? VK_NULL_HANDLE : GetCurrentCommandBuffer();
         if (immediate) {
-            if (!BeginImmediateCommandBuffer(&commandBuffer)) {
+            const bool beganImmediate = batchedImmediate
+                ? BeginOrReuseImmediateUploadBatch(&commandBuffer)
+                : BeginImmediateCommandBuffer(&commandBuffer);
+            if (!beganImmediate) {
                 vkDestroyBuffer(m_device, stagingBuffer, nullptr);
                 vkFreeMemory(m_device, stagingMemory, nullptr);
                 return false;
@@ -6658,15 +6948,21 @@ private:
 
         textureHandle->m_layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
-        if (immediate) {
+        if (immediate && !batchedImmediate) {
             const bool submitted = EndImmediateCommandBuffer(commandBuffer);
             vkDestroyBuffer(m_device, stagingBuffer, nullptr);
             vkFreeMemory(m_device, stagingMemory, nullptr);
+            if (submitted) {
+                g_vulkanPerfStats.textureUploads += 1;
+                g_vulkanPerfStats.textureUploadMs += VulkanNowMs() - uploadStartMs;
+            }
             return submitted;
         }
 
         m_pendingReleaseBuffers.push_back(stagingBuffer);
         m_pendingReleaseMemory.push_back(stagingMemory);
+        g_vulkanPerfStats.textureUploads += 1;
+        g_vulkanPerfStats.textureUploadMs += VulkanNowMs() - uploadStartMs;
         return true;
     }
 
@@ -7197,10 +7493,21 @@ private:
             return false;
         }
 
-        const char* extensions[] = {
-            VK_KHR_SURFACE_EXTENSION_NAME,
-            VK_KHR_WIN32_SURFACE_EXTENSION_NAME,
-        };
+        std::vector<const char*> extensions;
+        extensions.push_back(VK_KHR_SURFACE_EXTENSION_NAME);
+#if RO_PLATFORM_WINDOWS
+        extensions.push_back(VK_KHR_WIN32_SURFACE_EXTENSION_NAME);
+#else
+        if (HasInstanceExtension("VK_KHR_xcb_surface")) {
+            extensions.push_back("VK_KHR_xcb_surface");
+        }
+        if (HasInstanceExtension("VK_KHR_xlib_surface")) {
+            extensions.push_back("VK_KHR_xlib_surface");
+        }
+        if (HasInstanceExtension("VK_KHR_wayland_surface")) {
+            extensions.push_back("VK_KHR_wayland_surface");
+        }
+#endif
 
         VkApplicationInfo appInfo{};
         appInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
@@ -7213,8 +7520,8 @@ private:
         VkInstanceCreateInfo createInfo{};
         createInfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
         createInfo.pApplicationInfo = &appInfo;
-        createInfo.enabledExtensionCount = static_cast<uint32_t>(std::size(extensions));
-        createInfo.ppEnabledExtensionNames = extensions;
+        createInfo.enabledExtensionCount = static_cast<uint32_t>(extensions.size());
+        createInfo.ppEnabledExtensionNames = extensions.data();
 
         const VkResult result = vkCreateInstance(&createInfo, nullptr, &m_instance);
         if (result != VK_SUCCESS) {
@@ -7233,10 +7540,18 @@ private:
 
     bool CreateSurface()
     {
+#if RO_PLATFORM_WINDOWS
         VkWin32SurfaceCreateInfoKHR createInfo{};
         createInfo.sType = VK_STRUCTURE_TYPE_WIN32_SURFACE_CREATE_INFO_KHR;
         createInfo.hinstance = GetModuleHandleA(nullptr);
         createInfo.hwnd = m_hwnd;
+
+        const PFN_vkCreateWin32SurfaceKHR vkCreateWin32SurfaceKHR = reinterpret_cast<PFN_vkCreateWin32SurfaceKHR>(
+            vkGetInstanceProcAddr(m_instance, "vkCreateWin32SurfaceKHR"));
+        if (!vkCreateWin32SurfaceKHR) {
+            m_bootstrap.initHr = static_cast<int>(E_NOINTERFACE);
+            return false;
+        }
 
         const VkResult result = vkCreateWin32SurfaceKHR(m_instance, &createInfo, nullptr, &m_surface);
         if (result != VK_SUCCESS) {
@@ -7245,6 +7560,30 @@ private:
             return false;
         }
         return true;
+#else
+        QWindow* window = RoQtGetQWindow(m_hwnd);
+        if (!window) {
+            m_bootstrap.initHr = static_cast<int>(VK_ERROR_INITIALIZATION_FAILED);
+            return false;
+        }
+
+        m_qtVulkanInstance = new QVulkanInstance();
+        m_qtVulkanInstance->setVkInstance(m_instance);
+        if (!m_qtVulkanInstance->create()) {
+            m_bootstrap.initHr = static_cast<int>(VK_ERROR_INITIALIZATION_FAILED);
+            DbgLog("[Render] Qt failed to wrap the Vulkan instance for the host window.\n");
+            return false;
+        }
+
+        window->setVulkanInstance(m_qtVulkanInstance);
+        m_surface = m_qtVulkanInstance->surfaceForWindow(window);
+        if (m_surface == VK_NULL_HANDLE) {
+            m_bootstrap.initHr = static_cast<int>(VK_ERROR_INITIALIZATION_FAILED);
+            DbgLog("[Render] Qt failed to create a Vulkan surface for the host window.\n");
+            return false;
+        }
+        return true;
+#endif
     }
 
     bool PickPhysicalDevice()
@@ -8317,21 +8656,33 @@ private:
 
     VkResult BeginFrame()
     {
+        if (!FlushPendingImmediateUploadBatch()) {
+            return static_cast<VkResult>(m_bootstrap.initHr);
+        }
+
+        const double frameFenceWaitStartMs = VulkanNowMs();
         VkResult result = vkWaitForFences(m_device, 1, &m_inFlightFence, VK_TRUE, UINT64_MAX);
+        g_vulkanPerfStats.frameFenceWaitMs += VulkanNowMs() - frameFenceWaitStartMs;
         if (result != VK_SUCCESS) {
             DbgLog("[Render][Vulkan] vkWaitForFences(frame) failed: %d\n", static_cast<int>(result));
             m_bootstrap.initHr = static_cast<int>(result);
             return result;
         }
+        const double releaseStartMs = VulkanNowMs();
         ReleasePendingTransferResources();
+        g_vulkanPerfStats.frameReleaseTransferMs += VulkanNowMs() - releaseStartMs;
+        const double resetFenceStartMs = VulkanNowMs();
         result = vkResetFences(m_device, 1, &m_inFlightFence);
+        g_vulkanPerfStats.frameResetFenceMs += VulkanNowMs() - resetFenceStartMs;
         if (result != VK_SUCCESS) {
             DbgLog("[Render][Vulkan] vkResetFences(frame) failed: %d\n", static_cast<int>(result));
             m_bootstrap.initHr = static_cast<int>(result);
             return result;
         }
         if (m_descriptorPool != VK_NULL_HANDLE) {
+            const double resetDescriptorPoolStartMs = VulkanNowMs();
             result = vkResetDescriptorPool(m_device, m_descriptorPool, 0);
+            g_vulkanPerfStats.frameResetDescriptorPoolMs += VulkanNowMs() - resetDescriptorPoolStartMs;
             if (result != VK_SUCCESS) {
                 DbgLog("[Render][Vulkan] vkResetDescriptorPool failed: %d\n", static_cast<int>(result));
                 m_bootstrap.initHr = static_cast<int>(result);
@@ -8343,7 +8694,9 @@ private:
         ResetUploadPageCursors(m_indexUploadPages);
         m_overlayPassPrepared = false;
 
+        const double acquireImageStartMs = VulkanNowMs();
         result = vkAcquireNextImageKHR(m_device, m_swapChain, UINT64_MAX, m_imageAvailableSemaphore, VK_NULL_HANDLE, &m_currentImageIndex);
+        g_vulkanPerfStats.frameAcquireImageMs += VulkanNowMs() - acquireImageStartMs;
         if (result == VK_ERROR_OUT_OF_DATE_KHR) {
             ResizeSwapChain();
             return result;
@@ -8355,7 +8708,9 @@ private:
         }
 
         VkCommandBuffer commandBuffer = GetCurrentCommandBuffer();
+        const double resetCommandBufferStartMs = VulkanNowMs();
         result = vkResetCommandBuffer(commandBuffer, 0);
+        g_vulkanPerfStats.frameResetCommandBufferMs += VulkanNowMs() - resetCommandBufferStartMs;
         if (result != VK_SUCCESS) {
             DbgLog("[Render][Vulkan] vkResetCommandBuffer failed: %d\n", static_cast<int>(result));
             m_bootstrap.initHr = static_cast<int>(result);
@@ -8364,7 +8719,9 @@ private:
 
         VkCommandBufferBeginInfo beginInfo{};
         beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+        const double beginCommandBufferStartMs = VulkanNowMs();
         result = vkBeginCommandBuffer(commandBuffer, &beginInfo);
+        g_vulkanPerfStats.frameBeginCommandBufferMs += VulkanNowMs() - beginCommandBufferStartMs;
         if (result != VK_SUCCESS) {
             DbgLog("[Render][Vulkan] vkBeginCommandBuffer failed: %d\n", static_cast<int>(result));
             m_bootstrap.initHr = static_cast<int>(result);
@@ -8534,6 +8891,7 @@ private:
     VkShaderModule m_postSmaaNeighborhoodFragmentShaderModule;
     VkCommandPool m_commandPool;
     VkCommandPool m_immediateCommandPool;
+    VkCommandBuffer m_pendingImmediateUploadCommandBuffer;
     VkSemaphore m_imageAvailableSemaphore;
     VkSemaphore m_renderFinishedSemaphore;
     VkFence m_inFlightFence;
@@ -8552,6 +8910,9 @@ private:
     VulkanTextureHandle* m_defaultTexture;
     bool m_samplerAnisotropySupported;
     float m_maxSamplerAnisotropy;
+#if !RO_PLATFORM_WINDOWS && RO_ENABLE_QT6_UI
+    QVulkanInstance* m_qtVulkanInstance;
+#endif
     std::vector<CTexture*> m_liveTextures;
     std::vector<VkImage> m_swapChainImages;
     std::vector<VkImageLayout> m_swapChainImageLayouts;
@@ -8615,8 +8976,8 @@ private:
 
         RECT clientRect{};
         GetClientRect(m_hwnd, &clientRect);
-        m_renderWidth = (std::max)(1L, clientRect.right - clientRect.left);
-        m_renderHeight = (std::max)(1L, clientRect.bottom - clientRect.top);
+        m_renderWidth = (std::max)(1, static_cast<int>(clientRect.right - clientRect.left));
+        m_renderHeight = (std::max)(1, static_cast<int>(clientRect.bottom - clientRect.top));
     }
 
     int GetRenderWidth() const override { return m_renderWidth; }
@@ -8626,8 +8987,6 @@ private:
     int ClearColor(unsigned int color) override { (void)color; return -1; }
     int ClearDepth() override { return -1; }
     int Present(bool vertSync) override { (void)vertSync; return -1; }
-    bool AcquireBackBufferDC(HDC* outDc) override { if (outDc) { *outDc = nullptr; } return false; }
-    void ReleaseBackBufferDC(HDC dc) override { (void)dc; }
     bool UpdateBackBufferFromMemory(const void* bgraPixels, int width, int height, int pitch) override { (void)bgraPixels; (void)width; (void)height; (void)pitch; return false; }
     bool BeginScene() override { return false; }
     bool PrepareOverlayPass() override { return false; }
@@ -8771,8 +9130,6 @@ public:
     int ClearColor(unsigned int color) override { return m_active->ClearColor(color); }
     int ClearDepth() override { return m_active->ClearDepth(); }
     int Present(bool vertSync) override { return m_active->Present(vertSync); }
-    bool AcquireBackBufferDC(HDC* outDc) override { return m_active->AcquireBackBufferDC(outDc); }
-    void ReleaseBackBufferDC(HDC dc) override { m_active->ReleaseBackBufferDC(dc); }
     bool UpdateBackBufferFromMemory(const void* bgraPixels, int width, int height, int pitch) override { return m_active->UpdateBackBufferFromMemory(bgraPixels, width, height, pitch); }
     bool BeginScene() override { return m_active->BeginScene(); }
     bool PrepareOverlayPass() override { return m_active->PrepareOverlayPass(); }
@@ -8787,6 +9144,8 @@ public:
     void ReleaseTextureResource(CTexture* texture) override { m_active->ReleaseTextureResource(texture); }
     bool CreateTextureResource(CTexture* texture, unsigned int requestedWidth, unsigned int requestedHeight, int pixelFormat, unsigned int* outSurfaceWidth, unsigned int* outSurfaceHeight) override { return m_active->CreateTextureResource(texture, requestedWidth, requestedHeight, pixelFormat, outSurfaceWidth, outSurfaceHeight); }
     bool UpdateTextureResource(CTexture* texture, int x, int y, int w, int h, const unsigned int* data, bool skipColorKey, int pitch) override { return m_active->UpdateTextureResource(texture, x, y, w, h, data, skipColorKey, pitch); }
+    bool GetQtUiRenderTargetInfo(QtUiRenderTargetInfo* outInfo) const override { return m_active->GetQtUiRenderTargetInfo(outInfo); }
+    bool GetQtUiTextureTargetInfo(const CTexture* texture, QtUiRenderTargetInfo* outInfo) const override { return m_active->GetQtUiTextureTargetInfo(texture, outInfo); }
 
 private:
     LegacyRenderDevice m_legacy;

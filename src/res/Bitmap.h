@@ -26,3 +26,5 @@ private:
     bool LoadJPGData(const unsigned char* buffer, int size);
     bool LoadTGAData(const unsigned char* buffer, int size);
 };
+
+bool LoadBgraPixelsFromGameData(const char* path, u32** outPixels, int* outWidth = nullptr, int* outHeight = nullptr);

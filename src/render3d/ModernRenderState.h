@@ -1,6 +1,6 @@
 #pragma once
 
-#include <d3d.h>
+#include "Dx7Compat.h"
 #include <vector>
 
 struct ModernTextureStageState {
