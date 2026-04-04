@@ -544,6 +544,7 @@ void UIWindow::OnWheel(int delta) {}
 void UIWindow::RefreshSnap() {}
 msgresult_t UIWindow::SendMsg(UIWindow* sender, int msg, msgparam_t wparam, msgparam_t lparam, msgparam_t extra) { return 0; }
 void UIWindow::OnChar(char c) { (void)c; }
+void UIWindow::OnKeyDown(int /*virtualKey*/) {}
 bool UIWindow::CanReceiveKeyInput() const { return false; }
 
 UIWindow* UIWindow::HitTestDeep(int x, int y)
@@ -805,6 +806,25 @@ void UIEditCtrl::OnChar(char c)
     }
     if (m_text != before) {
         Invalidate();
+    }
+}
+
+void UIEditCtrl::OnKeyDown(int virtualKey)
+{
+    switch(virtualKey)
+    {
+        case VK_BACK:
+        {
+            // Backspace
+            if (!m_text.empty())
+            {
+                m_text.pop_back();
+                Invalidate();
+            }
+        }
+        break;
+        default:
+            break;
     }
 }
 
