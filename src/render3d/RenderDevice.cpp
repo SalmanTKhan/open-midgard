@@ -5102,6 +5102,9 @@ public:
             vkDestroyCommandPool(m_device, m_commandPool, nullptr);
             m_commandPool = VK_NULL_HANDLE;
         }
+
+// On non-Windows Qt, the vulkan states are owned by Qt so don't destroy them here
+#if RO_PLATFORM_WINDOWS || !RO_ENABLE_QT6_UI
         if (m_device != VK_NULL_HANDLE) {
             vkDestroyDevice(m_device, nullptr);
             m_device = VK_NULL_HANDLE;
@@ -5110,14 +5113,19 @@ public:
             vkDestroySurfaceKHR(m_instance, m_surface, nullptr);
             m_surface = VK_NULL_HANDLE;
         }
-#if !RO_PLATFORM_WINDOWS && RO_ENABLE_QT6_UI
-        delete m_qtVulkanInstance;
-        m_qtVulkanInstance = nullptr;
 #endif
+
+#if !RO_PLATFORM_WINDOWS && RO_ENABLE_QT6_UI
+        //delete m_qtVulkanInstance;
+        //m_qtVulkanInstance = nullptr;
+#endif
+
+#if RO_PLATFORM_WINDOWS || !RO_ENABLE_QT6_UI
         if (m_instance != VK_NULL_HANDLE) {
             vkDestroyInstance(m_instance, nullptr);
             m_instance = VK_NULL_HANDLE;
         }
+#endif
 
         m_hwnd = nullptr;
         m_renderWidth = 0;
