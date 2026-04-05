@@ -210,33 +210,18 @@ int ResolvePcAttackWeaponValue(const CGameActor& actor)
         return 0;
     }
 
-    int weaponValue = pcActor->m_weapon;
+    int weaponValue = pcActor->m_weapon & 0xFFFF;
+
+    if (IsDualWeaponPcJob(actor.m_job) && pcActor->m_shield != 0) {
+        weaponValue = (pcActor->m_weapon & 0xFFFF) | ((pcActor->m_shield & 0xFFFF) << 16);
+    }
 
     const bool isLocalPlayer = actor.m_gid != 0
         && (actor.m_gid == g_session.m_gid || actor.m_gid == g_session.m_aid);
     if (isLocalPlayer) {
-        const unsigned int primaryWeaponItemId = g_session.GetEquippedRightHandWeaponItemId();
-        const unsigned int secondaryWeaponItemId = g_session.GetEquippedLeftHandWeaponItemId();
-        if (primaryWeaponItemId != 0 || secondaryWeaponItemId != 0) {
-            weaponValue = primaryWeaponItemId != 0
-                ? static_cast<int>(primaryWeaponItemId)
-                : static_cast<int>(secondaryWeaponItemId);
-            if (IsDualWeaponPcJob(actor.m_job) && secondaryWeaponItemId != 0) {
-                weaponValue = g_session.MakeWeaponTypeByItemId(
-                    static_cast<int>(primaryWeaponItemId),
-                    static_cast<int>(secondaryWeaponItemId));
-            }
-            return weaponValue;
-        }
-    }
-
-    if (IsDualWeaponPcJob(actor.m_job) && pcActor->m_shield != 0) {
-        int secondaryWeaponType = pcActor->m_shield;
-        if (secondaryWeaponType > 31) {
-            secondaryWeaponType = g_session.GetWeaponTypeByItemId(secondaryWeaponType);
-        }
-        if (secondaryWeaponType > 0) {
-            return (pcActor->m_weapon & 0xFFFF) | ((pcActor->m_shield & 0xFFFF) << 16);
+        const int localWeaponValue = g_session.GetCurrentPlayerWeaponValue();
+        if (localWeaponValue != 0) {
+            return localWeaponValue;
         }
     }
 

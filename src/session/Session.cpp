@@ -1555,6 +1555,14 @@ int CSession::MakeWeaponTypeByItemId(int primaryWeaponItemId, int secondaryWeapo
 
 int CSession::GetCurrentPlayerWeaponValue() const
 {
+    if (IsDualWeaponJob(m_playerJob) && (m_playerWeapon != 0 || m_playerShield != 0)) {
+        return (m_playerWeapon & 0xFFFF) | ((m_playerShield & 0xFFFF) << 16);
+    }
+
+    if (m_playerWeapon != 0) {
+        return m_playerWeapon;
+    }
+
     const unsigned int primaryWeaponItemId = GetEquippedRightHandWeaponItemId();
     const unsigned int secondaryWeaponItemId = GetEquippedLeftHandWeaponItemId();
     if (primaryWeaponItemId != 0 || secondaryWeaponItemId != 0) {
@@ -1567,11 +1575,7 @@ int CSession::GetCurrentPlayerWeaponValue() const
             : static_cast<int>(secondaryWeaponItemId);
     }
 
-    if (IsDualWeaponJob(m_playerJob) && GetWeaponTypeByItemId(m_playerShield) > 0) {
-        return (m_playerWeapon & 0xFFFF) | ((m_playerShield & 0xFFFF) << 16);
-    }
-
-    return m_playerWeapon;
+    return secondaryWeaponItemId != 0 ? static_cast<int>(secondaryWeaponItemId) : 0;
 }
 
 std::string CSession::GetPlayerWeaponToken(int weaponType) const
