@@ -2951,11 +2951,11 @@ void CRagEffect::Init(CRenderObject* master, int effectId, const vector3d& delta
     case 37:
     case 43:
         m_handler = Handler::IncAgility;
-        m_duration = 60;
+        m_duration = 20;
         break;
     case 42:
         m_handler = Handler::Blessing;
-        m_duration = 60;
+        m_duration = 24;
         break;
     case 601:
         m_handler = Handler::SightState;
@@ -3864,37 +3864,32 @@ void CRagEffect::SpawnIncAgility()
             prim->m_heightSize = 1.7f;
             prim->m_param[2] = -10.0f;
             prim->m_alpha = 0.0f;
-            prim->m_alphaSpeed = 13.5f;
+            prim->m_alphaSpeed = 20.0f;
             prim->m_maxAlpha = 200.0f;
-            prim->m_fadeOutCnt = m_duration - 15;
+            prim->m_fadeOutCnt = 6;
             prim->m_texture.push_back(overlayTexture);
             prim->m_tintColor = RGB(255, 255, 255);
         }
-    }
-
-    if ((m_stateCnt % 2) != 0) {
-        return;
-    }
-
-    if (CEffectPrim* prim = LaunchEffectPrim(PP_3DPARTICLEGRAVITY, vector3d{})) {
-        const float angle = static_cast<float>(rand() % 360) * (kPi / 180.0f);
-        const float radius = 2.0f + static_cast<float>(rand() % 7);
-        prim->m_duration = 50;
-        prim->m_deltaPos2 = {
-            std::sin(angle) * radius,
-            -8.0f,
-            -std::cos(angle) * radius
-        };
-        prim->m_gravSpeed = -0.16f;
-        prim->m_gravAccel = 0.01f;
-        prim->m_size = 1.0f + static_cast<float>(rand() % 4) * 0.08f;
-        prim->m_sizeSpeed = -0.01f;
-        prim->m_alpha = 0.0f;
-        prim->m_alphaSpeed = 10.0f;
-        prim->m_maxAlpha = 200.0f;
-        prim->m_fadeOutCnt = prim->m_duration - 20;
-        prim->m_texture.push_back(trailTexture);
-        prim->m_tintColor = dexVariant ? RGB(220, 244, 255) : RGB(210, 255, 220);
+        for (int index = 0; index < 5; ++index) {
+            if (CEffectPrim* prim = LaunchEffectPrim(PP_3DCROSSTEXTURE, vector3d{})) {
+                const float angle = (72.0f * static_cast<float>(index) + static_cast<float>(rand() % 24)) * (kPi / 180.0f);
+                const float radius = 2.0f + static_cast<float>(rand() % 7);
+                prim->m_duration = 18;
+                prim->m_deltaPos2 = {
+                    std::sin(angle) * radius,
+                    -10.0f + static_cast<float>(rand() % 5),
+                    -std::cos(angle) * radius
+                };
+                prim->m_size = 0.85f + static_cast<float>(rand() % 4) * 0.08f;
+                prim->m_heightSize = 0.18f;
+                prim->m_alpha = 0.0f;
+                prim->m_alphaSpeed = 28.0f;
+                prim->m_maxAlpha = 200.0f;
+                prim->m_fadeOutCnt = 7;
+                prim->m_texture.push_back(trailTexture);
+                prim->m_tintColor = dexVariant ? RGB(220, 244, 255) : RGB(210, 255, 220);
+            }
+        }
     }
 }
 
@@ -3907,10 +3902,16 @@ void CRagEffect::SpawnBlessing()
         "effect\\alpha_dow.bmp",
     }, false);
     CTexture* sparkleTexture = ResolveEffectTextureCandidates({
-        "effect\\magic_blue.tga",
-        "effect\\magic_blue.bmp",
+        "effect\\torch_green10.bmp",
+        "effect\\torch_green11.bmp",
+        "effect\\torch_green12.bmp",
         "effect\\alpha_center.tga",
-        "effect\\ring_white.tga",
+    }, false);
+    CTexture* blessingBurstTexture = ResolveEffectTextureCandidates({
+        "effect\\torch_green11.bmp",
+        "effect\\torch_green12.bmp",
+        "effect\\torch_green10.bmp",
+        "effect\\alpha_center.tga",
     }, false);
 
     if (m_stateCnt == 0) {
@@ -3926,51 +3927,47 @@ void CRagEffect::SpawnBlessing()
             prim->m_latitude = 90.0f;
             prim->m_deltaPos2.y = -1.0f;
             prim->m_alpha = 0.0f;
-            prim->m_alphaSpeed = 3.4f;
+            prim->m_alphaSpeed = 8.0f;
             prim->m_maxAlpha = 100.0f;
-            prim->m_fadeOutCnt = m_duration - 30;
+            prim->m_fadeOutCnt = 8;
             prim->m_texture.push_back(alphaDown);
             prim->m_tintColor = RGB(32, 176, 232);
         }
-    }
-
-    if ((m_stateCnt % 3) == 0 && m_stateCnt < 10) {
-        if (CEffectPrim* prim = LaunchEffectPrim(PP_3DPARTICLE, vector3d{})) {
-            prim->m_duration = m_duration;
-            prim->m_deltaPos2 = { 0.0f, -18.0f, 0.0f };
-            prim->m_size = 1.15f;
-            prim->m_sizeSpeed = -0.01f;
-            prim->m_alpha = static_cast<float>(200 - 6 * m_stateCnt);
-            prim->m_alphaSpeed = -2.5f;
-            prim->m_fadeOutCnt = m_duration - 18;
-            prim->m_texture.push_back(sparkleTexture);
-            prim->m_tintColor = RGB(220, 244, 255);
+        for (int index = 0; index < 3; ++index) {
+            if (CEffectPrim* prim = LaunchEffectPrim(PP_3DPARTICLE, vector3d{})) {
+                prim->m_duration = 16;
+                prim->m_deltaPos2 = { 0.0f, -18.0f - static_cast<float>(index * 2), 0.0f };
+                prim->m_size = 1.0f - static_cast<float>(index) * 0.12f;
+                prim->m_sizeSpeed = -0.03f;
+                prim->m_alpha = 180.0f - static_cast<float>(index) * 28.0f;
+                prim->m_alphaSpeed = -8.0f;
+                prim->m_texture.push_back(blessingBurstTexture);
+                prim->m_tintColor = RGB(220, 244, 255);
+            }
         }
-    }
 
-    if ((m_stateCnt % 4) != 0) {
-        return;
-    }
-
-    if (CEffectPrim* prim = LaunchEffectPrim(PP_3DPARTICLEGRAVITY, vector3d{})) {
-        const float angle = static_cast<float>(rand() % 360) * (kPi / 180.0f);
-        const float radius = 2.0f + static_cast<float>(rand() % 7);
-        prim->m_duration = 60;
-        prim->m_deltaPos2 = {
-            std::sin(angle) * radius,
-            -18.0f,
-            -std::cos(angle) * radius
-        };
-        prim->m_gravSpeed = -0.18f;
-        prim->m_gravAccel = 0.012f;
-        prim->m_size = 0.8f + static_cast<float>(rand() % 4) * 0.05f;
-        prim->m_sizeSpeed = -0.008f;
-        prim->m_alpha = 0.0f;
-        prim->m_alphaSpeed = 9.0f;
-        prim->m_maxAlpha = 180.0f;
-        prim->m_fadeOutCnt = prim->m_duration - 20;
-        prim->m_texture.push_back(sparkleTexture);
-        prim->m_tintColor = RGB(140, 220, 255);
+        for (int index = 0; index < 4; ++index) {
+            if (CEffectPrim* prim = LaunchEffectPrim(PP_3DPARTICLEGRAVITY, vector3d{})) {
+                const float angle = (90.0f * static_cast<float>(index) + static_cast<float>(rand() % 20)) * (kPi / 180.0f);
+                const float radius = 2.0f + static_cast<float>(rand() % 6);
+                prim->m_duration = 22;
+                prim->m_deltaPos2 = {
+                    std::sin(angle) * radius,
+                    -18.0f,
+                    -std::cos(angle) * radius
+                };
+                prim->m_gravSpeed = -0.14f;
+                prim->m_gravAccel = 0.014f;
+                prim->m_size = 0.7f + static_cast<float>(rand() % 4) * 0.05f;
+                prim->m_sizeSpeed = -0.02f;
+                prim->m_alpha = 0.0f;
+                prim->m_alphaSpeed = 16.0f;
+                prim->m_maxAlpha = 180.0f;
+                prim->m_fadeOutCnt = 8;
+                prim->m_texture.push_back(sparkleTexture);
+                prim->m_tintColor = RGB(140, 220, 255);
+            }
+        }
     }
 }
 
