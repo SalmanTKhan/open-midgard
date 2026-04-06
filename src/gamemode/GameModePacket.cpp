@@ -2683,6 +2683,20 @@ int ResolveCombatHitWaveWeaponType(const CGameActor& sourceActor)
         return -1;
     }
 
+    if (IsDualWeaponPcJob(sourceActor.m_job)) {
+        const int primaryWeaponValue = weaponValue & 0xFFFF;
+        if (primaryWeaponValue == 0) {
+            return -1;
+        }
+
+        int primaryWeaponType = g_session.ResolvePackedWeaponType(sourceActor.m_job, primaryWeaponValue);
+        if (primaryWeaponType <= 0 || primaryWeaponType >= 31) {
+            primaryWeaponType = g_session.ResolvePackedWeaponType(0, primaryWeaponValue);
+        }
+
+        return (primaryWeaponType > 0 && primaryWeaponType < 31) ? primaryWeaponType : -1;
+    }
+
     int weaponType = g_session.ResolvePackedWeaponType(sourceActor.m_job, weaponValue);
     if (weaponType <= 0 || weaponType >= 31) {
         weaponType = g_session.ResolvePackedWeaponType(sourceActor.m_job, weaponValue & 0xFFFF);
