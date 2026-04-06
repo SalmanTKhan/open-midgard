@@ -2567,7 +2567,7 @@ constexpr u8 kNotifyActMultiHitEndure = 9;
 constexpr u8 kNotifyActCriticalDamage = 10;
 constexpr u8 kNotifyActLuckyDodge = 11;
 constexpr int kDefaultAttackMotionTime = 1440;
-constexpr u32 kRefDoubleAttackTermMs = 80;
+constexpr u32 kRefDoubleAttackTermMs = 200;
 
 struct ScheduledAttackHit {
     int damage = 0;
@@ -2719,16 +2719,18 @@ std::vector<ScheduledAttackHit> ResolveAttackHitSchedule(const CGameActor& sourc
     std::vector<ScheduledAttackHit> scheduledHits;
     const u16 repeatHitCount = ResolveAttackRepeatHitCount(actionType, div);
     const u32 impactDelayMs = ResolveAttackImpactDelayMs(sourceActor);
+    const bool hasRefOffhandFollowup = leftDamage != 0
+        && (sourceActor.m_job < 1000 || sourceActor.m_job > 4000);
 
     if (damage != 0) {
         if (repeatHitCount <= 1) {
             scheduledHits.push_back({ damage, impactDelayMs });
         } else {
             const int perHitDamage = damage / static_cast<int>(repeatHitCount);
-            scheduledHits.reserve(static_cast<size_t>(repeatHitCount) + (leftDamage != 0 ? 1u : 0u));
+            scheduledHits.reserve(static_cast<size_t>(repeatHitCount) + (hasRefOffhandFollowup ? 1u : 0u));
             scheduledHits.push_back({ perHitDamage, impactDelayMs });
 
-            if (leftDamage != 0) {
+            if (hasRefOffhandFollowup) {
                 const u32 followupDelayMs = impactDelayMs + kRefDoubleAttackTermMs / 2;
                 for (u16 hitIndex = 1; hitIndex < repeatHitCount; ++hitIndex) {
                     scheduledHits.push_back({ perHitDamage, followupDelayMs });
@@ -2741,7 +2743,7 @@ std::vector<ScheduledAttackHit> ResolveAttackHitSchedule(const CGameActor& sourc
         }
     }
 
-    if (leftDamage != 0) {
+    if (hasRefOffhandFollowup) {
         const u32 offhandDelayMs = impactDelayMs + kRefDoubleAttackTermMs / 4 + kRefDoubleAttackTermMs + kRefDoubleAttackTermMs / 2;
         scheduledHits.push_back({ leftDamage, offhandDelayMs });
     }
