@@ -3833,7 +3833,7 @@ void CRagEffect::SpawnRuwach()
         prim->m_alpha = 250.0f;
         prim->m_alphaSpeed = -3.0f;
         prim->m_fadeOutCnt = prim->m_duration - 6;
-        ConfigureEffectSpritePrim(prim, { "ÀÌÆÑÆ®" }, 0, 1.0f, false, 0.0f, 0);
+        ConfigureEffectSpritePrim(prim, { "particle2" }, 0, 1.0f, false, 0.0f, 0);
     }
 
     if (CEffectPrim* prim = LaunchEffectPrim(PP_3DPARTICLE, vector3d{})) {
