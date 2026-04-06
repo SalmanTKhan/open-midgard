@@ -4897,8 +4897,6 @@ bool CPc::EnsureBillboardTexture(float cameraLongitude)
                 // Preserve the last walk-facing direction for the first idle frame
                 // after movement stops so the billboard does not flip for one tick.
                 usedRuntimeDirectionalAction = tryUseRuntimeDirectionalAction(8, 0);
-            } else {
-                usedRuntimeDirectionalAction = tryUseRuntimeDirectionalAction(baseBodyAction, baseBodyAction);
             }
 
             if (usedRuntimeDirectionalAction && m_isMoving) {
