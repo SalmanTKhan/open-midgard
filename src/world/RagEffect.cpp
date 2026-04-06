@@ -34,6 +34,7 @@ constexpr float kEffectPixelRatioScale = 0.14285715f;
 // Ref/Wave.cpp PlayWave defaults used for skill / EzStr SFX.
 constexpr int kRefEffectWaveMaxDist = 250;
 constexpr int kRefEffectWaveMinDist = 40;
+constexpr int kSightEffectStateMask = 0x0001;
 
 struct RagEffectCatalogEntry {
     int effectId;
@@ -177,6 +178,12 @@ int ResolveEffectRenderFlags(u32 renderFlag, int fallbackFlags)
 D3DBLEND ResolveEffectDestBlend(u32 renderFlag, D3DBLEND additiveBlend = D3DBLEND_ONE)
 {
     return (renderFlag & (2u | 4u)) != 0 ? additiveBlend : D3DBLEND_INVSRCALPHA;
+}
+
+bool MasterHasEffectState(const CRenderObject* master, int mask)
+{
+    const CGameActor* actor = dynamic_cast<const CGameActor*>(master);
+    return actor && (actor->m_effectState & mask) != 0;
 }
 
 unsigned int PackColor(unsigned int alpha, COLORREF color)
@@ -2745,12 +2752,25 @@ void CRagEffect::Init(CRenderObject* master, int effectId, const vector3d& delta
         m_duration = effectId == 582 ? 124 : 112;
         break;
     case 12:
+        m_handler = Handler::Sight;
+        m_duration = 20;
+        break;
+    case 22:
         m_handler = Handler::SightAura;
-        m_duration = 48;
+        m_duration = 20;
         break;
     case 24:
         m_handler = Handler::SightAura;
         m_duration = 72;
+        break;
+    case 33:
+        m_handler = Handler::SightAura;
+        m_duration = 25;
+        break;
+    case 601:
+        m_handler = Handler::SightState;
+        m_duration = 20;
+        m_loop = true;
         break;
     case 316:
         m_handler = Handler::ReadyPortal2;
@@ -2921,6 +2941,8 @@ bool CRagEffect::ResolveCullSphere(vector3d* outCenter, float* outRadius) const
     case Handler::Entry2:
     case Handler::JobLevelUp50:
     case Handler::SuperAngel:
+    case Handler::Sight:
+    case Handler::SightState:
     case Handler::SightAura:
     case Handler::FireBoltRain:
         radius = 140.0f;
@@ -3576,6 +3598,93 @@ void CRagEffect::SpawnSightAura()
     }
 }
 
+void CRagEffect::SpawnSight()
+{
+    if ((m_stateCnt % 2) != 0) {
+        return;
+    }
+
+    const float angle = static_cast<float>(-5 * m_stateCnt) * (kPi / 180.0f);
+    const float offsetX = std::sin(angle) * 15.0f;
+    const float offsetZ = -std::cos(angle) * 15.0f;
+    CTexture* primary = ResolveEffectTextureCandidates({
+        "effect\\magic_blue.tga",
+        "effect\\magic_blue.bmp",
+        "effect\\cloud11.tga",
+        "effect\\cloud11.bmp",
+    }, true);
+    CTexture* secondary = ResolveEffectTextureCandidates({
+        "effect\\cloud11.tga",
+        "effect\\cloud11.bmp",
+        "effect\\magic_blue.tga",
+        "effect\\magic_blue.bmp",
+    }, true);
+
+    if (CEffectPrim* prim = LaunchEffectPrim(PP_3DPARTICLEGRAVITY, vector3d{})) {
+        prim->m_duration = 20;
+        prim->m_deltaPos2 = { offsetX, -20.0f, offsetZ };
+        prim->m_gravAccel = 0.1f;
+        prim->m_size = 2.5f;
+        prim->m_sizeSpeed = -0.1f;
+        prim->m_alpha = 150.0f;
+        prim->m_alphaSpeed = -3.0f;
+        if (primary) {
+            prim->m_texture.push_back(primary);
+        }
+    }
+
+    if (CEffectPrim* prim = LaunchEffectPrim(PP_3DPARTICLE, vector3d{})) {
+        prim->m_duration = 20;
+        prim->m_deltaPos2 = { offsetX, 0.0f, offsetZ };
+        prim->m_size = 1.5f;
+        prim->m_sizeSpeed = -0.06f;
+        prim->m_alpha = 120.0f;
+        prim->m_alphaSpeed = -1.0f;
+        if (secondary) {
+            prim->m_texture.push_back(secondary);
+        }
+    }
+}
+
+void CRagEffect::SpawnSightState()
+{
+    if (!m_master || !MasterHasEffectState(m_master, kSightEffectStateMask)) {
+        m_loop = false;
+        m_duration = m_stateCnt;
+        return;
+    }
+
+    if (m_stateCnt >= 9998) {
+        m_stateCnt = 0;
+    }
+    if ((m_stateCnt % 2) != 0) {
+        return;
+    }
+
+    const float angle = static_cast<float>(-5 * m_stateCnt) * (kPi / 180.0f);
+    const float offsetX = std::sin(angle) * 15.0f;
+    const float offsetZ = -std::cos(angle) * 15.0f;
+    CTexture* primary = ResolveEffectTextureCandidates({
+        "effect\\magic_blue.tga",
+        "effect\\magic_blue.bmp",
+        "effect\\cloud11.tga",
+        "effect\\cloud11.bmp",
+    }, true);
+
+    if (CEffectPrim* prim = LaunchEffectPrim(PP_3DPARTICLEGRAVITY, vector3d{})) {
+        prim->m_duration = 20;
+        prim->m_deltaPos2 = { offsetX, -20.0f, offsetZ };
+        prim->m_gravAccel = 0.1f;
+        prim->m_size = 2.5f;
+        prim->m_sizeSpeed = -0.1f;
+        prim->m_alpha = 50.0f;
+        prim->m_alphaSpeed = -3.0f;
+        if (primary) {
+            prim->m_texture.push_back(primary);
+        }
+    }
+}
+
 void CRagEffect::SpawnFireBoltRain()
 {
     const vector3d target = m_hasTargetPos ? m_targetPos : ResolveBasePosition();
@@ -3708,6 +3817,12 @@ u8 CRagEffect::OnProcess()
             break;
         case Handler::SuperAngel:
             UpdateSuperAngel();
+            break;
+        case Handler::Sight:
+            SpawnSight();
+            break;
+        case Handler::SightState:
+            SpawnSightState();
             break;
         case Handler::SightAura:
             SpawnSightAura();

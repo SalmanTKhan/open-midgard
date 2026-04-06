@@ -9,11 +9,16 @@ struct JobNameEntry {
 };
 
 #include "../session/JobNameTable.generated.inc"
+#include "../skill/SkillEnumIdTable.inc"
 
 #include <algorithm>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
+#include <unordered_map>
+#include <unordered_set>
+
+#include <cmath>
 
 extern "C" {
 #include "lua.h"
@@ -27,6 +32,15 @@ std::string NormalizeSlashPath(std::string path)
 {
 	std::replace(path.begin(), path.end(), '/', '\\');
 	return path;
+}
+
+int GetAbsoluteLuaIndex(lua_State* state, int index)
+{
+	if (!state || index > 0 || index <= LUA_REGISTRYINDEX) {
+		return index;
+	}
+
+	return lua_gettop(state) + index + 1;
 }
 
 bool PathEndsWithInsensitive(const std::string& path, const char* suffix)
@@ -68,6 +82,247 @@ bool TryGetLuaGlobalInteger(lua_State* state, const char* name, int* outValue)
 	*outValue = static_cast<int>(lua_tointeger(state, -1));
 	lua_pop(state, 1);
 	return true;
+}
+
+bool TryGetLuaTableIntegerField(lua_State* state, int tableIndex, const char* fieldName, int* outValue)
+{
+	if (!state || !fieldName || !*fieldName || !outValue) {
+		return false;
+	}
+
+	const int absoluteIndex = GetAbsoluteLuaIndex(state, tableIndex);
+	lua_getfield(state, absoluteIndex, fieldName);
+	if (!lua_isnumber(state, -1)) {
+		lua_pop(state, 1);
+		return false;
+	}
+
+	*outValue = static_cast<int>(lua_tointeger(state, -1));
+	lua_pop(state, 1);
+	return true;
+}
+
+bool TryGetLuaTableBooleanField(lua_State* state, int tableIndex, const char* fieldName, bool* outValue)
+{
+	if (!state || !fieldName || !*fieldName || !outValue) {
+		return false;
+	}
+
+	const int absoluteIndex = GetAbsoluteLuaIndex(state, tableIndex);
+	lua_getfield(state, absoluteIndex, fieldName);
+	if (lua_isboolean(state, -1)) {
+		*outValue = lua_toboolean(state, -1) != 0;
+		lua_pop(state, 1);
+		return true;
+	}
+	if (lua_isnumber(state, -1)) {
+		*outValue = lua_tointeger(state, -1) != 0;
+		lua_pop(state, 1);
+		return true;
+	}
+
+	lua_pop(state, 1);
+	return false;
+}
+
+bool TryGetLuaTableIntegerArrayField(lua_State* state, int tableIndex, const char* fieldName, std::vector<int>* outValues)
+{
+	if (!state || !fieldName || !*fieldName || !outValues) {
+		return false;
+	}
+
+	outValues->clear();
+	const int absoluteIndex = GetAbsoluteLuaIndex(state, tableIndex);
+	lua_getfield(state, absoluteIndex, fieldName);
+	if (!lua_istable(state, -1)) {
+		lua_pop(state, 1);
+		return false;
+	}
+
+	const int fieldIndex = GetAbsoluteLuaIndex(state, -1);
+	const size_t count = static_cast<size_t>(lua_objlen(state, fieldIndex));
+	for (size_t index = 1; index <= count; ++index) {
+		lua_rawgeti(state, fieldIndex, static_cast<int>(index));
+		if (lua_isnumber(state, -1)) {
+			outValues->push_back(static_cast<int>(lua_tointeger(state, -1)));
+		}
+		lua_pop(state, 1);
+	}
+
+	lua_pop(state, 1);
+	return !outValues->empty();
+}
+
+int AllocateSyntheticLuaTableValue(const char* tableName, const char* keyName)
+{
+	if (!tableName || !*tableName || !keyName || !*keyName) {
+		return 0;
+	}
+
+	static std::unordered_map<std::string, int> syntheticValues;
+	static int nextSkillId = 50000;
+	static int nextEffectId = 70000;
+	static int nextActorState = 90000;
+
+	std::string compositeKey = tableName;
+	compositeKey += '.';
+	compositeKey += keyName;
+
+	const auto existing = syntheticValues.find(compositeKey);
+	if (existing != syntheticValues.end()) {
+		return existing->second;
+	}
+
+	int value = 0;
+	if (_stricmp(tableName, "SKID") == 0) {
+		value = nextSkillId++;
+	} else if (_stricmp(tableName, "EFID") == 0) {
+		value = nextEffectId++;
+	} else if (_stricmp(tableName, "ACTOR_STATE") == 0) {
+		value = nextActorState++;
+	}
+
+	if (value != 0) {
+		syntheticValues.emplace(compositeKey, value);
+	}
+
+	return value;
+}
+
+bool HasLuaTableIntegerKey(lua_State* state, const char* tableName, const char* keyName)
+{
+	if (!state || !tableName || !*tableName || !keyName || !*keyName) {
+		return false;
+	}
+
+	lua_getglobal(state, tableName);
+	if (!lua_istable(state, -1)) {
+		lua_pop(state, 1);
+		return false;
+	}
+
+	const int tableIndex = GetAbsoluteLuaIndex(state, -1);
+	lua_getfield(state, tableIndex, keyName);
+	const bool found = lua_isnumber(state, -1);
+	lua_pop(state, 2);
+	return found;
+}
+
+void SetLuaTableIntegerKey(lua_State* state, const char* tableName, const char* keyName, int value)
+{
+	if (!state || !tableName || !*tableName || !keyName || !*keyName) {
+		return;
+	}
+
+	lua_getglobal(state, tableName);
+	if (!lua_istable(state, -1)) {
+		lua_pop(state, 1);
+		return;
+	}
+
+	const int tableIndex = GetAbsoluteLuaIndex(state, -1);
+	lua_pushstring(state, keyName);
+	lua_pushinteger(state, value);
+	lua_settable(state, tableIndex);
+	lua_pop(state, 1);
+	DbgLog("[Lua] Synthesizing missing table key %s.%s=%d before loading skill-effect info.\n",
+		tableName,
+		keyName,
+		value);
+	}
+
+bool IsUppercaseEnumToken(const std::string& token)
+
+{
+	if (token.size() < 3) {
+		return false;
+	}
+
+	bool hasUnderscore = false;
+	for (char ch : token) {
+		const unsigned char uch = static_cast<unsigned char>(ch);
+		if (ch == '_') {
+			hasUnderscore = true;
+			continue;
+		}
+		if ((uch >= 'A' && uch <= 'Z') || (uch >= '0' && uch <= '9')) {
+			continue;
+		}
+		return false;
+	}
+
+	return hasUnderscore;
+}
+
+bool ShouldTreatAsSkillEnumToken(const std::string& token)
+{
+	if (!IsUppercaseEnumToken(token)) {
+		return false;
+	}
+	if (_stricmp(token.c_str(), "SKILL_EFFECT_INFO_LIST") == 0
+		|| _stricmp(token.c_str(), "SKID") == 0
+		|| _stricmp(token.c_str(), "ACTOR_STATE") == 0
+		|| _stricmp(token.c_str(), "EFID") == 0
+		|| _stricmp(token.c_str(), "LaunchZC_USE_SKILL") == 0) {
+		return false;
+	}
+	return std::strncmp(token.c_str(), "EF_", 3) != 0
+		&& std::strncmp(token.c_str(), "ST_", 3) != 0;
+}
+
+void PopulateSkillEffectCompatibilityTables(lua_State* state, const std::vector<unsigned char>& bytes)
+{
+	if (!state || bytes.empty()) {
+		return;
+	}
+
+	std::unordered_set<std::string> seenTokens;
+	std::string token;
+	auto flushToken = [&]() {
+		if (token.empty()) {
+			return;
+		}
+
+		if (seenTokens.insert(token).second) {
+			if (std::strncmp(token.c_str(), "EF_", 3) == 0) {
+				if (!HasLuaTableIntegerKey(state, "EFID", token.c_str())) {
+					const int value = AllocateSyntheticLuaTableValue("EFID", token.c_str());
+					if (value != 0) {
+						SetLuaTableIntegerKey(state, "EFID", token.c_str(), value);
+					}
+				}
+			} else if (std::strncmp(token.c_str(), "ST_", 3) == 0) {
+				if (!HasLuaTableIntegerKey(state, "ACTOR_STATE", token.c_str())) {
+					const int value = AllocateSyntheticLuaTableValue("ACTOR_STATE", token.c_str());
+					if (value != 0) {
+						SetLuaTableIntegerKey(state, "ACTOR_STATE", token.c_str(), value);
+					}
+				}
+			} else if (ShouldTreatAsSkillEnumToken(token)) {
+				if (!HasLuaTableIntegerKey(state, "SKID", token.c_str())) {
+					const int value = AllocateSyntheticLuaTableValue("SKID", token.c_str());
+					if (value != 0) {
+						SetLuaTableIntegerKey(state, "SKID", token.c_str(), value);
+					}
+				}
+			}
+		}
+
+		token.clear();
+	};
+
+	for (unsigned char byte : bytes) {
+		const char ch = static_cast<char>(byte);
+		const bool isTokenChar = (ch >= 'A' && ch <= 'Z')
+			|| (ch >= '0' && ch <= '9')
+			|| ch == '_';
+		if (isTokenChar) {
+			token.push_back(ch);
+		} else {
+			flushToken();
+		}
+	}
+	flushToken();
 }
 
 void EnsurePcJobTbl2Table(lua_State* state)
@@ -204,6 +459,31 @@ void PreparePcJobNameGenderCompatibility(lua_State* state)
 	AddPcJobVariantAliases(state);
 }
 
+void EnsureSkillIdTable(lua_State* state)
+{
+	if (!state) {
+		return;
+	}
+
+	lua_getglobal(state, "SKID");
+	if (lua_istable(state, -1)) {
+		lua_pop(state, 1);
+		return;
+	}
+
+	lua_pop(state, 1);
+	lua_newtable(state);
+	for (const SkillEnumEntry& entry : kSkillEnumEntries) {
+		if (!entry.name || !*entry.name) {
+			continue;
+		}
+		lua_pushstring(state, entry.name);
+		lua_pushinteger(state, entry.id);
+		lua_settable(state, -3);
+	}
+	lua_setglobal(state, "SKID");
+}
+
 bool ReadLocalFileBytes(const std::filesystem::path& path, std::vector<unsigned char>* outBytes)
 {
 	if (!outBytes) {
@@ -282,6 +562,8 @@ void CLuaBridge::Shutdown()
 		m_state = nullptr;
 	}
 	m_loadedScripts.clear();
+	m_skillEffectInfoCache.clear();
+	m_missingSkillEffectInfoIds.clear();
 	m_lastError.clear();
 }
 
@@ -513,6 +795,95 @@ bool CLuaBridge::GetGlobalTableStringByIntegerKey(const char* tableName, int num
 	outValue->assign(value);
 	lua_settop(m_state, 0);
 	m_lastError.clear();
+	return true;
+}
+
+bool CLuaBridge::GetSkillEffectInfoBySkillId(int skillId, LuaSkillEffectInfo* outInfo)
+{
+	if (outInfo) {
+		*outInfo = LuaSkillEffectInfo{};
+	}
+	if (skillId <= 0) {
+		return false;
+	}
+
+	const auto cacheIt = m_skillEffectInfoCache.find(skillId);
+	if (cacheIt != m_skillEffectInfoCache.end()) {
+		if (outInfo) {
+			*outInfo = cacheIt->second;
+		}
+		return true;
+	}
+	if (m_missingSkillEffectInfoIds.find(skillId) != m_missingSkillEffectInfoIds.end()) {
+		return false;
+	}
+
+	if (!Initialize()) {
+		return false;
+	}
+
+	EnsureSkillIdTable(m_state);
+
+	if (!LoadRagnarokScriptOnce("lua files\\skilleffectinfo\\actorstate.lub")
+		|| !LoadRagnarokScriptOnce("lua files\\skilleffectinfo\\skilleffectinfo_f.lub")
+		|| !LoadRagnarokScriptOnce("lua files\\skilleffectinfo\\EffectID.lub")) {
+		return false;
+	}
+
+	std::vector<unsigned char> skillEffectListBytes;
+	std::string skillEffectListSourcePath;
+	bool skillEffectListLoadedFromLocal = false;
+	if (ReadRagnarokScriptBytes("lua files\\skilleffectinfo\\SkillEffectInfoList.lub",
+		&skillEffectListBytes,
+		&skillEffectListSourcePath,
+		&skillEffectListLoadedFromLocal)) {
+		PopulateSkillEffectCompatibilityTables(m_state, skillEffectListBytes);
+	}
+
+	if (!LoadRagnarokScriptOnce("lua files\\skilleffectinfo\\SkillEffectInfoList.lub")) {
+		return false;
+	}
+
+	lua_getglobal(m_state, "SKILL_EFFECT_INFO_LIST");
+	if (!lua_istable(m_state, -1)) {
+		lua_settop(m_state, 0);
+		m_lastError = "SKILL_EFFECT_INFO_LIST not found";
+		return false;
+	}
+
+	LuaSkillEffectInfo info;
+	bool found = false;
+	lua_pushnil(m_state);
+	while (lua_next(m_state, -2) != 0) {
+		if (lua_istable(m_state, -1)) {
+			int entrySkillId = 0;
+			if (TryGetLuaTableIntegerField(m_state, -1, "SKID", &entrySkillId) && entrySkillId == skillId) {
+				info.hasBeginEffectId = TryGetLuaTableIntegerField(m_state, -1, "beginEffectID", &info.beginEffectId);
+				info.hasBeginMotionType = TryGetLuaTableIntegerField(m_state, -1, "beginMotionType", &info.beginMotionType);
+				info.hasTargetEffectId = TryGetLuaTableIntegerField(m_state, -1, "targetEffectID", &info.targetEffectId);
+				info.hasGroundEffectId = TryGetLuaTableIntegerField(m_state, -1, "groundEffectID", &info.groundEffectId);
+				TryGetLuaTableIntegerArrayField(m_state, -1, "effectIDs", &info.effectIds);
+				info.hasOnTarget = TryGetLuaTableBooleanField(m_state, -1, "onTarget", &info.onTarget);
+				info.hasLaunchUseSkill = TryGetLuaTableBooleanField(m_state, -1, "LaunchZC_USE_SKILL", &info.launchUseSkill);
+				found = true;
+				lua_pop(m_state, 1);
+				break;
+			}
+		}
+
+		lua_pop(m_state, 1);
+	}
+
+	lua_settop(m_state, 0);
+	if (!found) {
+		m_missingSkillEffectInfoIds.insert(skillId);
+		return false;
+	}
+
+	m_skillEffectInfoCache.emplace(skillId, info);
+	if (outInfo) {
+		*outInfo = info;
+	}
 	return true;
 }
 

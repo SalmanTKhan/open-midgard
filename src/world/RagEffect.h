@@ -176,6 +176,8 @@ private:
         MapMagicZone,
         MapParticle,
         SuperAngel,
+        Sight,
+        SightState,
         SightAura,
         FireBoltRain,
     };
@@ -204,6 +206,8 @@ private:
     void SpawnSuperAngelVariant(int variant, int birthFrame);
     void SpawnSuperAngelBurst(int startAngle);
     void UpdateSuperAngel();
+    void SpawnSight();
+    void SpawnSightState();
     void SpawnSightAura();
     void SpawnFireBoltRain();
 

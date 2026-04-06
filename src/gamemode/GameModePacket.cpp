@@ -8,12 +8,14 @@
 #include "core/File.h"
 #include "pathfinder/PathFinder.h"
 #include "session/Session.h"
+#include "session/SkillActionInfo.h"
 #include "session/SkillActionInfo2.h"
 #include "skill/Skill.h"
 #include "item/Item.h"
 #include "Mode.h"
 #include "DebugLog.h"
 #include "audio/Audio.h"
+#include "lua/LuaBridge.h"
 #include "ui/UIBasicInfoWnd.h"
 #include "ui/UISayDialogWnd.h"
 #include "ui/UINpcMenuWnd.h"
@@ -106,6 +108,58 @@ constexpr u32 kStatusAspd = 53;
 constexpr u32 kStatusPlusAspd = 54;
 constexpr u32 kStatusJobLevel = 55;
 constexpr u32 kNotifyEffectBaseLevelUp = 0;
+constexpr int kEffectStateSightMask = 0x0001;
+constexpr int kEffectStateHidingMask = 0x0004;
+constexpr int kEffectStateSpecialHidingMask = 0x0040;
+constexpr int kEffectStateBurrowMask = 0x4000;
+constexpr int kSightStateEffectId = 601;
+
+bool HasEffectStateFlag(int effectState, int mask)
+{
+    return (effectState & mask) != 0;
+}
+
+bool ActorHasAttachedEffect(const CGameActor* actor, int effectId)
+{
+    if (!actor) {
+        return false;
+    }
+
+    for (const CRagEffect* effect : actor->m_effectList) {
+        if (effect && effect->GetEffectType() == effectId) {
+            return true;
+        }
+    }
+    return false;
+}
+
+void RefreshActorEffectStatePresentation(CGameActor* actor, int oldEffectState)
+{
+    if (!actor) {
+        return;
+    }
+
+    (void)oldEffectState;
+
+    const int effectState = actor->m_effectState;
+    const bool hiding = HasEffectStateFlag(effectState, kEffectStateHidingMask);
+    const bool specialHiding = HasEffectStateFlag(effectState, kEffectStateSpecialHidingMask);
+    const bool burrow = HasEffectStateFlag(effectState, kEffectStateBurrowMask);
+    const bool bodyVisible = !(hiding || specialHiding || burrow);
+    const bool fullyVisible = !(hiding || specialHiding);
+
+    actor->m_isVisibleBody = bodyVisible ? 1 : 0;
+    actor->m_isVisible = fullyVisible ? 1 : 0;
+    actor->m_shadowOn = bodyVisible ? 1 : 0;
+
+    if (HasEffectStateFlag(effectState, kEffectStateSightMask) && !ActorHasAttachedEffect(actor, kSightStateEffectId)) {
+        actor->LaunchEffect(kSightStateEffectId, vector3d{}, 0.0f);
+    }
+
+    if (CPc* pcActor = dynamic_cast<CPc*>(actor)) {
+        pcActor->InvalidateBillboard();
+    }
+}
 constexpr u32 kNotifyEffectJobLevelUp = 1;
 constexpr u32 kNotifyEffectBaseLevelUpSuperNovice = 7;
 constexpr u32 kNotifyEffectJobLevelUpSuperNovice = 8;
@@ -2865,6 +2919,16 @@ void EmitSkillImpactEffect(CGameActor* targetActor, u16 skillId)
         return;
     }
 
+    LuaSkillEffectInfo luaInfo;
+    if (g_buabridge.GetSkillEffectInfoBySkillId(static_cast<int>(skillId), &luaInfo) && !luaInfo.effectIds.empty()) {
+        for (int effectId : luaInfo.effectIds) {
+            if (effectId > 0) {
+                targetActor->LaunchEffect(effectId, vector3d{}, 0.0f);
+            }
+        }
+        return;
+    }
+
     switch (skillId) {
     case 17: // MG_FIREBOLT
         targetActor->LaunchEffect(49, vector3d{}, 0.0f);
@@ -3499,73 +3563,45 @@ float TileToWorldCoordZ(const CWorld* world, int tileY)
     return (static_cast<float>(tileY) - static_cast<float>(height) * 0.5f) * zoom + zoom * 0.5f;
 }
 
-constexpr int kDefaultSkillCastBeginEffectId = 16;
+struct UseSkillPacketInfo {
+    int beginEffectId = 16;
+    int motionType = 7;
+    int targetEffectId = -1;
+    std::vector<int> impactEffectIds;
+    bool useTargetSlot = false;
+    bool launchUseSkill = true;
+};
 
-int ResolveSkillBeginEffectId(u16 skillId, u32 property)
+UseSkillPacketInfo ResolveUseSkillPacketInfo(u16 skillId)
 {
-    int effectId = kDefaultSkillCastBeginEffectId;
+    UseSkillPacketInfo info;
+    GetSkillActionInfo(static_cast<int>(skillId), info.beginEffectId, info.motionType);
 
-    switch (skillId) {
-    // Priest/Acolyte self-buff family follows the reference GetSkillActionInfo2 mapping.
-    case 22: // AL_DP
-    case 23: // AL_DEMONBANE
-    case 24: // AL_RUWACH
-    case 28: // AL_HEAL
-    case 29: // AL_INCAGI
-    case 30: // AL_DECAGI
-    case 32: // AL_CRUCIS
-    case 33: // AL_ANGELUS
-    case 34: // AL_BLESSING
-    case 35: // AL_CURE
-        effectId = 12;
-        break;
-    case 45:
-        effectId = 43;
-        break;
-    case 57:
-        effectId = 144;
-        break;
-    case 59:
-        return -1;
-    default:
-        break;
-    }
-
-    if (effectId == 12) {
-        switch (property) {
-        case 1: return 54;
-        case 2: return 56;
-        case 3: return 55;
-        case 4: return 57;
-        case 5: return 59;
-        case 6: return 58;
-        default:
-            break;
+    LuaSkillEffectInfo luaInfo;
+    if (g_buabridge.GetSkillEffectInfoBySkillId(static_cast<int>(skillId), &luaInfo)) {
+        if (luaInfo.hasTargetEffectId) {
+            info.targetEffectId = luaInfo.targetEffectId;
+        }
+        info.impactEffectIds = luaInfo.effectIds;
+        if (luaInfo.hasOnTarget) {
+            info.useTargetSlot = luaInfo.onTarget;
+        }
+        if (luaInfo.hasLaunchUseSkill) {
+            info.launchUseSkill = luaInfo.launchUseSkill;
         }
     }
 
-    return effectId;
-}
-
-int ResolveSkillMotionType(u16 skillId)
-{
-    switch (skillId) {
-    case 24: // AL_RUWACH
-    case 34: // AL_BLESSING
-        return kGameActorSkillStateId;
-    case 29: // AL_INCAGI
-    case 151:
-    case 304:
-        return 0;
-    default:
-        return kGameActorSkillStateId;
-    }
+    return info;
 }
 
 int ResolveGroundSkillEffectId(u16 skillId, u16 level);
 
-int ResolveSkillVisibleEffectId(u16 skillId, u16 levelOrAmount)
+int ResolveSkillVisibleEffectId(u16 skillId, const UseSkillPacketInfo& packetInfo, u16 levelOrAmount)
 {
+    if (packetInfo.targetEffectId >= 0) {
+        return packetInfo.targetEffectId;
+    }
+
     switch (skillId) {
     case 24: // AL_RUWACH
         return 24;
@@ -3574,8 +3610,7 @@ int ResolveSkillVisibleEffectId(u16 skillId, u16 levelOrAmount)
     case 35: // AL_CURE
         return 66;
     default: {
-        const int beginEffectId = ResolveSkillBeginEffectId(skillId, 0);
-        return beginEffectId >= 0 ? beginEffectId : ResolveGroundSkillEffectId(skillId, levelOrAmount);
+        return packetInfo.beginEffectId >= 0 ? packetInfo.beginEffectId : ResolveGroundSkillEffectId(skillId, levelOrAmount);
     }
     }
 }
@@ -3650,6 +3685,11 @@ vector3d ResolveSkillCellWorldPosition(const CWorld* world, int cellX, int cellY
 
 int ResolveGroundSkillEffectId(u16 skillId, u16 level)
 {
+    LuaSkillEffectInfo luaInfo;
+    if (g_buabridge.GetSkillEffectInfoBySkillId(static_cast<int>(skillId), &luaInfo) && luaInfo.hasGroundEffectId) {
+        return luaInfo.groundEffectId;
+    }
+
     switch (skillId) {
     case 21: return 30;
     case 25: return 141;
@@ -3939,6 +3979,15 @@ void HandleSkillCastAck(CGameMode& mode, const PacketView& packet)
     int beginEffectId = 16;
     int motionType = kGameActorCastingStateId;
     GetSkillActionInfo2(static_cast<int>(skillId), beginEffectId, motionType, static_cast<int>(property), sourceActor->m_job);
+    LuaSkillEffectInfo luaInfo;
+    if (g_buabridge.GetSkillEffectInfoBySkillId(static_cast<int>(skillId), &luaInfo)) {
+        if (luaInfo.hasBeginEffectId) {
+            beginEffectId = luaInfo.beginEffectId;
+        }
+        if (luaInfo.hasBeginMotionType) {
+            motionType = luaInfo.beginMotionType;
+        }
+    }
 
     int motion = motionType;
     if (motion == 0 && castTimeMs > 0) {
@@ -3972,9 +4021,8 @@ void HandleSkillCastAck(CGameMode& mode, const PacketView& packet)
             }
             sourceActor->SetState(motionToApply);
         }
-        // Timed casts: no begin-spell VFX here — completion packets (damage / ground notify / unit) play the skill effect.
-        if (beginEffectId >= 0 && castTimeMs <= 0) {
-            sourceActor->SendMsg(sourceActor, 85, beginEffectId, 0, 0);
+        if (beginEffectId >= 0) {
+            sourceActor->SendMsg(sourceActor, 85, beginEffectId, castTimeMs > 0 ? (castTimeMs >> 4) : 0, 0);
         }
         if (castTimeMs > 0) {
             sourceActor->SendMsg(sourceActor, 82, castTimeMs, 0, 0);
@@ -4119,8 +4167,14 @@ void HandleGroundSkillNotify(CGameMode& mode, const PacketView& packet)
 
     CGameActor* sourceActor = ResolveCombatActor(mode, srcGid, true);
     const vector3d worldPos = ResolveSkillCellWorldPosition(mode.m_world, cellX, cellY);
+    const UseSkillPacketInfo packetInfo = ResolveUseSkillPacketInfo(skillId);
     if (sourceActor) {
-        StartSkillSourceAnimation(sourceActor, &worldPos, kDefaultAttackMotionTime);
+        ClearAttachedSkillEffects(sourceActor);
+        if (packetInfo.motionType == kGameActorAttackStateId) {
+            StartSkillSourceAnimation(sourceActor, &worldPos, kDefaultAttackMotionTime);
+        } else if (packetInfo.motionType >= 0) {
+            StartSkillStateAnimation(sourceActor, packetInfo.motionType, 0, &worldPos);
+        }
     }
     SpawnWorldSkillEffect(mode, ResolveGroundSkillEffectId(skillId, level), worldPos);
     PlayGroundSkillImpactSound(skillId, worldPos);
@@ -4147,13 +4201,17 @@ void HandleSkillNoDamageNotify(CGameMode& mode, const PacketView& packet)
 
     CGameActor* sourceActor = srcGid != 0 ? ResolveCombatActor(mode, srcGid, true) : nullptr;
     CGameActor* targetActor = ResolveCombatActor(mode, dstGid, true);
-    if (sourceActor && targetActor) {
+    const UseSkillPacketInfo packetInfo = ResolveUseSkillPacketInfo(skillId);
+    if (sourceActor && targetActor && packetInfo.motionType >= 0) {
         ClearAttachedSkillEffects(sourceActor);
-        StartSkillStateAnimation(sourceActor, ResolveSkillMotionType(skillId), dstGid, &targetActor->m_pos);
+        StartSkillStateAnimation(sourceActor, packetInfo.motionType, dstGid, &targetActor->m_pos);
     }
-    if (targetActor && result != 0) {
-        const int effectId = ResolveSkillVisibleEffectId(skillId, levelOrAmount);
-        if (sourceActor == targetActor && effectId >= 0) {
+    if (targetActor && result != 0 && packetInfo.launchUseSkill) {
+        const int effectId = ResolveSkillVisibleEffectId(skillId, packetInfo, levelOrAmount);
+        const bool selfCast = sourceActor && sourceActor == targetActor;
+        const bool useTargetSlot = !selfCast
+            && (packetInfo.useTargetSlot || packetInfo.targetEffectId >= 0);
+        if (selfCast && effectId >= 0) {
             targetActor->SendMsg(targetActor, 85, effectId, 0, 0);
         } else {
             ClearAttachedSkillEffects(targetActor);
@@ -4698,6 +4756,8 @@ void ApplyRuntimeActorState(CGameMode& mode, const RuntimeActorState& state)
         return;
     }
 
+    const int oldEffectState = actor->m_effectState;
+
     actor->m_speed = state.speed;
     actor->m_job = state.job;
     actor->m_sex = state.sex;
@@ -4716,6 +4776,7 @@ void ApplyRuntimeActorState(CGameMode& mode, const RuntimeActorState& state)
     actor->m_actorType = state.objectType;
     actor->m_isPc = isPc ? 1 : 0;
     actor->m_roty = PacketDirToRotationDegrees(state.dir);
+    RefreshActorEffectStatePresentation(actor, oldEffectState);
 
     if (isPc) {
         mode.m_lastPcGid = state.gid;
@@ -5328,14 +5389,13 @@ void HandleActorStateChange(CGameMode& mode, const PacketView& packet)
         return;
     }
 
+    const int oldEffectState = actor->m_effectState;
+
     actor->m_bodyState = bodyState;
     actor->m_healthState = healthState;
     actor->m_effectState = effectState;
     actor->m_pkState = pkState;
-
-    if (CPc* pcActor = dynamic_cast<CPc*>(actor)) {
-        pcActor->InvalidateBillboard();
-    }
+    RefreshActorEffectStatePresentation(actor, oldEffectState);
 }
 
 CGameActor* EnsureRuntimeActor(CGameMode& mode, u32 gid, bool preferPc)
