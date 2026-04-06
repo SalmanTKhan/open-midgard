@@ -4872,13 +4872,37 @@ bool CPc::EnsureBillboardTexture(float cameraLongitude)
         if (!bodyActRes) {
             bodyActRes = g_resMgr.GetAs<CActRes>(bodyActName.c_str());
         }
+
+        auto tryUseRuntimeDirectionalAction = [&](int runtimeBaseAction, int outputBaseAction) {
+            if (m_curAction < runtimeBaseAction || m_curAction >= runtimeBaseAction + 8) {
+                return false;
+            }
+            bodyAction = outputBaseAction + (m_curAction - runtimeBaseAction);
+            return true;
+        };
+
         if (IsTransientActionActive(*this, bodyActRes, m_curAction)) {
             bodyAction = m_curAction;
             headMotion = m_curMotion;
         } else {
+            bool usedRuntimeDirectionalAction = false;
+            if (m_isMoving) {
+                usedRuntimeDirectionalAction = tryUseRuntimeDirectionalAction(8, 8);
+            } else if (m_stateId == kMoveStateId) {
+                // Preserve the last walk-facing direction for the first idle frame
+                // after movement stops so the billboard does not flip for one tick.
+                usedRuntimeDirectionalAction = tryUseRuntimeDirectionalAction(8, 0);
+            } else {
+                usedRuntimeDirectionalAction = tryUseRuntimeDirectionalAction(baseBodyAction, baseBodyAction);
+            }
+
+            if (usedRuntimeDirectionalAction && (m_isMoving || m_stateId == kMoveStateId)) {
+                headMotion = m_curMotion;
+            } else {
             headMotion = ResolveHeadMotionFromBodyAction(bodyAction, m_headDir);
             if (headMotion < 0) {
                 headMotion = ResolvePcMotionIndex(this, bodyAction, bodyActName);
+            }
             }
         }
     } else {
