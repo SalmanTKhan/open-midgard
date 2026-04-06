@@ -178,6 +178,7 @@ private:
         SuperAngel,
         Sight,
         SightState,
+        Ruwach,
         SightAura,
         FireBoltRain,
     };
@@ -208,6 +209,7 @@ private:
     void UpdateSuperAngel();
     void SpawnSight();
     void SpawnSightState();
+    void SpawnRuwach();
     void SpawnSightAura();
     void SpawnFireBoltRain();
 

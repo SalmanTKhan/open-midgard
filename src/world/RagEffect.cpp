@@ -257,6 +257,11 @@ float SinDeg(float angleDegrees)
     return std::sin(angleDegrees * (kPi / 180.0f));
 }
 
+const char* RefRuwachSpriteStem()
+{
+    return "\xC0\xCC\xC6\xD1\xC6\xAE";
+}
+
 void SubmitScreenQuad(const tlvertex3d& anchor,
     CTexture* texture,
     float offsetX,
@@ -2841,7 +2846,7 @@ void CRagEffect::Init(CRenderObject* master, int effectId, const vector3d& delta
         m_duration = 72;
         break;
     case 33:
-        m_handler = Handler::SightAura;
+        m_handler = Handler::Ruwach;
         m_duration = 25;
         break;
     case 601:
@@ -3020,6 +3025,7 @@ bool CRagEffect::ResolveCullSphere(vector3d* outCenter, float* outRadius) const
     case Handler::SuperAngel:
     case Handler::Sight:
     case Handler::SightState:
+    case Handler::Ruwach:
     case Handler::SightAura:
     case Handler::FireBoltRain:
         radius = 140.0f;
@@ -3751,6 +3757,41 @@ void CRagEffect::SpawnSightState()
     }
 }
 
+void CRagEffect::SpawnRuwach()
+{
+    if ((m_stateCnt % 3) != 0) {
+        return;
+    }
+
+    constexpr float kRuwachStepDegrees = -50.0f / 13.0f;
+    const float angle = static_cast<float>(m_stateCnt) * kRuwachStepDegrees * (kPi / 180.0f);
+    const float offsetX = std::sin(angle) * 15.0f;
+    const float offsetZ = -std::cos(angle) * 15.0f;
+
+    if (CEffectPrim* prim = LaunchEffectPrim(PP_3DPARTICLE, vector3d{})) {
+        prim->m_duration = 25;
+        prim->m_deltaPos2 = { offsetX, -10.0f, offsetZ };
+        prim->m_size = 3.0f;
+        prim->m_sizeSpeed = -0.1f;
+        prim->m_alpha = 250.0f;
+        prim->m_alphaSpeed = -3.0f;
+        prim->m_fadeOutCnt = prim->m_duration - 6;
+        ConfigureEffectSpritePrim(prim, { RefRuwachSpriteStem() }, 0, 1.0f, false, 0.0f, 0);
+    }
+
+    if (CEffectPrim* prim = LaunchEffectPrim(PP_3DPARTICLE, vector3d{})) {
+        prim->m_duration = 25;
+        prim->m_deltaPos2 = { offsetX, 0.0f, offsetZ };
+        prim->m_animSpeed = 2;
+        prim->m_size = 1.5f;
+        prim->m_sizeSpeed = -0.06f;
+        prim->m_alpha = 150.0f;
+        prim->m_alphaSpeed = -2.5f;
+        prim->m_fadeOutCnt = prim->m_duration - 6;
+        ConfigureEffectSpritePrim(prim, { "Shadow", "shadow" }, 0, 1.0f, false, 0.0f, 0);
+    }
+}
+
 void CRagEffect::SpawnFireBoltRain()
 {
     const vector3d target = m_hasTargetPos ? m_targetPos : ResolveBasePosition();
@@ -3889,6 +3930,9 @@ u8 CRagEffect::OnProcess()
             break;
         case Handler::SightState:
             SpawnSightState();
+            break;
+        case Handler::Ruwach:
+            SpawnRuwach();
             break;
         case Handler::SightAura:
             SpawnSightAura();
