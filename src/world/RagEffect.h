@@ -177,6 +177,8 @@ private:
         MapParticle,
         SuperAngel,
         BeginCasting,
+        IncAgility,
+        Blessing,
         Sight,
         SightState,
         FireBall,
@@ -210,6 +212,8 @@ private:
     void SpawnSuperAngelBurst(int startAngle);
     void UpdateSuperAngel();
     void SpawnBeginCasting();
+    void SpawnIncAgility();
+    void SpawnBlessing();
     void SpawnSight();
     void SpawnSightState();
     void SpawnFireBall();

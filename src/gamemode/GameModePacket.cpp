@@ -3615,8 +3615,12 @@ int ResolveSkillVisibleEffectId(u16 skillId, const UseSkillPacketInfo& packetInf
     }
 
     switch (skillId) {
+    case 29: // AL_INCAGI
+        return 37;
     case 33: // AL_ANGELUS
         return 41;
+    case 34: // AL_BLESSING
+        return 42;
     case 35: // AL_CURE
         return 66;
     default: {
@@ -3997,6 +4001,12 @@ void HandleSkillCastAck(CGameMode& mode, const PacketView& packet)
         if (luaInfo.hasBeginMotionType) {
             motionType = luaInfo.beginMotionType;
         }
+    }
+
+    // Ruwach's real visual is already driven by its state/visible effect path; some servers still emit a cast ack
+    // for this instant skill, which otherwise adds a spurious begin-spell ring.
+    if (skillId == 24) {
+        beginEffectId = -1;
     }
 
     int motion = motionType;
