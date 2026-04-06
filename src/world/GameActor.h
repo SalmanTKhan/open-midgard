@@ -65,6 +65,7 @@ struct PROCEEDTYPE { int type; };
 
 constexpr int kGameActorAttackStateId = 2;
 constexpr int kGameActorDeathStateId = 3;
+constexpr int kGameActorPickupStateId = 5;
 constexpr int kGameActorSkillStateId = 7;
 constexpr int kGameActorCastingStateId = 8;
 constexpr int kGameActorCastingLoopStateId = 13;
@@ -85,6 +86,8 @@ public:
 
 class CRenderObject : public CGameObject {
 public:
+    CRenderObject();
+
     vector3d m_pos;
     std::string m_bodyPaletteName;
     int m_baseAction;
@@ -184,6 +187,7 @@ public:
 
 class CGameActor : public CAbleToMakeEffect {
 public:
+    CGameActor();
     virtual ~CGameActor();
 
     int m_moveDestX, m_moveDestY;

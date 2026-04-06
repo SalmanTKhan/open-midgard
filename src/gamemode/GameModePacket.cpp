@@ -2798,13 +2798,7 @@ CGameActor* ResolveCombatActor(CGameMode& mode, u32 actorId, bool preferPc)
             return player;
         }
     }
-
-    const auto it = mode.m_runtimeActors.find(actorId);
-    if (it != mode.m_runtimeActors.end()) {
-        return it->second;
-    }
-
-    return EnsureRuntimeActor(mode, actorId, false);
+    return EnsureRuntimeActor(mode, actorId, preferPc);
 }
 
 void StartAttackAnimation(CGameActor* actor, CGameActor* target, int attackMT)
@@ -2818,8 +2812,37 @@ void StartAttackAnimation(CGameActor* actor, CGameActor* target, int attackMT)
     StopActorMovementForAction(actor);
     FaceActorTowardTarget(actor, target);
     actor->SetModifyFactorOfmotionSpeed(attackMT);
+    DbgLog("[ActorTrace2] attack before actor=%p gid=%u state=%d base=%d cur=%d motion=%d isPc=%d isCPc=%d target=%u attackMT=%d roty=%.1f\n",
+        static_cast<void*>(actor),
+        actor->m_gid,
+        actor->m_stateId,
+        actor->m_baseAction,
+        actor->m_curAction,
+        actor->m_curMotion,
+        actor->m_isPc,
+        dynamic_cast<CPc*>(actor) != nullptr,
+        actor->m_targetGid,
+        attackMT,
+        actor->m_roty);
     actor->SetState(kGameActorAttackStateId);
+    DbgLog("[ActorTrace2] attack after SetState actor=%p gid=%u state=%d base=%d cur=%d motion=%d atkMotion=%.1f\n",
+        static_cast<void*>(actor),
+        actor->m_gid,
+        actor->m_stateId,
+        actor->m_baseAction,
+        actor->m_curAction,
+        actor->m_curMotion,
+        actor->m_attackMotion);
     actor->ProcessMotion();
+    DbgLog("[ActorTrace2] attack after ProcessMotion actor=%p gid=%u state=%d base=%d cur=%d motion=%d finished=%d atkMotion=%.1f\n",
+        static_cast<void*>(actor),
+        actor->m_gid,
+        actor->m_stateId,
+        actor->m_baseAction,
+        actor->m_curAction,
+        actor->m_curMotion,
+        actor->m_isMotionFinished,
+        actor->m_attackMotion);
 
     if (CPc* pcActor = dynamic_cast<CPc*>(actor)) {
         pcActor->InvalidateBillboard();
@@ -2844,15 +2867,36 @@ void StartPickupAnimation(CGameMode& mode, CGameActor* actor, u32 objectAid)
         break;
     }
 
-    // Ref/eAthena ZC_NOTIFY_ACT uses type 1 for item pickup, type 2 for sit,
-    // and type 3 for stand. Our PC act bands are directional groups of 8, and
-    // 16 maps to sit in practice, so use the next directional band for pickup.
-    constexpr int kPlayerPickupAction = 24;
-    actor->m_stateStartTick = timeGetTime();
-    actor->m_attackMotion = -1.0f;
-    actor->SetAction(kPlayerPickupAction, 0, 1);
-    actor->m_stateId = kGameActorAttackStateId;
+    DbgLog("[ActorTrace2] pickup before actor=%p gid=%u state=%d base=%d cur=%d motion=%d isPc=%d isCPc=%d item=%u roty=%.1f\n",
+        static_cast<void*>(actor),
+        actor->m_gid,
+        actor->m_stateId,
+        actor->m_baseAction,
+        actor->m_curAction,
+        actor->m_curMotion,
+        actor->m_isPc,
+        dynamic_cast<CPc*>(actor) != nullptr,
+        objectAid,
+        actor->m_roty);
+    actor->SetState(kGameActorPickupStateId);
+    DbgLog("[ActorTrace2] pickup after SetState actor=%p gid=%u state=%d base=%d cur=%d motion=%d atkMotion=%.1f\n",
+        static_cast<void*>(actor),
+        actor->m_gid,
+        actor->m_stateId,
+        actor->m_baseAction,
+        actor->m_curAction,
+        actor->m_curMotion,
+        actor->m_attackMotion);
     actor->ProcessMotion();
+    DbgLog("[ActorTrace2] pickup after ProcessMotion actor=%p gid=%u state=%d base=%d cur=%d motion=%d finished=%d atkMotion=%.1f\n",
+        static_cast<void*>(actor),
+        actor->m_gid,
+        actor->m_stateId,
+        actor->m_baseAction,
+        actor->m_curAction,
+        actor->m_curMotion,
+        actor->m_isMotionFinished,
+        actor->m_attackMotion);
 
     if (CPc* pcActor = dynamic_cast<CPc*>(actor)) {
         pcActor->InvalidateBillboard();
@@ -3037,13 +3081,16 @@ void HandleActorActionNotify(CGameMode& mode, const PacketView& packet)
         return;
     }
 
-    DbgLog("[GameMode] act notify stage=resolved src=%u dst=%u srcPtr=%p dstPtr=%p srcPc=%d dstPc=%d\n",
+    DbgLog("[GameMode] act notify stage=resolved src=%u dst=%u srcPtr=%p dstPtr=%p srcPc=%d dstPc=%d srcLocal=%d srcCPc=%d dstCPc=%d\n",
         srcGid,
         dstGid,
         static_cast<void*>(sourceActor),
         static_cast<void*>(targetActor),
         sourceActor->m_isPc,
-        targetActor ? targetActor->m_isPc : 0);
+        targetActor ? targetActor->m_isPc : 0,
+        mode.m_world && sourceActor == static_cast<CGameActor*>(mode.m_world->m_player),
+        dynamic_cast<CPc*>(sourceActor) != nullptr,
+        dynamic_cast<CPc*>(targetActor) != nullptr);
 
     if (actionType == 1) {
         StartPickupAnimation(mode, sourceActor, dstGid);
@@ -4430,7 +4477,7 @@ void LogActorPacketSeenOnce(const PacketView& packet)
 void ApplyRuntimeActorState(CGameMode& mode, const RuntimeActorState& state)
 {
     const bool isPc = ShouldTreatActorAsPc(state.objectType, state.job);
-    CGameActor* actor = EnsureRuntimeActor(mode, state.gid, isPc);
+    CGameActor* actor = EnsureRuntimeActor(mode, state.gid, ShouldUseSpriteBillboardActor(state.objectType, state.job));
     if (!actor) {
         return;
     }

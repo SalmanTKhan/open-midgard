@@ -771,11 +771,13 @@ void CSession::RebuildPlayerEquipmentAppearanceFromInventory()
 
         const unsigned int itemId = item.GetItemId();
         const int viewId = g_ttemmgr.GetViewId(itemId);
+        const bool occupiesRightHand = (item.m_wearLocation & 2) != 0;
+        const bool occupiesLeftHand = (item.m_wearLocation & 32) != 0;
 
-        if ((item.m_wearLocation & 2) != 0) {
+        if (occupiesRightHand) {
             weapon = viewId > 0 ? viewId : static_cast<int>(itemId);
         }
-        if ((item.m_wearLocation & 32) != 0) {
+        if (occupiesLeftHand && !occupiesRightHand) {
             shield = viewId > 0 ? viewId : static_cast<int>(itemId);
         }
         if ((item.m_wearLocation & 1) != 0) {
@@ -1602,7 +1604,7 @@ unsigned int CSession::GetEquippedLeftHandWeaponItemId() const
         if (item.m_wearLocation == 0) {
             continue;
         }
-        if ((item.m_wearLocation & 32) != 0) {
+        if ((item.m_wearLocation & 32) != 0 && (item.m_wearLocation & 2) == 0) {
             const unsigned int itemId = item.GetItemId();
             if (GetWeaponTypeByItemId(static_cast<int>(itemId)) > 0) {
                 return itemId;

@@ -69,6 +69,7 @@ constexpr int kPlayerBillboardComposeWidth = 128;
 constexpr int kPlayerBillboardComposeHeight = 128;
 constexpr int kPlayerBillboardAnchorX = 64;
 constexpr int kPlayerBillboardAnchorY = 110;
+constexpr int kSharedPlayerWarmupMotionLimit = 32;
 constexpr int kSharedNonPcWarmupMotionLimit = 32;
 constexpr int kItemBillboardComposeWidth = 96;
 constexpr int kItemBillboardComposeHeight = 96;
@@ -1168,7 +1169,7 @@ void PrimePlayerBillboardStrip(CPc& actor,
     const std::string bodyActName = g_session.GetJobActName(displayJob, sex, bodyAct);
     CActRes* bodyActRes = g_resMgr.GetAs<CActRes>(bodyActName.c_str());
     const int motionCount = bodyActRes ? bodyActRes->GetMotionCount(bodyAction) : 0;
-    if (motionCount <= 1 || motionCount > 8) {
+    if (motionCount <= 1 || motionCount > kSharedPlayerWarmupMotionLimit) {
         return;
     }
 
@@ -1252,14 +1253,12 @@ void SetRuntimeActorCameraLongitude(float longitude)
 
 int CGameObject::Get8Dir(float rot)
 {
-    return ResolveEightDirectionFromLongitude(-g_runtimeActorCameraLongitude - rot, false);
+    return ResolveEightDirectionFromLongitude(NormalizeAngle360(rot), true);
 }
 
 int CGameActor::Get8Dir(float rot)
 {
-    const bool useRoundedDirs = (m_isPc != 0 && (m_baseAction == 0 || m_baseAction == 8 || m_baseAction == 16))
-        || (m_job > 45 && m_job < 1000 && m_baseAction == 0);
-    return ResolveEightDirectionFromLongitude(-g_runtimeActorCameraLongitude - rot, useRoundedDirs);
+    return ResolveEightDirectionFromLongitude(NormalizeAngle360(rot), true);
 }
 
 namespace {
@@ -1294,7 +1293,16 @@ int ResolveAvailableActionIndex(CActRes* actRes, int action)
         return -1;
     }
 
-    for (int candidate = action; candidate >= 0; candidate -= 8) {
+    if (actRes->GetMotionCount(action) > 0) {
+        return action;
+    }
+
+    const int familyBase = action & ~7;
+    if (familyBase != action && familyBase >= 0 && actRes->GetMotionCount(familyBase) > 0) {
+        return familyBase;
+    }
+
+    for (int candidate = familyBase - 8; candidate >= 0; candidate -= 8) {
         if (actRes->GetMotionCount(candidate) > 0) {
             return candidate;
         }
@@ -1352,6 +1360,7 @@ bool IsTransientActionActive(const CGameActor& actor, CActRes* actRes, int actio
 
     const bool allowWhileMoving = actor.m_stateId == kAttackStateId
         || actor.m_stateId == kSecondAttackStateId
+        || actor.m_stateId == kGameActorPickupStateId
         || actor.m_stateId == kDeathStateId;
     if (actor.m_isMoving && !allowWhileMoving) {
         return false;
@@ -2067,6 +2076,46 @@ bool BuildShieldOverlayPath(const std::string& bodyActName,
     return true;
 }
 
+CActRes* ResolvePcTransientActRes(const CGameActor& actor, int action)
+{
+    if (actor.m_isPc == 0) {
+        return nullptr;
+    }
+
+    const CPc* pcActor = dynamic_cast<const CPc*>(&actor);
+    if (!pcActor) {
+        return nullptr;
+    }
+
+    const int displayJob = ResolveDisplayJob(actor);
+    const int sex = actor.m_sex != 0 ? 1 : 0;
+    char bodyActPath[260] = {};
+    const std::string bodyActName = g_session.GetJobActName(displayJob, sex, bodyActPath);
+    CActRes* bodyActRes = g_resMgr.GetAs<CActRes>(bodyActName.c_str());
+
+    const bool isAttackLikeState = actor.m_stateId == kAttackStateId
+        || actor.m_stateId == kSecondAttackStateId
+        || actor.m_stateId == kGameActorCastingLoopStateId;
+    const bool isAttackLikeAction = action >= 80 && action < 96;
+    if ((!isAttackLikeState && !isAttackLikeAction) || pcActor->m_weapon == 0) {
+        return bodyActRes;
+    }
+
+    std::string weaponActNameResolved;
+    if (!BuildWeaponOverlayPath(bodyActName, pcActor->m_weapon, false, "act", &weaponActNameResolved)) {
+        return bodyActRes;
+    }
+
+    CActRes* weaponActRes = g_resMgr.GetAs<CActRes>(weaponActNameResolved.c_str());
+    if (!weaponActRes) {
+        return bodyActRes;
+    }
+
+    return ResolveAvailableActionIndex(weaponActRes, action) >= 0
+        ? weaponActRes
+        : bodyActRes;
+}
+
 int ResolveOverlayMotionIndex(CActRes* actRes, int curAction, int curMotion, const std::string& bodyActName)
 {
     if (!actRes) {
@@ -2345,6 +2394,7 @@ bool DrawPcBillboard(BillboardComposeSurface& bitmap,
     int head = actor.m_head;
     const int curAction = bodyAction;
     const int curMotion = headMotion;
+    const int weaponValue = ResolvePcAttackWeaponValue(actor);
 
     const std::string bodyActName = g_session.GetJobActName(displayJob, sex, bodyAct);
     const std::string bodySprName = g_session.GetJobSprName(displayJob, sex, bodySpr);
@@ -2447,6 +2497,25 @@ bool DrawPcBillboard(BillboardComposeSurface& bitmap,
                 sex,
                 actor.m_weapon,
                 actor.m_shield);
+        }
+    }
+
+    if ((actor.m_stateId == kAttackStateId || actor.m_stateId == kSecondAttackStateId) && actor.m_isPc != 0) {
+        static std::map<u32, u32> loggedAttackRenderState;
+        const u32 renderKey = (static_cast<u32>(curAction & 0xFFFF) << 16) | static_cast<u32>(curMotion & 0xFFFF);
+        if (loggedAttackRenderState[actor.m_gid] != renderKey) {
+            loggedAttackRenderState[actor.m_gid] = renderKey;
+            DbgLog("[Actor] pc attack render gid=%u state=%d action=%d motion=%d weaponValue=%d weapon=%d shield=%d bodyAct='%s' weaponAct='%s' weaponGlowAct='%s'\n",
+                actor.m_gid,
+                actor.m_stateId,
+                curAction,
+                curMotion,
+                weaponValue,
+                actor.m_weapon,
+                actor.m_shield,
+                bodyActName.c_str(),
+                weaponActNameResolved.c_str(),
+                weaponEffectActNameResolved.c_str());
         }
     }
 
@@ -3088,8 +3157,96 @@ const char* CActRes::GetEventName(int eventIndex) const {
 // CGameObject::~CGameObject() {} // defined in header as virtual
 
 // CRenderObject stubs
+CRenderObject::CRenderObject()
+    : m_pos{ 0.0f, 0.0f, 0.0f }
+    , m_baseAction(0)
+    , m_curAction(0)
+    , m_curMotion(0)
+    , m_oldBaseAction(0)
+    , m_oldMotion(0)
+    , m_bodyPalette(0)
+    , m_roty(0.0f)
+    , m_zoom(1.0f)
+    , m_shadowZoom(1.0f)
+    , m_motionSpeed(1.0f)
+    , m_lastPixelRatio(1.0f)
+    , m_loopCountOfmotionFinish(1.0f)
+    , m_modifyFactorOfmotionSpeed(1.0f)
+    , m_modifyFactorOfmotionSpeed2(1.0f)
+    , m_motionType(0)
+    , m_stateId(0)
+    , m_oldstateId(0)
+    , m_sprShift(0)
+    , m_sprAngle(0)
+    , m_offsetOow(0)
+    , m_colorOfSingleColor(0xFFFF0000u)
+    , m_singleColorStartTick(timeGetTime())
+    , m_stateStartTick(timeGetTime())
+    , m_oldColor{ 0, 0, 0, 0 }
+    , m_curColor{ 0, 0, 0, 0 }
+    , m_isLieOnGround(0)
+    , m_isMotionFinished(0)
+    , m_isMotionFreezed(0)
+    , m_isSingleColor(0)
+    , m_isVisible(1)
+    , m_isVisibleBody(1)
+    , m_alwaysTopLayer(0)
+    , m_isSprArgbFixed(0)
+    , m_shadowOn(0)
+    , m_shouldAddPickInfo(0)
+    , m_isPc(0)
+    , m_lastTlvertX(0)
+    , m_lastTlvertY(0)
+    , m_forceAct(0)
+    , m_forceMot(0)
+    , m_forceAct2{ 0, 0, 0, 0, 0 }
+    , m_forceMot2{ 0, 0, 0, 0, 0 }
+    , m_forceMaxMot(0)
+    , m_forceAnimSpeed(0)
+    , m_forceFinishedAct(0)
+    , m_forceFinishedMot(0)
+    , m_forceStartMot(0)
+    , m_isForceState(0)
+    , m_isForceAnimLoop(0)
+    , m_isForceAnimation(0)
+    , m_isForceAnimFinish(0)
+    , m_isForceState2(0)
+    , m_isForceState3(0)
+    , m_forceStateCnt(0)
+    , m_forceStateEndTick(0)
+    , m_BodyLight(0)
+    , m_BeZero(0)
+    , m_BodyFlag(0)
+    , m_BodySin(0)
+    , m_BodySin2(0)
+    , m_BodySin3(0)
+    , m_BodySin4(0)
+    , m_BodySin5(0)
+    , m_BodyTime(0)
+    , m_BodyTime2(0)
+    , m_BodyTime3(0)
+    , m_FlyMove(0)
+    , m_FlyNow(0)
+    , m_camp(0)
+    , m_charfont(0)
+    , m_BodyAni(0)
+    , m_BodyAct(0)
+    , m_BodyAniFrame(0)
+    , m_sprRes(nullptr)
+    , m_actRes(nullptr)
+{
+    m_u28.m_sprArgb = 0xFFFFFFFFu;
+}
+
 void CRenderObject::SetAction(int act, int mot, int type) {
     CActRes* actRes = ResolveRuntimeActorActRes(this);
+    if (CGameActor* actor = dynamic_cast<CGameActor*>(this)) {
+        if (actor->m_isPc != 0) {
+            if (CActRes* transientActRes = ResolvePcTransientActRes(*actor, act)) {
+                actRes = transientActRes;
+            }
+        }
+    }
     const float baseDelay = actRes ? actRes->GetDelay(act) : kDefaultMotionDelay;
     const float clampedDelay = (std::max)(kDefaultMotionSpeedFactor, baseDelay);
 
@@ -3108,10 +3265,32 @@ void CRenderObject::SetAction(int act, int mot, int type) {
     m_isForceState = 0;
     m_isForceState2 = 0;
     m_isForceState3 = 0;
+
+    if (CGameActor* actor = dynamic_cast<CGameActor*>(this)) {
+        const bool isLocalPlayer = actor->m_gid != 0
+            && (actor->m_gid == g_session.m_gid || actor->m_gid == g_session.m_aid);
+        if (isLocalPlayer && (act == 24 || act == 80 || act == 88)) {
+            DbgLog("[ActorTrace] SetAction gid=%u state=%d act=%d mot=%d type=%d delay=%.3f motionSpeed=%.3f\n",
+                actor->m_gid,
+                actor->m_stateId,
+                act,
+                mot,
+                type,
+                clampedDelay,
+                m_motionSpeed);
+        }
+    }
 }
 
 void CRenderObject::ProcessMotion() {
     CActRes* actRes = ResolveRuntimeActorActRes(this);
+    if (CGameActor* actor = dynamic_cast<CGameActor*>(this)) {
+        if (actor->m_isPc != 0) {
+            if (CActRes* transientActRes = ResolvePcTransientActRes(*actor, m_baseAction)) {
+                actRes = transientActRes;
+            }
+        }
+    }
     if (!actRes) {
         return;
     }
@@ -3124,6 +3303,23 @@ void CRenderObject::ProcessMotion() {
 
     const int availableAction = ResolveAvailableActionIndex(actRes, resolvedAction);
     m_curAction = availableAction >= 0 ? availableAction : resolvedAction;
+
+    if (CGameActor* actor = dynamic_cast<CGameActor*>(this)) {
+        const bool isLocalPlayer = actor->m_gid != 0
+            && (actor->m_gid == g_session.m_gid || actor->m_gid == g_session.m_aid);
+        if (isLocalPlayer && (actor->m_stateId == kAttackStateId
+                || actor->m_stateId == kSecondAttackStateId
+                || actor->m_stateId == kGameActorPickupStateId)) {
+            DbgLog("[ActorTrace] ProcessMotion gid=%u state=%d base=%d dir=%d resolved=%d available=%d cur=%d\n",
+                actor->m_gid,
+                actor->m_stateId,
+                m_baseAction,
+                Get8Dir(m_roty),
+                resolvedAction,
+                availableAction,
+                m_curAction);
+        }
+    }
 
     const int motionCount = actRes->GetMotionCount(m_curAction);
     if (motionCount <= 0) {
@@ -3175,7 +3371,7 @@ void CRenderObject::SetTlvert(float x, float y) {
 }
 
 CAbleToMakeEffect::CAbleToMakeEffect()
-    : m_efId(0)
+    : m_efId(-1)
     , m_Sk_Level(0)
     , m_isLoop(0)
     , m_beginSpellEffect(nullptr)
@@ -3227,6 +3423,100 @@ void CAbleToMakeEffect::DetachEffects()
     }
     m_beginSpellEffect = nullptr;
     m_magicTargetEffect = nullptr;
+}
+
+CGameActor::CGameActor()
+    : m_moveDestX(0)
+    , m_moveDestY(0)
+    , m_moveSrcX(0)
+    , m_moveSrcY(0)
+    , m_speed(0)
+    , m_isCounter(0)
+    , m_isTrickDead(0)
+    , m_isPlayHitWave(0)
+    , m_isAsuraAttack(0)
+    , m_emblemWnd(nullptr)
+    , m_WordDisplayWnd(nullptr)
+    , m_hitWaveName{}
+    , m_colorEndTick(0)
+    , m_clevel(0)
+    , m_MaxHp(0)
+    , m_Hp(0)
+    , m_MaxSp(0)
+    , m_Sp(0)
+    , m_Exp(0)
+    , m_Str(0)
+    , m_Int(0)
+    , m_Dex(0)
+    , m_Vit(0)
+    , m_Luk(0)
+    , m_Agi(0)
+    , m_accel{ 0.0f, 0.0f, 0.0f }
+    , m_moveStartTime(0)
+    , m_isNeverAnimation(0)
+    , m_pathStartCell(-1)
+    , m_dist(0.0f)
+    , m_lastProcessStateTime(timeGetTime())
+    , m_lastServerTime(g_session.GetServerTime())
+    , m_chatTick(0)
+    , m_targetGid(0)
+    , m_attackMotion(-1.0f)
+    , m_isBladeStop(0)
+    , m_gid(0)
+    , m_job(0)
+    , m_sex(0)
+    , m_balloon(nullptr)
+    , m_chatTitle(nullptr)
+    , m_merchantShopTitle(nullptr)
+    , m_skillRechargeGage(nullptr)
+    , m_freezeEndTick(0)
+    , m_petEmotionStartTick(0)
+    , m_skillRechargeEndTick(timeGetTime() - 5000)
+    , m_skillRechargeStartTick(timeGetTime() - 10000)
+    , m_chatWidth(0)
+    , m_chatHeight(0)
+    , m_nameWidth(0)
+    , m_xSize(0)
+    , m_ySize(0)
+    , m_headType(0)
+    , m_willBeDead(0)
+    , m_is99(0)
+    , m_99(0)
+    , m_bodyState(0)
+    , m_effectState(0)
+    , m_healthState(0)
+    , m_pkState(0)
+    , m_isSitting(0)
+    , m_damageDestX(0.0f)
+    , m_damageDestZ(0.0f)
+    , m_effectLaunchCnt(3600)
+    , m_vanishTime(0)
+    , m_actorType(0)
+    , m_bIsMemberAndVisible(0)
+    , m_gdid(0)
+    , m_emblemVersion(0)
+    , m_homunAI(nullptr)
+    , m_merAI(nullptr)
+    , m_objectType(4)
+    , m_homunMsg{}
+    , m_homunResMsg{}
+    , m_merMsg{}
+    , m_merResMsg{}
+    , m_birdEffect(nullptr)
+    , m_moveStartPos{ 0.0f, 0.0f, 0.0f }
+    , m_moveEndPos{ 0.0f, 0.0f, 0.0f }
+    , m_moveEndTime(0)
+    , m_isMoving(0)
+{
+    m_shadowOn = 1;
+    m_shouldAddPickInfo = 1;
+    m_stateStartTick = timeGetTime();
+    m_u28.m_sprArgb = 0xFFFFFFFFu;
+    std::memset(m_hitWaveName, 0, sizeof(m_hitWaveName));
+    std::memset(&m_homunMsg, 0, sizeof(m_homunMsg));
+    std::memset(&m_homunResMsg, 0, sizeof(m_homunResMsg));
+    std::memset(&m_merMsg, 0, sizeof(m_merMsg));
+    std::memset(&m_merResMsg, 0, sizeof(m_merResMsg));
 }
 
 CGameActor::~CGameActor()
@@ -3332,6 +3622,14 @@ u8 CGameActor::ProcessState() {
     switch (m_stateId) {
     case kMoveStateId:
         if (!m_isMoving) {
+            SetState(0);
+        }
+        break;
+    case kGameActorPickupStateId:
+        m_isCounter = 0;
+        m_isMotionFreezed = 0;
+        ProcessMotion();
+        if (m_isMotionFinished) {
             SetState(0);
         }
         break;
@@ -3556,6 +3854,15 @@ void CGameActor::SetState(int state) {
         SetAction(80, 3, 1);
         m_attackMotion = static_cast<float>(GetAttackMotion());
         break;
+    case kGameActorPickupStateId:
+        m_isMoving = 0;
+        m_path.Reset();
+        m_isMotionFinished = 0;
+        m_isMotionFreezed = 0;
+        m_isCounter = 0;
+        m_attackMotion = -1.0f;
+        SetAction(24, 6, 1);
+        break;
     case kGameActorAttackStateId:
     case kSecondAttackStateId:
         m_isMoving = 0;
@@ -3564,7 +3871,7 @@ void CGameActor::SetState(int state) {
         SetAction(state == kSecondAttackStateId
                 ? 88
                 : (m_isPc != 0 ? ResolvePcAttackAction(*this) : 16),
-            4,
+            3,
             1);
         m_attackMotion = static_cast<float>(GetAttackMotion());
         break;
@@ -3616,8 +3923,28 @@ void CGameActor::SetState(int state) {
         return;
     }
 
+    m_curAction = m_baseAction + Get8Dir(m_roty);
+    if (m_stateId == 0 || m_stateId == 6) {
+        m_oldstateId = m_stateId;
+    }
     m_stateId = state;
     m_stateStartTick = timeGetTime();
+
+    const bool isLocalPlayer = m_gid != 0 && (m_gid == g_session.m_gid || m_gid == g_session.m_aid);
+    if (isLocalPlayer && (state == kAttackStateId || state == kSecondAttackStateId || state == kGameActorPickupStateId)) {
+        DbgLog("[ActorTrace] SetState gid=%u state=%d base=%d cur=%d motion=%d roty=%.1f dir=%d atkMotion=%.1f weapon=%d shield=%d isPc=%d\n",
+            m_gid,
+            state,
+            m_baseAction,
+            m_curAction,
+            m_curMotion,
+            m_roty,
+            Get8Dir(m_roty),
+            m_attackMotion,
+            dynamic_cast<CPc*>(this) ? dynamic_cast<CPc*>(this)->m_weapon : -1,
+            dynamic_cast<CPc*>(this) ? dynamic_cast<CPc*>(this)->m_shield : -1,
+            m_isPc);
+    }
 }
 
 void CGameActor::DestroySkillRechargeGage()
@@ -4439,7 +4766,10 @@ bool CPc::EnsureBillboardTexture(float cameraLongitude)
     if (usePlayerStyleBillboard) {
         char bodyAct[260] = {};
         const std::string bodyActName = g_session.GetJobActName(displayJob, sex, bodyAct);
-        CActRes* bodyActRes = g_resMgr.GetAs<CActRes>(bodyActName.c_str());
+        CActRes* bodyActRes = ResolvePcTransientActRes(*this, m_curAction);
+        if (!bodyActRes) {
+            bodyActRes = g_resMgr.GetAs<CActRes>(bodyActName.c_str());
+        }
         if (IsTransientActionActive(*this, bodyActRes, m_curAction)) {
             bodyAction = m_curAction;
             headMotion = m_curMotion;
@@ -4475,6 +4805,8 @@ bool CPc::EnsureBillboardTexture(float cameraLongitude)
         && m_cachedBillboardHeadPalette == (usePlayerStyleBillboard ? m_headPalette : 0)) {
         return true;
     }
+
+    const bool isTransientBillboard = bodyAction < baseBodyAction || bodyAction >= baseBodyAction + 8;
 
     if (isVulkanBackend && !usePlayerStyleBillboard) {
         PrimeNonPcBillboardStrip(*this, displayJob, bodyAction);
@@ -4595,7 +4927,7 @@ bool CPc::EnsureBillboardTexture(float cameraLongitude)
             s_vulkanBillboardUploadTick = tick;
             s_vulkanBillboardUploadsThisTick = 0;
         }
-        if (s_vulkanBillboardUploadsThisTick >= 4u) {
+        if (s_vulkanBillboardUploadsThisTick >= 4u && !isTransientBillboard) {
             return m_billboardTexture != nullptr;
         }
         ++s_vulkanBillboardUploadsThisTick;
