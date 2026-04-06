@@ -168,6 +168,32 @@ int ResolveEightDirectionFromLongitude(float longitude, bool useRoundedDirs)
     return static_cast<int>(longitude / 45.0f) & 7;
 }
 
+float ResolveRuntimeActorLongitudeForDirection(float rotationDegrees)
+{
+    return NormalizeAngle360(-g_runtimeActorCameraLongitude - rotationDegrees);
+}
+
+bool ShouldUseRoundedDirectionForActor(const CGameActor* actor)
+{
+    if (!actor) {
+        return false;
+    }
+
+    if (actor->m_isPc != 0) {
+        return actor->m_baseAction == 0 || actor->m_baseAction == 8 || actor->m_baseAction == 16;
+    }
+
+    if (actor->m_job > 45 && actor->m_job < 1000 && actor->m_baseAction == 0) {
+        return true;
+    }
+
+    if (actor->m_job >= kMercenaryJobMin && actor->m_job <= kMercenaryJobMax) {
+        return actor->m_baseAction == 0 || actor->m_baseAction == 8 || actor->m_baseAction == 16;
+    }
+
+    return false;
+}
+
 bool TryResolveNonPcSpritePaths(const char* spriteRoot, const char* jobName, char* actPath, char* sprPath)
 {
     if (!spriteRoot || !jobName || !*jobName || !actPath || !sprPath) {
@@ -1249,12 +1275,14 @@ void SetRuntimeActorCameraLongitude(float longitude)
 
 int CGameObject::Get8Dir(float rot)
 {
-    return ResolveEightDirectionFromLongitude(NormalizeAngle360(rot), true);
+    return ResolveEightDirectionFromLongitude(ResolveRuntimeActorLongitudeForDirection(rot), false);
 }
 
 int CGameActor::Get8Dir(float rot)
 {
-    return ResolveEightDirectionFromLongitude(NormalizeAngle360(rot), true);
+    return ResolveEightDirectionFromLongitude(
+        ResolveRuntimeActorLongitudeForDirection(rot),
+        ShouldUseRoundedDirectionForActor(this));
 }
 
 namespace {
