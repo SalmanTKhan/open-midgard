@@ -1990,7 +1990,98 @@ bool ExtractPcOverlayPathParts(const std::string& bodyActName,
     return true;
 }
 
-bool BuildWeaponOverlayPath(const std::string& bodyActName,
+int NormalizePcWeaponOverlayTypeForJob(int job, int weaponType, bool dualWeapon)
+{
+    if (weaponType <= 0) {
+        if (dualWeapon && IsDualWeaponPcJob(job)) {
+            return 2;
+        }
+        return 0;
+    }
+
+    if (dualWeapon) {
+        if (IsDualWeaponPcJob(job) && (weaponType == 7 || weaponType == 8)) {
+            return 2;
+        }
+        return weaponType;
+    }
+
+    if (((job == 6 || job == 4007 || job == 4029) && (weaponType == 6 || weaponType == 7 || weaponType == 8))
+        || ((job == 12 || job == 17) && (weaponType == 7 || weaponType == 8))
+        || ((job == 4013 || job == 4018) && (weaponType == 7 || weaponType == 8))
+        || ((job == 4035 || job == 4040) && (weaponType == 7 || weaponType == 8))) {
+        weaponType = 2;
+    }
+
+    if (((job == 2 || job == 9 || job == 16)
+            || (job == 4003 || job == 4010 || job == 4017)
+            || (job == 4025 || job == 4032 || job == 4039))
+        && weaponType == 5) {
+        weaponType = 10;
+    }
+
+    if ((job == 17 || job == 4018 || job == 4040) && weaponType == 6) {
+        weaponType = 1;
+    }
+
+    if ((job == 8 || job == 4009 || job == 4031) && weaponType == 12) {
+        return 0;
+    }
+
+    return weaponType;
+}
+
+bool SupportsPcWeaponOverlaySecondLayer(int weaponType)
+{
+    switch (weaponType) {
+    case 1:
+    case 2:
+    case 3:
+    case 4:
+    case 5:
+    case 6:
+    case 7:
+    case 16:
+    case 17:
+    case 18:
+    case 25:
+    case 26:
+    case 27:
+    case 28:
+    case 29:
+    case 30:
+        return true;
+    default:
+        return false;
+    }
+}
+
+int ResolvePcWeaponOverlayType(const CGameActor& actor, int weapon, bool* outDualWeapon)
+{
+    const int primaryWeaponItemId = weapon & 0xFFFF;
+    const int secondaryWeaponItemId = static_cast<int>((static_cast<unsigned int>(weapon) >> 16) & 0xFFFFu);
+    const bool dualWeapon = IsDualWeaponPcJob(actor.m_job)
+        && secondaryWeaponItemId != 0
+        && g_session.GetWeaponTypeByItemId(secondaryWeaponItemId) > 0;
+
+    if (outDualWeapon) {
+        *outDualWeapon = dualWeapon;
+    }
+
+    int weaponType = 0;
+    if (dualWeapon) {
+        weaponType = g_session.MakeWeaponTypeByItemId(primaryWeaponItemId, secondaryWeaponItemId);
+    } else if (weapon > 31) {
+        weaponType = g_session.GetWeaponTypeByItemId(primaryWeaponItemId);
+    } else {
+        weaponType = weapon;
+    }
+
+    return NormalizePcWeaponOverlayTypeForJob(actor.m_job, weaponType, dualWeapon);
+}
+
+bool BuildWeaponOverlayPath(const CGameActor& actor,
+    const std::string& bodyActName,
     int weapon,
     bool secondLayer,
     const char* extension,
@@ -2009,42 +2100,35 @@ bool BuildWeaponOverlayPath(const std::string& bodyActName,
 
     const int primaryWeaponItemId = weapon & 0xFFFF;
     const int secondaryWeaponItemId = static_cast<int>((static_cast<unsigned int>(weapon) >> 16) & 0xFFFFu);
+    bool dualWeapon = false;
+    const int weaponType = ResolvePcWeaponOverlayType(actor, weapon, &dualWeapon);
+
+    if (weaponType <= 0) {
+        return false;
+    }
+
+    if (secondLayer && !SupportsPcWeaponOverlaySecondLayer(weaponType)) {
+        return false;
+    }
 
     auto buildNumericPath = [&](int numericWeapon) {
         char buffer[512] = {};
-        if (secondLayer) {
-            std::sprintf(buffer,
-                "%s%s_%s_%d_%d.%s",
-                humanOverlayRoot.c_str(),
-                jobStem.c_str(),
-                sexToken.c_str(),
-                numericWeapon,
-                numericWeapon,
-                extension);
-        } else {
-            std::sprintf(buffer,
-                "%s%s_%s_%d.%s",
-                humanOverlayRoot.c_str(),
-                jobStem.c_str(),
-                sexToken.c_str(),
-                numericWeapon,
-                extension);
-        }
+        std::sprintf(buffer,
+            "%s%s_%s_%d.%s",
+            humanOverlayRoot.c_str(),
+            jobStem.c_str(),
+            sexToken.c_str(),
+            numericWeapon,
+            extension);
         return std::string(buffer);
     };
 
-    std::string candidate = buildNumericPath(primaryWeaponItemId);
-    if (g_resMgr.IsExist(candidate.c_str())) {
-        *outPath = candidate;
-        return true;
-    }
-
-    int weaponType = weapon;
-    if (weaponType > 31) {
-        if (secondaryWeaponItemId != 0 && g_session.GetWeaponTypeByItemId(secondaryWeaponItemId) > 0) {
-            weaponType = g_session.MakeWeaponTypeByItemId(primaryWeaponItemId, secondaryWeaponItemId);
-        } else {
-            weaponType = g_session.GetWeaponTypeByItemId(primaryWeaponItemId);
+    std::string candidate;
+    if ((!dualWeapon || secondLayer) && primaryWeaponItemId > 0) {
+        candidate = buildNumericPath(primaryWeaponItemId);
+        if (g_resMgr.IsExist(candidate.c_str())) {
+            *outPath = candidate;
+            return true;
         }
     }
 
@@ -2071,24 +2155,6 @@ bool BuildWeaponOverlayPath(const std::string& bodyActName,
             token.c_str(),
             extension);
 
-        candidate.assign(buffer);
-        if (g_resMgr.IsExist(candidate.c_str())) {
-            *outPath = candidate;
-            return true;
-        }
-
-        if (!secondLayer) {
-            continue;
-        }
-
-        std::sprintf(buffer,
-            "%s%s_%s_%s_%s.%s",
-            humanOverlayRoot.c_str(),
-            jobStem.c_str(),
-            sexToken.c_str(),
-            token.c_str(),
-            token.c_str(),
-            extension);
         candidate.assign(buffer);
         if (g_resMgr.IsExist(candidate.c_str())) {
             *outPath = candidate;
@@ -2167,7 +2233,7 @@ CActRes* ResolvePcTransientActRes(const CGameActor& actor, int action)
 
     auto tryOverlayAct = [&](bool secondLayer, std::string* outPath) -> CActRes* {
         std::string overlayActNameResolved;
-        if (!BuildWeaponOverlayPath(bodyActName, weaponValue, secondLayer, "act", &overlayActNameResolved)) {
+        if (!BuildWeaponOverlayPath(actor, bodyActName, weaponValue, secondLayer, "act", &overlayActNameResolved)) {
             return nullptr;
         }
 
@@ -2514,10 +2580,10 @@ bool DrawPcBillboard(BillboardComposeSurface& bitmap,
     std::string weaponLayer6SprNameResolved;
     std::string shieldActNameResolved;
     std::string shieldSprNameResolved;
-    BuildWeaponOverlayPath(bodyActName, weaponValue, false, "act", &weaponActNameResolved);
-    BuildWeaponOverlayPath(bodyActName, weaponValue, false, "spr", &weaponSprNameResolved);
-    BuildWeaponOverlayPath(bodyActName, weaponValue, true, "act", &weaponLayer6ActNameResolved);
-    BuildWeaponOverlayPath(bodyActName, weaponValue, true, "spr", &weaponLayer6SprNameResolved);
+    BuildWeaponOverlayPath(actor, bodyActName, weaponValue, false, "act", &weaponActNameResolved);
+    BuildWeaponOverlayPath(actor, bodyActName, weaponValue, false, "spr", &weaponSprNameResolved);
+    BuildWeaponOverlayPath(actor, bodyActName, weaponValue, true, "act", &weaponLayer6ActNameResolved);
+    BuildWeaponOverlayPath(actor, bodyActName, weaponValue, true, "spr", &weaponLayer6SprNameResolved);
     BuildShieldOverlayPath(bodyActName, actor.m_shield, "act", &shieldActNameResolved);
     BuildShieldOverlayPath(bodyActName, actor.m_shield, "spr", &shieldSprNameResolved);
 
