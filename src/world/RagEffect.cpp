@@ -2838,12 +2838,12 @@ void CRagEffect::Init(CRenderObject* master, int effectId, const vector3d& delta
         m_duration = 20;
         break;
     case 22:
-        m_handler = Handler::SightAura;
+        m_handler = Handler::Sight;
         m_duration = 20;
         break;
     case 24:
-        m_handler = Handler::SightAura;
-        m_duration = 72;
+        m_handler = Handler::FireBall;
+        m_duration = 40;
         break;
     case 33:
         m_handler = Handler::Ruwach;
@@ -3025,6 +3025,7 @@ bool CRagEffect::ResolveCullSphere(vector3d* outCenter, float* outRadius) const
     case Handler::SuperAngel:
     case Handler::Sight:
     case Handler::SightState:
+    case Handler::FireBall:
     case Handler::Ruwach:
     case Handler::SightAura:
     case Handler::FireBoltRain:
@@ -3757,6 +3758,48 @@ void CRagEffect::SpawnSightState()
     }
 }
 
+void CRagEffect::SpawnFireBall()
+{
+    if (m_stateCnt != 20 && m_stateCnt != 24 && m_stateCnt != 28 && m_stateCnt != 32) {
+        return;
+    }
+
+    const vector3d base = ResolveBasePosition();
+    TryPlayEffectWaveAt(base, {
+        "effect\\EF_FireBall.wav",
+        "effect\\ef_fireball.wav",
+    });
+
+    if (CEffectPrim* prim = LaunchEffectPrim(PP_3DPARTICLE, vector3d{})) {
+        prim->m_duration = 20;
+        prim->m_pattern |= 0x120;
+        prim->m_deltaPos2 = { 0.0f, -15.0f, 0.0f };
+
+        const float dx = m_deltaPos.x;
+        const float dz = m_deltaPos.z;
+        const float distance = std::sqrt(dx * dx + dz * dz);
+        const float facingDegrees = std::atan2(dx, -dz) * (180.0f / kPi);
+        prim->m_longitude = -facingDegrees;
+        prim->m_speed = distance > 0.0f ? -(distance / static_cast<float>(prim->m_duration)) : 0.0f;
+        prim->m_size = 1.3f;
+        prim->m_animSpeed = 1;
+        prim->m_alpha = 255.0f;
+
+        if (m_stateCnt != 20) {
+            prim->m_tintColor = RGB(246, 199, 76);
+            if (m_stateCnt == 24) {
+                prim->m_alpha = 180.0f;
+            } else if (m_stateCnt == 28) {
+                prim->m_alpha = 130.0f;
+            } else {
+                prim->m_alpha = 80.0f;
+            }
+        }
+
+        ConfigureEffectSpritePrim(prim, { "fireball" }, 0, 1.0f, true, 0.0f, 0);
+    }
+}
+
 void CRagEffect::SpawnRuwach()
 {
     if ((m_stateCnt % 3) != 0) {
@@ -3930,6 +3973,9 @@ u8 CRagEffect::OnProcess()
             break;
         case Handler::SightState:
             SpawnSightState();
+            break;
+        case Handler::FireBall:
+            SpawnFireBall();
             break;
         case Handler::Ruwach:
             SpawnRuwach();
