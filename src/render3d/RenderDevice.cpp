@@ -5,6 +5,7 @@
 #include "DebugLog.h"
 #include "GraphicsSettings.h"
 #include "ModernRenderState.h"
+#include "platform/WindowsCompat.h"
 #include "qtui/QtPlatformWindow.h"
 #include "render/Renderer.h"
 #include "res/Texture.h"
@@ -345,8 +346,12 @@ bool LoadVulkanLoader()
     if (!g_vulkanModule) {
 #if RO_PLATFORM_WINDOWS
         g_vulkanModule = LoadLibraryA("vulkan-1.dll");
-#else
+#elif RO_PLATFORM_MACOS
+        g_vulkanModule = LoadLibraryA("libvulkan.1.dylib");
+#elif RO_PLATFORM_LINUX
         g_vulkanModule = LoadLibraryA("libvulkan.so.1");
+#else
+#error "Unknown platform"
 #endif
     }
     if (!g_vulkanModule) {
@@ -7513,6 +7518,30 @@ private:
 #if RO_PLATFORM_WINDOWS
         extensions.push_back(VK_KHR_WIN32_SURFACE_EXTENSION_NAME);
 #else
+// TODO: If vulkan & qt become more tightly coupled, we can just use QVulkanInstance::supportedExtensions()
+#if defined(RO_PLATFORM_MACOS)
+        if (HasInstanceExtension("VK_KHR_portability_enumeration")) {
+            extensions.push_back("VK_KHR_portability_enumeration");
+        }
+        else {
+            DbgLog("[Render] Vulkan on macOS requires VK_KHR_portability_enumeration\n");
+            return false;
+        }
+        if (HasInstanceExtension("VK_KHR_surface")) {
+            extensions.push_back("VK_KHR_surface");
+        }
+        else {
+            DbgLog("[Render] Vulkan on macOS requires VK_KHR_surface\n");
+            return false;
+        }
+        if (HasInstanceExtension("VK_EXT_metal_surface")) {
+            extensions.push_back("VK_EXT_metal_surface");
+        }
+        else {
+            DbgLog("[Render] Vulkan on macOS requires VK_EXT_metal_surface\n");
+            return false;
+        }
+#endif
         if (HasInstanceExtension("VK_KHR_xcb_surface")) {
             extensions.push_back("VK_KHR_xcb_surface");
         }
@@ -7537,6 +7566,10 @@ private:
         createInfo.pApplicationInfo = &appInfo;
         createInfo.enabledExtensionCount = static_cast<uint32_t>(extensions.size());
         createInfo.ppEnabledExtensionNames = extensions.data();
+
+#if RO_PLATFORM_MACOS
+        createInfo.flags |= VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
+#endif
 
         const VkResult result = vkCreateInstance(&createInfo, nullptr, &m_instance);
         if (result != VK_SUCCESS) {
