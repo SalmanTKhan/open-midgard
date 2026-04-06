@@ -1292,6 +1292,80 @@ bool ConfigureEffectSpritePrim(CEffectPrim* prim,
     return false;
 }
 
+bool SubmitAnimatedSpriteParticle(const CEffectPrim& prim,
+    const vector3d& base,
+    matrix* viewMatrix,
+    unsigned int color,
+    D3DBLEND destBlend,
+    int renderFlags)
+{
+    if (!viewMatrix || prim.m_spriteActName.empty() || prim.m_spriteSprName.empty()) {
+        return false;
+    }
+
+    CActRes* actRes = g_resMgr.GetAs<CActRes>(prim.m_spriteActName.c_str());
+    if (!actRes) {
+        return false;
+    }
+
+    int actionIndex = prim.m_spriteAction;
+    if (actRes->GetMotionCount(actionIndex) <= 0) {
+        actionIndex = 0;
+    }
+
+    const int motionCount = actRes->GetMotionCount(actionIndex);
+    if (motionCount <= 0) {
+        return false;
+    }
+
+    const float frameDelay = prim.m_spriteFrameDelay > 0.0f
+        ? prim.m_spriteFrameDelay
+        : (std::max)(1.0f, actRes->GetDelay(actionIndex));
+    const int motionAdvance = static_cast<int>(static_cast<float>(prim.m_stateCnt) / frameDelay);
+    const int clampedBase = (std::max)(0, (std::min)(prim.m_spriteMotionBase, motionCount - 1));
+    const int motionIndex = prim.m_spriteRepeat
+        ? (clampedBase + motionAdvance) % motionCount
+        : (std::min)(motionCount - 1, clampedBase + motionAdvance);
+
+    const BakedEffectSpriteFrame* frame = GetBakedEffectSpriteFrame(
+        prim.m_spriteActName,
+        prim.m_spriteSprName,
+        actionIndex,
+        motionIndex);
+    if (!frame || !frame->texture) {
+        return false;
+    }
+
+    vector3d anchorPos = AddVec3(base, prim.m_deltaPos2);
+    anchorPos.y += prim.m_param[2];
+    tlvertex3d anchor{};
+    if (!ProjectPoint(anchorPos, *viewMatrix, &anchor)) {
+        return false;
+    }
+
+    const float pixelRatio = ResolveEffectPixelRatio(anchor);
+    const float scale = (std::max)(0.1f, prim.m_spriteScale) * (std::max)(0.1f, prim.m_size);
+    if (!std::isfinite(pixelRatio) || pixelRatio <= 0.0f) {
+        return false;
+    }
+
+    const float width = static_cast<float>(frame->width) * pixelRatio * scale;
+    const float height = static_cast<float>(frame->height) * pixelRatio * scale;
+    const float pivotX = frame->pivotX * pixelRatio * scale;
+    const float pivotY = frame->pivotY * pixelRatio * scale;
+    SubmitScreenQuadPivot(anchor,
+        frame->texture,
+        pivotX,
+        pivotY,
+        width,
+        height,
+        color,
+        destBlend,
+        0.0f,
+        renderFlags);
+    return true;
+}
+
 void AddXformDelta(KAC_XFORMDATA* target, const KAC_XFORMDATA& delta)
 {
     if (!target) {
@@ -1995,22 +2069,25 @@ void CEffectPrim::Render(matrix* viewMatrix)
     case PP_3DPARTICLE:
     case PP_3DPARTICLEGRAVITY:
     case PP_3DPARTICLESPLINE: {
-        CTexture* texture = !m_texture.empty()
-            ? m_texture[(std::min)(m_curMotion, static_cast<int>(m_texture.size()) - 1)]
-            : GetSoftDiscTexture();
-        const vector3d pos = m_pos;
-        const float size = (std::max)(0.8f, m_size);
         const int renderFlags = ResolveEffectRenderFlags(m_renderFlag, 1 | 2);
         const D3DBLEND destBlend = ResolveEffectDestBlend(m_renderFlag);
-        SubmitBillboard(pos,
-            *viewMatrix,
-            texture,
-            size * 20.0f,
-            size * 20.0f,
-            PackColor(static_cast<unsigned int>(normalizedAlpha), m_tintColor),
-            destBlend,
-            0.0f,
-            renderFlags);
+        const unsigned int color = PackColor(static_cast<unsigned int>(normalizedAlpha), m_tintColor);
+        if (!SubmitAnimatedSpriteParticle(*this, base, viewMatrix, color, destBlend, renderFlags)) {
+            CTexture* texture = !m_texture.empty()
+                ? m_texture[(std::min)(m_curMotion, static_cast<int>(m_texture.size()) - 1)]
+                : GetSoftDiscTexture();
+            const vector3d pos = m_pos;
+            const float size = (std::max)(0.8f, m_size);
+            SubmitBillboard(pos,
+                *viewMatrix,
+                texture,
+                size * 20.0f,
+                size * 20.0f,
+                color,
+                destBlend,
+                0.0f,
+                renderFlags);
+        }
         break;
     }
     case PP_3DTEXTURE:
@@ -3607,19 +3684,6 @@ void CRagEffect::SpawnSight()
     const float angle = static_cast<float>(-5 * m_stateCnt) * (kPi / 180.0f);
     const float offsetX = std::sin(angle) * 15.0f;
     const float offsetZ = -std::cos(angle) * 15.0f;
-    CTexture* primary = ResolveEffectTextureCandidates({
-        "effect\\magic_blue.tga",
-        "effect\\magic_blue.bmp",
-        "effect\\cloud11.tga",
-        "effect\\cloud11.bmp",
-    }, true);
-    CTexture* secondary = ResolveEffectTextureCandidates({
-        "effect\\cloud11.tga",
-        "effect\\cloud11.bmp",
-        "effect\\magic_blue.tga",
-        "effect\\magic_blue.bmp",
-    }, true);
-
     if (CEffectPrim* prim = LaunchEffectPrim(PP_3DPARTICLEGRAVITY, vector3d{})) {
         prim->m_duration = 20;
         prim->m_deltaPos2 = { offsetX, -20.0f, offsetZ };
@@ -3628,9 +3692,7 @@ void CRagEffect::SpawnSight()
         prim->m_sizeSpeed = -0.1f;
         prim->m_alpha = 150.0f;
         prim->m_alphaSpeed = -3.0f;
-        if (primary) {
-            prim->m_texture.push_back(primary);
-        }
+        ConfigureEffectSpritePrim(prim, { "sight" }, 0, 1.0f, true, 3.0f, 0);
     }
 
     if (CEffectPrim* prim = LaunchEffectPrim(PP_3DPARTICLE, vector3d{})) {
@@ -3640,9 +3702,7 @@ void CRagEffect::SpawnSight()
         prim->m_sizeSpeed = -0.06f;
         prim->m_alpha = 120.0f;
         prim->m_alphaSpeed = -1.0f;
-        if (secondary) {
-            prim->m_texture.push_back(secondary);
-        }
+        ConfigureEffectSpritePrim(prim, { "Shadow", "shadow" }, 0, 1.0f, true, 2.0f, 0);
     }
 }
 
@@ -3664,13 +3724,6 @@ void CRagEffect::SpawnSightState()
     const float angle = static_cast<float>(-5 * m_stateCnt) * (kPi / 180.0f);
     const float offsetX = std::sin(angle) * 15.0f;
     const float offsetZ = -std::cos(angle) * 15.0f;
-    CTexture* primary = ResolveEffectTextureCandidates({
-        "effect\\magic_blue.tga",
-        "effect\\magic_blue.bmp",
-        "effect\\cloud11.tga",
-        "effect\\cloud11.bmp",
-    }, true);
-
     if (CEffectPrim* prim = LaunchEffectPrim(PP_3DPARTICLEGRAVITY, vector3d{})) {
         prim->m_duration = 20;
         prim->m_deltaPos2 = { offsetX, -20.0f, offsetZ };
@@ -3679,9 +3732,7 @@ void CRagEffect::SpawnSightState()
         prim->m_sizeSpeed = -0.1f;
         prim->m_alpha = 50.0f;
         prim->m_alphaSpeed = -3.0f;
-        if (primary) {
-            prim->m_texture.push_back(primary);
-        }
+        ConfigureEffectSpritePrim(prim, { "sight" }, 0, 1.0f, true, 3.0f, 0);
     }
 }
 
