@@ -527,6 +527,20 @@ void ProcessQueuedHitWave(CGameActor& actor)
 
 void ApplyQueuedHitReaction(CGameActor& actor, const WBA& hitInfo)
 {
+    CGameActor* sourceActor = nullptr;
+    if (hitInfo.gid != 0) {
+        if (g_world.m_player && g_world.m_player->m_gid == hitInfo.gid) {
+            sourceActor = g_world.m_player;
+        } else {
+            for (CGameActor* entry : g_world.m_actorList) {
+                if (entry && entry->m_gid == hitInfo.gid) {
+                    sourceActor = entry;
+                    break;
+                }
+            }
+        }
+    }
+
     actor.m_damageDestX = hitInfo.damageDestX;
     actor.m_damageDestZ = hitInfo.damageDestZ;
 
@@ -544,6 +558,15 @@ void ApplyQueuedHitReaction(CGameActor& actor, const WBA& hitInfo)
         actor.m_motionSpeed = (std::max)(kDefaultMotionSpeedFactor,
             static_cast<float>(hitInfo.attackedMotionTime) * kAttackMotionFactor);
     }
+
+    if (hitInfo.damage != 0 && hitInfo.damageKind != 0) {
+        actor.SendMsg(sourceActor,
+            88,
+            hitInfo.damage,
+            static_cast<int>(hitInfo.damageColor),
+            hitInfo.damageKind);
+    }
+
     actor.SetState(kHitReactionStateId);
 }
 

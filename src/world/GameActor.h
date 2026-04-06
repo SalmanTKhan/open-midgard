@@ -56,6 +56,9 @@ struct WBA {
     u32 time = 0;
     int message = 0;
     int attackedMotionTime = 0;
+    int damage = 0;
+    u32 damageColor = 0;
+    int damageKind = 0;
     float damageDestX = 0.0f;
     float damageDestZ = 0.0f;
     char waveName[128] = {};

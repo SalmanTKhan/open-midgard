@@ -2567,6 +2567,12 @@ constexpr u8 kNotifyActMultiHitEndure = 9;
 constexpr u8 kNotifyActCriticalDamage = 10;
 constexpr u8 kNotifyActLuckyDodge = 11;
 constexpr int kDefaultAttackMotionTime = 1440;
+constexpr u32 kRefDoubleAttackTermMs = 80;
+
+struct ScheduledAttackHit {
+    int damage = 0;
+    u32 delayMs = 0;
+};
 
 bool IsAttackNotifyType(u8 actionType)
 {
@@ -2611,6 +2617,38 @@ int ResolveCombatNumberKind(int damage, u8 actionType)
     }
 }
 
+u16 ResolveAttackRepeatHitCount(u8 actionType, u16 div)
+{
+    if (actionType == kNotifyActMultiHitDamage || actionType == kNotifyActMultiHitEndure) {
+        return static_cast<u16>((std::max)(1, (std::min)(36, static_cast<int>(div))));
+    }
+
+    return 1;
+}
+
+u32 ResolveAttackImpactDelayMs(const CGameActor& actor)
+{
+    u32 delayMs = static_cast<u32>((std::max)(0.0f, actor.m_attackMotion * actor.m_motionSpeed * 24.0f));
+    switch (actor.m_job) {
+    case 1016:
+    case 1420:
+        delayMs += 192;
+        break;
+    case 1285:
+    case 1830:
+        delayMs += 912;
+        break;
+    case 1286:
+    case 1287:
+    case 1829:
+        delayMs += 408;
+        break;
+    default:
+        break;
+    }
+    return delayMs;
+}
+
 void EmitCombatNumber(CGameActor* sourceActor, CGameActor* targetActor, int damage, u8 actionType)
 {
     if (!targetActor || damage == 0 || actionType == kNotifyActLuckyDodge) {
@@ -2635,6 +2673,115 @@ void EmitCombatNumber(CGameActor* sourceActor, CGameActor* targetActor, int dama
         ResolveCombatNumberKind(damage, actionType));
 }
 
+void AppendCombatDamageHits(std::vector<int>& hitDamages, int damage, u16 hitCountRaw)
+{
+    if (damage == 0) {
+        return;
+    }
+
+    const int hitCount = (std::max)(1, static_cast<int>(hitCountRaw));
+    if (hitCount <= 1) {
+        hitDamages.push_back(damage);
+        return;
+    }
+
+    const int absDamage = damage < 0 ? -damage : damage;
+    const int sign = damage < 0 ? -1 : 1;
+    const int basePerHit = absDamage / hitCount;
+    int remainder = absDamage % hitCount;
+    for (int hitIndex = 0; hitIndex < hitCount; ++hitIndex) {
+        int perHit = basePerHit;
+        if (remainder > 0) {
+            ++perHit;
+            --remainder;
+        }
+        hitDamages.push_back(perHit * sign);
+    }
+}
+
+std::vector<int> ResolveAttackHitDamages(int damage, int leftDamage, u16 hitCountRaw)
+{
+    std::vector<int> hitDamages;
+    hitDamages.reserve((std::max)(1, static_cast<int>(hitCountRaw)) + (leftDamage != 0 ? 1 : 0));
+    AppendCombatDamageHits(hitDamages, damage, hitCountRaw);
+    if (leftDamage != 0) {
+        hitDamages.push_back(leftDamage);
+    }
+    return hitDamages;
+}
+
+std::vector<ScheduledAttackHit> ResolveAttackHitSchedule(const CGameActor& sourceActor,
+    int damage,
+    int leftDamage,
+    u16 div,
+    u8 actionType)
+{
+    std::vector<ScheduledAttackHit> scheduledHits;
+    const u16 repeatHitCount = ResolveAttackRepeatHitCount(actionType, div);
+    const u32 impactDelayMs = ResolveAttackImpactDelayMs(sourceActor);
+
+    if (damage != 0) {
+        if (repeatHitCount <= 1) {
+            scheduledHits.push_back({ damage, impactDelayMs });
+        } else {
+            const int perHitDamage = damage / static_cast<int>(repeatHitCount);
+            scheduledHits.reserve(static_cast<size_t>(repeatHitCount) + (leftDamage != 0 ? 1u : 0u));
+            scheduledHits.push_back({ perHitDamage, impactDelayMs });
+
+            if (leftDamage != 0) {
+                const u32 followupDelayMs = impactDelayMs + kRefDoubleAttackTermMs / 2;
+                for (u16 hitIndex = 1; hitIndex < repeatHitCount; ++hitIndex) {
+                    scheduledHits.push_back({ perHitDamage, followupDelayMs });
+                }
+            } else {
+                for (u16 hitIndex = 1; hitIndex < repeatHitCount; ++hitIndex) {
+                    scheduledHits.push_back({ perHitDamage, impactDelayMs + kRefDoubleAttackTermMs * hitIndex });
+                }
+            }
+        }
+    }
+
+    if (leftDamage != 0) {
+        const u32 offhandDelayMs = impactDelayMs + kRefDoubleAttackTermMs / 4 + kRefDoubleAttackTermMs + kRefDoubleAttackTermMs / 2;
+        scheduledHits.push_back({ leftDamage, offhandDelayMs });
+    }
+
+    return scheduledHits;
+}
+
+void PopulateCombatHitWaveName(CGameActor* sourceActor, CGameActor* targetActor, char* waveName, size_t waveNameSize)
+{
+    if (!waveName || waveNameSize == 0) {
+        return;
+    }
+
+    const char* resolvedWaveName = nullptr;
+    if (targetActor && targetActor->m_isPc != 0) {
+        resolvedWaveName = g_session.GetJobHitWaveName(targetActor->m_job);
+    } else if (sourceActor) {
+        int weaponType = -1;
+        if (const CPc* pcActor = dynamic_cast<const CPc*>(sourceActor)) {
+            weaponType = pcActor->m_weapon;
+        } else if (const CGrannyPc* grannyPcActor = dynamic_cast<const CGrannyPc*>(sourceActor)) {
+            weaponType = grannyPcActor->m_weapon;
+        }
+        resolvedWaveName = g_session.GetWeaponHitWaveName((weaponType >= 0 && weaponType < 31) ? weaponType : -1);
+    } else {
+        resolvedWaveName = g_session.GetWeaponHitWaveName(-1);
+    }
+
+    if (resolvedWaveName && *resolvedWaveName) {
+        std::snprintf(waveName, waveNameSize, "%s", resolvedWaveName);
+    }
+}
+
+void EmitCombatNumbers(CGameActor* sourceActor, CGameActor* targetActor, const std::vector<int>& hitDamages, u8 actionType)
+{
+    for (int hitDamage : hitDamages) {
+        EmitCombatNumber(sourceActor, targetActor, hitDamage, actionType);
+    }
+}
+
 u16 ResolveDisplayedSkillHitCount(u16 skillId, u16 level, u16 div)
 {
     if (div > 1) {
@@ -2653,24 +2800,10 @@ u16 ResolveDisplayedSkillHitCount(u16 skillId, u16 level, u16 div)
 
 void EmitCombatNumbers(CGameActor* sourceActor, CGameActor* targetActor, int damage, u8 actionType, u16 hitCountRaw)
 {
-    const int hitCount = (std::max)(1, static_cast<int>(hitCountRaw));
-    if (hitCount <= 1 || damage == 0) {
-        EmitCombatNumber(sourceActor, targetActor, damage, actionType);
-        return;
-    }
-
-    const int absDamage = damage < 0 ? -damage : damage;
-    const int sign = damage < 0 ? -1 : 1;
-    const int basePerHit = absDamage / hitCount;
-    int remainder = absDamage % hitCount;
-    for (int hitIndex = 0; hitIndex < hitCount; ++hitIndex) {
-        int perHit = basePerHit;
-        if (remainder > 0) {
-            ++perHit;
-            --remainder;
-        }
-        EmitCombatNumber(sourceActor, targetActor, perHit * sign, actionType);
-    }
+    std::vector<int> hitDamages;
+    hitDamages.reserve((std::max)(1, static_cast<int>(hitCountRaw)));
+    AppendCombatDamageHits(hitDamages, damage, hitCountRaw);
+    EmitCombatNumbers(sourceActor, targetActor, hitDamages, actionType);
 }
 
 void EmitSkillImpactEffect(CGameActor* targetActor, u16 skillId)
@@ -2709,27 +2842,55 @@ void QueueCombatHitReaction(CGameActor* sourceActor, CGameActor* targetActor, in
     hitInfo.attackedMotionTime = attackedMT;
     hitInfo.damageDestX = targetActor->m_pos.x;
     hitInfo.damageDestZ = targetActor->m_pos.z;
-
-    const char* waveName = nullptr;
-    if (targetActor->m_isPc != 0) {
-        waveName = g_session.GetJobHitWaveName(targetActor->m_job);
-    } else if (sourceActor) {
-        int weaponType = -1;
-        if (const CPc* pcActor = dynamic_cast<const CPc*>(sourceActor)) {
-            weaponType = pcActor->m_weapon;
-        } else if (const CGrannyPc* grannyPcActor = dynamic_cast<const CGrannyPc*>(sourceActor)) {
-            weaponType = grannyPcActor->m_weapon;
-        }
-        waveName = g_session.GetWeaponHitWaveName((weaponType >= 0 && weaponType < 31) ? weaponType : -1);
-    } else {
-        waveName = g_session.GetWeaponHitWaveName(-1);
-    }
-
-    if (waveName && *waveName) {
-        std::snprintf(hitInfo.waveName, sizeof(hitInfo.waveName), "%s", waveName);
-    }
+    PopulateCombatHitWaveName(sourceActor, targetActor, hitInfo.waveName, sizeof(hitInfo.waveName));
 
     targetActor->QueueWillBeAttacked(hitInfo);
+}
+
+void QueueTimedAttackHit(CGameActor* sourceActor,
+    CGameActor* targetActor,
+    int attackedMT,
+    int damage,
+    u8 actionType,
+    u32 queueTime)
+{
+    if (!targetActor || damage == 0 || actionType == kNotifyActLuckyDodge) {
+        return;
+    }
+
+    WBA hitInfo{};
+    hitInfo.gid = sourceActor ? sourceActor->m_gid : 0;
+    hitInfo.time = queueTime;
+    hitInfo.message = 133;
+    hitInfo.attackedMotionTime = attackedMT;
+    hitInfo.damage = damage < 0 ? -damage : damage;
+    const bool isLocalPlayerTarget = targetActor->m_gid == g_session.m_gid || targetActor->m_gid == g_session.m_aid;
+    const bool isLocalPlayerSource = sourceActor && (sourceActor->m_gid == g_session.m_gid || sourceActor->m_gid == g_session.m_aid);
+    hitInfo.damageColor = (isLocalPlayerTarget && !isLocalPlayerSource)
+        ? 0xFFFF4040u
+        : ResolveCombatNumberColor(damage, actionType);
+    hitInfo.damageKind = ResolveCombatNumberKind(damage, actionType);
+    hitInfo.damageDestX = targetActor->m_pos.x;
+    hitInfo.damageDestZ = targetActor->m_pos.z;
+    PopulateCombatHitWaveName(sourceActor, targetActor, hitInfo.waveName, sizeof(hitInfo.waveName));
+    targetActor->QueueWillBeAttacked(hitInfo);
+}
+
+void QueueAttackHitReactions(CGameActor* sourceActor,
+    CGameActor* targetActor,
+    int attackedMT,
+    const std::vector<ScheduledAttackHit>& scheduledHits,
+    u8 actionType)
+{
+    const u32 now = timeGetTime();
+    for (const ScheduledAttackHit& scheduledHit : scheduledHits) {
+        QueueTimedAttackHit(sourceActor,
+            targetActor,
+            attackedMT,
+            scheduledHit.damage,
+            actionType,
+            now + scheduledHit.delayMs);
+    }
 }
 
 void FaceActorTowardTarget(CGameActor* actor, CGameActor* target)
@@ -3118,12 +3279,14 @@ void HandleActorActionNotify(CGameMode& mode, const PacketView& packet)
         sourceActor->m_curAction,
         sourceActor->m_motionSpeed,
         sourceActor->m_attackMotion);
-    QueueCombatHitReaction(sourceActor, targetActor, attackedMT, damage, actionType);
-    EmitCombatNumber(sourceActor, targetActor, damage, actionType);
-    DbgLog("[GameMode] act notify stage=number src=%u dst=%u dmg=%d\n",
+    const std::vector<ScheduledAttackHit> scheduledHits = ResolveAttackHitSchedule(*sourceActor, damage, leftDamage, div, actionType);
+    QueueAttackHitReactions(sourceActor, targetActor, attackedMT, scheduledHits, actionType);
+    DbgLog("[GameMode] act notify stage=number src=%u dst=%u dmg=%d left=%d hits=%u\n",
         srcGid,
         dstGid,
-        damage);
+        damage,
+        leftDamage,
+        static_cast<unsigned int>(scheduledHits.size()));
 
     DbgLog("[GameMode] act notify opcode=0x%04X src=%u dst=%u type=%u attackMT=%d attackedMT=%d dmg=%d left=%d div=%u action=%d motionSpeed=%.3f atkMotion=%.1f\n",
         packet.packetId,
