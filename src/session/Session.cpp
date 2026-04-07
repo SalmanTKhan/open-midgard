@@ -841,11 +841,16 @@ void CSession::ClearInventoryWearLocationMask(int wearMask, unsigned int exceptI
 
 void CSession::RebuildPlayerEquipmentAppearanceFromInventory()
 {
-    int weapon = 0;
-    int shield = 0;
-    int accessoryBottom = 0;
-    int accessoryTop = 0;
-    int accessoryMid = 0;
+    int weapon = m_playerWeapon;
+    int shield = m_playerShield;
+    int accessoryBottom = m_playerAccessory;
+    int accessoryTop = m_playerAccessory2;
+    int accessoryMid = m_playerAccessory3;
+    bool hasWeapon = false;
+    bool hasShield = false;
+    bool hasAccessoryBottom = false;
+    bool hasAccessoryTop = false;
+    bool hasAccessoryMid = false;
 
     for (const ITEM_INFO& item : m_inventoryItems) {
         if (item.m_wearLocation == 0) {
@@ -853,25 +858,50 @@ void CSession::RebuildPlayerEquipmentAppearanceFromInventory()
         }
 
         const unsigned int itemId = item.GetItemId();
-        const int viewId = g_ttemmgr.GetViewId(itemId);
+        const int viewId = g_ttemmgr.GetVisibleHeadgearViewId(itemId);
         const bool occupiesRightHand = (item.m_wearLocation & 2) != 0;
         const bool occupiesLeftHand = (item.m_wearLocation & 32) != 0;
 
         if (occupiesRightHand) {
-            weapon = viewId > 0 ? viewId : static_cast<int>(itemId);
+            hasWeapon = true;
         }
         if (occupiesLeftHand && !occupiesRightHand) {
-            shield = viewId > 0 ? viewId : static_cast<int>(itemId);
+            hasShield = true;
         }
         if ((item.m_wearLocation & 1) != 0) {
-            accessoryBottom = viewId;
+            hasAccessoryBottom = true;
+            if (viewId > 0) {
+                accessoryBottom = viewId;
+            }
         }
         if ((item.m_wearLocation & 256) != 0) {
-            accessoryTop = viewId;
+            hasAccessoryTop = true;
+            if (viewId > 0) {
+                accessoryTop = viewId;
+            }
         }
         if ((item.m_wearLocation & 512) != 0) {
-            accessoryMid = viewId;
+            hasAccessoryMid = true;
+            if (viewId > 0) {
+                accessoryMid = viewId;
+            }
         }
+    }
+
+    if (!hasWeapon) {
+        weapon = 0;
+    }
+    if (!hasShield) {
+        shield = 0;
+    }
+    if (!hasAccessoryBottom) {
+        accessoryBottom = 0;
+    }
+    if (!hasAccessoryTop) {
+        accessoryTop = 0;
+    }
+    if (!hasAccessoryMid) {
+        accessoryMid = 0;
     }
 
     m_playerWeapon = weapon;
@@ -1405,7 +1435,8 @@ char* CSession::GetAccessoryActName(int job, int* head, int sex, int accessory, 
     }
 
     const char* sexToken = GetSexToken(sex);
-    std::sprintf(buf, "%s%s\\%s_%s.act", kAccessorySpriteRoot, sexToken, sexToken, resourceName.c_str());
+    const char* separator = resourceName.front() == '_' ? "" : "_";
+    std::sprintf(buf, "%s%s\\%s%s%s.act", kAccessorySpriteRoot, sexToken, sexToken, separator, resourceName.c_str());
     return buf;
 }
 
@@ -1435,7 +1466,8 @@ char* CSession::GetAccessorySprName(int job, int* head, int sex, int accessory, 
     }
 
     const char* sexToken = GetSexToken(sex);
-    std::sprintf(buf, "%s%s\\%s_%s.spr", kAccessorySpriteRoot, sexToken, sexToken, resourceName.c_str());
+    const char* separator = resourceName.front() == '_' ? "" : "_";
+    std::sprintf(buf, "%s%s\\%s%s%s.spr", kAccessorySpriteRoot, sexToken, sexToken, separator, resourceName.c_str());
     return buf;
 }
 

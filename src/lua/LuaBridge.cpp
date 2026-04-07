@@ -57,6 +57,13 @@ bool PathEndsWithInsensitive(const std::string& path, const char* suffix)
 	return _stricmp(path.c_str() + (path.size() - suffixLength), suffix) == 0;
 }
 
+bool IsAccessoryNameTableScript(const std::string& path)
+{
+	return PathEndsWithInsensitive(path, "lua files\\datainfo\\accname.lub")
+		|| PathEndsWithInsensitive(path, "lua files\\datainfo\\accname_f.lub")
+		|| PathEndsWithInsensitive(path, "lua files\\datainfo\\accname_eng.lub");
+}
+
 void SetLuaGlobalInteger(lua_State* state, const char* name, int value)
 {
 	if (!state || !name || !*name) {
@@ -707,6 +714,10 @@ bool CLuaBridge::ExecuteBuffer(const unsigned char* bytes, size_t size, const ch
 bool CLuaBridge::LoadRagnarokScript(const char* relativePath)
 {
 	const std::string normalized = NormalizePath(relativePath);
+	if (IsAccessoryNameTableScript(normalized)) {
+		LoadRagnarokScriptOnce("lua files\\datainfo\\accessoryid.lub");
+	}
+
 	if (PathEndsWithInsensitive(normalized, "lua files\\datainfo\\pcjobnamegender.lub")
 		|| PathEndsWithInsensitive(normalized, "lua files\\datainfo\\pcjobnamegender_f.lub")) {
 		LoadRagnarokScriptOnce("lua files\\admin\\pcidentity.lub");
