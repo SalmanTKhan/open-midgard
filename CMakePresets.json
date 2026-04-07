@@ -52,6 +52,20 @@
       }
     },
     {
+      "name": "mingw-qt-x64-ci",
+      "displayName": "MinGW Qt x64 CI",
+      "generator": "MinGW Makefiles",
+      "binaryDir": "${sourceDir}/build-mingw-preset",
+      "cacheVariables": {
+        "CMAKE_CXX_STANDARD": "17",
+        "CMAKE_CXX_STANDARD_REQUIRED": "ON",
+        "CMAKE_CXX_EXTENSIONS": "OFF",
+        "RO_ENABLE_DEV_DEPLOY": "OFF",
+        "RO_ENABLE_QT6_UI_SPIKE": "ON",
+        "RO_QT_UI_SPIKE_DEFAULT_ENABLED": "ON"
+      }
+    },
+    {
       "name": "linux-qt-vulkan",
       "displayName": "Linux Qt Vulkan",
       "generator": "Ninja",
@@ -91,6 +105,10 @@
     {
       "name": "build-mingw-qt-x64",
       "configurePreset": "mingw-qt-x64"
+    },
+    {
+      "name": "build-mingw-qt-x64-ci",
+      "configurePreset": "mingw-qt-x64-ci"
     },
     {
       "name": "build-linux-qt-vulkan",
