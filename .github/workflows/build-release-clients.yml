@@ -261,8 +261,12 @@ jobs:
           path: release-assets
 
       - name: Upload assets to GitHub release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            release-assets/open-midgard-windows-qt-x64/open-midgard-windows-qt-x64.zip
-            release-assets/open-midgard-linux-qt-vulkan/open-midgard-linux-qt-vulkan.tar.gz
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release upload "${{ github.event.release.tag_name }}" \
+            release-assets/open-midgard-windows-qt-x64/open-midgard-windows-qt-x64.zip \
+            release-assets/open-midgard-linux-qt-vulkan/open-midgard-linux-qt-vulkan.tar.gz \
+            --clobber
