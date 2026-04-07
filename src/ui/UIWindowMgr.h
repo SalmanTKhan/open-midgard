@@ -192,6 +192,10 @@ public:
     ArgbDibSurface m_uiComposeSurface;
 
     std::vector<UIChatEvent> m_chatEvents;
+    std::vector<std::string> m_chatInputHistory;
+    std::string m_chatInputText;
+    int m_chatInputActive;
+    int m_chatScrollLineOffset;
 
 private:
     UIWindow* HitTestWindow(int x, int y) const;

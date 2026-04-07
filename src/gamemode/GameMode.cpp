@@ -3566,7 +3566,6 @@ void UpdateMapLoadingUi(CGameMode& mode, const char* message, float progress)
 void FinishMapLoading(CGameMode& mode)
 {
     g_windowMgr.HideLoadingScreen();
-    g_windowMgr.ClearChatEvents();
     g_windowMgr.EnsureChatWindowVisible();
     g_windowMgr.MakeWindow(UIWindowMgr::WID_BASICINFOWND);
     g_windowMgr.MakeWindow(UIWindowMgr::WID_SHORTCUTWND);
@@ -4136,6 +4135,29 @@ bool LocalPlayerHasPendingMoveAck(const CGameMode& mode, u32 now)
     }
 
     return now - player->m_moveReqTick <= kMoveAckTimeoutMs;
+}
+
+constexpr u32 kLocalChatBubbleBaseLifetimeMs = 3200;
+constexpr u32 kLocalChatBubblePerCharLifetimeMs = 90;
+constexpr u32 kLocalChatBubbleMinLifetimeMs = 4500;
+constexpr u32 kLocalChatBubbleMaxLifetimeMs = 12000;
+
+u32 ComputeLocalChatBubbleUntilTick(const std::string& text, u32 now)
+{
+    const u32 bubbleLengthMs = kLocalChatBubbleBaseLifetimeMs
+        + static_cast<u32>(text.size()) * kLocalChatBubblePerCharLifetimeMs;
+    const u32 clampedLengthMs = (std::min)(kLocalChatBubbleMaxLifetimeMs,
+        (std::max)(kLocalChatBubbleMinLifetimeMs, bubbleLengthMs));
+    return now + clampedLengthMs;
+}
+
+void ApplyLocalPlayerChatBubble(CGameMode& mode, const std::string& text)
+{
+    if (text.empty() || !mode.m_world || !mode.m_world->m_player) {
+        return;
+    }
+
+    mode.m_world->m_player->SetChatBubbleText(text, ComputeLocalChatBubbleUntilTick(text, GetTickCount()));
 }
 
 bool SendGlobalChatMessage(const char* playerName, const std::string& message)
@@ -8213,7 +8235,6 @@ void CGameMode::OnInit(const char* worldName) {
 
     g_windowMgr.RemoveAllWindows();
     g_windowMgr.SetLoginStatus("");
-    g_windowMgr.ClearChatEvents();
     m_loadingWallpaperName = ChooseRandomLoadingWallpaper();
     g_windowMgr.ShowLoadingScreen(m_loadingWallpaperName, "Preparing loading screen...", 0.02f);
 
@@ -8908,7 +8929,11 @@ msgresult_t CGameMode::SendMsg(int msg, msgparam_t wparam, msgparam_t lparam, ms
             }
             return sent ? 1 : 0;
         }
-        return SendGlobalChatMessage(g_session.GetPlayerName(), text) ? 1 : 0;
+        const bool sent = SendGlobalChatMessage(g_session.GetPlayerName(), text);
+        if (sent) {
+            ApplyLocalPlayerChatBubble(*this, text);
+        }
+        return sent ? 1 : 0;
     }
 
     case GameMsg_ToggleSitStand:

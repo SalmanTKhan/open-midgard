@@ -32,10 +32,15 @@ constexpr int kChatWindowWidth = 420;
 constexpr int kChatLineHeight = 19;
 constexpr int kChatInputHeight = 22;
 constexpr int kChatPanelPadding = 8;
-constexpr int kChatHistoryHeight = 192;
 constexpr int kChatMessageGap = 2;
+constexpr int kChatVisibleLineCount = 12;
+constexpr int kChatHistoryHeight =
+    (kChatLineHeight * kChatVisibleLineCount) + (kChatMessageGap * (kChatVisibleLineCount - 1));
+constexpr int kChatScrollbarWidth = 8;
+constexpr int kChatScrollbarGap = 4;
 constexpr size_t kMaxInputChars = 180;
 constexpr size_t kMaxInputHistory = 5;
+constexpr int kChatWheelScrollLines = 3;
 COLORREF ToColorRef(u32 color)
 {
     return RGB((color >> 16) & 0xFFu, (color >> 8) & 0xFFu, color & 0xFFu);
@@ -208,7 +213,9 @@ void FillRectStippled(HDC target, const RECT& rect)
 UINewChatWnd::UINewChatWnd()
     : m_lastDrawTick(0),
       m_inputActive(0),
-      m_historyBrowseIndex(-1)
+    m_historyBrowseIndex(-1),
+    m_scrollLineOffset(0),
+    m_firstVisibleLineIndex(0)
 {
 }
 
@@ -220,11 +227,10 @@ void UINewChatWnd::AddChatLine(const char* text, u32 color, u8 channel, u32 tick
         return;
     }
 
+    const bool wasPinnedBottom = m_scrollLineOffset == 0;
+
     if (m_lines.size() >= kMaxChatLines) {
         m_lines.erase(m_lines.begin());
-        if (!m_visibleLines.empty()) {
-            m_visibleLines.erase(m_visibleLines.begin());
-        }
     }
 
     ChatLine line{};
@@ -233,7 +239,12 @@ void UINewChatWnd::AddChatLine(const char* text, u32 color, u8 channel, u32 tick
     line.channel = channel;
     line.tick = tick;
     m_lines.push_back(std::move(line));
-    m_visibleLines = m_lines;
+
+    if (!wasPinnedBottom) {
+        ++m_scrollLineOffset;
+    }
+    ClampScrollOffset();
+    RefreshVisibleLines(GetTickCount());
     Invalidate();
 }
 
@@ -250,6 +261,21 @@ const std::vector<ChatLine>& UINewChatWnd::GetVisibleLines() const
 const std::string& UINewChatWnd::GetInputText() const
 {
     return m_inputText;
+}
+
+const std::vector<std::string>& UINewChatWnd::GetInputHistory() const
+{
+    return m_inputHistory;
+}
+
+ChatScrollBarState UINewChatWnd::GetScrollBarState() const
+{
+    ChatScrollBarState state{};
+    state.totalLines = static_cast<int>(m_lines.size());
+    state.firstVisibleLine = m_firstVisibleLineIndex;
+    state.visibleLineCount = static_cast<int>(m_visibleLines.size());
+    state.visible = (state.totalLines > state.visibleLineCount) ? 1 : 0;
+    return state;
 }
 
 void UINewChatWnd::OnProcess()
@@ -280,8 +306,14 @@ void UINewChatWnd::OnProcess()
         }
     }
     if (linesChanged) {
+        const bool wasPinnedBottom = m_scrollLineOffset == 0;
+        const size_t oldCount = m_lines.size();
         m_lines.swap(syncedLines);
-        m_visibleLines = m_lines;
+        if (!wasPinnedBottom && m_lines.size() > oldCount) {
+            m_scrollLineOffset += static_cast<int>(m_lines.size() - oldCount);
+        }
+        ClampScrollOffset();
+        RefreshVisibleLines(GetTickCount());
         Invalidate();
     }
     RefreshVisibleLines(GetTickCount());
@@ -337,39 +369,31 @@ void UINewChatWnd::OnDraw()
     IntersectClipRect(hdc, historyRc.left, historyRc.top, historyRc.right, historyRc.bottom);
     SetBkMode(hdc, TRANSPARENT);
     const int textInset = 4;
-    const int textWidth = (historyRc.right - historyRc.left) - (textInset * 2);
+    const ChatScrollBarState scrollState = GetScrollBarState();
+    const int reservedScrollbarWidth = scrollState.visible ? (kChatScrollbarWidth + kChatScrollbarGap) : 0;
+    const int textWidth = (historyRc.right - historyRc.left) - (textInset * 2) - reservedScrollbarWidth;
     const size_t lineCount = m_visibleLines.size();
     std::vector<int> measuredHeights(lineCount, kChatLineHeight);
     int usedHeight = 0;
-    size_t firstVisibleIndex = lineCount;
-    for (size_t index = lineCount; index > 0; --index) {
-        const size_t lineIndex = index - 1;
-        const int measured = MeasureWrappedTextHeight(hdc, m_visibleLines[lineIndex].text, textWidth);
-        measuredHeights[lineIndex] = measured;
-        const int blockHeight = measured + ((usedHeight > 0) ? kChatMessageGap : 0);
-        if (usedHeight + blockHeight > kChatHistoryHeight) {
-            break;
+    for (size_t index = 0; index < lineCount; ++index) {
+        measuredHeights[index] = MeasureWrappedTextHeight(hdc, m_visibleLines[index].text, textWidth);
+        usedHeight += measuredHeights[index];
+        if (index + 1 < lineCount) {
+            usedHeight += kChatMessageGap;
         }
-        usedHeight += blockHeight;
-        firstVisibleIndex = lineIndex;
-    }
-    if (firstVisibleIndex == lineCount && lineCount > 0) {
-        firstVisibleIndex = lineCount - 1;
-        measuredHeights[firstVisibleIndex] = MeasureWrappedTextHeight(hdc, m_visibleLines[firstVisibleIndex].text, textWidth);
-        usedHeight = measuredHeights[firstVisibleIndex];
     }
 
     int lineY = historyRc.bottom - textInset - usedHeight;
     if (lineY < historyRc.top + textInset) {
         lineY = historyRc.top + textInset;
     }
-    for (size_t index = firstVisibleIndex; index < lineCount; ++index) {
+    for (size_t index = 0; index < lineCount; ++index) {
         const ChatLine& line = m_visibleLines[index];
         const int textHeight = measuredHeights[index];
         RECT textRc = {
             historyRc.left + textInset,
             lineY,
-            historyRc.right - textInset,
+            historyRc.right - textInset - reservedScrollbarWidth,
             lineY + textHeight
         };
         SetTextColor(hdc, ToColorRef(line.color));
@@ -381,6 +405,32 @@ void UINewChatWnd::OnDraw()
         lineY += textHeight + kChatMessageGap;
     }
     RestoreDC(hdc, historyClipDc);
+
+    if (scrollState.visible) {
+        RECT trackRc = {
+            historyRc.right - textInset - kChatScrollbarWidth,
+            historyRc.top + textInset,
+            historyRc.right - textInset,
+            historyRc.bottom - textInset
+        };
+        HBRUSH trackBrush = CreateSolidBrush(RGB(40, 40, 40));
+        FillRect(hdc, &trackRc, trackBrush);
+        DeleteObject(trackBrush);
+        FrameRect(hdc, &trackRc, static_cast<HBRUSH>(GetStockObject(WHITE_BRUSH)));
+
+        const int trackHeight = trackRc.bottom - trackRc.top;
+        const int visibleLineCount = (std::max)(1, scrollState.visibleLineCount);
+        const int totalLines = (std::max)(visibleLineCount, scrollState.totalLines);
+        const int thumbHeight = (std::max)(18, trackHeight * visibleLineCount / totalLines);
+        const int maxTravel = (std::max)(0, trackHeight - thumbHeight);
+        const int scrollDenom = (std::max)(1, totalLines - visibleLineCount);
+        const int thumbTop = trackRc.top + (maxTravel * scrollState.firstVisibleLine) / scrollDenom;
+        RECT thumbRc = { trackRc.left + 1, thumbTop, trackRc.right - 1, thumbTop + thumbHeight };
+        HBRUSH thumbBrush = CreateSolidBrush(RGB(184, 184, 184));
+        FillRect(hdc, &thumbRc, thumbBrush);
+        DeleteObject(thumbBrush);
+    }
+
     HBRUSH inputBg = CreateSolidBrush(m_inputActive ? RGB(245, 245, 220) : RGB(210, 210, 210));
     FillRect(hdc, &inputRc, inputBg);
     DeleteObject(inputBg);
@@ -409,11 +459,43 @@ void UINewChatWnd::OnDraw()
 void UINewChatWnd::RefreshVisibleLines(u32 nowTick)
 {
     (void)nowTick;
+
+    ClampScrollOffset();
+
     std::vector<ChatLine> nextVisible;
-    nextVisible.reserve(m_lines.size());
-    for (const ChatLine& line : m_lines) {
-        nextVisible.push_back(line);
+    m_firstVisibleLineIndex = 0;
+
+    if (!m_lines.empty()) {
+        HDC hdc = AcquireDrawTarget();
+        const int textWidth = kChatWindowWidth - (kChatPanelPadding * 2) - 8 - 8 - (kChatScrollbarWidth + kChatScrollbarGap);
+        const int endExclusive = (std::max)(0, static_cast<int>(m_lines.size()) - m_scrollLineOffset);
+        int usedHeight = 0;
+        int firstVisibleIndex = endExclusive;
+        for (int index = endExclusive - 1; index >= 0; --index) {
+            const int measured = MeasureWrappedTextHeight(hdc, m_lines[static_cast<size_t>(index)].text, textWidth);
+            const int blockHeight = measured + ((usedHeight > 0) ? kChatMessageGap : 0);
+            if (usedHeight + blockHeight > kChatHistoryHeight) {
+                break;
+            }
+            usedHeight += blockHeight;
+            firstVisibleIndex = index;
+        }
+
+        if (firstVisibleIndex == endExclusive && endExclusive > 0) {
+            firstVisibleIndex = endExclusive - 1;
+        }
+
+        m_firstVisibleLineIndex = (std::max)(0, firstVisibleIndex);
+        nextVisible.reserve(static_cast<size_t>((std::max)(0, endExclusive - m_firstVisibleLineIndex)));
+        for (int index = m_firstVisibleLineIndex; index < endExclusive; ++index) {
+            nextVisible.push_back(m_lines[static_cast<size_t>(index)]);
+        }
+
+        if (hdc) {
+            ReleaseDrawTarget(hdc);
+        }
     }
+
     if (nextVisible.size() != m_visibleLines.size()) {
         Invalidate();
     } else {
@@ -433,6 +515,8 @@ void UINewChatWnd::ClearLines()
 {
     m_lines.clear();
     m_visibleLines.clear();
+    m_scrollLineOffset = 0;
+    m_firstVisibleLineIndex = 0;
     Invalidate();
 }
 
@@ -441,6 +525,15 @@ void UINewChatWnd::OnLBtnDown(int x, int y)
     (void)x;
     (void)y;
     SetInputActive(true);
+}
+
+void UINewChatWnd::OnWheel(int delta)
+{
+    if (delta > 0) {
+        AdjustScroll(kChatWheelScrollLines);
+    } else if (delta < 0) {
+        AdjustScroll(-kChatWheelScrollLines);
+    }
 }
 
 bool UINewChatWnd::HandleKeyDown(int virtualKey)
@@ -554,6 +647,24 @@ void UINewChatWnd::Layout()
     Resize(kChatWindowWidth, panelHeight);
 }
 
+void UINewChatWnd::AdjustScroll(int lineDelta)
+{
+    if (lineDelta == 0 || m_lines.empty()) {
+        return;
+    }
+
+    m_scrollLineOffset += lineDelta;
+    ClampScrollOffset();
+    RefreshVisibleLines(GetTickCount());
+    Invalidate();
+}
+
+void UINewChatWnd::ClampScrollOffset()
+{
+    const int maxOffset = m_lines.empty() ? 0 : static_cast<int>(m_lines.size()) - 1;
+    m_scrollLineOffset = std::clamp(m_scrollLineOffset, 0, maxOffset);
+}
+
 void UINewChatWnd::SetInputActive(bool active)
 {
     m_inputActive = active ? 1 : 0;
@@ -609,4 +720,23 @@ void UINewChatWnd::AddInputHistory(const std::string& text)
     if (m_inputHistory.size() > kMaxInputHistory) {
         m_inputHistory.resize(kMaxInputHistory);
     }
+}
+
+void UINewChatWnd::RestorePersistentState(const std::vector<std::string>& inputHistory,
+    const std::string& inputText,
+    bool inputActive,
+    int scrollLineOffset)
+{
+    m_inputHistory = inputHistory;
+    if (m_inputHistory.size() > kMaxInputHistory) {
+        m_inputHistory.resize(kMaxInputHistory);
+    }
+    m_inputText = inputText;
+    m_inputActive = inputActive ? 1 : 0;
+    m_historyBrowseIndex = -1;
+    m_historyDraft.clear();
+    m_scrollLineOffset = scrollLineOffset;
+    ClampScrollOffset();
+    RefreshVisibleLines(GetTickCount());
+    Invalidate();
 }

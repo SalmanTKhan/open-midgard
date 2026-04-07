@@ -58,6 +58,9 @@ constexpr float kPlayerBillboardDepthHeightBiasFactor = 0.45f;
 constexpr float kPlayerBillboardTopDepthForwardBiasScale = 0.85f;
 constexpr int kActorLabelBaseYOffset = 4;
 constexpr int kPlayerLabelBaseYOffset = 22;
+constexpr int kActorSpeechBubbleHeadGapPx = 26;
+constexpr int kActorSpeechBubbleMinOffsetPx = 88;
+constexpr int kActorSpeechBubbleMaxOffsetPx = 164;
 constexpr float kGroundItemScreenScale = 1.6f;
 constexpr unsigned short kGroundQuadIndices[6] = { 0, 1, 2, 0, 2, 3 };
 constexpr bool kSubmitGroundSideFaces = true;
@@ -5335,6 +5338,58 @@ bool CWorld::GetActorScreenMarker(const matrix& viewMatrix,
     }
     if (outLabelY) {
         *outLabelY = static_cast<int>(std::lround(projectedBase.y)) + kActorLabelBaseYOffset;
+    }
+    return true;
+}
+
+bool CWorld::GetActorSpeechBubbleAnchor(const matrix& viewMatrix,
+    u32 gid,
+    int* outCenterX,
+    int* outBottomY) const
+{
+    if (outCenterX) {
+        *outCenterX = 0;
+    }
+    if (outBottomY) {
+        *outBottomY = 0;
+    }
+
+    CGameActor* actor = nullptr;
+    if (m_player && m_player->m_gid == gid) {
+        actor = m_player;
+    } else {
+        for (CGameActor* entry : m_actorList) {
+            if (entry && entry->m_gid == gid) {
+                actor = entry;
+                break;
+            }
+        }
+    }
+
+    if (!actor || !actor->m_isVisible) {
+        return false;
+    }
+
+    tlvertex3d projectedBase{};
+    if (!ProjectPoint(g_renderer, viewMatrix, actor->m_pos, &projectedBase)) {
+        return false;
+    }
+
+    const int actorSize = actor->m_ySize > 0 ? actor->m_ySize : 5;
+    int verticalOffsetPx = 72 + actorSize * 6;
+    if (actor->m_isPc) {
+        verticalOffsetPx += 6;
+    }
+    verticalOffsetPx = (std::min)(kActorSpeechBubbleMaxOffsetPx,
+        (std::max)(kActorSpeechBubbleMinOffsetPx, verticalOffsetPx));
+
+    if (outCenterX) {
+        *outCenterX = static_cast<int>(std::lround(projectedBase.x));
+    }
+    if (outBottomY) {
+        *outBottomY = static_cast<int>(std::lround(projectedBase.y))
+            - verticalOffsetPx
+            - kActorSpeechBubbleHeadGapPx;
     }
     return true;
 }

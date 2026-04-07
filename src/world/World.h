@@ -296,6 +296,10 @@ public:
         int* outCenterX,
         int* outTopY,
         int* outLabelY = nullptr) const;
+    bool GetActorSpeechBubbleAnchor(const matrix& viewMatrix,
+        u32 gid,
+        int* outCenterX,
+        int* outBottomY) const;
     bool FindHoveredActorScreen(const matrix& viewMatrix,
         float cameraLongitude,
         int screenX,

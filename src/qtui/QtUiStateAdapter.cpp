@@ -55,6 +55,130 @@ namespace {
 
 constexpr DWORD kHoverNameRequestCooldownMs = 1000;
 constexpr int kQtActorLabelVerticalOffset = 10;
+constexpr int kQtSpeechBubbleMaxTextWidth = 200;
+
+bool IsGameplayUiSuppressed(const QtUiState* state)
+{
+    return state && state->loadingVisible();
+}
+
+template <typename TWindow>
+bool IsGameplayWindowVisible(const QtUiState* state, const TWindow* window)
+{
+    return window && window->m_show != 0 && !IsGameplayUiSuppressed(state);
+}
+
+void ClearGameplayUiState(QtUiState* state)
+{
+    if (!state) {
+        return;
+    }
+
+    state->setNpcMenuVisible(false);
+    state->setNpcMenuGeometry(0, 0, 0, 0);
+    state->setNpcMenuSelection(-1);
+    state->setNpcMenuHoverIndex(-1);
+    state->setNpcMenuButtons(false, false);
+    state->setNpcMenuOptions(QVariantList{});
+    state->setNpcMenuButtonsData(QVariantList{});
+
+    state->setSayDialogVisible(false);
+    state->setSayDialogGeometry(0, 0, 0, 0);
+    state->setSayDialogText(QString());
+    state->setSayDialogAction(false, QString(), false, false);
+    state->setSayDialogActionButton(QVariantMap{});
+
+    state->setNpcInputVisible(false);
+    state->setNpcInputGeometry(0, 0, 0, 0);
+    state->setNpcInputText(QString(), QString());
+    state->setNpcInputButtons(false, false);
+    state->setNpcInputButtonsData(QVariantList{});
+
+    state->setChooseMenuVisible(false);
+    state->setChooseMenuGeometry(0, 0, 0, 0);
+    state->setChooseMenuSelectedIndex(-1);
+    state->setChooseMenuPressedIndex(-1);
+    state->setChooseMenuOptions(QVariantList{});
+
+    state->setItemShopVisible(false);
+    state->setItemShopGeometry(0, 0, 0, 0);
+    state->setItemShopTitle(QString());
+    state->setItemShopData(QVariantMap{});
+    state->setItemShopRows(QVariantList{});
+
+    state->setItemPurchaseVisible(false);
+    state->setItemPurchaseGeometry(0, 0, 0, 0);
+    state->setItemPurchaseTotal(0);
+    state->setItemPurchaseData(QVariantMap{});
+    state->setItemPurchaseRows(QVariantList{});
+    state->setItemPurchaseButtons(QVariantList{});
+
+    state->setItemSellVisible(false);
+    state->setItemSellGeometry(0, 0, 0, 0);
+    state->setItemSellTotal(0);
+    state->setItemSellData(QVariantMap{});
+    state->setItemSellRows(QVariantList{});
+    state->setItemSellButtons(QVariantList{});
+
+    state->setShortCutVisible(false);
+    state->setShortCutGeometry(0, 0, 0, 0);
+    state->setShortCutPage(0);
+    state->setShortCutHoverSlot(-1);
+    state->setShortCutSlots(QVariantList{});
+
+    state->setBasicInfoVisible(false);
+    state->setBasicInfoGeometry(0, 0, 0, 0);
+    state->setBasicInfoMini(false);
+    state->setBasicInfoData(QVariantMap{});
+
+    state->setStatusVisible(false);
+    state->setStatusGeometry(0, 0, 0, 0);
+    state->setStatusMini(false);
+    state->setStatusPage(0);
+    state->setStatusData(QVariantMap{});
+
+    state->setChatWindowVisible(false);
+    state->setChatWindowGeometry(0, 0, 0, 0);
+    state->setChatWindowInputActive(false);
+    state->setChatWindowInputText(QString());
+    state->setChatWindowLines(QVariantList{});
+    state->setChatWindowScrollBar(QVariantMap{});
+
+    state->setRechargeGaugeVisible(false);
+    state->setRechargeGaugeGeometry(0, 0, 0, 0);
+    state->setRechargeGaugeProgress(0, 0);
+
+    state->setInventoryVisible(false);
+    state->setInventoryGeometry(0, 0, 0, 0);
+    state->setInventoryMini(false);
+    state->setInventoryTab(0);
+    state->setInventoryData(QVariantMap{});
+
+    state->setEquipVisible(false);
+    state->setEquipGeometry(0, 0, 0, 0);
+    state->setEquipMini(false);
+    state->setEquipData(QVariantMap{});
+
+    state->setSkillListVisible(false);
+    state->setSkillListGeometry(0, 0, 0, 0);
+    state->setSkillListData(QVariantMap{});
+
+    state->setOptionVisible(false);
+    state->setOptionGeometry(0, 0, 0, 0);
+    state->setOptionData(QVariantMap{});
+
+    state->setMinimapVisible(false);
+    state->setMinimapGeometry(0, 0, 0, 0);
+    state->setMinimapData(QVariantMap{});
+
+    state->setShopChoiceVisible(false);
+    state->setShopChoiceGeometry(0, 0, 0, 0);
+    state->setShopChoiceText(QString(), QString());
+    state->setShopChoiceButtons(QVariantList{});
+
+    state->setNotifications(QVariantList{});
+    state->setAnchors(QVariantList{});
+}
 
 QString ToQString(const std::string& value)
 {
@@ -691,6 +815,11 @@ void PopulateNotificationState(QtUiState* state)
         return;
     }
 
+    if (IsGameplayUiSuppressed(state)) {
+        state->setNotifications(QVariantList{});
+        return;
+    }
+
     QVariantList notifications;
     const UINotifyLevelUpWnd* notices[] = {
         g_windowMgr.m_notifyLevelUpWnd,
@@ -724,7 +853,7 @@ void PopulateShopChoiceState(QtUiState* state)
     }
 
     const UIChooseSellBuyWnd* const shopWnd = g_windowMgr.m_chooseSellBuyWnd;
-    const bool visible = shopWnd && shopWnd->m_show != 0;
+    const bool visible = IsGameplayWindowVisible(state, shopWnd);
     state->setShopChoiceVisible(visible);
     if (!visible) {
         state->setShopChoiceGeometry(0, 0, 0, 0);
@@ -771,7 +900,7 @@ void PopulateNpcMenuState(QtUiState* state)
     }
 
     const UINpcMenuWnd* const menuWnd = g_windowMgr.m_npcMenuWnd;
-    const bool visible = menuWnd && menuWnd->m_show != 0;
+    const bool visible = IsGameplayWindowVisible(state, menuWnd);
     state->setNpcMenuVisible(visible);
     if (!visible) {
         state->setNpcMenuGeometry(0, 0, 0, 0);
@@ -828,7 +957,7 @@ void PopulateSayDialogState(QtUiState* state)
     }
 
     const UISayDialogWnd* const dialogWnd = g_windowMgr.m_sayDialogWnd;
-    const bool visible = dialogWnd && dialogWnd->m_show != 0;
+    const bool visible = IsGameplayWindowVisible(state, dialogWnd);
     state->setSayDialogVisible(visible);
     if (!visible) {
         state->setSayDialogGeometry(0, 0, 0, 0);
@@ -867,7 +996,7 @@ void PopulateNpcInputState(QtUiState* state)
     }
 
     const UINpcInputWnd* const inputWnd = g_windowMgr.m_npcInputWnd;
-    const bool visible = inputWnd && inputWnd->m_show != 0;
+    const bool visible = IsGameplayWindowVisible(state, inputWnd);
     state->setNpcInputVisible(visible);
     if (!visible) {
         state->setNpcInputGeometry(0, 0, 0, 0);
@@ -917,7 +1046,7 @@ void PopulateChooseMenuState(QtUiState* state)
     }
 
     const UIChooseWnd* const chooseWnd = g_windowMgr.m_chooseWnd;
-    const bool visible = chooseWnd && chooseWnd->m_show != 0;
+    const bool visible = IsGameplayWindowVisible(state, chooseWnd);
     state->setChooseMenuVisible(visible);
     if (!visible) {
         state->setChooseMenuGeometry(0, 0, 0, 0);
@@ -947,7 +1076,7 @@ void PopulateItemShopState(QtUiState* state)
     }
 
     const UIItemShopWnd* const shopWnd = g_windowMgr.m_itemShopWnd;
-    const bool visible = shopWnd && shopWnd->m_show != 0;
+    const bool visible = IsGameplayWindowVisible(state, shopWnd);
     state->setItemShopVisible(visible);
     if (!visible) {
         state->setItemShopGeometry(0, 0, 0, 0);
@@ -998,7 +1127,7 @@ void PopulateItemPurchaseState(QtUiState* state)
     }
 
     const UIItemPurchaseWnd* const purchaseWnd = g_windowMgr.m_itemPurchaseWnd;
-    const bool visible = purchaseWnd && purchaseWnd->m_show != 0;
+    const bool visible = IsGameplayWindowVisible(state, purchaseWnd);
     state->setItemPurchaseVisible(visible);
     if (!visible) {
         state->setItemPurchaseGeometry(0, 0, 0, 0);
@@ -1072,7 +1201,7 @@ void PopulateItemSellState(QtUiState* state)
     }
 
     const UIItemSellWnd* const sellWnd = g_windowMgr.m_itemSellWnd;
-    const bool visible = sellWnd && sellWnd->m_show != 0;
+    const bool visible = IsGameplayWindowVisible(state, sellWnd);
     state->setItemSellVisible(visible);
     if (!visible) {
         state->setItemSellGeometry(0, 0, 0, 0);
@@ -1146,7 +1275,7 @@ void PopulateShortCutState(QtUiState* state)
     }
 
     const UIShortCutWnd* const shortCutWnd = g_windowMgr.m_shortCutWnd;
-    const bool visible = shortCutWnd && shortCutWnd->m_show != 0;
+    const bool visible = IsGameplayWindowVisible(state, shortCutWnd);
     state->setShortCutVisible(visible);
     if (!visible) {
         state->setShortCutGeometry(0, 0, 0, 0);
@@ -1195,7 +1324,7 @@ void PopulateBasicInfoState(QtUiState* state)
     }
 
     const UIBasicInfoWnd* const basicInfoWnd = g_windowMgr.m_basicInfoWnd;
-    const bool visible = basicInfoWnd && basicInfoWnd->m_show != 0;
+    const bool visible = IsGameplayWindowVisible(state, basicInfoWnd);
     state->setBasicInfoVisible(visible);
     if (!visible) {
         state->setBasicInfoGeometry(0, 0, 0, 0);
@@ -1286,7 +1415,7 @@ void PopulateStatusState(QtUiState* state)
     }
 
     const UIStatusWnd* const statusWnd = g_windowMgr.m_statusWnd;
-    const bool visible = statusWnd && statusWnd->m_show != 0;
+    const bool visible = IsGameplayWindowVisible(state, statusWnd);
     state->setStatusVisible(visible);
     if (!visible) {
         state->setStatusGeometry(0, 0, 0, 0);
@@ -1400,13 +1529,14 @@ void PopulateChatWindowState(QtUiState* state)
     }
 
     const UINewChatWnd* const chatWnd = g_windowMgr.m_chatWnd;
-    const bool visible = chatWnd && chatWnd->m_show != 0;
+    const bool visible = IsGameplayWindowVisible(state, chatWnd);
     state->setChatWindowVisible(visible);
     if (!visible) {
         state->setChatWindowGeometry(0, 0, 0, 0);
         state->setChatWindowInputActive(false);
         state->setChatWindowInputText(QString());
         state->setChatWindowLines(QVariantList{});
+        state->setChatWindowScrollBar(QVariantMap{});
         return;
     }
 
@@ -1428,6 +1558,14 @@ void PopulateChatWindowState(QtUiState* state)
         lines.push_back(entry);
     }
     state->setChatWindowLines(lines);
+
+    const ChatScrollBarState scrollState = chatWnd->GetScrollBarState();
+    QVariantMap scrollBar;
+    scrollBar.insert(QStringLiteral("visible"), scrollState.visible != 0);
+    scrollBar.insert(QStringLiteral("totalLines"), scrollState.totalLines);
+    scrollBar.insert(QStringLiteral("firstVisibleLine"), scrollState.firstVisibleLine);
+    scrollBar.insert(QStringLiteral("visibleLineCount"), scrollState.visibleLineCount);
+    state->setChatWindowScrollBar(scrollBar);
 }
 
 void PopulateRechargeGaugeState(QtUiState* state)
@@ -1446,7 +1584,7 @@ void PopulateRechargeGaugeState(QtUiState* state)
         break;
     }
 
-    const bool visible = rechargeGauge != nullptr;
+    const bool visible = rechargeGauge != nullptr && !IsGameplayUiSuppressed(state);
     state->setRechargeGaugeVisible(visible);
     if (!visible) {
         state->setRechargeGaugeGeometry(0, 0, 0, 0);
@@ -1465,7 +1603,7 @@ void PopulateInventoryState(QtUiState* state)
     }
 
     const UIItemWnd* const itemWnd = g_windowMgr.m_itemWnd;
-    const bool visible = itemWnd && itemWnd->m_show != 0;
+    const bool visible = IsGameplayWindowVisible(state, itemWnd);
     state->setInventoryVisible(visible);
     if (!visible) {
         state->setInventoryGeometry(0, 0, 0, 0);
@@ -1570,7 +1708,7 @@ void PopulateEquipState(QtUiState* state)
     }
 
     const UIEquipWnd* const equipWnd = g_windowMgr.m_equipWnd;
-    const bool visible = equipWnd && equipWnd->m_show != 0;
+    const bool visible = IsGameplayWindowVisible(state, equipWnd);
     state->setEquipVisible(visible);
     if (!visible) {
         state->setEquipGeometry(0, 0, 0, 0);
@@ -1636,7 +1774,7 @@ void PopulateSkillListState(QtUiState* state)
     }
 
     const UISkillListWnd* const skillWnd = g_windowMgr.m_skillListWnd;
-    const bool visible = skillWnd && skillWnd->m_show != 0;
+    const bool visible = IsGameplayWindowVisible(state, skillWnd);
     state->setSkillListVisible(visible);
     if (!visible) {
         state->setSkillListGeometry(0, 0, 0, 0);
@@ -1735,7 +1873,7 @@ void PopulateOptionState(QtUiState* state)
     }
 
     const UIOptionWnd* const optionWnd = g_windowMgr.m_optionWnd;
-    const bool visible = optionWnd && optionWnd->m_show != 0;
+    const bool visible = IsGameplayWindowVisible(state, optionWnd);
     state->setOptionVisible(visible);
     if (!visible) {
         state->setOptionGeometry(0, 0, 0, 0);
@@ -1855,7 +1993,7 @@ void PopulateMinimapState(QtUiState* state)
     }
 
     const UIRoMapWnd* const minimapWnd = g_windowMgr.m_roMapWnd;
-    const bool visible = minimapWnd && minimapWnd->m_show != 0;
+    const bool visible = IsGameplayWindowVisible(state, minimapWnd) && minimapWnd->HasLoadedMinimap();
     state->setMinimapVisible(visible);
     if (!visible) {
         state->setMinimapGeometry(0, 0, 0, 0);
@@ -2087,6 +2225,29 @@ QVariantMap MakeCenteredAnchor(const QString& text,
     return anchor;
 }
 
+QVariantMap MakeSpeechBubbleAnchor(const QString& text,
+    int centerX,
+    int bottomY)
+{
+    QVariantMap anchor;
+    anchor.insert(QStringLiteral("text"), text);
+    anchor.insert(QStringLiteral("centerX"), centerX);
+    anchor.insert(QStringLiteral("bottomY"), bottomY);
+    anchor.insert(QStringLiteral("background"), QStringLiteral("#de333333"));
+    anchor.insert(QStringLiteral("foreground"), QStringLiteral("#ffffff"));
+    anchor.insert(QStringLiteral("showBubble"), true);
+    anchor.insert(QStringLiteral("fontPixelSize"), 14);
+    anchor.insert(QStringLiteral("bold"), false);
+    anchor.insert(QStringLiteral("wrap"), true);
+    anchor.insert(QStringLiteral("maxTextWidth"), kQtSpeechBubbleMaxTextWidth);
+    anchor.insert(QStringLiteral("paddingX"), 16);
+    anchor.insert(QStringLiteral("paddingY"), 12);
+    anchor.insert(QStringLiteral("radius"), 8);
+    anchor.insert(QStringLiteral("borderColor"), QStringLiteral("#80686868"));
+    anchor.insert(QStringLiteral("z"), 2100);
+    return anchor;
+}
+
 QVariantMap MakeUiItemAnchor(const shopui::ItemHoverInfo& hoverInfo)
 {
     const int centerX = hoverInfo.anchorRect.left + ((hoverInfo.anchorRect.right - hoverInfo.anchorRect.left) / 2);
@@ -2181,54 +2342,7 @@ bool QtUiStateAdapter::syncMenu(RenderBackendType activeBackend,
     PopulateMakeCharState(m_state);
     PopulateServerSelectState(m_state);
     PopulateLoadingState(m_state);
-    m_state->setNpcMenuVisible(false);
-    m_state->setNpcMenuGeometry(0, 0, 0, 0);
-    m_state->setNpcMenuSelection(-1);
-    m_state->setNpcMenuHoverIndex(-1);
-    m_state->setNpcMenuButtons(false, false);
-    m_state->setNpcMenuOptions(QVariantList{});
-    m_state->setSayDialogVisible(false);
-    m_state->setSayDialogGeometry(0, 0, 0, 0);
-    m_state->setSayDialogText(QString());
-    m_state->setSayDialogAction(false, QString(), false, false);
-    m_state->setNpcInputVisible(false);
-    m_state->setNpcInputGeometry(0, 0, 0, 0);
-    m_state->setNpcInputText(QString(), QString());
-    m_state->setNpcInputButtons(false, false);
-    m_state->setChooseMenuVisible(false);
-    m_state->setChooseMenuGeometry(0, 0, 0, 0);
-    m_state->setChooseMenuSelectedIndex(-1);
-    m_state->setChooseMenuPressedIndex(-1);
-    m_state->setChooseMenuOptions(QVariantList{});
-    m_state->setItemShopVisible(false);
-    m_state->setItemShopGeometry(0, 0, 0, 0);
-    m_state->setItemShopTitle(QString());
-    m_state->setItemShopRows(QVariantList{});
-    m_state->setItemPurchaseVisible(false);
-    m_state->setItemPurchaseGeometry(0, 0, 0, 0);
-    m_state->setItemPurchaseTotal(0);
-    m_state->setItemPurchaseRows(QVariantList{});
-    m_state->setItemPurchaseButtons(QVariantList{});
-    m_state->setItemSellVisible(false);
-    m_state->setItemSellGeometry(0, 0, 0, 0);
-    m_state->setItemSellTotal(0);
-    m_state->setItemSellRows(QVariantList{});
-    m_state->setItemSellButtons(QVariantList{});
-    m_state->setShortCutVisible(false);
-    m_state->setShortCutGeometry(0, 0, 0, 0);
-    m_state->setShortCutPage(0);
-    m_state->setShortCutHoverSlot(-1);
-    m_state->setShortCutSlots(QVariantList{});
-    m_state->setBasicInfoVisible(false);
-    m_state->setBasicInfoGeometry(0, 0, 0, 0);
-    m_state->setBasicInfoMini(false);
-    m_state->setBasicInfoData(QVariantMap{});
-    m_state->setShopChoiceVisible(false);
-    m_state->setShopChoiceGeometry(0, 0, 0, 0);
-    m_state->setShopChoiceText(QString(), QString());
-    m_state->setShopChoiceButtons(QVariantList{});
-    m_state->setNotifications(QVariantList{});
-    m_state->setAnchors(QVariantList{});
+    ClearGameplayUiState(m_state);
     return true;
 }
 
@@ -2291,6 +2405,32 @@ bool QtUiStateAdapter::syncGameplay(CGameMode& mode,
     if (mode.m_world && mode.m_view) {
         const matrix& viewMatrix = mode.m_view->GetViewMatrix();
         const float cameraLongitude = mode.m_view->GetCameraLongitude();
+        const u32 now = GetTickCount();
+
+        auto appendChatBubbleAnchor = [&](CGameActor* actor) {
+            if (!actor || !actor->m_isVisible || !actor->HasActiveChatBubble(now)) {
+                return;
+            }
+
+            int bubbleX = 0;
+            int bubbleBottomY = 0;
+            if (!mode.m_world->GetActorSpeechBubbleAnchor(viewMatrix, actor->m_gid, &bubbleX, &bubbleBottomY)) {
+                return;
+            }
+
+            anchors.push_back(MakeSpeechBubbleAnchor(ToQString(actor->GetChatBubbleText()),
+                bubbleX,
+                bubbleBottomY));
+        };
+
+        appendChatBubbleAnchor(mode.m_world->m_player);
+        for (const auto& runtimeEntry : mode.m_runtimeActors) {
+            CGameActor* const actor = runtimeEntry.second;
+            if (!actor || actor == mode.m_world->m_player) {
+                continue;
+            }
+            appendChatBubbleAnchor(actor);
+        }
 
         const bool hasUiItemHover = TryAppendHoveredUiItemAnchor(&anchors);
         const bool blocksWorldHover = g_windowMgr.HasWindowAtPoint(mouseX, mouseY);

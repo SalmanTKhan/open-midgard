@@ -59,28 +59,44 @@ Item {
 
         delegate: Item {
             required property var modelData
-            x: modelData.x
-            y: modelData.y
+            property int bubblePaddingX: modelData.showBubble === false ? 0 : (modelData.paddingX || 12)
+            property int bubblePaddingY: modelData.showBubble === false ? 0 : (modelData.paddingY || 8)
+            property int maxTextWidth: modelData.maxTextWidth || 0
+            property bool wrapText: modelData.wrap === true
+            property int textWidth: {
+                const measured = Math.max(1, Math.ceil(label.contentWidth || label.implicitWidth || 1))
+                return maxTextWidth > 0 ? Math.min(maxTextWidth, measured) : measured
+            }
+            x: modelData.centerX !== undefined
+                ? Math.round((modelData.centerX || 0) - width / 2)
+                : (modelData.x || 0)
+            y: modelData.bottomY !== undefined
+                ? Math.round((modelData.bottomY || 0) - height)
+                : (modelData.y || 0)
             z: modelData.z || 2000
-            width: label.implicitWidth + (modelData.showBubble === false ? 0 : 12)
-            height: label.implicitHeight + (modelData.showBubble === false ? 0 : 8)
+            width: textWidth + bubblePaddingX
+            height: Math.max(1, Math.ceil(label.implicitHeight)) + bubblePaddingY
 
             Rectangle {
                 anchors.fill: parent
-                radius: 6
+                radius: modelData.radius || 6
                 color: modelData.background
                 visible: modelData.showBubble !== false
                 border.width: 1
-                border.color: "#80ffffff"
+                border.color: modelData.borderColor || "#80ffffff"
             }
 
             Text {
                 id: label
-                anchors.centerIn: parent
+                x: Math.floor(parent.bubblePaddingX / 2)
+                y: Math.floor(parent.bubblePaddingY / 2)
+                width: parent.textWidth
                 text: modelData.text
                 color: modelData.foreground
                 font.pixelSize: modelData.fontPixelSize || 14
                 font.bold: modelData.bold !== false
+                wrapMode: parent.wrapText ? Text.Wrap : Text.NoWrap
+                horizontalAlignment: Text.AlignHCenter
             }
         }
     }
@@ -1545,11 +1561,17 @@ Item {
             border.color: "#60ffffff"
             clip: true
 
+            readonly property var scrollBar: uiState.chatWindowScrollBar || ({})
+            readonly property bool scrollBarVisible: scrollBar.visible || false
+            readonly property int scrollBarWidth: scrollBarVisible ? 8 : 0
+            readonly property int scrollBarGap: scrollBarVisible ? 4 : 0
+            readonly property int chatTextWidth: width - 8 - scrollBarWidth - scrollBarGap
+
             Column {
                 id: chatLinesColumn
                 x: 4
                 y: Math.max(4, parent.height - height - 4)
-                width: parent.width - 8
+                width: parent.chatTextWidth
                 spacing: 2
 
                 Repeater {
@@ -1563,6 +1585,31 @@ Item {
                         font.pixelSize: 12
                         wrapMode: Text.WordWrap
                     }
+                }
+            }
+
+            Rectangle {
+                x: parent.width - 4 - width
+                y: 4
+                width: parent.scrollBarWidth
+                height: parent.height - 8
+                visible: parent.scrollBarVisible
+                color: "#40282828"
+                border.width: 1
+                border.color: "#80ffffff"
+
+                Rectangle {
+                    readonly property int totalLines: Math.max(1, parent.parent.scrollBar.totalLines || 0)
+                    readonly property int visibleLineCount: Math.max(1, parent.parent.scrollBar.visibleLineCount || 0)
+                    readonly property int firstVisibleLine: Math.max(0, parent.parent.scrollBar.firstVisibleLine || 0)
+                    readonly property int thumbHeight: Math.max(18, Math.round(parent.height * visibleLineCount / totalLines))
+                    readonly property int maxTravel: Math.max(0, parent.height - thumbHeight)
+                    readonly property int scrollDenominator: Math.max(1, totalLines - visibleLineCount)
+                    x: 1
+                    y: Math.round(maxTravel * firstVisibleLine / scrollDenominator)
+                    width: parent.width - 2
+                    height: thumbHeight
+                    color: "#c0d8d8d8"
                 }
             }
         }

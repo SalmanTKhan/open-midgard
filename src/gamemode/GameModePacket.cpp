@@ -58,6 +58,10 @@ namespace {
 
 constexpr int kUiChatEventMsg = 101;
 constexpr u32 kSystemNoticeColor = 0x0080C0FFu;
+constexpr u32 kActorChatBubbleBaseLifetimeMs = 3200;
+constexpr u32 kActorChatBubblePerCharLifetimeMs = 90;
+constexpr u32 kActorChatBubbleMinLifetimeMs = 4500;
+constexpr u32 kActorChatBubbleMaxLifetimeMs = 12000;
 
 PendingDisconnectAction g_pendingDisconnectAction = PendingDisconnectAction::None;
 u32 g_lastLocalLevelUpEffectId = 0;
@@ -5805,6 +5809,86 @@ std::string ExtractChatTextWithAid(const PacketView& packet)
     return ExtractPacketString(packet, 4);
 }
 
+std::string ExtractActorSpeechBubbleText(const std::string& chatText)
+{
+    if (chatText.empty()) {
+        return {};
+    }
+
+    const size_t separator = chatText.find(" : ");
+    if (separator == std::string::npos) {
+        return chatText;
+    }
+
+    const size_t bodyOffset = separator + 3;
+    if (bodyOffset >= chatText.size()) {
+        return chatText;
+    }
+
+    return chatText.substr(bodyOffset);
+}
+
+u32 ComputeActorChatBubbleUntilTick(const std::string& chatText, u32 now)
+{
+    const u32 bubbleLengthMs = kActorChatBubbleBaseLifetimeMs
+        + static_cast<u32>(chatText.size()) * kActorChatBubblePerCharLifetimeMs;
+    const u32 clampedLengthMs = (std::min)(kActorChatBubbleMaxLifetimeMs,
+        (std::max)(kActorChatBubbleMinLifetimeMs, bubbleLengthMs));
+    return now + clampedLengthMs;
+}
+
+CGameActor* ResolveChatSpeakerActor(CGameMode& mode, u32 actorId)
+{
+    if (actorId == 0) {
+        return nullptr;
+    }
+
+    if (mode.m_world && mode.m_world->m_player) {
+        CGameActor* const player = mode.m_world->m_player;
+        if (actorId == player->m_gid || actorId == g_session.m_gid || actorId == g_session.m_aid) {
+            return player;
+        }
+    }
+
+    const auto directIt = mode.m_runtimeActors.find(actorId);
+    if (directIt != mode.m_runtimeActors.end() && directIt->second) {
+        return directIt->second;
+    }
+
+    if (actorId == g_session.m_aid && g_session.m_gid != 0) {
+        const auto gidIt = mode.m_runtimeActors.find(g_session.m_gid);
+        if (gidIt != mode.m_runtimeActors.end() && gidIt->second) {
+            return gidIt->second;
+        }
+    }
+
+    if (actorId == g_session.m_gid && g_session.m_aid != 0) {
+        const auto aidIt = mode.m_runtimeActors.find(g_session.m_aid);
+        if (aidIt != mode.m_runtimeActors.end() && aidIt->second) {
+            return aidIt->second;
+        }
+    }
+
+    return nullptr;
+}
+
+void ApplyActorChatBubble(CGameMode& mode, u32 actorId, const std::string& chatText)
+{
+    CGameActor* const actor = ResolveChatSpeakerActor(mode, actorId);
+    if (!actor) {
+        return;
+    }
+
+    const std::string bubbleText = ExtractActorSpeechBubbleText(chatText);
+    if (bubbleText.empty()) {
+        actor->ClearChatBubbleText();
+        return;
+    }
+
+    const u32 now = GetTickCount();
+    actor->SetChatBubbleText(bubbleText, ComputeActorChatBubbleUntilTick(bubbleText, now));
+}
+
 void PropagateChatToUi(const ChatEntry& entry)
 {
     if (entry.text.empty()) {
@@ -5855,7 +5939,9 @@ void HandleNotifyChat(CGameMode& mode, const PacketView& packet)
 
     const u32 aid = ReadLE32(packet.data + 4);
     mode.m_aidList[aid] = GetTickCount();
-    RecordChat(mode, ExtractChatTextWithAid(packet), 0x00FFFFFF, kChatChannelNormal);
+    const std::string text = ExtractChatTextWithAid(packet);
+    RecordChat(mode, text, 0x00FFFFFF, kChatChannelNormal);
+    ApplyActorChatBubble(mode, aid, text);
 }
 
 void HandleNotifyPlayerChat(CGameMode& mode, const PacketView& packet)

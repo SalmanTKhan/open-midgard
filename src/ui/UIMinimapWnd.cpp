@@ -573,13 +573,21 @@ UIRoMapWnd::~UIRoMapWnd()
 
 void UIRoMapWnd::SetShow(int show)
 {
-    UIWindow::SetShow(show);
-    if (show != 0) {
-        EnsureCreated();
-        LayoutChildren();
-        UpdateMinimapBitmap();
-        InvalidateRenderCache();
+    if (show == 0) {
+        UIWindow::SetShow(0);
+        return;
     }
+
+    EnsureCreated();
+    LayoutChildren();
+    UpdateMinimapBitmap();
+    if (m_mapPixels.empty() || m_mapBitmapWidth <= 0 || m_mapBitmapHeight <= 0) {
+        UIWindow::SetShow(0);
+        return;
+    }
+
+    UIWindow::SetShow(1);
+    InvalidateRenderCache();
 }
 
 void UIRoMapWnd::Move(int x, int y)
@@ -1084,6 +1092,14 @@ bool UIRoMapWnd::GetDisplayDataForQt(DisplayData* outData) const
 
     *outData = std::move(data);
     return true;
+}
+
+bool UIRoMapWnd::HasLoadedMinimap() const
+{
+    UIRoMapWnd* mutableThis = const_cast<UIRoMapWnd*>(this);
+    mutableThis->EnsureCreated();
+    mutableThis->UpdateMinimapBitmap();
+    return !m_mapPixels.empty() && m_mapBitmapWidth > 0 && m_mapBitmapHeight > 0;
 }
 
 bool UIRoMapWnd::BuildQtMinimapImage(QImage* outImage) const

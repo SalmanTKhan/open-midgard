@@ -60,6 +60,7 @@ public:
     void OnWheel(int delta) override;
     void StoreInfo() override;
     void DrawToHdc(HDC hdc, int drawX, int drawY);
+    bool HasLoadedMinimap() const;
     bool GetDisplayDataForQt(DisplayData* outData) const;
     bool BuildQtMinimapImage(QImage* outImage) const;
     bool BuildOverlayImageForRenderer(QImage* outImage) const;

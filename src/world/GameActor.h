@@ -193,6 +193,11 @@ public:
     CGameActor();
     virtual ~CGameActor();
 
+    void SetChatBubbleText(const std::string& text, u32 untilTick);
+    void ClearChatBubbleText();
+    bool HasActiveChatBubble(u32 now) const;
+    const std::string& GetChatBubbleText() const { return m_chatBubbleText; }
+
     int m_moveDestX, m_moveDestY;
     int m_moveSrcX, m_moveSrcY;
     u32 m_speed;
@@ -239,6 +244,7 @@ public:
     vector3d m_moveEndPos;
     u32 m_moveEndTime;
     int m_isMoving;
+    std::string m_chatBubbleText;
 
     virtual u8   ProcessState();
     virtual void SendMsg(CGameObject* src, int msg, msgparam_t par1, msgparam_t par2, msgparam_t par3) override;

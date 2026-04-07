@@ -506,7 +506,7 @@ UIWindowMgr::UIWindowMgr()
       m_captureWindow(nullptr), m_editWindow(nullptr), m_modalWindow(nullptr), m_lastHitWindow(nullptr),
       m_loadingWnd(nullptr), m_roMapWnd(nullptr), m_minimapZoomWnd(nullptr), m_statusWnd(nullptr), m_sayDialogWnd(nullptr), m_npcMenuWnd(nullptr), m_npcInputWnd(nullptr), m_chooseSellBuyWnd(nullptr), m_itemShopWnd(nullptr), m_itemPurchaseWnd(nullptr), m_itemSellWnd(nullptr), m_shortCutWnd(nullptr), m_chatWnd(nullptr),
     m_loginWnd(nullptr), m_selectServerWnd(nullptr), m_selectCharWnd(nullptr), m_makeCharWnd(nullptr), m_waitWnd(nullptr), m_chooseWnd(nullptr), m_optionWnd(nullptr), m_itemWnd(nullptr), m_questWnd(nullptr), m_basicInfoWnd(nullptr), m_notifyLevelUpWnd(nullptr), m_notifyJobLevelUpWnd(nullptr), m_equipWnd(nullptr), m_skillListWnd(nullptr),
-      m_wallpaperSurface(nullptr), m_uiComposeSurface()
+            m_wallpaperSurface(nullptr), m_uiComposeSurface(), m_chatInputActive(0), m_chatScrollLineOffset(0)
 {
     m_loginStatus = "Login: idle";
 }
@@ -612,6 +612,10 @@ void UIWindowMgr::EnsureChatWindowVisible()
     if (!m_chatWnd) {
         m_chatWnd = new UINewChatWnd();
         m_children.push_back(m_chatWnd);
+        m_chatWnd->RestorePersistentState(m_chatInputHistory,
+            m_chatInputText,
+            m_chatInputActive != 0,
+            m_chatScrollLineOffset);
     }
 
     m_children.remove(m_chatWnd);
@@ -1081,6 +1085,13 @@ void UIWindowMgr::DeleteWindow(UIWindow* window)
 
 void UIWindowMgr::RemoveAllWindows()
 {
+    if (m_chatWnd) {
+        m_chatInputHistory = m_chatWnd->GetInputHistory();
+        m_chatInputText = m_chatWnd->GetInputText();
+        m_chatInputActive = m_chatWnd->IsInputActive() ? 1 : 0;
+        m_chatScrollLineOffset = m_chatWnd->GetScrollBarState().totalLines > 0 ? m_chatWnd->GetScrollBarState().totalLines - (m_chatWnd->GetScrollBarState().firstVisibleLine + m_chatWnd->GetScrollBarState().visibleLineCount) : 0;
+    }
+
     while (!m_children.empty()) {
         DeleteWindow(m_children.front());
     }
@@ -1129,6 +1140,10 @@ void UIWindowMgr::Reset() {
     m_optionWnd = nullptr;
     m_chatWnd = nullptr;
     m_chatEvents.clear();
+    m_chatInputHistory.clear();
+    m_chatInputText.clear();
+    m_chatInputActive = 0;
+    m_chatScrollLineOffset = 0;
     m_skillListWnd = nullptr;
 
     if (m_wallpaperSurface) {
@@ -2032,20 +2047,19 @@ const std::vector<UIChatEvent>& UIWindowMgr::GetChatEvents() const {
 
 std::vector<UIChatEvent> UIWindowMgr::GetChatPreviewEvents(size_t maxCount) const {
     std::vector<UIChatEvent> preview;
-    if (!m_chatWnd || maxCount == 0) {
+    if (maxCount == 0 || m_chatEvents.empty()) {
         return preview;
     }
 
-    const auto& visible = m_chatWnd->GetVisibleLines();
-    const size_t start = visible.size() > maxCount ? (visible.size() - maxCount) : 0;
-    preview.reserve(visible.size() - start);
+    const size_t start = m_chatEvents.size() > maxCount ? (m_chatEvents.size() - maxCount) : 0;
+    preview.reserve(m_chatEvents.size() - start);
 
-    for (size_t i = start; i < visible.size(); ++i) {
+    for (size_t i = start; i < m_chatEvents.size(); ++i) {
         UIChatEvent ev{};
-        ev.text = visible[i].text;
-        ev.color = visible[i].color;
-        ev.channel = visible[i].channel;
-        ev.tick = visible[i].tick;
+        ev.text = m_chatEvents[i].text;
+        ev.color = m_chatEvents[i].color;
+        ev.channel = m_chatEvents[i].channel;
+        ev.tick = m_chatEvents[i].tick;
         preview.push_back(std::move(ev));
     }
     return preview;

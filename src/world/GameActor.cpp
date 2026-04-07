@@ -3764,6 +3764,30 @@ CGameActor::~CGameActor()
     m_birdEffect = nullptr;
 }
 
+void CGameActor::SetChatBubbleText(const std::string& text, u32 untilTick)
+{
+    if (text.empty() || untilTick == 0) {
+        ClearChatBubbleText();
+        return;
+    }
+
+    m_chatBubbleText = text;
+    m_chatTick = untilTick;
+}
+
+void CGameActor::ClearChatBubbleText()
+{
+    m_chatBubbleText.clear();
+    m_chatTick = 0;
+}
+
+bool CGameActor::HasActiveChatBubble(u32 now) const
+{
+    return !m_chatBubbleText.empty()
+        && m_chatTick != 0
+        && static_cast<s32>(m_chatTick - now) > 0;
+}
+
 u8 CGameActor::ProcessState() {
     ProcessWillBeAttacked();
 
