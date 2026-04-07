@@ -5,6 +5,7 @@
 #include "core/ClientInfoLocale.h"
 #include "core/DllMgr.h"
 #include "core/File.h"
+#include "core/SettingsIni.h"
 #include "core/Timer.h"
 #include "gamemode/CursorRenderer.h"
 #include "gamemode/GameMode.h"
@@ -360,7 +361,9 @@ bool InitApp(HINSTANCE, int)
 
 int ReadRegistry()
 {
+    EnsureOpenMidgardIniDefaults();
     ApplyConfiguredWindowSize();
+    (void)GetConfiguredRenderBackend();
     return 1;
 }
 

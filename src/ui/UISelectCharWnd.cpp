@@ -1,6 +1,7 @@
 #include "UISelectCharWnd.h"
 
 #include "core/File.h"
+#include "core/SettingsIni.h"
 #include "gamemode/LoginMode.h"
 #include "gamemode/Mode.h"
 #include "main/WinMain.h"
@@ -58,8 +59,8 @@ constexpr int kSelectCharDeleteX = 5;
 constexpr int kSelectCharDeleteW = 80;
 constexpr int kSelectCharChargeX = 314;
 constexpr int kSelectCharChargeW = 85;
-constexpr char kRegPath[] = "Software\\Gravity Soft\\Ragnarok Online";
-constexpr char kCurSlotValue[] = "CURSLOT";
+constexpr char kSelectCharSection[] = "SelectChar";
+constexpr char kCurSlotValue[] = "CurrentSlot";
 
 shopui::BitmapPixels LoadBitmapPixelsFromGameData(const char* path)
 {
@@ -1157,7 +1158,7 @@ void UISelectCharWnd::OnCreate(int cx, int cy)
 {
     if (!m_controlsCreated) {
         Create(kWindowWidth, kWindowHeight);
-        LoadSelectionFromRegistry();
+        LoadSelectionFromSettings();
         m_controlsCreated = true;
     }
 
@@ -1242,36 +1243,22 @@ void UISelectCharWnd::ClampSelection()
     m_page = m_selectedSlot / kVisibleSlotsPerPage;
 }
 
-void UISelectCharWnd::SaveSelectionToRegistry() const
+void UISelectCharWnd::SaveSelectionToSettings() const
 {
-    DWORD slot = static_cast<DWORD>(m_selectedSlot);
-    HKEY key = nullptr;
-    if (RegCreateKeyExA(HKEY_CURRENT_USER, kRegPath, 0, nullptr, 0, KEY_SET_VALUE, nullptr, &key, nullptr) == ERROR_SUCCESS) {
-        RegSetValueExA(key, kCurSlotValue, 0, REG_DWORD, reinterpret_cast<const BYTE*>(&slot), sizeof(slot));
-        RegCloseKey(key);
-    }
+    SaveSettingsIniInt(kSelectCharSection, kCurSlotValue, m_selectedSlot);
 }
 
-void UISelectCharWnd::LoadSelectionFromRegistry()
+void UISelectCharWnd::LoadSelectionFromSettings()
 {
-    DWORD slot = 0;
-    DWORD size = sizeof(slot);
-    HKEY key = nullptr;
-    if (RegOpenKeyExA(HKEY_CURRENT_USER, kRegPath, 0, KEY_READ, &key) == ERROR_SUCCESS) {
-        const LONG result = RegQueryValueExA(key, kCurSlotValue, nullptr, nullptr, reinterpret_cast<BYTE*>(&slot), &size);
-        RegCloseKey(key);
-        if (result == ERROR_SUCCESS) {
-            m_selectedSlot = static_cast<int>(slot);
-            m_page = m_selectedSlot / kVisibleSlotsPerPage;
-        }
-    }
+    m_selectedSlot = LoadSettingsIniInt(kSelectCharSection, kCurSlotValue, 0);
+    m_page = m_selectedSlot / kVisibleSlotsPerPage;
 }
 
 void UISelectCharWnd::SetSelectedSlot(int slotNumber)
 {
     m_selectedSlot = slotNumber;
     ClampSelection();
-    SaveSelectionToRegistry();
+    SaveSelectionToSettings();
     UpdateActionButtons();
     Invalidate();
 }

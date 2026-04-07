@@ -2,6 +2,7 @@
 
 #include "audio/Audio.h"
 #include "core/File.h"
+#include "core/SettingsIni.h"
 #include "main/WinMain.h"
 #include "qtui/QtUiRuntime.h"
 #include "render/DC.h"
@@ -27,23 +28,23 @@
 
 namespace {
 
-constexpr char kRegPath[] = "Software\\Gravity Soft\\Ragnarok Online";
-constexpr char kOptionWndXValue[] = "OptionWndX";
-constexpr char kOptionWndYValue[] = "OptionWndY";
-constexpr char kOptionWndWValue[] = "OptionWndW";
-constexpr char kOptionWndHValue[] = "OptionWndH";
-constexpr char kOptionWndOrgHValue[] = "OptionWndOrgH";
-constexpr char kOptionWndShowValue[] = "OptionWndShow";
-constexpr char kOptionWndBgmVolumeValue[] = "OptionWndBgmVolume";
-constexpr char kOptionWndSoundVolumeValue[] = "OptionWndSoundVolume";
-constexpr char kOptionWndBgmOnValue[] = "OptionWndBgmOn";
-constexpr char kOptionWndSoundOnValue[] = "OptionWndSoundOn";
-constexpr char kOptionWndNoCtrlValue[] = "OptionWndNoCtrl";
-constexpr char kOptionWndAttackSnapValue[] = "OptionWndAttackSnap";
-constexpr char kOptionWndSkillSnapValue[] = "OptionWndSkillSnap";
-constexpr char kOptionWndItemSnapValue[] = "OptionWndItemSnap";
-constexpr char kOptionWndCollapsedValue[] = "OptionWndCollapsed";
-constexpr char kOptionWndTabValue[] = "OptionWndTab";
+constexpr char kOptionWndSection[] = "OptionWnd";
+constexpr char kOptionWndXValue[] = "X";
+constexpr char kOptionWndYValue[] = "Y";
+constexpr char kOptionWndWValue[] = "W";
+constexpr char kOptionWndHValue[] = "H";
+constexpr char kOptionWndOrgHValue[] = "OrgH";
+constexpr char kOptionWndShowValue[] = "Show";
+constexpr char kOptionWndBgmVolumeValue[] = "BgmVolume";
+constexpr char kOptionWndSoundVolumeValue[] = "SoundVolume";
+constexpr char kOptionWndBgmOnValue[] = "BgmOn";
+constexpr char kOptionWndSoundOnValue[] = "SoundOn";
+constexpr char kOptionWndNoCtrlValue[] = "NoCtrl";
+constexpr char kOptionWndAttackSnapValue[] = "AttackSnap";
+constexpr char kOptionWndSkillSnapValue[] = "SkillSnap";
+constexpr char kOptionWndItemSnapValue[] = "ItemSnap";
+constexpr char kOptionWndCollapsedValue[] = "Collapsed";
+constexpr char kOptionWndTabValue[] = "Tab";
 
 constexpr int kDefaultWidth = 308;
 constexpr int kDefaultHeight = 238;
@@ -435,43 +436,16 @@ std::string FormatAnisotropicText(int level)
     return FormatMultiplierText(level);
 }
 
-void LoadDwordSetting(HKEY key, const char* valueName, int* target)
-{
-    if (!key || !valueName || !target) {
-        return;
-    }
-
-    DWORD value = static_cast<DWORD>(*target);
-    DWORD size = sizeof(value);
-    if (RegQueryValueExA(key, valueName, nullptr, nullptr, reinterpret_cast<BYTE*>(&value), &size) == ERROR_SUCCESS) {
-        *target = static_cast<int>(value);
-    }
-}
-
-void SaveDwordSetting(HKEY key, const char* valueName, int value)
-{
-    if (!key || !valueName) {
-        return;
-    }
-
-    const DWORD raw = static_cast<DWORD>(value);
-    RegSetValueExA(key, valueName, 0, REG_DWORD, reinterpret_cast<const BYTE*>(&raw), sizeof(raw));
-}
-
-void LoadSavedAudioSettingsFromRegistry(int* bgmVolume, int* soundVolume, int* bgmEnabled, int* soundEnabled)
+void LoadSavedAudioSettingsFromIni(int* bgmVolume, int* soundVolume, int* bgmEnabled, int* soundEnabled)
 {
     if (!bgmVolume || !soundVolume || !bgmEnabled || !soundEnabled) {
         return;
     }
 
-    HKEY key = nullptr;
-    if (RegOpenKeyExA(HKEY_CURRENT_USER, kRegPath, 0, KEY_READ, &key) == ERROR_SUCCESS) {
-        LoadDwordSetting(key, kOptionWndBgmVolumeValue, bgmVolume);
-        LoadDwordSetting(key, kOptionWndSoundVolumeValue, soundVolume);
-        LoadDwordSetting(key, kOptionWndBgmOnValue, bgmEnabled);
-        LoadDwordSetting(key, kOptionWndSoundOnValue, soundEnabled);
-        RegCloseKey(key);
-    }
+    *bgmVolume = LoadSettingsIniInt(kOptionWndSection, kOptionWndBgmVolumeValue, *bgmVolume);
+    *soundVolume = LoadSettingsIniInt(kOptionWndSection, kOptionWndSoundVolumeValue, *soundVolume);
+    *bgmEnabled = LoadSettingsIniInt(kOptionWndSection, kOptionWndBgmOnValue, *bgmEnabled);
+    *soundEnabled = LoadSettingsIniInt(kOptionWndSection, kOptionWndSoundOnValue, *soundEnabled);
 
     *bgmVolume = ClampSliderValue(*bgmVolume);
     *soundVolume = ClampSliderValue(*soundVolume);
@@ -487,7 +461,7 @@ void ApplySavedAudioSettings()
     int soundVolume = 100;
     int bgmEnabled = 1;
     int soundEnabled = 1;
-    LoadSavedAudioSettingsFromRegistry(&bgmVolume, &soundVolume, &bgmEnabled, &soundEnabled);
+    LoadSavedAudioSettingsFromIni(&bgmVolume, &soundVolume, &bgmEnabled, &soundEnabled);
 
     CAudio* audio = CAudio::GetInstance();
     if (!audio) {
@@ -699,24 +673,20 @@ RenderBackendType UIOptionWnd::NormalizeSelectedBackend(RenderBackendType backen
 
 void UIOptionWnd::LoadSettings()
 {
-    HKEY key = nullptr;
-    if (RegOpenKeyExA(HKEY_CURRENT_USER, kRegPath, 0, KEY_READ, &key) == ERROR_SUCCESS) {
-        LoadDwordSetting(key, kOptionWndXValue, &m_x);
-        LoadDwordSetting(key, kOptionWndYValue, &m_y);
-        LoadDwordSetting(key, kOptionWndWValue, &m_w);
-        LoadDwordSetting(key, kOptionWndHValue, &m_h);
-        LoadDwordSetting(key, kOptionWndOrgHValue, &m_orgHeight);
-        LoadDwordSetting(key, kOptionWndShowValue, &m_show);
-        LoadDwordSetting(key, kOptionWndNoCtrlValue, &m_noCtrl);
-        LoadDwordSetting(key, kOptionWndAttackSnapValue, &m_attackSnap);
-        LoadDwordSetting(key, kOptionWndSkillSnapValue, &m_skillSnap);
-        LoadDwordSetting(key, kOptionWndItemSnapValue, &m_itemSnap);
-        LoadDwordSetting(key, kOptionWndCollapsedValue, &m_collapsed);
-        LoadDwordSetting(key, kOptionWndTabValue, &m_activeTab);
-        RegCloseKey(key);
-    }
+    m_x = LoadSettingsIniInt(kOptionWndSection, kOptionWndXValue, m_x);
+    m_y = LoadSettingsIniInt(kOptionWndSection, kOptionWndYValue, m_y);
+    m_w = LoadSettingsIniInt(kOptionWndSection, kOptionWndWValue, m_w);
+    m_h = LoadSettingsIniInt(kOptionWndSection, kOptionWndHValue, m_h);
+    m_orgHeight = LoadSettingsIniInt(kOptionWndSection, kOptionWndOrgHValue, m_orgHeight);
+    m_show = LoadSettingsIniInt(kOptionWndSection, kOptionWndShowValue, m_show);
+    m_noCtrl = LoadSettingsIniInt(kOptionWndSection, kOptionWndNoCtrlValue, m_noCtrl);
+    m_attackSnap = LoadSettingsIniInt(kOptionWndSection, kOptionWndAttackSnapValue, m_attackSnap);
+    m_skillSnap = LoadSettingsIniInt(kOptionWndSection, kOptionWndSkillSnapValue, m_skillSnap);
+    m_itemSnap = LoadSettingsIniInt(kOptionWndSection, kOptionWndItemSnapValue, m_itemSnap);
+    m_collapsed = LoadSettingsIniInt(kOptionWndSection, kOptionWndCollapsedValue, m_collapsed);
+    m_activeTab = LoadSettingsIniInt(kOptionWndSection, kOptionWndTabValue, m_activeTab);
 
-    LoadSavedAudioSettingsFromRegistry(&m_bgmVolume, &m_soundVolume, &m_bgmEnabled, &m_soundEnabled);
+    LoadSavedAudioSettingsFromIni(&m_bgmVolume, &m_soundVolume, &m_bgmEnabled, &m_soundEnabled);
     m_graphicsSettings = GetCachedGraphicsSettings();
     m_appliedGraphicsSettings = m_graphicsSettings;
     m_selectedRenderBackend = NormalizeSelectedBackend(GetConfiguredRenderBackend());
@@ -771,28 +741,22 @@ void UIOptionWnd::SaveGraphicsPreferences() const
 
 void UIOptionWnd::SaveSettings() const
 {
-    HKEY key = nullptr;
-    if (RegCreateKeyExA(HKEY_CURRENT_USER, kRegPath, 0, nullptr, 0, KEY_SET_VALUE, nullptr, &key, nullptr) != ERROR_SUCCESS) {
-        return;
-    }
-
-    SaveDwordSetting(key, kOptionWndXValue, m_x);
-    SaveDwordSetting(key, kOptionWndYValue, m_y);
-    SaveDwordSetting(key, kOptionWndWValue, m_w);
-    SaveDwordSetting(key, kOptionWndHValue, m_h);
-    SaveDwordSetting(key, kOptionWndOrgHValue, m_orgHeight);
-    SaveDwordSetting(key, kOptionWndShowValue, m_show != 0 ? 1 : 0);
-    SaveDwordSetting(key, kOptionWndBgmVolumeValue, m_bgmVolume);
-    SaveDwordSetting(key, kOptionWndSoundVolumeValue, m_soundVolume);
-    SaveDwordSetting(key, kOptionWndBgmOnValue, m_bgmEnabled);
-    SaveDwordSetting(key, kOptionWndSoundOnValue, m_soundEnabled);
-    SaveDwordSetting(key, kOptionWndNoCtrlValue, m_noCtrl);
-    SaveDwordSetting(key, kOptionWndAttackSnapValue, m_attackSnap);
-    SaveDwordSetting(key, kOptionWndSkillSnapValue, m_skillSnap);
-    SaveDwordSetting(key, kOptionWndItemSnapValue, m_itemSnap);
-    SaveDwordSetting(key, kOptionWndCollapsedValue, m_collapsed != 0 ? 1 : 0);
-    SaveDwordSetting(key, kOptionWndTabValue, m_activeTab);
-    RegCloseKey(key);
+    SaveSettingsIniInt(kOptionWndSection, kOptionWndXValue, m_x);
+    SaveSettingsIniInt(kOptionWndSection, kOptionWndYValue, m_y);
+    SaveSettingsIniInt(kOptionWndSection, kOptionWndWValue, m_w);
+    SaveSettingsIniInt(kOptionWndSection, kOptionWndHValue, m_h);
+    SaveSettingsIniInt(kOptionWndSection, kOptionWndOrgHValue, m_orgHeight);
+    SaveSettingsIniInt(kOptionWndSection, kOptionWndShowValue, m_show != 0 ? 1 : 0);
+    SaveSettingsIniInt(kOptionWndSection, kOptionWndBgmVolumeValue, m_bgmVolume);
+    SaveSettingsIniInt(kOptionWndSection, kOptionWndSoundVolumeValue, m_soundVolume);
+    SaveSettingsIniInt(kOptionWndSection, kOptionWndBgmOnValue, m_bgmEnabled != 0 ? 1 : 0);
+    SaveSettingsIniInt(kOptionWndSection, kOptionWndSoundOnValue, m_soundEnabled != 0 ? 1 : 0);
+    SaveSettingsIniInt(kOptionWndSection, kOptionWndNoCtrlValue, m_noCtrl != 0 ? 1 : 0);
+    SaveSettingsIniInt(kOptionWndSection, kOptionWndAttackSnapValue, m_attackSnap != 0 ? 1 : 0);
+    SaveSettingsIniInt(kOptionWndSection, kOptionWndSkillSnapValue, m_skillSnap != 0 ? 1 : 0);
+    SaveSettingsIniInt(kOptionWndSection, kOptionWndItemSnapValue, m_itemSnap != 0 ? 1 : 0);
+    SaveSettingsIniInt(kOptionWndSection, kOptionWndCollapsedValue, m_collapsed != 0 ? 1 : 0);
+    SaveSettingsIniInt(kOptionWndSection, kOptionWndTabValue, m_activeTab);
 
     SaveGraphicsPreferences();
 }

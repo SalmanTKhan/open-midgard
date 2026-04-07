@@ -50,6 +50,21 @@
         "RO_QT_UI_SPIKE_DEFAULT_ENABLED": "ON",
         "RO_QT_ROOT": "C:/Qt/6.11.0/mingw_64"
       }
+    },
+    {
+      "name": "linux-qt-vulkan",
+      "displayName": "Linux Qt Vulkan",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build-linux-qt-vulkan",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_CXX_STANDARD": "17",
+        "CMAKE_CXX_STANDARD_REQUIRED": "ON",
+        "CMAKE_CXX_EXTENSIONS": "OFF",
+        "RO_ENABLE_DEV_DEPLOY": "OFF",
+        "RO_ENABLE_QT6_UI": "ON",
+        "RO_QT_UI_DEFAULT_ENABLED": "ON"
+      }
     }
   ],
   "buildPresets": [
@@ -76,6 +91,10 @@
     {
       "name": "build-mingw-qt-x64",
       "configurePreset": "mingw-qt-x64"
+    },
+    {
+      "name": "build-linux-qt-vulkan",
+      "configurePreset": "linux-qt-vulkan"
     }
   ]
 }

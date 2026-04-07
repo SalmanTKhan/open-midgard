@@ -2,6 +2,7 @@
 
 #include "audio/Audio.h"
 #include "core/File.h"
+#include "core/SettingsIni.h"
 #include "DebugLog.h"
 #include "main/WinMain.h"
 #include "qtui/QtUiRuntime.h"
@@ -28,7 +29,7 @@
 namespace {
 
 HDC g_sharedUiDrawDC = nullptr;
-constexpr char kUiWindowRegPath[] = "Software\\Gravity Soft\\Ragnarok Online";
+constexpr char kUiWindowSection[] = "UIWindows";
 
 class ScopedUiDrawTarget {
 public:
@@ -411,30 +412,16 @@ bool LoadUiWindowPlacement(const char* windowName, int* x, int* y)
     std::snprintf(valueNameX, sizeof(valueNameX), "%sX", windowName);
     std::snprintf(valueNameY, sizeof(valueNameY), "%sY", windowName);
 
-    HKEY key = nullptr;
-    if (RegOpenKeyExA(HKEY_CURRENT_USER, kUiWindowRegPath, 0, KEY_READ, &key) != ERROR_SUCCESS) {
+    int storedX = 0;
+    int storedY = 0;
+    if (!TryLoadSettingsIniInt(kUiWindowSection, valueNameX, &storedX)
+        || !TryLoadSettingsIniInt(kUiWindowSection, valueNameY, &storedY)) {
         return false;
     }
 
-    bool loadedX = false;
-    bool loadedY = false;
-
-    DWORD rawValue = 0;
-    DWORD size = sizeof(rawValue);
-    if (RegQueryValueExA(key, valueNameX, nullptr, nullptr, reinterpret_cast<BYTE*>(&rawValue), &size) == ERROR_SUCCESS) {
-        *x = static_cast<int>(rawValue);
-        loadedX = true;
-    }
-
-    rawValue = 0;
-    size = sizeof(rawValue);
-    if (RegQueryValueExA(key, valueNameY, nullptr, nullptr, reinterpret_cast<BYTE*>(&rawValue), &size) == ERROR_SUCCESS) {
-        *y = static_cast<int>(rawValue);
-        loadedY = true;
-    }
-
-    RegCloseKey(key);
-    return loadedX && loadedY;
+    *x = storedX;
+    *y = storedY;
+    return true;
 }
 
 void SaveUiWindowPlacement(const char* windowName, int x, int y)
@@ -448,16 +435,8 @@ void SaveUiWindowPlacement(const char* windowName, int x, int y)
     std::snprintf(valueNameX, sizeof(valueNameX), "%sX", windowName);
     std::snprintf(valueNameY, sizeof(valueNameY), "%sY", windowName);
 
-    HKEY key = nullptr;
-    if (RegCreateKeyExA(HKEY_CURRENT_USER, kUiWindowRegPath, 0, nullptr, 0, KEY_SET_VALUE, nullptr, &key, nullptr) != ERROR_SUCCESS) {
-        return;
-    }
-
-    const DWORD rawX = static_cast<DWORD>(x);
-    const DWORD rawY = static_cast<DWORD>(y);
-    RegSetValueExA(key, valueNameX, 0, REG_DWORD, reinterpret_cast<const BYTE*>(&rawX), sizeof(rawX));
-    RegSetValueExA(key, valueNameY, 0, REG_DWORD, reinterpret_cast<const BYTE*>(&rawY), sizeof(rawY));
-    RegCloseKey(key);
+    SaveSettingsIniInt(kUiWindowSection, valueNameX, x);
+    SaveSettingsIniInt(kUiWindowSection, valueNameY, y);
 }
 
 UIWindow::~UIWindow() {

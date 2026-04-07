@@ -1,6 +1,7 @@
 #include "UILoginWnd.h"
 
 #include "core/File.h"
+#include "core/SettingsIni.h"
 #include "gamemode/LoginMode.h"
 #include "gamemode/Mode.h"
 #include "main/WinMain.h"
@@ -205,38 +206,14 @@ std::string ResolveArchiveAssetByFileName(const std::string& requestedPath)
     return bestPath;
 }
 
-constexpr char kLoginRegPath[] = "Software\\Gravity Soft\\Ragnarok Online";
+constexpr char kLoginSettingsSection[] = "Login";
 constexpr char kRememberUserIdEnabledValue[] = "RememberUserIdEnabled";
 constexpr char kRememberUserIdValue[] = "RememberUserId";
 
 void StoreRememberedUserId(const char* userId, bool enabled)
 {
-    HKEY key = nullptr;
-    if (RegCreateKeyExA(HKEY_CURRENT_USER, kLoginRegPath, 0, nullptr, 0, KEY_SET_VALUE, nullptr, &key, nullptr) != ERROR_SUCCESS) {
-        return;
-    }
-
-    const DWORD enabledValue = enabled ? 1u : 0u;
-    RegSetValueExA(key,
-        kRememberUserIdEnabledValue,
-        0,
-        REG_DWORD,
-        reinterpret_cast<const BYTE*>(&enabledValue),
-        sizeof(enabledValue));
-
-    if (enabled && userId && *userId) {
-        const DWORD userIdSize = static_cast<DWORD>(std::strlen(userId) + 1);
-        RegSetValueExA(key,
-            kRememberUserIdValue,
-            0,
-            REG_SZ,
-            reinterpret_cast<const BYTE*>(userId),
-            userIdSize);
-    } else {
-        RegDeleteValueA(key, kRememberUserIdValue);
-    }
-
-    RegCloseKey(key);
+    SaveSettingsIniInt(kLoginSettingsSection, kRememberUserIdEnabledValue, enabled ? 1 : 0);
+    SaveSettingsIniString(kLoginSettingsSection, kRememberUserIdValue, (enabled && userId) ? std::string(userId) : std::string());
 }
 
 void LoadRememberedUserId(std::string* userId, bool* enabled)
@@ -248,46 +225,14 @@ void LoadRememberedUserId(std::string* userId, bool* enabled)
         *enabled = false;
     }
 
-    HKEY key = nullptr;
-    if (RegOpenKeyExA(HKEY_CURRENT_USER, kLoginRegPath, 0, KEY_READ, &key) != ERROR_SUCCESS) {
-        return;
-    }
-
-    DWORD enabledValue = 0;
-    DWORD enabledSize = sizeof(enabledValue);
-    bool hasEnabledValue = false;
-    if (enabled && RegQueryValueExA(
-            key,
-            kRememberUserIdEnabledValue,
-            nullptr,
-            nullptr,
-            reinterpret_cast<BYTE*>(&enabledValue),
-            &enabledSize) == ERROR_SUCCESS) {
-        *enabled = (enabledValue != 0);
-        hasEnabledValue = true;
-    }
-
-    bool hasUserIdValue = false;
+    const int enabledValue = LoadSettingsIniInt(kLoginSettingsSection, kRememberUserIdEnabledValue, 0);
+    const std::string storedUserId = LoadSettingsIniString(kLoginSettingsSection, kRememberUserIdValue, "");
     if (userId) {
-        char buffer[64] = {};
-        DWORD size = sizeof(buffer);
-        if (RegQueryValueExA(
-                key,
-                kRememberUserIdValue,
-                nullptr,
-                nullptr,
-                reinterpret_cast<BYTE*>(buffer),
-                &size) == ERROR_SUCCESS) {
-            *userId = buffer;
-            hasUserIdValue = true;
-        }
+        *userId = storedUserId;
     }
-
-    if (enabled && hasUserIdValue && !hasEnabledValue) {
-        *enabled = true;
+    if (enabled) {
+        *enabled = enabledValue != 0 && !storedUserId.empty();
     }
-
-    RegCloseKey(key);
 }
 
 void AddUniqueCandidate(std::vector<std::string>& out, const std::string& raw)

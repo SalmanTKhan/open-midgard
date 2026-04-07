@@ -1,5 +1,7 @@
 #include "GraphicsSettings.h"
 
+#include "core/SettingsIni.h"
+
 #include <windows.h>
 
 #include <algorithm>
@@ -7,42 +9,19 @@
 
 namespace {
 
-constexpr char kRegPath[] = "Software\\Gravity Soft\\Ragnarok Online";
-constexpr char kGraphicsWidthValue[] = "GraphicsWidth";
-constexpr char kGraphicsHeightValue[] = "GraphicsHeight";
-constexpr char kGraphicsWindowModeValue[] = "GraphicsWindowMode";
-constexpr char kGraphicsTextureUpscaleValue[] = "GraphicsTextureUpscale";
-constexpr char kGraphicsAnisotropicValue[] = "GraphicsAnisotropicLevel";
-constexpr char kGraphicsAntiAliasingValue[] = "GraphicsAntiAliasing";
+constexpr char kGraphicsSection[] = "Graphics";
+constexpr char kGraphicsWidthValue[] = "Width";
+constexpr char kGraphicsHeightValue[] = "Height";
+constexpr char kGraphicsWindowModeValue[] = "WindowMode";
+constexpr char kGraphicsTextureUpscaleValue[] = "TextureUpscale";
+constexpr char kGraphicsAnisotropicValue[] = "AnisotropicLevel";
+constexpr char kGraphicsAntiAliasingValue[] = "AntiAliasing";
 constexpr int kMinWidth = 640;
 constexpr int kMinHeight = 480;
 constexpr int kMaxWidth = 7680;
 constexpr int kMaxHeight = 4320;
 GraphicsSettings g_cachedSettings = GetDefaultGraphicsSettings();
 bool g_cachedSettingsValid = false;
-
-void LoadDwordSetting(HKEY key, const char* valueName, int* target)
-{
-    if (!key || !valueName || !target) {
-        return;
-    }
-
-    DWORD value = static_cast<DWORD>(*target);
-    DWORD size = sizeof(value);
-    if (RegQueryValueExA(key, valueName, nullptr, nullptr, reinterpret_cast<BYTE*>(&value), &size) == ERROR_SUCCESS) {
-        *target = static_cast<int>(value);
-    }
-}
-
-void SaveDwordSetting(HKEY key, const char* valueName, int value)
-{
-    if (!key || !valueName) {
-        return;
-    }
-
-    const DWORD rawValue = static_cast<DWORD>(value);
-    RegSetValueExA(key, valueName, 0, REG_DWORD, reinterpret_cast<const BYTE*>(&rawValue), sizeof(rawValue));
-}
 
 int ClampToAllowedAnisotropy(int level)
 {
@@ -98,16 +77,12 @@ GraphicsSettings LoadGraphicsSettings()
 {
     GraphicsSettings settings = GetDefaultGraphicsSettings();
 
-    HKEY key = nullptr;
-    if (RegOpenKeyExA(HKEY_CURRENT_USER, kRegPath, 0, KEY_READ, &key) == ERROR_SUCCESS) {
-        LoadDwordSetting(key, kGraphicsWidthValue, &settings.width);
-        LoadDwordSetting(key, kGraphicsHeightValue, &settings.height);
-        LoadDwordSetting(key, kGraphicsWindowModeValue, reinterpret_cast<int*>(&settings.windowMode));
-        LoadDwordSetting(key, kGraphicsTextureUpscaleValue, &settings.textureUpscaleFactor);
-        LoadDwordSetting(key, kGraphicsAnisotropicValue, &settings.anisotropicLevel);
-        LoadDwordSetting(key, kGraphicsAntiAliasingValue, reinterpret_cast<int*>(&settings.antiAliasing));
-        RegCloseKey(key);
-    }
+    settings.width = LoadSettingsIniInt(kGraphicsSection, kGraphicsWidthValue, settings.width);
+    settings.height = LoadSettingsIniInt(kGraphicsSection, kGraphicsHeightValue, settings.height);
+    settings.windowMode = static_cast<WindowMode>(LoadSettingsIniInt(kGraphicsSection, kGraphicsWindowModeValue, static_cast<int>(settings.windowMode)));
+    settings.textureUpscaleFactor = LoadSettingsIniInt(kGraphicsSection, kGraphicsTextureUpscaleValue, settings.textureUpscaleFactor);
+    settings.anisotropicLevel = LoadSettingsIniInt(kGraphicsSection, kGraphicsAnisotropicValue, settings.anisotropicLevel);
+    settings.antiAliasing = static_cast<AntiAliasingMode>(LoadSettingsIniInt(kGraphicsSection, kGraphicsAntiAliasingValue, static_cast<int>(settings.antiAliasing)));
 
     SanitizeGraphicsSettings(&settings);
     return settings;
@@ -118,19 +93,12 @@ bool SaveGraphicsSettings(const GraphicsSettings& rawSettings)
     GraphicsSettings settings = rawSettings;
     SanitizeGraphicsSettings(&settings);
 
-    HKEY key = nullptr;
-    if (RegCreateKeyExA(HKEY_CURRENT_USER, kRegPath, 0, nullptr, 0, KEY_SET_VALUE, nullptr, &key, nullptr) != ERROR_SUCCESS) {
-        return false;
-    }
-
-    SaveDwordSetting(key, kGraphicsWidthValue, settings.width);
-    SaveDwordSetting(key, kGraphicsHeightValue, settings.height);
-    SaveDwordSetting(key, kGraphicsWindowModeValue, static_cast<int>(settings.windowMode));
-    SaveDwordSetting(key, kGraphicsTextureUpscaleValue, settings.textureUpscaleFactor);
-    SaveDwordSetting(key, kGraphicsAnisotropicValue, settings.anisotropicLevel);
-    SaveDwordSetting(key, kGraphicsAntiAliasingValue, static_cast<int>(settings.antiAliasing));
-    RegCloseKey(key);
-    return true;
+    return SaveSettingsIniInt(kGraphicsSection, kGraphicsWidthValue, settings.width)
+        && SaveSettingsIniInt(kGraphicsSection, kGraphicsHeightValue, settings.height)
+        && SaveSettingsIniInt(kGraphicsSection, kGraphicsWindowModeValue, static_cast<int>(settings.windowMode))
+        && SaveSettingsIniInt(kGraphicsSection, kGraphicsTextureUpscaleValue, settings.textureUpscaleFactor)
+        && SaveSettingsIniInt(kGraphicsSection, kGraphicsAnisotropicValue, settings.anisotropicLevel)
+        && SaveSettingsIniInt(kGraphicsSection, kGraphicsAntiAliasingValue, static_cast<int>(settings.antiAliasing));
 }
 
 const GraphicsSettings& GetCachedGraphicsSettings()

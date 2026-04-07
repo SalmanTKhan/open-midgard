@@ -119,8 +119,8 @@ private:
     int FindCharacterIndexForSlot(int slotNumber) const;
     int GetVisibleSlotStart() const;
     void ClampSelection();
-    void SaveSelectionToRegistry() const;
-    void LoadSelectionFromRegistry();
+    void SaveSelectionToSettings() const;
+    void LoadSelectionFromSettings();
     void MoveSelection(int delta);
     void ChangePage(int delta);
     void SetSelectedSlot(int slotNumber);

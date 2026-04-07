@@ -10,44 +10,40 @@ permissions:
   contents: write
 
 jobs:
-  build:
-    name: Build ${{ matrix.label }}
+  build-windows-qt:
+    name: Build Windows Qt x64
     runs-on: windows-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - label: Win32
-            asset_name: open-midgard-win32
-            configure_preset: vs2022-win32
-            build_preset: build-release
-            output_dir: build/Release
-          - label: x64
-            asset_name: open-midgard-x64
-            configure_preset: vs2022-x64
-            build_preset: build-release-x64
-            output_dir: build64/Release
 
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Set up MSVC environment
-        uses: ilammy/msvc-dev-cmd@v1
+      - name: Install Qt 6.11 MinGW toolchain
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: 6.11.0
+          host: windows
+          target: desktop
+          arch: win64_mingw
+          dir: C:\Qt
+          cache: true
+          tools: tools_mingw1310,qt.tools.win64_mingw1310
 
-      - name: Configure ${{ matrix.label }}
-        shell: pwsh
-        run: cmake --preset ${{ matrix.configure_preset }} -DRO_ENABLE_DEV_DEPLOY=OFF
+      - name: Configure Windows Qt release
+        shell: bash
+        run: cmake --preset mingw-qt-x64 -DRO_ENABLE_DEV_DEPLOY=OFF
 
-      - name: Build ${{ matrix.label }} release
-        shell: pwsh
-        run: cmake --build --preset ${{ matrix.build_preset }}
+      - name: Build Windows Qt release
+        shell: bash
+        run: cmake --build --preset build-mingw-qt-x64 --parallel 4
 
-      - name: Package ${{ matrix.label }} release
+      - name: Package Windows Qt release
         shell: pwsh
         run: |
-          $stagingDir = Join-Path $env:RUNNER_TEMP "${{ matrix.asset_name }}"
-          $zipPath = Join-Path $env:RUNNER_TEMP "${{ matrix.asset_name }}.zip"
+          $assetName = "open-midgard-windows-qt-x64"
+          $buildDir = Join-Path $PWD "build-mingw-preset"
+          $stagingDir = Join-Path $env:RUNNER_TEMP $assetName
+          $zipPath = Join-Path $env:RUNNER_TEMP "$assetName.zip"
 
           if (Test-Path $stagingDir) {
             Remove-Item $stagingDir -Recurse -Force
@@ -57,21 +53,170 @@ jobs:
           }
 
           New-Item -ItemType Directory -Path $stagingDir | Out-Null
-          Copy-Item "${{ matrix.output_dir }}/open-midgard.exe" $stagingDir
+          Copy-Item (Join-Path $buildDir "open-midgard.exe") $stagingDir
+
+          Get-ChildItem -Path $buildDir -Filter "*.dll" -File | Copy-Item -Destination $stagingDir
+
+          if (Test-Path (Join-Path $buildDir "qt.conf")) {
+            Copy-Item (Join-Path $buildDir "qt.conf") $stagingDir
+          }
+
+          foreach ($dirName in @("licenses", "thirdparty")) {
+            $sourceDir = Join-Path $buildDir $dirName
+            if (Test-Path $sourceDir) {
+              Copy-Item $sourceDir $stagingDir -Recurse
+            }
+          }
 
           Compress-Archive -Path "$stagingDir/*" -DestinationPath $zipPath
 
       - name: Upload packaged artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.asset_name }}
-          path: ${{ runner.temp }}/${{ matrix.asset_name }}.zip
+          name: open-midgard-windows-qt-x64
+          path: ${{ runner.temp }}/open-midgard-windows-qt-x64.zip
+          if-no-files-found: error
+
+  build-linux-qt-vulkan:
+    name: Build Linux Qt Vulkan
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install Linux build dependencies
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            cmake \
+            ninja-build \
+            qt6-base-dev \
+            qt6-base-dev-tools \
+            qt6-declarative-dev \
+            qt6-declarative-dev-tools \
+            libegl1-mesa-dev \
+            libgl1-mesa-dev \
+            libvulkan-dev \
+            libxkbcommon-dev \
+            libxkbcommon-x11-dev
+
+      - name: Configure Linux Qt Vulkan release
+        shell: bash
+        run: cmake --preset linux-qt-vulkan
+
+      - name: Build Linux Qt Vulkan release
+        shell: bash
+        run: cmake --build --preset build-linux-qt-vulkan --parallel "$(nproc)"
+
+      - name: Package Linux Qt Vulkan release
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          asset_name="open-midgard-linux-qt-vulkan"
+          build_dir="$GITHUB_WORKSPACE/build-linux-qt-vulkan"
+          staging_dir="$RUNNER_TEMP/$asset_name"
+          tar_path="$RUNNER_TEMP/$asset_name.tar.gz"
+
+          rm -rf "$staging_dir" "$tar_path"
+          mkdir -p "$staging_dir/lib" "$staging_dir/plugins" "$staging_dir/qml" "$staging_dir/translations" "$staging_dir/licenses"
+
+          cp "$build_dir/open-midgard" "$staging_dir/open-midgard-bin"
+          cp -a "$GITHUB_WORKSPACE/third_party/qt" "$staging_dir/licenses/qt"
+
+          cat > "$staging_dir/open-midgard" <<'EOF'
+          #!/usr/bin/env bash
+          SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+          export LD_LIBRARY_PATH="$SCRIPT_DIR/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+          export QT_PLUGIN_PATH="$SCRIPT_DIR/plugins"
+          export QML2_IMPORT_PATH="$SCRIPT_DIR/qml"
+          exec "$SCRIPT_DIR/open-midgard-bin" "$@"
+          EOF
+          chmod +x "$staging_dir/open-midgard" "$staging_dir/open-midgard-bin"
+
+          cat > "$staging_dir/qt.conf" <<'EOF'
+          [Paths]
+          Plugins = plugins
+          Imports = qml
+          Qml2Imports = qml
+          Translations = translations
+          EOF
+
+          qmake_bin="$(command -v qmake6 || command -v qmake)"
+          qt_lib_dir="$($qmake_bin -query QT_INSTALL_LIBS)"
+          qt_plugin_dir="$($qmake_bin -query QT_INSTALL_PLUGINS)"
+          qt_qml_dir="$($qmake_bin -query QT_INSTALL_QML)"
+          qt_translation_dir="$($qmake_bin -query QT_INSTALL_TRANSLATIONS)"
+
+          for plugin_dir in \
+            egldeviceintegrations \
+            iconengines \
+            imageformats \
+            networkinformation \
+            platforms \
+            platforminputcontexts \
+            platformthemes \
+            tls \
+            wayland-decoration-client \
+            wayland-graphics-integration-client \
+            wayland-shell-integration \
+            xcbglintegrations; do
+            if [ -d "$qt_plugin_dir/$plugin_dir" ]; then
+              cp -a "$qt_plugin_dir/$plugin_dir" "$staging_dir/plugins/"
+            fi
+          done
+
+          for qml_dir in QML Qt QtQml QtQuick; do
+            if [ -d "$qt_qml_dir/$qml_dir" ]; then
+              cp -a "$qt_qml_dir/$qml_dir" "$staging_dir/qml/"
+            fi
+          done
+
+          if [ -d "$qt_translation_dir" ]; then
+            find "$qt_translation_dir" -maxdepth 1 -type f -name 'qt_*.qm' -exec cp -a {} "$staging_dir/translations/" \;
+          fi
+
+          copy_runtime_deps() {
+            local target="$1"
+            ldd "$target" | awk '/=> \// { print $3 } /^\// { print $1 }' | while read -r dep_path; do
+              if [ -z "$dep_path" ] || [ ! -f "$dep_path" ]; then
+                continue
+              fi
+              case "$(basename "$dep_path")" in
+                linux-vdso.so.*|ld-linux*.so*|libc.so.*|libdl.so.*|libgcc_s.so.*|libm.so.*|libpthread.so.*|librt.so.*|libresolv.so.*|libstdc++.so.*|libutil.so.*)
+                  continue
+                  ;;
+              esac
+              cp -aL "$dep_path" "$staging_dir/lib/"
+            done
+          }
+
+          copy_runtime_deps "$staging_dir/open-midgard-bin"
+          find "$staging_dir/plugins" "$staging_dir/qml" -type f \( -name '*.so' -o -name '*.so.*' \) -print0 | while IFS= read -r -d '' so_path; do
+            copy_runtime_deps "$so_path"
+          done
+
+          find "$qt_lib_dir" -maxdepth 1 -type f \( -name 'libQt6*.so*' -o -name 'libicu*.so*' \) -exec cp -aL {} "$staging_dir/lib/" \;
+
+          tar -C "$RUNNER_TEMP" -czf "$tar_path" "$asset_name"
+
+      - name: Upload packaged artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: open-midgard-linux-qt-vulkan
+          path: ${{ runner.temp }}/open-midgard-linux-qt-vulkan.tar.gz
           if-no-files-found: error
 
   attach-to-release:
     name: Attach release assets
     if: github.event_name == 'release'
-    needs: build
+    needs:
+      - build-windows-qt
+      - build-linux-qt-vulkan
     runs-on: ubuntu-latest
 
     steps:
@@ -84,5 +229,5 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            release-assets/open-midgard-win32/open-midgard-win32.zip
-            release-assets/open-midgard-x64/open-midgard-x64.zip
+            release-assets/open-midgard-windows-qt-x64/open-midgard-windows-qt-x64.zip
+            release-assets/open-midgard-linux-qt-vulkan/open-midgard-linux-qt-vulkan.tar.gz

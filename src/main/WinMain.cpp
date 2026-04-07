@@ -11,6 +11,7 @@
 #include <windowsx.h>
 #include "WinMain.h"
 #include "Types.h"
+#include "core/SettingsIni.h"
 #include "core/Timer.h"
 #include "core/File.h"
 #include "gamemode/CursorRenderer.h"
@@ -80,9 +81,6 @@ static std::string g_windowTitleStatusSuffix;
 static int g_windowTitleFps = -1;
 static DWORD g_windowTitleFpsTick = 0;
 static unsigned int g_windowTitleFrameCount = 0;
-
-// Registry path used by the original client
-static const char g_regPath[] = "Software\\Gravity Soft\\Ragnarok Online";
 
 namespace {
 
@@ -234,24 +232,13 @@ bool RelaunchCurrentApplication()
 }
 
 // ---------------------------------------------------------------------------
-// Registry helper
+// Settings bootstrap
 // ---------------------------------------------------------------------------
 int ReadRegistry()
 {
-    HKEY hKey = nullptr;
-    if (RegOpenKeyExA(HKEY_LOCAL_MACHINE, g_regPath, 0, KEY_READ, &hKey) != ERROR_SUCCESS)
-    {
-        ApplyConfiguredWindowSize();
-        return 0;
-    }
-
-    DWORD type = REG_DWORD, len = 4;
-    RegQueryValueExA(hKey, "IsFullScreen",  nullptr, &type, reinterpret_cast<LPBYTE>(&g_isAppActive), &len);
-    RegQueryValueExA(hKey, "Width",         nullptr, &type, reinterpret_cast<LPBYTE>(&WINDOW_WIDTH),  &len);
-    RegQueryValueExA(hKey, "Height",        nullptr, &type, reinterpret_cast<LPBYTE>(&WINDOW_HEIGHT), &len);
-
-    RegCloseKey(hKey);
+    EnsureOpenMidgardIniDefaults();
     ApplyConfiguredWindowSize();
+    (void)GetConfiguredRenderBackend();
     return 1;
 }
 
@@ -589,31 +576,9 @@ int __stdcall WinMain(HINSTANCE hInstance, HINSTANCE /*hPrevInstance*/,
 
     CoInitialize(nullptr);
 
-    // Read registry once. If missing, try setup; if that is unavailable, keep defaults
-    // so we can still create and show the game window.
-    if (!ReadRegistry())
-    {
-        const bool hasSetupExe = (_access("Setup\\SetupHp.exe", 0) == 0);
-        if (hasSetupExe) {
-            STARTUPINFOA si{};
-            PROCESS_INFORMATION pi{};
-            si.cb = sizeof(si);
-            si.dwFlags = STARTF_USESHOWWINDOW;
-            si.wShowWindow = SW_SHOW;
-
-            if (CreateProcessA(nullptr, (LPSTR)"Setup\\SetupHp.exe", nullptr, nullptr, FALSE,
-                               0, nullptr, nullptr, &si, &pi)) {
-                WaitForSingleObject(pi.hProcess, INFINITE);
-                CloseHandle(pi.hProcess);
-                CloseHandle(pi.hThread);
-                ReadRegistry();
-            }
-        }
-
-        // Preserve the graphics-settings fallback that ReadRegistry() already
-        // applied from HKCU when the legacy setup registry is unavailable.
-        g_isAppActive = true;
-    }
+    // Initialize persisted settings from open-midgard.ini beside the executable.
+    ReadRegistry();
+    g_isAppActive = true;
 
     // Floating-point control
     _controlfp(0x20000, 0x30000);

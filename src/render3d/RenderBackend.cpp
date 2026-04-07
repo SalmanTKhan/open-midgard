@@ -1,6 +1,7 @@
 #include "RenderBackend.h"
 
 #include "RenderDevice.h"
+#include "core/SettingsIni.h"
 #include "DebugLog.h"
 
 #if RO_HAS_NATIVE_D3D11
@@ -30,10 +31,8 @@
 
 namespace {
 
-#if RO_PLATFORM_WINDOWS
-constexpr char kRenderBackendRegPath[] = "Software\\Gravity Soft\\Ragnarok Online";
-constexpr char kRenderBackendValueName[] = "RenderBackend";
-#endif
+constexpr char kRenderBackendSection[] = "Renderer";
+constexpr char kRenderBackendValueName[] = "Backend";
 #if RO_HAS_NATIVE_D3D11
 constexpr RenderBackendType kDefaultConfiguredBackend = RenderBackendType::Direct3D11;
 #elif RO_HAS_VULKAN
@@ -368,56 +367,26 @@ bool IsRenderBackendSupported(RenderBackendType backend)
 
 RenderBackendType GetConfiguredRenderBackend()
 {
-#if !RO_PLATFORM_WINDOWS
-    return kDefaultConfiguredBackend;
-#else
-    HKEY key = nullptr;
-    if (RegOpenKeyExA(HKEY_CURRENT_USER, kRenderBackendRegPath, 0, KEY_READ, &key) != ERROR_SUCCESS) {
-        return kDefaultConfiguredBackend;
-    }
-
-    DWORD rawValue = static_cast<DWORD>(kDefaultConfiguredBackend);
-    DWORD valueSize = sizeof(rawValue);
-    const LONG status = RegQueryValueExA(
-        key,
+    const int rawValue = LoadSettingsIniInt(
+        kRenderBackendSection,
         kRenderBackendValueName,
-        nullptr,
-        nullptr,
-        reinterpret_cast<BYTE*>(&rawValue),
-        &valueSize);
-    RegCloseKey(key);
-
-    if (status != ERROR_SUCCESS || valueSize != sizeof(rawValue) || !IsValidStoredBackend(rawValue)) {
+        static_cast<int>(kDefaultConfiguredBackend));
+    if (!IsValidStoredBackend(rawValue)) {
+        SaveSettingsIniInt(kRenderBackendSection, kRenderBackendValueName, static_cast<int>(kDefaultConfiguredBackend));
         return kDefaultConfiguredBackend;
     }
 
-    return NormalizeBackendForCurrentBuild(static_cast<RenderBackendType>(rawValue));
-#endif
+    const RenderBackendType normalized = NormalizeBackendForCurrentBuild(static_cast<RenderBackendType>(rawValue));
+    if (normalized != static_cast<RenderBackendType>(rawValue)) {
+        SaveSettingsIniInt(kRenderBackendSection, kRenderBackendValueName, static_cast<int>(normalized));
+    }
+    return normalized;
 }
 
 bool SetConfiguredRenderBackend(RenderBackendType backend)
 {
-#if !RO_PLATFORM_WINDOWS
-    (void)backend;
-    return false;
-#else
-    HKEY key = nullptr;
-    if (RegCreateKeyExA(HKEY_CURRENT_USER, kRenderBackendRegPath, 0, nullptr, 0, KEY_SET_VALUE, nullptr, &key, nullptr) != ERROR_SUCCESS) {
-        return false;
-    }
-
     backend = NormalizeBackendForCurrentBuild(backend);
-    const DWORD rawValue = static_cast<DWORD>(backend);
-    const LONG status = RegSetValueExA(
-        key,
-        kRenderBackendValueName,
-        0,
-        REG_DWORD,
-        reinterpret_cast<const BYTE*>(&rawValue),
-        sizeof(rawValue));
-    RegCloseKey(key);
-    return status == ERROR_SUCCESS;
-#endif
+    return SaveSettingsIniInt(kRenderBackendSection, kRenderBackendValueName, static_cast<int>(backend));
 }
 
 RenderBackendType GetRequestedRenderBackend()
