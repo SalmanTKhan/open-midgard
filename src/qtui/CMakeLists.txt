@@ -41,7 +41,7 @@ target_link_libraries(ro_qtui PUBLIC
     ro_world
 )
 
-if(WIN32)
+if(WIN32 AND RO_HAS_NATIVE_D3D12)
     target_link_libraries(ro_qtui PUBLIC
         Qt6::GuiPrivate
     )
