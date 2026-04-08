@@ -1723,6 +1723,29 @@ bool BuildPaletteOverride(const std::string& paletteName, std::array<unsigned in
     return true;
 }
 
+u32 HashPixelBuffer(const unsigned int* pixels, size_t pixelCount)
+{
+    if (!pixels || pixelCount == 0) {
+        return 0u;
+    }
+
+    u32 hash = 2166136261u;
+    for (size_t index = 0; index < pixelCount; ++index) {
+        hash ^= pixels[index];
+        hash *= 16777619u;
+    }
+    return hash;
+}
+
+int ResolveClassicTransBaseJobForComparison(int job)
+{
+    if (job >= 4008 && job <= 4022) {
+        return job - 4001;
+    }
+
+    return job;
+}
+
 bool ApplyAttachPointDelta(const CMotion* baseMotion, const CMotion* attachedMotion, POINT* inOutPoint)
 {
     if (!baseMotion || !attachedMotion || !inOutPoint || baseMotion->attachInfo.empty() || attachedMotion->attachInfo.empty()) {
@@ -2651,6 +2674,145 @@ bool DrawPcBillboard(BillboardComposeSurface& bitmap,
     BuildWeaponOverlayPath(actor, bodyActName, weaponValue, true, "spr", &weaponLayer6SprNameResolved);
     BuildShieldOverlayPath(bodyActName, actor.m_shield, "act", &shieldActNameResolved);
     BuildShieldOverlayPath(bodyActName, actor.m_shield, "spr", &shieldSprNameResolved);
+
+    const bool isLocalPlayer = actor.m_gid != 0
+        && (actor.m_gid == g_session.m_gid || actor.m_gid == g_session.m_aid);
+    if (isLocalPlayer) {
+        static std::map<u32, std::string> loggedBillboardResources;
+        char logKey[2048] = {};
+        std::snprintf(logKey,
+            sizeof(logKey),
+            "%d|%d|%d|%d|%d|%s|%s|%s|%s|%s|%s|%d|%d|%d|%d",
+            displayJob,
+            sex,
+            bodyAction,
+            headMotion,
+            actor.m_stateId,
+            bodyActName.c_str(),
+            bodySprName.c_str(),
+            imfPath.c_str(),
+            bodyPaletteName.c_str(),
+            headPaletteName.c_str(),
+            weaponActNameResolved.c_str(),
+            actor.m_bodyPalette,
+            actor.m_headPalette,
+            actor.m_weapon,
+            actor.m_shield);
+        const std::string logValue(logKey);
+        if (loggedBillboardResources[actor.m_gid] != logValue) {
+            loggedBillboardResources[actor.m_gid] = logValue;
+            DbgLog("[ActorTrace] pc billboard resources gid=%u displayJob=%d sex=%d state=%d curAction=%d curMotion=%d bodyAction=%d headMotion=%d bodyAct='%s' bodySpr='%s' headAct='%s' headSpr='%s' imf='%s' bodyPal='%s' headPal='%s' bodyPalId=%d headPalId=%d accessoryBottom=%d accessoryMid=%d accessoryTop=%d weapon=%d shield=%d weaponAct='%s' weaponSpr='%s' weapon2Act='%s' weapon2Spr='%s' shieldAct='%s' shieldSpr='%s'\n",
+                actor.m_gid,
+                displayJob,
+                sex,
+                actor.m_stateId,
+                actor.m_curAction,
+                actor.m_curMotion,
+                bodyAction,
+                headMotion,
+                bodyActName.c_str(),
+                bodySprName.c_str(),
+                headActName.c_str(),
+                headSprName.c_str(),
+                imfPath.c_str(),
+                bodyPaletteName.c_str(),
+                headPaletteName.c_str(),
+                actor.m_bodyPalette,
+                actor.m_headPalette,
+                actor.m_accessory,
+                actor.m_accessory3,
+                actor.m_accessory2,
+                actor.m_weapon,
+                actor.m_shield,
+                weaponActNameResolved.c_str(),
+                weaponSprNameResolved.c_str(),
+                weaponLayer6ActNameResolved.c_str(),
+                weaponLayer6SprNameResolved.c_str(),
+                shieldActNameResolved.c_str(),
+                shieldSprNameResolved.c_str());
+        }
+
+        if (actor.m_bodyPalette > 0) {
+            const int basePaletteJob = ResolveClassicTransBaseJobForComparison(displayJob);
+            if (basePaletteJob != displayJob) {
+                char baseBodyPalette[260] = {};
+                const std::string baseBodyPaletteName = g_session.GetBodyPaletteName(basePaletteJob, sex, actor.m_bodyPalette, baseBodyPalette);
+
+                BillboardComposeSurface actualSurface(kPlayerBillboardComposeWidth, kPlayerBillboardComposeHeight);
+                actualSurface.Clear(0x00000000u);
+                BillboardComposeSurface baseSurface(kPlayerBillboardComposeWidth, kPlayerBillboardComposeHeight);
+                baseSurface.Clear(0x00000000u);
+
+                const bool actualLayerOk = DrawPlayerLayer(actualSurface,
+                    kPlayerBillboardAnchorX,
+                    kPlayerBillboardAnchorY,
+                    0,
+                    curAction,
+                    curMotion,
+                    bodyActName,
+                    bodySprName,
+                    imfPath,
+                    bodyActName,
+                    headActName,
+                    curMotion,
+                    headMotion,
+                    bodyPaletteName);
+                const bool baseLayerOk = DrawPlayerLayer(baseSurface,
+                    kPlayerBillboardAnchorX,
+                    kPlayerBillboardAnchorY,
+                    0,
+                    curAction,
+                    curMotion,
+                    bodyActName,
+                    bodySprName,
+                    imfPath,
+                    bodyActName,
+                    headActName,
+                    curMotion,
+                    headMotion,
+                    baseBodyPaletteName);
+
+                const u32 actualHash = actualLayerOk
+                    ? HashPixelBuffer(actualSurface.GetImageData(), static_cast<size_t>(actualSurface.GetWidth()) * static_cast<size_t>(actualSurface.GetHeight()))
+                    : 0u;
+                const u32 baseHash = baseLayerOk
+                    ? HashPixelBuffer(baseSurface.GetImageData(), static_cast<size_t>(baseSurface.GetWidth()) * static_cast<size_t>(baseSurface.GetHeight()))
+                    : 0u;
+
+                static std::map<u32, std::string> loggedBodyPaletteComparisons;
+                char compareKey[1024] = {};
+                std::snprintf(compareKey,
+                    sizeof(compareKey),
+                    "%d|%d|%d|%d|%u|%u|%s|%s",
+                    displayJob,
+                    basePaletteJob,
+                    curAction,
+                    curMotion,
+                    actualHash,
+                    baseHash,
+                    bodyPaletteName.c_str(),
+                    baseBodyPaletteName.c_str());
+                const std::string compareValue(compareKey);
+                if (loggedBodyPaletteComparisons[actor.m_gid] != compareValue) {
+                    loggedBodyPaletteComparisons[actor.m_gid] = compareValue;
+                    DbgLog("[ActorTrace] body palette compare gid=%u displayJob=%d baseJob=%d pal=%d action=%d motion=%d actualPal='%s' basePal='%s' actualOk=%d baseOk=%d actualHash=%08X baseHash=%08X samePixels=%d\n",
+                        actor.m_gid,
+                        displayJob,
+                        basePaletteJob,
+                        actor.m_bodyPalette,
+                        curAction,
+                        curMotion,
+                        bodyPaletteName.c_str(),
+                        baseBodyPaletteName.c_str(),
+                        actualLayerOk ? 1 : 0,
+                        baseLayerOk ? 1 : 0,
+                        static_cast<unsigned int>(actualHash),
+                        static_cast<unsigned int>(baseHash),
+                        actualLayerOk && baseLayerOk && actualHash == baseHash ? 1 : 0);
+                }
+            }
+        }
+    }
 
     CImfRes* imfRes = g_resMgr.GetAs<CImfRes>(imfPath.c_str());
     const std::array<int, 8> layerOrder = BuildPlayerRenderLayerOrder(imfRes, curAction, curMotion);
@@ -5045,6 +5207,7 @@ bool CPc::EnsureBillboardTexture(float cameraLongitude)
     }
     int bodyAction = baseBodyAction + ResolvePcBodyActionFromViewStable(cameraLongitude, actorRotationDegrees, previousDir);
     int headMotion = 0;
+    const bool isLocalPlayer = m_gid != 0 && (m_gid == g_session.m_gid || m_gid == g_session.m_aid);
     if (usePlayerStyleBillboard) {
         char bodyAct[260] = {};
         const std::string bodyActName = g_session.GetJobActName(displayJob, sex, bodyAct);
@@ -5116,6 +5279,27 @@ bool CPc::EnsureBillboardTexture(float cameraLongitude)
         && m_cachedBillboardHeadPalette == (usePlayerStyleBillboard ? m_headPalette : 0)
         && m_cachedBillboardWeapon == (usePlayerStyleBillboard ? m_weapon : 0)
         && m_cachedBillboardShield == (usePlayerStyleBillboard ? m_shield : 0)) {
+        if (isLocalPlayer) {
+            static std::map<u32, u32> loggedBillboardCacheHits;
+            const u32 cacheKey = (static_cast<u32>(displayJob & 0xFFFF) << 16)
+                ^ (static_cast<u32>(bodyAction & 0xFF) << 8)
+                ^ static_cast<u32>(headMotion & 0xFF)
+                ^ (usePlayerStyleBillboard ? 0x80000000u : 0u);
+            if (loggedBillboardCacheHits[m_gid] != cacheKey) {
+                loggedBillboardCacheHits[m_gid] = cacheKey;
+                DbgLog("[ActorTrace] billboard cache reuse gid=%u playerStyle=%d displayJob=%d state=%d bodyAction=%d headMotion=%d bodyPal=%d headPal=%d weapon=%d shield=%d\n",
+                    m_gid,
+                    usePlayerStyleBillboard ? 1 : 0,
+                    displayJob,
+                    m_stateId,
+                    bodyAction,
+                    headMotion,
+                    m_bodyPalette,
+                    m_headPalette,
+                    m_weapon,
+                    m_shield);
+            }
+        }
         return true;
     }
 
@@ -5215,6 +5399,31 @@ bool CPc::EnsureBillboardTexture(float cameraLongitude)
             LogNonPcBillboardFailureOnce(displayJob, g_session.GetJobName(displayJob), bodyAction, headMotion);
         }
         return false;
+    }
+
+    if (isLocalPlayer) {
+        static std::map<u32, u32> loggedBillboardCompose;
+        const u32 composeKey = (static_cast<u32>(displayJob & 0xFFFF) << 16)
+            ^ (static_cast<u32>(bodyAction & 0xFF) << 8)
+            ^ static_cast<u32>(headMotion & 0xFF)
+            ^ (usePlayerStyleBillboard ? 0x40000000u : 0u);
+        if (loggedBillboardCompose[m_gid] != composeKey) {
+            loggedBillboardCompose[m_gid] = composeKey;
+            DbgLog("[ActorTrace] billboard compose gid=%u playerStyle=%d displayJob=%d resolvedJob=%d state=%d bodyAction=%d headMotion=%d roty=%.1f dir=%d bodyPal=%d headPal=%d weapon=%d shield=%d\n",
+                m_gid,
+                usePlayerStyleBillboard ? 1 : 0,
+                displayJob,
+                resolvedJob,
+                m_stateId,
+                bodyAction,
+                headMotion,
+                m_roty,
+                Get8Dir(m_roty),
+                m_bodyPalette,
+                m_headPalette,
+                m_weapon,
+                m_shield);
+        }
     }
 
     if (!usePlayerStyleBillboard) {

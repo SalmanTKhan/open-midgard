@@ -873,11 +873,15 @@ UIWindow* UIWindowMgr::MakeWindow(int windowId)
         return m_roMapWnd;
 
     case WID_SELECTCHARWND:
+        DbgLog("[WindowMgr] MakeWindow WID_SELECTCHARWND existing=%p\n", m_selectCharWnd);
         if (!m_selectCharWnd) {
+            DbgLog("[WindowMgr] Creating UISelectCharWnd\n");
             m_selectCharWnd = new UISelectCharWnd();
             m_children.push_back(m_selectCharWnd);
+            DbgLog("[WindowMgr] Created UISelectCharWnd=%p\n", m_selectCharWnd);
         }
         m_selectCharWnd->SetShow(1);
+        DbgLog("[WindowMgr] WID_SELECTCHARWND show enabled\n");
         return m_selectCharWnd;
 
     case WID_MAKECHARWND:

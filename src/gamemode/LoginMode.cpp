@@ -960,11 +960,15 @@ void CLoginMode::OnChangeState(int newState) {
     }
 
     case LoginSubMode_CharSelect: {
+        DbgLog("[Login] Entering LoginSubMode_CharSelect\n");
         UIWindow* charSelectWnd = g_windowMgr.MakeWindow(UIWindowMgr::WID_SELECTCHARWND);
+        DbgLog("[Login] MakeWindow(WID_SELECTCHARWND) returned=%p\n", charSelectWnd);
         if (charSelectWnd) {
             charSelectWnd->SetShow(1);
+            DbgLog("[Login] Select char window show enabled\n");
         }
         g_windowMgr.SetLoginStatus("");
+        DbgLog("[Login] LoginSubMode_CharSelect ready\n");
         break;
     }
 
@@ -1291,6 +1295,16 @@ void CLoginMode::OnAcceptChar(const std::vector<u8>& raw)
            static_cast<int>(m_charInfo[0].headpalette),
            static_cast<int>(m_charInfo[0].bodypalette),
            static_cast<unsigned int>(m_charInfo[0].haircolor));
+
+    for (int index = 0; index < m_numChar; ++index) {
+        const int job = static_cast<int>(m_charInfo[index].job);
+        const char* const displayJobName = g_session.GetJobDisplayName(job);
+        DbgLog("[Login] Warmed char display name index=%d slot=%d job=%d name='%s'\n",
+            index,
+            static_cast<int>(m_charInfo[index].CharNum),
+            job,
+            displayJobName ? displayJobName : "");
+    }
 
     m_selectedCharIndex = 0;
     m_nextSubMode = LoginSubMode_CharSelect;

@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <cstdio>
 #include <filesystem>
+#include <set>
 #include "../DebugLog.h"
 
 #if !RO_PLATFORM_WINDOWS
@@ -16,6 +17,124 @@
 #endif
 
 namespace {
+
+std::string NormalizeLookupPath(const char* fileName)
+{
+    if (!fileName) {
+        return {};
+    }
+
+    std::string normalized(fileName);
+    std::replace(normalized.begin(), normalized.end(), '/', '\\');
+    return normalized;
+}
+
+bool HasPreferredDiskExtension(const char* fileName)
+{
+    if (!fileName || !*fileName) {
+        return false;
+    }
+
+    const char* dot = std::strrchr(fileName, '.');
+    if (!dot) {
+        return false;
+    }
+
+    char ext[8] = {};
+    size_t index = 0;
+    for (const char* cursor = dot + 1; *cursor && index + 1 < sizeof(ext); ++cursor, ++index) {
+        const unsigned char value = static_cast<unsigned char>(*cursor);
+        ext[index] = static_cast<char>(std::tolower(value));
+    }
+    ext[index] = '\0';
+
+    return std::strcmp(ext, "spr") == 0
+        || std::strcmp(ext, "act") == 0
+        || std::strcmp(ext, "imf") == 0
+        || std::strcmp(ext, "pal") == 0;
+}
+
+bool ShouldTraceDataSource(const char* fileName)
+{
+    return HasPreferredDiskExtension(fileName);
+}
+
+void LogDataSourceOnce(const char* fileName, const char* source, int size)
+{
+    if (!ShouldTraceDataSource(fileName) || !fileName || !source) {
+        return;
+    }
+
+    static std::set<std::string> logged;
+    std::string key(fileName);
+    key.push_back('|');
+    key += source;
+    if (!logged.insert(key).second) {
+        return;
+    }
+
+    DbgLog("[FileMgr] data source=%s path='%s' size=%d\n", source, fileName, size);
+}
+
+bool ShouldReadDiskFirst(const char* fileName)
+{
+    return g_readFolderFirst != 0 || HasPreferredDiskExtension(fileName);
+}
+
+#if RO_PLATFORM_WINDOWS
+bool FileExistsOnDisk(const char* fileName)
+{
+    if (!fileName || !*fileName) {
+        return false;
+    }
+
+    const std::string normalized = NormalizeLookupPath(fileName);
+    return GetFileAttributesA(normalized.c_str()) != INVALID_FILE_ATTRIBUTES;
+}
+
+unsigned char* ReadWholeFileOnDisk(const char* fileName, int* outSize)
+{
+    if (outSize) {
+        *outSize = 0;
+    }
+    if (!fileName || !*fileName) {
+        return nullptr;
+    }
+
+    const std::string normalized = NormalizeLookupPath(fileName);
+    HANDLE hFile = CreateFileA(normalized.c_str(), GENERIC_READ, FILE_SHARE_READ,
+        nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (hFile == INVALID_HANDLE_VALUE) {
+        return nullptr;
+    }
+
+    const DWORD fileSize = GetFileSize(hFile, nullptr);
+    if (fileSize == INVALID_FILE_SIZE) {
+        CloseHandle(hFile);
+        return nullptr;
+    }
+
+    unsigned char* buf = new unsigned char[static_cast<size_t>(fileSize) + 1];
+    if (!buf) {
+        CloseHandle(hFile);
+        return nullptr;
+    }
+
+    DWORD bytesRead = 0;
+    const BOOL ok = ReadFile(hFile, buf, fileSize, &bytesRead, nullptr);
+    CloseHandle(hFile);
+    if (!ok || bytesRead != fileSize) {
+        delete[] buf;
+        return nullptr;
+    }
+
+    buf[fileSize] = 0;
+    if (outSize) {
+        *outSize = static_cast<int>(fileSize);
+    }
+    return buf;
+}
+#endif
 
 #if !RO_PLATFORM_WINDOWS
 // Windows is case-insensitive, so on non-windows platforms we can operate under the same assumption but must deal with possible filename mismatches due to case
@@ -120,6 +239,24 @@ unsigned char* ReadWholeFilePortable(const char* fileName, int* outSize)
 }
 #endif
 
+bool FileExistsOnDiskPortable(const char* fileName)
+{
+#if RO_PLATFORM_WINDOWS
+    return FileExistsOnDisk(fileName);
+#else
+    return FileExistsPortable(fileName);
+#endif
+}
+
+unsigned char* ReadWholeFileOnDiskPortable(const char* fileName, int* outSize)
+{
+#if RO_PLATFORM_WINDOWS
+    return ReadWholeFileOnDisk(fileName, outSize);
+#else
+    return ReadWholeFilePortable(fileName, outSize);
+#endif
+}
+
 } // namespace
 
 // ---------------------------------------------------------------------------
@@ -168,6 +305,10 @@ void CFileMgr::AddPak(const char* pakName)
 
 bool CFileMgr::IsDataExist(const char* fileName)
 {
+    if (ShouldReadDiskFirst(fileName) && FileExistsOnDiskPortable(fileName)) {
+        return true;
+    }
+
     CHash key(fileName);
     for (const auto& [memFile, pak] : m_pakList)
     {
@@ -176,10 +317,10 @@ bool CFileMgr::IsDataExist(const char* fileName)
     }
 
 #if RO_PLATFORM_WINDOWS
-    if (GetFileAttributesA(fileName) != INVALID_FILE_ATTRIBUTES)
+    if (!ShouldReadDiskFirst(fileName) && FileExistsOnDiskPortable(fileName))
         return true;
 #else
-    if (FileExistsPortable(fileName))
+    if (!ShouldReadDiskFirst(fileName) && FileExistsOnDiskPortable(fileName))
         return true;
 #endif
 
@@ -193,6 +334,13 @@ bool CFileMgr::IsExist(const char* fileName)
 
 unsigned char* CFileMgr::GetData(const char* fileName, int* outSize)
 {
+    if (ShouldReadDiskFirst(fileName)) {
+        if (unsigned char* buf = ReadWholeFileOnDiskPortable(fileName, outSize)) {
+            LogDataSourceOnce(fileName, "disk", outSize ? *outSize : 0);
+            return buf;
+        }
+    }
+
     CHash key(fileName);
     for (auto& [memFile, pak] : m_pakList)
     {
@@ -207,36 +355,28 @@ unsigned char* CFileMgr::GetData(const char* fileName, int* outSize)
         if (pak->GetData(pack, buf))
         {
             buf[pack.m_size] = 0;
+            LogDataSourceOnce(fileName, "grf", static_cast<int>(pack.m_size));
             return buf;
         }
         delete[] buf;
     }
 
 #if RO_PLATFORM_WINDOWS
-    HANDLE hFile = CreateFileA(fileName, GENERIC_READ, FILE_SHARE_READ,
-                               nullptr, OPEN_EXISTING,
-                               FILE_ATTRIBUTE_NORMAL, nullptr);
-    if (hFile != INVALID_HANDLE_VALUE)
-    {
-        DWORD fileSize = GetFileSize(hFile, nullptr);
-        if (outSize) *outSize = (int)fileSize;
-
-        unsigned char* buf = new unsigned char[fileSize + 1];
-        if (buf)
-        {
-            DWORD bytesRead = 0;
-            ReadFile(hFile, buf, fileSize, &bytesRead, nullptr);
-            buf[fileSize] = 0;
-            CloseHandle(hFile);
+    if (!ShouldReadDiskFirst(fileName)) {
+        if (unsigned char* buf = ReadWholeFileOnDiskPortable(fileName, outSize)) {
+            LogDataSourceOnce(fileName, "disk", outSize ? *outSize : 0);
             return buf;
         }
-        CloseHandle(hFile);
     }
 #else
-    if (unsigned char* buf = ReadWholeFilePortable(fileName, outSize)) {
-        return buf;
+    if (!ShouldReadDiskFirst(fileName)) {
+        if (unsigned char* buf = ReadWholeFileOnDiskPortable(fileName, outSize)) {
+            LogDataSourceOnce(fileName, "disk", outSize ? *outSize : 0);
+            return buf;
+        }
     }
 #endif
+
     return nullptr;
 }
 

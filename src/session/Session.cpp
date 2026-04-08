@@ -65,6 +65,11 @@ constexpr const char* kPaletteTokenCreator = "\xC5\xA9\xB8\xAE\xBF\xA1\xC0\xCC\x
 constexpr const char* kPaletteTokenClown = "\xC5\xA9\xB6\xF3\xBF\xEE";
 constexpr const char* kPaletteTokenGypsy = "\xC1\xFD\xBD\xC3";
 constexpr const char* kPaletteTokenPecoPaladin = "\xC6\xE4\xC4\xDA\xC6\xC8\xB6\xF3";
+constexpr const char* kBodyTokenHighPriest = "\xC7\xCF\xC0\xCC\xC7\xC1\xB8\xAE";
+constexpr const char* kBodyTokenAssassinCross = "\xBE\xEE\xBD\xD8\xBD\xC5\xC5\xA9\xB7\xCE\xBD\xBA";
+constexpr const char* kBodyTokenClown = "\xC5\xAC\xB6\xF3\xBF\xEE";
+constexpr const char* kBodyTokenPecoLordKnight = "\xC6\xE4\xC4\xDA\xC6\xE4\xC4\xDA_\xB1\xE2\xBB\xE7_h";
+constexpr const char* kBodyTokenPecoPaladin = "\xC6\xE4\xC4\xDA\xC6\xC8\xB6\xF3\xB5\xF2";
 
 int ClampShortcutPageIndex(int page)
 {
@@ -380,103 +385,6 @@ bool TryGetLuaJobDisplayName(int job, int sex, std::string* outValue)
         return false;
     };
 
-    if (job == 4009) {
-        static bool s_loggedHighPriestProbe = false;
-        if (!s_loggedHighPriestProbe) {
-            s_loggedHighPriestProbe = true;
-
-            auto logStringByInteger = [&](const char* tableName) {
-                std::string value;
-                if (g_buabridge.GetGlobalTableStringByIntegerKey(tableName, job, &value)) {
-                    DbgLog("[Session] Probe %s[%d] string='%s'\n", tableName, job, value.c_str());
-                } else {
-                    DbgLog("[Session] Probe %s[%d] string failed: %s\n",
-                        tableName,
-                        job,
-                        g_buabridge.GetLastError().c_str());
-                }
-            };
-
-            auto logIntegerByInteger = [&](const char* tableName) {
-                int value = 0;
-                if (g_buabridge.GetGlobalTableIntegerByIntegerKey(tableName, job, &value)) {
-                    DbgLog("[Session] Probe %s[%d] integer=%d\n", tableName, job, value);
-                } else {
-                    DbgLog("[Session] Probe %s[%d] integer failed: %s\n",
-                        tableName,
-                        job,
-                        g_buabridge.GetLastError().c_str());
-                }
-            };
-
-            logStringByInteger("pcJobTbl2");
-            logIntegerByInteger("pcJobTbl2");
-            logStringByInteger("jobtbl");
-            logIntegerByInteger("jobtbl");
-            logStringByInteger(preferredGenderTable);
-            logStringByInteger("PCJobNameTable");
-            logStringByInteger("JobNameTable");
-            logIntegerByInteger("JobNameTable");
-
-            for (const char* tableName : kLegacyGenderTables) {
-                std::string value;
-                if (g_buabridge.GetGlobalTableNestedStringByIntegerKey(tableName, job, preferredGenderKey, &value)) {
-                    DbgLog("[Session] Probe %s[%d]['%s'] string='%s'\n",
-                        tableName,
-                        job,
-                        preferredGenderKey,
-                        value.c_str());
-                } else {
-                    DbgLog("[Session] Probe %s[%d]['%s'] string failed: %s\n",
-                        tableName,
-                        job,
-                        preferredGenderKey,
-                        g_buabridge.GetLastError().c_str());
-                }
-            }
-
-            if (const char* generatedName = LookupGeneratedJobName(job)) {
-                std::string jtKey = "JT_";
-                jtKey += generatedName;
-
-                auto logStringByKey = [&](const char* tableName, const char* keyName) {
-                    std::string value;
-                    if (g_buabridge.GetGlobalTableStringByStringKey(tableName, keyName, &value)) {
-                        DbgLog("[Session] Probe %s['%s'] string='%s'\n", tableName, keyName, value.c_str());
-                    } else {
-                        DbgLog("[Session] Probe %s['%s'] string failed: %s\n",
-                            tableName,
-                            keyName,
-                            g_buabridge.GetLastError().c_str());
-                    }
-                };
-
-                auto logIntegerByKey = [&](const char* tableName, const char* keyName) {
-                    int value = 0;
-                    if (g_buabridge.GetGlobalTableIntegerByStringKey(tableName, keyName, &value)) {
-                        DbgLog("[Session] Probe %s['%s'] integer=%d\n", tableName, keyName, value);
-                    } else {
-                        DbgLog("[Session] Probe %s['%s'] integer failed: %s\n",
-                            tableName,
-                            keyName,
-                            g_buabridge.GetLastError().c_str());
-                    }
-                };
-
-                logStringByKey("pcJobTbl2", jtKey.c_str());
-                logIntegerByKey("pcJobTbl2", jtKey.c_str());
-                logStringByKey("pcJobTbl2", generatedName);
-                logIntegerByKey("pcJobTbl2", generatedName);
-                logStringByKey(preferredGenderTable, jtKey.c_str());
-                logStringByKey("PCJobNameTable", jtKey.c_str());
-                logStringByKey("JobNameTable", jtKey.c_str());
-                logStringByKey(preferredGenderTable, generatedName);
-                logStringByKey("PCJobNameTable", generatedName);
-                logStringByKey("JobNameTable", generatedName);
-            }
-        }
-    }
-
     if (tryDisplayLookupsByInteger(job)) {
         return true;
     }
@@ -505,6 +413,249 @@ bool TryGetLuaJobDisplayName(int job, int sex, std::string* outValue)
     }
 
     return false;
+}
+
+std::string ResolvePlayerResourceJobToken(int job);
+std::string ResolvePlayerImfJobToken(int job);
+bool ResourceExistsLocalFirst(const char* resourcePath);
+
+const char* ResolveClassicTransExplicitBodyToken(int job)
+{
+    const int normalizedJob = (job > 3950) ? (job - 3950) : job;
+    switch (normalizedJob) {
+    case 58: return kPaletteTokenLordKnight;
+    case 59: return kBodyTokenHighPriest;
+    case 60: return kPaletteTokenHighWizard;
+    case 61: return kPaletteTokenWhitesmith;
+    case 62: return kPaletteTokenSniper;
+    case 63: return kBodyTokenAssassinCross;
+    case 64: return kBodyTokenPecoLordKnight;
+    case 65: return kPaletteTokenPaladin;
+    case 66: return kPaletteTokenChampion;
+    case 67: return kPaletteTokenProfessor;
+    case 68: return kPaletteTokenStalker;
+    case 69: return kPaletteTokenCreator;
+    case 70: return kBodyTokenClown;
+    case 71: return kPaletteTokenGypsy;
+    case 72: return kBodyTokenPecoPaladin;
+    default:
+        return nullptr;
+    }
+}
+
+void EnsureLuaJobIdentityScriptsLoaded()
+{
+    static const char* kIdentityScripts[] = {
+        "lua files\\admin\\pcidentity.lub",
+        "lua files\\admin\\pcjobname.lub",
+        "lua files\\datainfo\\pcjobnamegender.lub",
+        "lua files\\datainfo\\jobname.lub",
+        "lua files\\datainfo\\jobidentity.lub",
+    };
+
+    for (const char* scriptPath : kIdentityScripts) {
+        g_buabridge.LoadRagnarokScriptOnce(scriptPath);
+    }
+}
+
+void AppendUniqueString(std::vector<std::string>* values, const std::string& value)
+{
+    if (!values || value.empty()) {
+        return;
+    }
+
+    if (std::find(values->begin(), values->end(), value) == values->end()) {
+        values->push_back(value);
+    }
+}
+
+bool TryNormalizeLuaJobSymbol(const std::string& candidate, std::string* outValue)
+{
+    if (!outValue || candidate.empty()) {
+        return false;
+    }
+
+    if (candidate.rfind("JT_", 0) == 0) {
+        *outValue = candidate;
+        return true;
+    }
+
+    bool sawLetter = false;
+    for (char ch : candidate) {
+        const unsigned char uch = static_cast<unsigned char>(ch);
+        if (uch >= 'A' && uch <= 'Z') {
+            sawLetter = true;
+            continue;
+        }
+        if ((uch >= '0' && uch <= '9') || ch == '_') {
+            continue;
+        }
+        return false;
+    }
+
+    if (!sawLetter) {
+        return false;
+    }
+
+    *outValue = "JT_" + candidate;
+    return true;
+}
+
+std::vector<std::string> CollectLuaJobSymbolCandidates(int job)
+{
+    EnsureLuaJobIdentityScriptsLoaded();
+
+    std::vector<std::string> candidates;
+
+    auto addCandidate = [&](const std::string& rawValue) {
+        std::string normalized;
+        if (TryNormalizeLuaJobSymbol(rawValue, &normalized)) {
+            AppendUniqueString(&candidates, normalized);
+        }
+    };
+
+    if (const char* generatedName = LookupGeneratedJobName(job)) {
+        addCandidate(generatedName);
+        addCandidate(std::string("JT_") + generatedName);
+    }
+
+    return candidates;
+}
+
+bool LooksLikeLuaIdentityToken(const std::string& value)
+{
+    return !value.empty() && value.rfind("JT_", 0) != 0;
+}
+
+bool TryGetLuaPlayerIdentityToken(int job, std::string* outValue)
+{
+    if (!outValue) {
+        return false;
+    }
+
+    outValue->clear();
+    EnsureLuaJobIdentityScriptsLoaded();
+
+    bool traceLookup = false;
+    switch (job) {
+    case 4009: {
+        static bool logged = false;
+        if (!logged) {
+            logged = true;
+            traceLookup = true;
+        }
+        break;
+    }
+    case 4013: {
+        static bool logged = false;
+        if (!logged) {
+            logged = true;
+            traceLookup = true;
+        }
+        break;
+    }
+    default:
+        break;
+    }
+
+    const std::vector<std::string> keyCandidates = CollectLuaJobSymbolCandidates(job);
+    std::string candidate;
+
+    if (traceLookup) {
+        DbgLog("[Session] JobIdentity lookup start job=%d generated='%s' candidateCount=%u\n",
+            job,
+            LookupGeneratedJobName(job) ? LookupGeneratedJobName(job) : "",
+            static_cast<unsigned int>(keyCandidates.size()));
+    }
+
+    auto acceptCandidate = [&](const std::string& value) {
+        if (!LooksLikeLuaIdentityToken(value)) {
+            if (traceLookup) {
+                DbgLog("[Session] JobIdentity invalid token job=%d value='%s'\n",
+                    job,
+                    value.c_str());
+            }
+            return false;
+        }
+        *outValue = value;
+        if (traceLookup) {
+            DbgLog("[Session] JobIdentity accepted job=%d value='%s'\n",
+                job,
+                value.c_str());
+        }
+        return true;
+    };
+
+    for (const std::string& keyCandidate : keyCandidates) {
+        if (g_buabridge.GetGlobalTableStringByStringKey("JobIdentity", keyCandidate.c_str(), &candidate)) {
+            if (traceLookup) {
+                DbgLog("[Session] JobIdentity['%s'] job=%d -> '%s'\n",
+                    keyCandidate.c_str(),
+                    job,
+                    candidate.c_str());
+            }
+            if (acceptCandidate(candidate)) {
+                return true;
+            }
+            continue;
+        }
+
+        if (traceLookup) {
+            DbgLog("[Session] JobIdentity['%s'] job=%d lookup failed error='%s'\n",
+                keyCandidate.c_str(),
+                job,
+                g_buabridge.GetLastError().c_str());
+        }
+    }
+
+    if (traceLookup) {
+        DbgLog("[Session] JobIdentity lookup no match job=%d\n", job);
+    }
+
+    return false;
+}
+
+std::vector<std::string> BuildPlayerBodyJobTokenCandidates(int job)
+{
+    std::vector<std::string> candidates;
+    if (const char* explicitToken = ResolveClassicTransExplicitBodyToken(job)) {
+        AppendUniqueString(&candidates, explicitToken);
+    }
+    AppendUniqueString(&candidates, ResolvePlayerResourceJobToken(job));
+    return candidates;
+}
+
+std::vector<std::string> BuildPlayerImfJobTokenCandidates(int job)
+{
+    std::vector<std::string> candidates;
+    AppendUniqueString(&candidates, ResolvePlayerImfJobToken(job));
+    return candidates;
+}
+
+bool HasPlayerBodyResourcePairForToken(const std::string& jobToken, int sex)
+{
+    if (jobToken.empty()) {
+        return false;
+    }
+
+    const char* sexToken = GetSexToken(sex);
+    char actPath[260] = {};
+    char sprPath[260] = {};
+    std::sprintf(actPath, "%s%s\\%s\\%s_%s.act", kHumanSpriteRoot, kBodyDir, sexToken, jobToken.c_str(), sexToken);
+    std::sprintf(sprPath, "%s%s\\%s\\%s_%s.spr", kHumanSpriteRoot, kBodyDir, sexToken, jobToken.c_str(), sexToken);
+    return ResourceExistsLocalFirst(actPath) && ResourceExistsLocalFirst(sprPath);
+}
+
+std::string ResolveExistingPlayerBodyJobToken(int job, int sex)
+{
+    const std::vector<std::string> candidates = BuildPlayerBodyJobTokenCandidates(job);
+    for (const std::string& candidate : candidates) {
+        if (HasPlayerBodyResourcePairForToken(candidate, sex)) {
+            return candidate;
+        }
+    }
+
+    return ResolvePlayerResourceJobToken(job);
 }
 
 std::string ResolvePlayerResourceJobToken(int job)
@@ -823,11 +974,6 @@ bool ResourceExistsLocalFirst(const char* resourcePath)
         return false;
     }
 
-    std::error_code error;
-    if (std::filesystem::exists(std::filesystem::path(resourcePath), error) && !error) {
-        return true;
-    }
-
     return g_fileMgr.IsExist(resourcePath);
 }
 
@@ -909,10 +1055,14 @@ char* BuildPlayerBodyResourceName(const CSession& session,
 {
     const int normalizedJob = NormalizePlayerBodyJob(job);
     const char* sexToken = GetSexToken(sex);
-    const std::string jobToken = ResolvePlayerResourceJobToken(job);
+    const std::vector<std::string> jobTokens = BuildPlayerBodyJobTokenCandidates(job);
+    std::string fallbackToken = ResolvePlayerResourceJobToken(job);
+    if (!jobTokens.empty()) {
+        fallbackToken = jobTokens.back();
+    }
 
-    char basePath[260] = {};
-    std::sprintf(basePath, "%s%s\\%s\\%s_%s.%s", kHumanSpriteRoot, kBodyDir, sexToken, jobToken.c_str(), sexToken, extension);
+    char fallbackPath[260] = {};
+    std::sprintf(fallbackPath, "%s%s\\%s\\%s_%s.%s", kHumanSpriteRoot, kBodyDir, sexToken, fallbackToken.c_str(), sexToken, extension);
 
     auto hasMatchingBodyResourcePair = [&](const char* candidatePath) {
         if (!candidatePath || !*candidatePath || !ResourceExistsLocalFirst(candidatePath)) {
@@ -932,33 +1082,43 @@ char* BuildPlayerBodyResourceName(const CSession& session,
     };
 
     const int weaponType = ResolvePlayerBodyWeaponType(session, normalizedJob, weaponItemId);
-    if (weaponType > 0) {
-        char candidate[260] = {};
-        std::sprintf(candidate, "%s%s\\%s\\%s_%s_%d.%s", kHumanSpriteRoot, kBodyDir, sexToken, jobToken.c_str(), sexToken, weaponType, extension);
-        if (hasMatchingBodyResourcePair(candidate)) {
-            std::strcpy(buf, candidate);
+    for (const std::string& jobToken : jobTokens) {
+        char basePath[260] = {};
+        std::sprintf(basePath, "%s%s\\%s\\%s_%s.%s", kHumanSpriteRoot, kBodyDir, sexToken, jobToken.c_str(), sexToken, extension);
+
+        if (weaponType > 0) {
+            char candidate[260] = {};
+            std::sprintf(candidate, "%s%s\\%s\\%s_%s_%d.%s", kHumanSpriteRoot, kBodyDir, sexToken, jobToken.c_str(), sexToken, weaponType, extension);
+            if (hasMatchingBodyResourcePair(candidate)) {
+                std::strcpy(buf, candidate);
+                return buf;
+            }
+
+            const std::string weaponTokenFromLua = session.GetPlayerWeaponToken(weaponType);
+            if (!weaponTokenFromLua.empty()) {
+                std::sprintf(candidate, "%s%s\\%s\\%s_%s_%s.%s", kHumanSpriteRoot, kBodyDir, sexToken, jobToken.c_str(), sexToken, weaponTokenFromLua.c_str(), extension);
+                if (hasMatchingBodyResourcePair(candidate)) {
+                    std::strcpy(buf, candidate);
+                    return buf;
+                }
+            }
+
+            if (const char* weaponToken = GetPlayerBodyWeaponToken(weaponType)) {
+                std::sprintf(candidate, "%s%s\\%s\\%s_%s_%s.%s", kHumanSpriteRoot, kBodyDir, sexToken, jobToken.c_str(), sexToken, weaponToken, extension);
+                if (hasMatchingBodyResourcePair(candidate)) {
+                    std::strcpy(buf, candidate);
+                    return buf;
+                }
+            }
+        }
+
+        if (hasMatchingBodyResourcePair(basePath)) {
+            std::strcpy(buf, basePath);
             return buf;
-        }
-
-        const std::string weaponTokenFromLua = session.GetPlayerWeaponToken(weaponType);
-        if (!weaponTokenFromLua.empty()) {
-            std::sprintf(candidate, "%s%s\\%s\\%s_%s_%s.%s", kHumanSpriteRoot, kBodyDir, sexToken, jobToken.c_str(), sexToken, weaponTokenFromLua.c_str(), extension);
-            if (hasMatchingBodyResourcePair(candidate)) {
-                std::strcpy(buf, candidate);
-                return buf;
-            }
-        }
-
-        if (const char* weaponToken = GetPlayerBodyWeaponToken(weaponType)) {
-            std::sprintf(candidate, "%s%s\\%s\\%s_%s_%s.%s", kHumanSpriteRoot, kBodyDir, sexToken, jobToken.c_str(), sexToken, weaponToken, extension);
-            if (hasMatchingBodyResourcePair(candidate)) {
-                std::strcpy(buf, candidate);
-                return buf;
-            }
         }
     }
 
-    std::strcpy(buf, basePath);
+    std::strcpy(buf, fallbackPath);
     return buf;
 }
 
@@ -1767,6 +1927,8 @@ const char* CSession::GetJobDisplayName(int job) const
         return "JT_G_MASTER";
     }
 
+    const std::lock_guard<std::mutex> lock(m_jobDisplayNameMutex);
+
     const auto cached = m_jobDisplayNameCache.find(job);
     if (cached != m_jobDisplayNameCache.end()) {
         return cached->second.c_str();
@@ -1870,7 +2032,7 @@ int CSession::GetSex() const
 char* CSession::GetJobActName(int job, int sex, char* buf)
 {
     const char* sexToken = GetSexToken(sex);
-    const std::string jobToken = ResolvePlayerResourceJobToken(job);
+    const std::string jobToken = ResolveExistingPlayerBodyJobToken(job, sex);
     std::sprintf(buf, "%s%s\\%s\\%s_%s.act", kHumanSpriteRoot, kBodyDir, sexToken, jobToken.c_str(), sexToken);
     return buf;
 }
@@ -1878,7 +2040,7 @@ char* CSession::GetJobActName(int job, int sex, char* buf)
 char* CSession::GetJobSprName(int job, int sex, char* buf)
 {
     const char* sexToken = GetSexToken(sex);
-    const std::string jobToken = ResolvePlayerResourceJobToken(job);
+    const std::string jobToken = ResolveExistingPlayerBodyJobToken(job, sex);
     std::sprintf(buf, "%s%s\\%s\\%s_%s.spr", kHumanSpriteRoot, kBodyDir, sexToken, jobToken.c_str(), sexToken);
     return buf;
 }
@@ -2028,8 +2190,32 @@ char* CSession::GetImfName(int job, int head, int sex, char* buf)
     (void)head;
     const char* sexToken = GetSexToken(sex);
 
-    const std::string imfToken = ResolvePlayerImfJobToken(job);
-    std::sprintf(buf, "%s%s_%s.imf", kImfRoot, imfToken.c_str(), sexToken);
+    const std::string resolvedBodyToken = ResolveExistingPlayerBodyJobToken(job, sex);
+    if (!resolvedBodyToken.empty()) {
+        std::sprintf(buf, "%s%s_%s.imf", kImfRoot, resolvedBodyToken.c_str(), sexToken);
+        if (ResourceExistsLocalFirst(buf)) {
+            return buf;
+        }
+    }
+
+    const std::string fallbackImfToken = ResolvePlayerImfJobToken(job);
+    std::sprintf(buf, "%s%s_%s.imf", kImfRoot, fallbackImfToken.c_str(), sexToken);
+    if (ResourceExistsLocalFirst(buf)) {
+        return buf;
+    }
+
+    const std::vector<std::string> imfTokens = BuildPlayerImfJobTokenCandidates(job);
+    for (const std::string& imfToken : imfTokens) {
+        if (imfToken == resolvedBodyToken || imfToken == fallbackImfToken) {
+            continue;
+        }
+        std::sprintf(buf, "%s%s_%s.imf", kImfRoot, imfToken.c_str(), sexToken);
+        if (ResourceExistsLocalFirst(buf)) {
+            return buf;
+        }
+    }
+
+    std::sprintf(buf, "%s%s_%s.imf", kImfRoot, fallbackImfToken.c_str(), sexToken);
     return buf;
 }
 

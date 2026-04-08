@@ -57,6 +57,16 @@ bool PathEndsWithInsensitive(const std::string& path, const char* suffix)
 	return _stricmp(path.c_str() + (path.size() - suffixLength), suffix) == 0;
 }
 
+const char* GetReturnedTableBindingName(const std::string& path)
+{
+	if (PathEndsWithInsensitive(path, "lua files\\datainfo\\jobidentity.lub")
+		|| PathEndsWithInsensitive(path, "lua files\\datainfo\\jobidentity_f.lub")) {
+		return "JobIdentity";
+	}
+
+	return nullptr;
+}
+
 bool IsAccessoryNameTableScript(const std::string& path)
 {
 	return PathEndsWithInsensitive(path, "lua files\\datainfo\\accname.lub")
@@ -684,6 +694,8 @@ CLuaBridge::~CLuaBridge()
 
 bool CLuaBridge::Initialize()
 {
+	const std::lock_guard<std::recursive_mutex> lock(m_mutex);
+
 	if (m_state) {
 		return true;
 	}
@@ -703,6 +715,8 @@ bool CLuaBridge::Initialize()
 
 void CLuaBridge::Shutdown()
 {
+	const std::lock_guard<std::recursive_mutex> lock(m_mutex);
+
 	if (m_state) {
 		lua_close(m_state);
 		m_state = nullptr;
@@ -715,6 +729,7 @@ void CLuaBridge::Shutdown()
 
 bool CLuaBridge::IsInitialized() const
 {
+	const std::lock_guard<std::recursive_mutex> lock(m_mutex);
 	return m_state != nullptr;
 }
 
@@ -813,7 +828,7 @@ bool CLuaBridge::ReadRagnarokScriptBytes(const char* relativePath,
 	return false;
 }
 
-bool CLuaBridge::ExecuteBuffer(const unsigned char* bytes, size_t size, const char* chunkName)
+bool CLuaBridge::ExecuteBuffer(const unsigned char* bytes, size_t size, const char* chunkName, const char* returnedTableGlobalName)
 {
 	if (!Initialize()) {
 		return false;
@@ -845,6 +860,28 @@ bool CLuaBridge::ExecuteBuffer(const unsigned char* bytes, size_t size, const ch
 		return false;
 	}
 
+	if (returnedTableGlobalName && *returnedTableGlobalName) {
+		lua_getglobal(m_state, returnedTableGlobalName);
+		const bool alreadyBound = lua_istable(m_state, -1);
+		lua_pop(m_state, 1);
+
+		if (!alreadyBound) {
+			const int resultCount = lua_gettop(m_state);
+			for (int index = 1; index <= resultCount; ++index) {
+				if (!lua_istable(m_state, index)) {
+					continue;
+				}
+
+				lua_pushvalue(m_state, index);
+				lua_setglobal(m_state, returnedTableGlobalName);
+				DbgLog("[Lua] Bound returned table to global '%s' after executing '%s'.\n",
+					returnedTableGlobalName,
+					chunkName ? chunkName : "(buffer)");
+				break;
+			}
+		}
+	}
+
 	lua_settop(m_state, 0);
 	m_lastError.clear();
 	return true;
@@ -852,13 +889,24 @@ bool CLuaBridge::ExecuteBuffer(const unsigned char* bytes, size_t size, const ch
 
 bool CLuaBridge::LoadRagnarokScript(const char* relativePath)
 {
+	const std::lock_guard<std::recursive_mutex> lock(m_mutex);
+
 	const std::string normalized = NormalizePath(relativePath);
+	if (!Initialize()) {
+		return false;
+	}
+
 	if (IsAccessoryNameTableScript(normalized)) {
 		LoadRagnarokScriptOnce("lua files\\datainfo\\accessoryid.lub");
 	}
 
 	if (PathEndsWithInsensitive(normalized, "lua files\\datainfo\\jobname.lub")
 		|| PathEndsWithInsensitive(normalized, "lua files\\datainfo\\jobname_f.lub")
+		|| PathEndsWithInsensitive(normalized, "lua files\\datainfo\\jobidentity.lub")
+		|| PathEndsWithInsensitive(normalized, "lua files\\datainfo\\jobidentity_f.lub")
+		|| PathEndsWithInsensitive(normalized, "lua files\\datainfo\\npcidentity.lub")
+		|| PathEndsWithInsensitive(normalized, "lua files\\datainfo\\npcidentity_f.lub")
+		|| PathEndsWithInsensitive(normalized, "lua files\\admin\\pcidentity.lub")
 		|| PathEndsWithInsensitive(normalized, "lua files\\admin\\pcjobname.lub")
 		|| PathEndsWithInsensitive(normalized, "lua files\\datainfo\\pcjobnamegender.lub")
 		|| PathEndsWithInsensitive(normalized, "lua files\\datainfo\\pcjobnamegender_f.lub")) {
@@ -888,12 +936,21 @@ bool CLuaBridge::LoadRagnarokScript(const char* relativePath)
 	if (PathEndsWithInsensitive(normalized, "lua files\\datainfo\\jobname.lub")
 		|| PathEndsWithInsensitive(normalized, "lua files\\datainfo\\jobname_f.lub")
 		|| PathEndsWithInsensitive(normalized, "lua files\\admin\\pcjobname.lub")
+		|| PathEndsWithInsensitive(normalized, "lua files\\datainfo\\jobidentity.lub")
+		|| PathEndsWithInsensitive(normalized, "lua files\\datainfo\\jobidentity_f.lub")
+		|| PathEndsWithInsensitive(normalized, "lua files\\datainfo\\npcidentity.lub")
+		|| PathEndsWithInsensitive(normalized, "lua files\\datainfo\\npcidentity_f.lub")
+		|| PathEndsWithInsensitive(normalized, "lua files\\admin\\pcidentity.lub")
 		|| PathEndsWithInsensitive(normalized, "lua files\\datainfo\\pcjobnamegender.lub")
 		|| PathEndsWithInsensitive(normalized, "lua files\\datainfo\\pcjobnamegender_f.lub")) {
 		PopulateJobEnumCompatibilityGlobals(m_state, bytes);
 	}
 
-	const bool executed = ExecuteBuffer(bytes.data(), bytes.size(), sourcePath.c_str());
+	const bool executed = ExecuteBuffer(
+		bytes.data(),
+		bytes.size(),
+		sourcePath.c_str(),
+		GetReturnedTableBindingName(normalized));
 	if (executed) {
 		DbgLog("[Lua] Loaded %s script: %s\n", loadedFromLocal ? "local" : "fallback", sourcePath.c_str());
 	}
@@ -902,6 +959,8 @@ bool CLuaBridge::LoadRagnarokScript(const char* relativePath)
 
 bool CLuaBridge::LoadRagnarokScriptOnce(const char* relativePath)
 {
+	const std::lock_guard<std::recursive_mutex> lock(m_mutex);
+
 	const std::string normalized = NormalizePath(relativePath);
 	if (normalized.empty()) {
 		m_lastError = "empty Lua path";
@@ -922,12 +981,16 @@ bool CLuaBridge::LoadRagnarokScriptOnce(const char* relativePath)
 
 bool CLuaBridge::HasLoadedScript(const char* relativePath) const
 {
+	const std::lock_guard<std::recursive_mutex> lock(m_mutex);
+
 	const std::string normalized = NormalizePath(relativePath);
 	return std::find(m_loadedScripts.begin(), m_loadedScripts.end(), normalized) != m_loadedScripts.end();
 }
 
 bool CLuaBridge::GetGlobalTableIntegerByIntegerKey(const char* tableName, int numericKey, int* outValue)
 {
+	const std::lock_guard<std::recursive_mutex> lock(m_mutex);
+
 	if (!outValue) {
 		return false;
 	}
@@ -964,6 +1027,8 @@ bool CLuaBridge::GetGlobalTableIntegerByIntegerKey(const char* tableName, int nu
 
 bool CLuaBridge::GetGlobalTableIntegerByStringKey(const char* tableName, const char* stringKey, int* outValue)
 {
+	const std::lock_guard<std::recursive_mutex> lock(m_mutex);
+
 	if (!outValue) {
 		return false;
 	}
@@ -1007,6 +1072,8 @@ bool CLuaBridge::GetGlobalTableNestedStringByIntegerKey(const char* tableName,
 	const char* nestedStringKey,
 	std::string* outValue)
 {
+	const std::lock_guard<std::recursive_mutex> lock(m_mutex);
+
 	if (!outValue) {
 		return false;
 	}
@@ -1062,6 +1129,8 @@ bool CLuaBridge::GetGlobalTableNestedStringByIntegerKey(const char* tableName,
 
 bool CLuaBridge::GetGlobalTableStringByIntegerKey(const char* tableName, int numericKey, std::string* outValue)
 {
+	const std::lock_guard<std::recursive_mutex> lock(m_mutex);
+
 	if (!outValue) {
 		return false;
 	}
@@ -1105,6 +1174,8 @@ bool CLuaBridge::GetGlobalTableStringByIntegerKey(const char* tableName, int num
 
 bool CLuaBridge::GetGlobalTableStringByStringKey(const char* tableName, const char* stringKey, std::string* outValue)
 {
+	const std::lock_guard<std::recursive_mutex> lock(m_mutex);
+
 	if (!outValue) {
 		return false;
 	}

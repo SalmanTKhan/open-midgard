@@ -1,5 +1,6 @@
 ﻿#pragma once
 
+#include <mutex>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -52,9 +53,10 @@ private:
         std::vector<unsigned char>* outBytes,
         std::string* outSourcePath,
         bool* outLoadedFromLocal) const;
-    bool ExecuteBuffer(const unsigned char* bytes, size_t size, const char* chunkName);
+    bool ExecuteBuffer(const unsigned char* bytes, size_t size, const char* chunkName, const char* returnedTableGlobalName = nullptr);
 
     lua_State* m_state;
+    mutable std::recursive_mutex m_mutex;
     std::vector<std::string> m_loadedScripts;
     std::unordered_map<int, LuaSkillEffectInfo> m_skillEffectInfoCache;
     std::unordered_set<int> m_missingSkillEffectInfoIds;

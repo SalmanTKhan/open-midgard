@@ -5,6 +5,7 @@
 #include "render/DC.h"
 
 #include <array>
+#include <mutex>
 #include <string>
 #include "platform/WindowsCompat.h"
 
@@ -155,6 +156,7 @@ private:
     int m_selectedSlot;
     int m_page;
     std::array<PreviewState, 3> m_visiblePreviews;
+    mutable std::mutex m_previewMutex;
     DWORD m_lastAnimTick;
     int m_animAction;
 };
