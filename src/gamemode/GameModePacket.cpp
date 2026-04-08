@@ -3385,6 +3385,7 @@ void StopActorMovementForAction(CGameActor* actor)
 }
 
 CGameActor* EnsureRuntimeActor(CGameMode& mode, u32 gid, bool preferPc);
+bool IsLikelyPlayerGid(u32 gid);
 
 CGameActor* ResolveCombatActor(CGameMode& mode, u32 actorId, bool preferPc)
 {
@@ -5197,7 +5198,10 @@ void LogActorPacketSeenOnce(const PacketView& packet)
 void ApplyRuntimeActorState(CGameMode& mode, const RuntimeActorState& state)
 {
     const bool isPc = ShouldTreatActorAsPc(state.objectType, state.job);
-    CGameActor* actor = EnsureRuntimeActor(mode, state.gid, ShouldUseSpriteBillboardActor(state.objectType, state.job));
+    CGameActor* actor = EnsureRuntimeActor(
+        mode,
+        state.gid,
+        isPc || ShouldUseSpriteBillboardActor(state.objectType, state.job));
     if (!actor) {
         return;
     }
@@ -6659,11 +6663,10 @@ void HandleActorMoveUpdate(CGameMode& mode, const PacketView& packet)
     int sx = 0, sy = 0, dx = 0, dy = 0, cellX = 0, cellY = 0;
     DecodePos2MoveData(packet.data + 6, sx, sy, dx, dy, cellX, cellY);
 
-    const bool likelyPlayer = IsLikelyPlayerGid(gid);
-
     // eAthena uses 0x0086 for any visible walking object. Keep a billboard-capable
     // shell for move-only actors, but only seed player appearance when the id falls
     // inside the account-id range used for PCs.
+    const bool likelyPlayer = IsLikelyPlayerGid(gid);
     CGameActor* actor = EnsureRuntimeActor(mode, gid, true);
     static u32 s_loggedMoveUpdateCount = 0;
     if (s_loggedMoveUpdateCount < 24) {

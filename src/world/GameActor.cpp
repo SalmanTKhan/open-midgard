@@ -4230,9 +4230,13 @@ u8 CGameActor::ProcessState() {
         if (m_isMotionFinished || elapsedMs >= kHitReactionDurationMs) {
             m_pos.x = m_moveEndPos.x;
             m_pos.z = m_moveEndPos.z;
-            m_stateId = 0;
             m_targetGid = 0;
             m_attackMotion = -1.0f;
+            if (m_willBeDead != 0 && m_willBeAttackedList.empty()) {
+                SetState(kDeathStateId);
+            } else {
+                SetState(0);
+            }
         }
         break;
     }
@@ -4249,6 +4253,12 @@ void CGameActor::SendMsg(CGameObject* src, int msg, msgparam_t par1, msgparam_t 
 {
     switch (msg) {
     case 28:
+        if (m_stateId != kDeathStateId
+            && m_isPc == 0
+            && (m_stateId == kHitReactionStateId || !m_willBeAttackedList.empty())) {
+            m_willBeDead = 1;
+            return;
+        }
         SetState(kDeathStateId);
         return;
     case 109:
@@ -5116,6 +5126,12 @@ CPc::~CPc()
 
 void CPc::SetState(int state)
 {
+    if (m_isPc == 0) {
+        CGameActor::SetState(state);
+        InvalidateBillboard();
+        return;
+    }
+
     const int previousState = m_stateId;
     if (previousState == kDeathStateId || m_isTrickDead || state == -1) {
         return;
@@ -5172,6 +5188,11 @@ void CPc::SetState(int state)
 
 void CPc::SetModifyFactorOfmotionSpeed(int attackMT)
 {
+    if (m_isPc == 0) {
+        CGameActor::SetModifyFactorOfmotionSpeed(attackMT);
+        return;
+    }
+
     if (attackMT <= 0) {
         attackMT = 1440;
     }
