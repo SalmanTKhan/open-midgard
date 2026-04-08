@@ -1310,5 +1310,7 @@ void UIMakeCharWnd::OnKeyDown(int virtualKey)
         SendMsg(nullptr, 6, 118, 0, 0);
     } else if (virtualKey == VK_ESCAPE) {
         SendMsg(nullptr, 6, 119, 0, 0);
+    } else if(m_nameEditCtrl->m_hasFocus) {
+        m_nameEditCtrl->OnKeyDown(virtualKey);
     }
 }
