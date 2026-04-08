@@ -9,6 +9,7 @@
 
 // Forward declarations
 class CGameObject;
+class CGameActor;
 class CRagEffect;
 class CMsgEffect;
 class UIBalloonText;
@@ -82,6 +83,7 @@ public:
     CGameObject() {}
     virtual ~CGameObject() {}
     virtual u8   OnProcess() { return 1; }
+    virtual void OnActorDeleted(const CGameActor* actor) {}
     virtual void SendMsg(CGameObject* src, int msg, msgparam_t par1, msgparam_t par2, msgparam_t par3) {}
     virtual void Render(matrix* m) {}
     virtual int  Get8Dir(float rot);
@@ -179,6 +181,7 @@ public:
 
     CRagEffect* LaunchEffect(int effectId, vector3d deltaPos = vector3d{ 0.0f, 0.0f, 0.0f }, float fRot = 0.0f);
     void DetachEffects();
+    void RemoveEffectById(int effectId);
 
     int m_efId;
     int m_Sk_Level;
@@ -233,6 +236,7 @@ public:
     int m_isSitting;
     float m_damageDestX, m_damageDestZ;
     u32 m_effectLaunchCnt, m_vanishTime;
+    u32 m_hideFadeStartTick, m_hideFadeEndTick;
     int m_actorType, m_bIsMemberAndVisible, m_gdid, m_emblemVersion;
     void* m_homunAI; // CMercenaryAI
     void* m_merAI;   // CMercenaryAI
@@ -255,6 +259,10 @@ public:
     virtual int GetAttackMotion();
     virtual void RegisterPos();
     virtual void UnRegisterPos();
+    void StartHideFade(u32 durationMs);
+    void CancelHideFade();
+    bool IsHideFadeActive(u32 now) const;
+    u32 GetHideFadeAlpha(u32 now) const;
     void QueueWillBeAttacked(const WBA& hitInfo);
     void DeleteMatchingEffect(CMsgEffect* effect);
     void DeleteTotalNumber(int kind);
@@ -268,6 +276,7 @@ public:
     ~CMsgEffect() override;
 
     u8 OnProcess() override;
+    void OnActorDeleted(const CGameActor* actor) override;
     void SendMsg(CGameObject* sender, int msg, msgparam_t par1, msgparam_t par2, msgparam_t par3) override;
     void Render(matrix* viewMatrix) override;
 

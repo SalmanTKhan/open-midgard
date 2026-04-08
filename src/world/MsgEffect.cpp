@@ -515,6 +515,16 @@ CMsgEffect::~CMsgEffect()
     }
 }
 
+void CMsgEffect::OnActorDeleted(const CGameActor* actor)
+{
+    if (!actor || m_masterActor != actor) {
+        return;
+    }
+
+    m_masterActor = nullptr;
+    m_removedFromOwner = 1;
+}
+
 u8 CMsgEffect::OnProcess()
 {
     if (m_isDisappear) {

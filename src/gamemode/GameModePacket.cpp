@@ -118,10 +118,122 @@ constexpr int kEffectStateHidingMask = 0x0004;
 constexpr int kEffectStateSpecialHidingMask = 0x0040;
 constexpr int kEffectStateBurrowMask = 0x0002;
 constexpr int kSightStateEffectId = 601;
+constexpr int kHideStartEffectId = 159;
+constexpr u32 kHideFadeDurationMs = 180;
+constexpr u16 kSkillIdHiding = 51;
+constexpr u16 kSkillIdCloaking = 135;
+constexpr u32 kPendingLocalHideSkillWindowMs = 1200;
+
+struct PendingLocalHideSkillRequest {
+    int mask = 0;
+    bool expectedActive = false;
+    u32 requestTick = 0;
+};
+
+PendingLocalHideSkillRequest g_pendingLocalHideSkillRequest;
+
+int ResolveHideSkillEffectStateMask(u16 skillId)
+{
+    switch (skillId) {
+    case kSkillIdHiding:
+        return kEffectStateHidingMask;
+    case kSkillIdCloaking:
+        return kEffectStateSpecialHidingMask;
+    default:
+        return 0;
+    }
+}
+
+bool IsLocalActorId(u32 actorId)
+{
+    if (actorId == 0) {
+        return false;
+    }
+    if (actorId == g_session.m_gid || actorId == g_session.m_aid) {
+        return true;
+    }
+
+    CGameMode* gameMode = g_modeMgr.GetCurrentGameMode();
+    return gameMode && gameMode->m_world && gameMode->m_world->m_player && gameMode->m_world->m_player->m_gid == actorId;
+}
+
+bool IsPendingLocalHideSkillRequestActive(u32 now)
+{
+    return g_pendingLocalHideSkillRequest.mask != 0
+        && g_pendingLocalHideSkillRequest.requestTick != 0
+        && now - g_pendingLocalHideSkillRequest.requestTick <= kPendingLocalHideSkillWindowMs;
+}
+
+void RefreshActorEffectStatePresentation(CGameActor* actor, int oldEffectState);
+
+void ClearPendingLocalHideSkillRequest()
+{
+    g_pendingLocalHideSkillRequest = {};
+}
+
+void ApplyPendingLocalHideSkillFallback(CGameActor* actor, u16 skillId)
+{
+    if (!actor) {
+        return;
+    }
+
+    const u32 now = timeGetTime();
+    if (!IsPendingLocalHideSkillRequestActive(now)) {
+        ClearPendingLocalHideSkillRequest();
+        return;
+    }
+
+    const int mask = ResolveHideSkillEffectStateMask(skillId);
+    if (mask == 0 || g_pendingLocalHideSkillRequest.mask != mask) {
+        return;
+    }
+
+    const bool isActive = (actor->m_effectState & mask) != 0;
+    if (isActive == g_pendingLocalHideSkillRequest.expectedActive) {
+        ClearPendingLocalHideSkillRequest();
+        return;
+    }
+
+    const int oldEffectState = actor->m_effectState;
+    if (g_pendingLocalHideSkillRequest.expectedActive) {
+        actor->m_effectState |= mask;
+        if (mask == kEffectStateHidingMask) {
+            actor->m_effectState &= ~kEffectStateSpecialHidingMask;
+        } else if (mask == kEffectStateSpecialHidingMask) {
+            actor->m_effectState &= ~kEffectStateHidingMask;
+        }
+    } else {
+        actor->m_effectState &= ~mask;
+    }
+
+    RefreshActorEffectStatePresentation(actor, oldEffectState);
+    DbgLog("[GameMode] synthesized local hide state skill=%u old=%d new=%d mask=0x%X\n",
+        static_cast<unsigned int>(skillId),
+        oldEffectState,
+        actor->m_effectState,
+        static_cast<unsigned int>(mask));
+    ClearPendingLocalHideSkillRequest();
+}
 
 bool HasEffectStateFlag(int effectState, int mask)
 {
     return (effectState & mask) != 0;
+}
+
+void RecordLocalHideSkillRequest(u16 skillId, u32 targetGid)
+{
+    const int mask = ResolveHideSkillEffectStateMask(skillId);
+    if (mask == 0 || !IsLocalActorId(targetGid)) {
+        return;
+    }
+
+    CGameMode* gameMode = g_modeMgr.GetCurrentGameMode();
+    CGameActor* actor = gameMode && gameMode->m_world ? gameMode->m_world->m_player : nullptr;
+    const bool currentlyActive = actor && (actor->m_effectState & mask) != 0;
+
+    g_pendingLocalHideSkillRequest.mask = mask;
+    g_pendingLocalHideSkillRequest.expectedActive = !currentlyActive;
+    g_pendingLocalHideSkillRequest.requestTick = timeGetTime();
 }
 
 bool ActorHasAttachedEffect(const CGameActor* actor, int effectId)
@@ -145,15 +257,30 @@ void RefreshActorEffectStatePresentation(CGameActor* actor, int oldEffectState)
     }
 
     const int effectState = actor->m_effectState;
+    const bool oldHiding = HasEffectStateFlag(oldEffectState, kEffectStateHidingMask);
+    const bool oldSpecialHiding = HasEffectStateFlag(oldEffectState, kEffectStateSpecialHidingMask);
     const bool hiding = HasEffectStateFlag(effectState, kEffectStateHidingMask);
     const bool specialHiding = HasEffectStateFlag(effectState, kEffectStateSpecialHidingMask);
     const bool burrow = HasEffectStateFlag(effectState, kEffectStateBurrowMask);
     const bool bodyVisible = !(hiding || specialHiding || burrow);
     const bool fullyVisible = !(hiding || specialHiding);
+    const bool enteredHidden = (!oldHiding && hiding) || (!oldSpecialHiding && specialHiding);
+    const bool exitedHidden = (oldHiding && !hiding) || (oldSpecialHiding && !specialHiding);
 
-    actor->m_isVisibleBody = bodyVisible ? 1 : 0;
-    actor->m_isVisible = fullyVisible ? 1 : 0;
-    actor->m_shadowOn = bodyVisible ? 1 : 0;
+    if (enteredHidden) {
+        actor->SendMsg(actor, 109, kHideStartEffectId, 0, 0);
+        actor->LaunchEffect(kHideStartEffectId, vector3d{}, 0.0f);
+        actor->StartHideFade(kHideFadeDurationMs);
+    } else if (exitedHidden) {
+        actor->CancelHideFade();
+        actor->SendMsg(actor, 109, kHideStartEffectId, 0, 0);
+    }
+
+    if (!actor->IsHideFadeActive(timeGetTime())) {
+        actor->m_isVisibleBody = bodyVisible ? 1 : 0;
+        actor->m_isVisible = fullyVisible ? 1 : 0;
+        actor->m_shadowOn = bodyVisible ? 1 : 0;
+    }
 
     if (HasEffectStateFlag(effectState, kEffectStateSightMask) && !ActorHasAttachedEffect(actor, kSightStateEffectId)) {
         actor->LaunchEffect(kSightStateEffectId, vector3d{}, 0.0f);
@@ -174,12 +301,15 @@ constexpr u32 kNotifyEffectBaseLevelUpSuperNovice = 7;
 constexpr u32 kNotifyEffectJobLevelUpSuperNovice = 8;
 constexpr u32 kNotifyEffectBaseLevelUpTaekwon = 9;
 constexpr u16 kSkillIdHeal = 28;
+constexpr u16 kSkillIdGrimtooth = 137;
 constexpr u32 kEffectIdRecoveryHp = 331;
 constexpr u32 kEffectIdRecoverySp = 332;
 constexpr u32 kEffectIdHealSmall = 7;
 constexpr u32 kEffectIdHealMedium = 312;
 constexpr u32 kEffectIdHealLarge = 313;
 constexpr u32 kEffectIdHealHuge = 325;
+constexpr u32 kEffectIdGrimtooth = 123;
+constexpr u32 kEffectIdGrimtoothImpact = 132;
 constexpr int kRecoveryNumberKind = 114;
 constexpr u32 kRecoveryHpNumberColor = 0xFF00FF00u;
 constexpr u32 kRecoverySpNumberColor = 0xFF0000FFu;
@@ -198,6 +328,7 @@ struct RemoteMoveApplyTrace {
 };
 
 std::map<u32, RemoteMoveApplyTrace> g_remoteMoveApplyTraceByGid;
+std::map<u32, u32> g_lastGrimtoothSourcePresentationTickByGid;
 
 u16 ReadLE16(const u8* data);
 u32 ReadLE32(const u8* data);
@@ -206,7 +337,8 @@ float TileToWorldCoordZ(const CWorld* world, int tileY);
 float ResolveActorHeight(const CWorld* world, float worldX, float worldZ);
 float PacketDirToRotationDegrees(int dir);
 bool ApplySelfStatusUpdate(CGameMode& mode, u32 statusType, u32 value);
-void ClearAttachedSkillEffects(CGameActor* actor);
+void ClearAttachedSkillEffects(CGameActor* actor, int preserveBeginEffectId = -1);
+void StartSkillSourceAnimation(CGameActor* actor, const vector3d* targetPos, int attackMotionMs);
 
 int ResolveHealVisualEffectId(u32 amount)
 {
@@ -2131,7 +2263,11 @@ void HandleNotifyTime(CGameMode& mode, const PacketView& packet)
         | (static_cast<u32>(packet.data[3]) << 8)
         | (static_cast<u32>(packet.data[4]) << 16)
         | (static_cast<u32>(packet.data[5]) << 24);
-    g_session.SetServerTime(serverTick);
+    if (mode.m_numNotifyTime != 0) {
+        g_session.UpdateServerTime(serverTick);
+    } else {
+        g_session.SetServerTime(serverTick);
+    }
     mode.m_receiveSyneRequestTime = static_cast<int>(timeGetTime());
     ++mode.m_numNotifyTime;
 }
@@ -2608,6 +2744,9 @@ void PrepareSameMapWarpReuse(CGameMode& mode)
             continue;
         }
 
+        if (mode.m_world) {
+            mode.m_world->NotifyActorDeleted(actor);
+        }
         actor->UnRegisterPos();
         delete actor;
         it = mode.m_runtimeActors.erase(it);
@@ -2834,6 +2973,107 @@ int ResolveCombatHitWaveWeaponType(const CGameActor& sourceActor)
     return (weaponType > 0 && weaponType < 31) ? weaponType : -1;
 }
 
+bool IsRangedProjectileWeaponType(int weaponType)
+{
+    return weaponType == 11 || weaponType == 13 || weaponType == 14;
+}
+
+bool IsRefArrowMonsterJob(int job)
+{
+    switch (job) {
+    case 1016:
+    case 1189:
+    case 1253:
+    case 1258:
+    case 1271:
+    case 1282:
+    case 1285:
+    case 1410:
+    case 1412:
+    case 1420:
+    case 1453:
+    case 1455:
+    case 1473:
+    case 1495:
+    case 1498:
+    case 1500:
+    case 1531:
+    case 1550:
+    case 1555:
+    case 1664:
+    case 1665:
+    case 1666:
+    case 1667:
+    case 1688:
+    case 1865:
+        return true;
+    default:
+        break;
+    }
+
+    return job >= 6017 && job <= 6026;
+}
+
+bool ShouldSpawnAttackProjectile(const CGameActor& sourceActor)
+{
+    if (sourceActor.m_isPc != 0) {
+        return IsRangedProjectileWeaponType(ResolveCombatHitWaveWeaponType(sourceActor));
+    }
+
+    return IsRefArrowMonsterJob(sourceActor.m_job);
+}
+
+float ResolveAttackProjectileTravelFrames(const CGameActor& sourceActor)
+{
+    (void)sourceActor;
+    return 8.0f;
+}
+
+float ResolveRefProjectileTravelFrames(const vector3d& startPos, const vector3d& targetPos)
+{
+    const float dx = targetPos.x - startPos.x;
+    const float dy = targetPos.y - startPos.y;
+    const float dz = targetPos.z - startPos.z;
+    const float distance = std::sqrt(dx * dx + dy * dy + dz * dz);
+    return (std::max)(1.0f, (std::min)(8.0f, distance * 0.2f));
+}
+
+float ResolveAttackProjectileDelayFrames(const CGameActor& sourceActor,
+    const vector3d& startPos,
+    const vector3d& targetPos)
+{
+    const float impactFrames = static_cast<float>(ResolveAttackImpactDelayMs(sourceActor)) / 24.0f;
+    const float travelFrames = ResolveRefProjectileTravelFrames(startPos, targetPos);
+    return (std::max)(0.0f, impactFrames - travelFrames);
+}
+
+void SpawnAttackProjectile(CGameMode& mode, CGameActor* sourceActor, CGameActor* targetActor)
+{
+    if (!mode.m_world || !sourceActor || !targetActor || !ShouldSpawnAttackProjectile(*sourceActor)) {
+        return;
+    }
+
+    const float travelFrames = ResolveRefProjectileTravelFrames(sourceActor->m_pos, targetActor->m_pos);
+    const float delayFrames = ResolveAttackProjectileDelayFrames(*sourceActor, sourceActor->m_pos, targetActor->m_pos);
+    const float impactFrames = static_cast<float>(ResolveAttackImpactDelayMs(*sourceActor)) / 24.0f;
+    DbgLog("[Projectile] queue attack src=%u dst=%u srcJob=%d dstJob=%d srcPc=%d visual=arrow impact=%.2f travel=%.2f delay=%.2f\n",
+        static_cast<unsigned int>(sourceActor->m_gid),
+        static_cast<unsigned int>(targetActor->m_gid),
+        sourceActor->m_job,
+        targetActor->m_job,
+        sourceActor->m_isPc,
+        impactFrames,
+        travelFrames,
+        delayFrames);
+
+    mode.m_world->SpawnProjectileEffect(sourceActor->m_pos,
+        targetActor->m_pos,
+        targetActor->m_gid,
+        WorldProjectileVisual::Arrow,
+        travelFrames,
+        delayFrames);
+}
+
 void EmitCombatNumber(CGameActor* sourceActor, CGameActor* targetActor, int damage, u8 actionType)
 {
     if (!targetActor || damage == 0 || actionType == kNotifyActLuckyDodge) {
@@ -3007,6 +3247,9 @@ void EmitSkillImpactEffect(CGameActor* targetActor, u16 skillId)
     switch (skillId) {
     case 17: // MG_FIREBOLT
         targetActor->LaunchEffect(49, vector3d{}, 0.0f);
+        break;
+    case kSkillIdGrimtooth:
+        targetActor->LaunchEffect(static_cast<int>(kEffectIdGrimtoothImpact), vector3d{}, 0.0f);
         break;
     default:
         break;
@@ -3422,10 +3665,6 @@ void HandleActorActionNotify(CGameMode& mode, const PacketView& packet)
         return;
     }
 
-    if (serverTick != 0) {
-        g_session.SetServerTime(serverTick);
-    }
-
     CGameActor* sourceActor = ResolveCombatActor(mode, srcGid, true);
     CGameActor* targetActor = (dstGid != 0 && IsAttackNotifyType(actionType))
         ? ResolveCombatActor(mode, dstGid, true)
@@ -3466,6 +3705,7 @@ void HandleActorActionNotify(CGameMode& mode, const PacketView& packet)
     }
 
     StartAttackAnimation(sourceActor, targetActor, attackMT);
+    SpawnAttackProjectile(mode, sourceActor, targetActor);
     DbgLog("[GameMode] act notify stage=started src=%u action=%d motionSpeed=%.3f atkMotion=%.1f\n",
         srcGid,
         sourceActor->m_curAction,
@@ -3703,13 +3943,13 @@ void InvalidateActorBillboard(CGameActor* actor)
     }
 }
 
-void ClearAttachedSkillEffects(CGameActor* actor)
+void ClearAttachedSkillEffects(CGameActor* actor, int preserveBeginEffectId)
 {
     if (!actor) {
         return;
     }
 
-    if (actor->m_beginSpellEffect) {
+    if (actor->m_beginSpellEffect && actor->m_beginSpellEffect->GetEffectType() != preserveBeginEffectId) {
         actor->m_beginSpellEffect->DetachFromMaster();
         actor->m_beginSpellEffect = nullptr;
     }
@@ -3717,6 +3957,57 @@ void ClearAttachedSkillEffects(CGameActor* actor)
         actor->m_magicTargetEffect->DetachFromMaster();
         actor->m_magicTargetEffect = nullptr;
     }
+}
+
+bool ShouldReplayGrimtoothSourcePresentation(u32 srcGid)
+{
+    if (srcGid == 0) {
+        return true;
+    }
+
+    const u32 now = timeGetTime();
+    u32& lastTick = g_lastGrimtoothSourcePresentationTickByGid[srcGid];
+    if (lastTick != 0 && now - lastTick <= 120) {
+        return false;
+    }
+
+    lastTick = now;
+    return true;
+}
+
+void StartDirectedSkillBeginEffect(CGameActor* actor, int effectId, const vector3d& targetPos)
+{
+    if (!actor || effectId <= 0) {
+        return;
+    }
+
+    if (effectId == static_cast<int>(kEffectIdGrimtooth)) {
+        DbgLog("[Projectile] queue grimtooth src=%u effect=%d visual=effect target=(%.2f,%.2f,%.2f)\n",
+            static_cast<unsigned int>(actor->m_gid),
+            effectId,
+            targetPos.x,
+            targetPos.y,
+            targetPos.z);
+    }
+
+    actor->SendMsg(actor, 85, effectId, 0, 0);
+    if (actor->m_beginSpellEffect && actor->m_beginSpellEffect->GetEffectType() == effectId) {
+        actor->m_beginSpellEffect->SendMsg(actor->m_beginSpellEffect,
+            14,
+            reinterpret_cast<msgparam_t>(&targetPos),
+            0,
+            0);
+    }
+}
+
+void MaybeStartGrimtoothSourcePresentation(CGameActor* sourceActor, u32 srcGid, const vector3d& targetPos)
+{
+    if (!sourceActor || !ShouldReplayGrimtoothSourcePresentation(srcGid)) {
+        return;
+    }
+
+    StartSkillSourceAnimation(sourceActor, &targetPos, kDefaultAttackMotionTime);
+    StartDirectedSkillBeginEffect(sourceActor, static_cast<int>(kEffectIdGrimtooth), targetPos);
 }
 
 void StartSkillSourceAnimation(CGameActor* actor, const vector3d* targetPos, int attackMotionMs)
@@ -4134,6 +4425,8 @@ void HandleSkillCastAck(CGameMode& mode, const PacketView& packet)
             effect->SendMsg(effect, 44, castLevel > 0 ? castLevel : 1, 0, 0);
             effect->SendMsg(effect, 14, reinterpret_cast<msgparam_t>(&targetActor->m_pos), 0, 0);
         }
+    } else if (skillId == kSkillIdGrimtooth) {
+        MaybeStartGrimtoothSourcePresentation(sourceActor, srcGid, targetPos);
     }
 
     DbgLog("[GameMode] skill cast ack src=%u dst=%u skill=%u property=%u castMs=%d cell=(%d,%d)\n",
@@ -4177,8 +4470,30 @@ void HandleSkillDamageNotify(CGameMode& mode, const PacketView& packet)
         return;
     }
 
-    ClearAttachedSkillEffects(sourceActor);
-    StartSkillSourceAnimation(sourceActor, &targetActor->m_pos, attackMT);
+    ClearAttachedSkillEffects(sourceActor,
+        skillId == kSkillIdGrimtooth ? static_cast<int>(kEffectIdGrimtooth) : -1);
+    if (skillId == kSkillIdGrimtooth) {
+        DbgLog("[Projectile] grimtooth damage packet opcode=0x%04X src=%u dst=%u level=%u div=%u damage=%d type=%u\n",
+            packet.packetId,
+            srcGid,
+            dstGid,
+            static_cast<unsigned int>(level),
+            static_cast<unsigned int>(div),
+            damage,
+            static_cast<unsigned int>(actionType));
+        MaybeStartGrimtoothSourcePresentation(sourceActor, srcGid, targetActor->m_pos);
+        if (damage == -30000) {
+            DbgLog("[GameMode] grimtooth sentinel suppressed opcode=0x%04X src=%u dst=%u level=%u div=%u\n",
+                packet.packetId,
+                srcGid,
+                dstGid,
+                static_cast<unsigned int>(level),
+                static_cast<unsigned int>(div));
+            return;
+        }
+    } else {
+        StartSkillSourceAnimation(sourceActor, &targetActor->m_pos, attackMT);
+    }
     QueueCombatHitReaction(sourceActor, targetActor, attackedMT, damage, actionType);
     EmitSkillImpactEffects(targetActor, skillId, displayHitCount);
     if (skillId == kSkillIdHeal && damage > 0) {
@@ -4224,8 +4539,31 @@ void HandleSkillDamagePositionNotify(CGameMode& mode, const PacketView& packet)
     const vector3d impactPos = ResolveSkillCellWorldPosition(mode.m_world, cellX, cellY);
 
     if (sourceActor) {
-        ClearAttachedSkillEffects(sourceActor);
-        StartSkillSourceAnimation(sourceActor, &impactPos, attackMT);
+        ClearAttachedSkillEffects(sourceActor,
+            skillId == kSkillIdGrimtooth ? static_cast<int>(kEffectIdGrimtooth) : -1);
+        if (skillId == kSkillIdGrimtooth) {
+            DbgLog("[Projectile] grimtooth pos packet src=%u dst=%u level=%u div=%u damage=%d cell=(%d,%d)\n",
+                srcGid,
+                dstGid,
+                static_cast<unsigned int>(level),
+                static_cast<unsigned int>(div),
+                damage,
+                cellX,
+                cellY);
+            MaybeStartGrimtoothSourcePresentation(sourceActor, srcGid, impactPos);
+        } else {
+            StartSkillSourceAnimation(sourceActor, &impactPos, attackMT);
+        }
+    }
+    if (skillId == kSkillIdGrimtooth && damage == -30000) {
+        DbgLog("[GameMode] grimtooth sentinel suppressed pos src=%u dst=%u level=%u div=%u cell=(%d,%d)\n",
+            srcGid,
+            dstGid,
+            static_cast<unsigned int>(level),
+            static_cast<unsigned int>(div),
+            cellX,
+            cellY);
+        return;
     }
     if (targetActor) {
         QueueCombatHitReaction(sourceActor, targetActor, attackedMT, damage, actionType);
@@ -4320,6 +4658,14 @@ void HandleSkillNoDamageNotify(CGameMode& mode, const PacketView& packet)
                 0,
                 0);
         }
+    }
+
+    if (result != 0
+        && targetActor
+        && sourceActor == targetActor
+        && IsLocalActorId(srcGid)
+        && IsLocalActorId(dstGid)) {
+        ApplyPendingLocalHideSkillFallback(targetActor, skillId);
     }
 
     DbgLog("[GameMode] skill nodamage src=%u dst=%u skill=%u value=%u result=%u\n",
@@ -5496,6 +5842,12 @@ void HandleActorStateChange(CGameMode& mode, const PacketView& packet)
     actor->m_effectState = effectState;
     actor->m_pkState = pkState;
     RefreshActorEffectStatePresentation(actor, oldEffectState);
+
+    if (IsLocalActorId(gid)
+        && IsPendingLocalHideSkillRequestActive(timeGetTime())
+        && HasEffectStateFlag(actor->m_effectState, g_pendingLocalHideSkillRequest.mask) == g_pendingLocalHideSkillRequest.expectedActive) {
+        ClearPendingLocalHideSkillRequest();
+    }
 }
 
 CGameActor* EnsureRuntimeActor(CGameMode& mode, u32 gid, bool preferPc)
@@ -5788,6 +6140,9 @@ void RemoveRuntimeActor(CGameMode& mode, u32 gid)
     }
 
     if (it->second) {
+        if (mode.m_world) {
+            mode.m_world->NotifyActorDeleted(it->second);
+        }
         it->second->UnRegisterPos();
         delete it->second;
     }
@@ -6962,4 +7317,9 @@ void RegisterDefaultGameModePacketHandlers(CGameModePacketRouter& router)
     router.Register(0x0856, HandleActorMoveSkeleton);
     router.Register(0x0857, HandleActorSpawnSkeleton);
     router.Register(0x0858, HandleActorSpawnSkeleton);
+}
+
+void NoteLocalHideSkillRequest(u16 skillId, u32 targetGid)
+{
+    RecordLocalHideSkillRequest(skillId, targetGid);
 }

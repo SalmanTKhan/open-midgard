@@ -182,6 +182,9 @@ private:
         HealLight,
         HealMedium,
         HealLarge,
+        HideStart,
+        GrimTooth,
+        GrimToothAtk,
         IncAgility,
         Blessing,
         Sight,
@@ -222,6 +225,9 @@ private:
     void SpawnHealLight();
     void SpawnHealMedium();
     void SpawnHealLarge();
+    void SpawnHideStart();
+    void SpawnGrimTooth();
+    void SpawnGrimToothAtk();
     void SpawnIncAgility();
     void SpawnBlessing();
     void SpawnSight();
@@ -250,6 +256,8 @@ private:
     vector3d m_cachedPos;
     vector3d m_deltaPos;
     vector3d m_targetPos;
+    vector3d m_grimToothStep;
+    vector3d m_grimToothRemaining;
     float m_param[4];
     float m_emitSpeed;
     float m_longitude;

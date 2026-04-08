@@ -21,6 +21,11 @@ class CTexture;
 class CGndRes;
 class C3dWorldRes;
 
+enum class WorldProjectileVisual {
+    Arrow,
+    Stone,
+};
+
 struct CLMInfo {
     u8 idata[8][8];
     u8 sdata[8][8][3];
@@ -240,6 +245,7 @@ public:
     void ClearGround();
     void ClearBackgroundObjects();
     void ClearFixedObjects();
+    void NotifyActorDeleted(const CGameActor* actor);
     void ResetSceneGraph();
     void RebuildSceneGraph();
     void InvalidateBillboardFrameCache();
@@ -318,6 +324,12 @@ public:
         CItem** outItem,
         int* outLabelX,
         int* outLabelY) const;
+    void SpawnProjectileEffect(const vector3d& startPos,
+        const vector3d& targetPos,
+        u32 targetGid,
+        WorldProjectileVisual visual,
+        float travelFrames,
+        float delayFrames = 0.0f);
     bool HasWarpAtAttrCell(int attrX, int attrY) const;
     void RenderBackgroundObjects(const matrix& viewMatrix) const;
 };

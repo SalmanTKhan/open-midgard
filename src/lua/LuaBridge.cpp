@@ -28,6 +28,10 @@ extern "C" {
 
 namespace {
 
+constexpr bool kLogLuaSyntheticGlobals = false;
+
+#define LOG_LUA_SYNTHETIC_GLOBAL(...) do { if constexpr (kLogLuaSyntheticGlobals) { DbgLog(__VA_ARGS__); } } while (0)
+
 std::string NormalizeSlashPath(std::string path)
 {
 	std::replace(path.begin(), path.end(), '/', '\\');
@@ -377,6 +381,7 @@ void PopulateJobEnumCompatibilityGlobals(lua_State* state, const std::vector<uns
 	}
 
 	std::unordered_set<std::string> seenTokens;
+	int synthesizedCount = 0;
 	std::string token;
 	auto flushToken = [&]() {
 		if (token.empty()) {
@@ -391,9 +396,10 @@ void PopulateJobEnumCompatibilityGlobals(lua_State* state, const std::vector<uns
 					value = AllocateSyntheticLuaTableValue("JT_ENUM", token.c_str());
 				}
 				if (value != 0) {
+					++synthesizedCount;
 					SetLuaGlobalInteger(state, token.c_str(), value);
 					SetJobTblEntry(state, token.c_str(), value);
-					DbgLog("[Lua] Synthesizing missing global %s=%d before loading job-name data.\n",
+					LOG_LUA_SYNTHETIC_GLOBAL("[Lua] Synthesizing missing global %s=%d before loading job-name data.\n",
 						token.c_str(),
 						value);
 				}
@@ -417,6 +423,10 @@ void PopulateJobEnumCompatibilityGlobals(lua_State* state, const std::vector<uns
 		}
 	}
 	flushToken();
+
+	if (synthesizedCount > 0) {
+		DbgLog("[Lua] Synthesized %d missing JT_* globals before loading job-name data.\n", synthesizedCount);
+	}
 }
 
 void PrepareGeneratedJobEnumCompatibility(lua_State* state)

@@ -29,6 +29,7 @@
 #include <chrono>
 #include <cstdlib>
 #include <unordered_map>
+#include <unordered_set>
 #include <string>
 #include <vector>
 
@@ -70,6 +71,10 @@ void EnsureQtUiResourcesInitialized()
 }
 
 namespace {
+
+constexpr bool kLogQtUiStatusIcon = false;
+
+#define LOG_QTUI_STATUS_ICON(...) do { if constexpr (kLogQtUiStatusIcon) { DbgLog(__VA_ARGS__); } } while (0)
 
 #if !RO_PLATFORM_WINDOWS
 constexpr RoWindowMessage WM_MOUSEMOVE = 0x0200u;
@@ -469,7 +474,7 @@ std::string ResolveQtStatusIconPath(int statusType)
 {
     const qtui::StatusIconCatalogEntry* const entry = qtui::FindStatusIconCatalogEntry(statusType);
     if (!entry || !entry->legacyIconFileName || !entry->legacyIconFileName[0]) {
-        DbgLog("[QtUiStatusIcon] no legacy filename mapped for statusType=%d label='%s'\n",
+        LOG_QTUI_STATUS_ICON("[QtUiStatusIcon] no legacy filename mapped for statusType=%d label='%s'\n",
             statusType,
             GetStatusIconDebugLabel(statusType));
         return std::string();
@@ -485,21 +490,14 @@ std::string ResolveQtStatusIconPath(int statusType)
 
     for (const std::string& candidate : candidates) {
         if (g_fileMgr.IsDataExist(candidate.c_str())) {
-            DbgLog("[QtUiStatusIcon] resolved statusType=%d label='%s' path='%s'\n",
-                statusType,
-                GetStatusIconDebugLabel(statusType),
-                candidate.c_str());
             return candidate;
         }
     }
 
-    DbgLog("[QtUiStatusIcon] missing statusType=%d label='%s' filename='%s'\n",
+    LOG_QTUI_STATUS_ICON("[QtUiStatusIcon] missing statusType=%d label='%s' filename='%s'\n",
         statusType,
         GetStatusIconDebugLabel(statusType),
         entry->legacyIconFileName);
-    for (const std::string& candidate : candidates) {
-        DbgLog("[QtUiStatusIcon]   tried '%s'\n", candidate.c_str());
-    }
 
     return std::string();
 }
@@ -511,45 +509,44 @@ bool TryBuildStatusIconImage(int statusType, QImage* outImage)
     }
 
     static std::unordered_map<int, QImage> s_statusIconCache;
+    static std::unordered_set<int> s_statusIconFailures;
     const auto cached = s_statusIconCache.find(statusType);
     if (cached != s_statusIconCache.end()) {
         *outImage = cached->second;
         return !outImage->isNull();
     }
+    if (s_statusIconFailures.find(statusType) != s_statusIconFailures.end()) {
+        return false;
+    }
 
     const std::string path = ResolveQtStatusIconPath(statusType);
     if (path.empty()) {
-        DbgLog("[QtUiStatusIcon] request failed: no path for statusType=%d label='%s'\n",
-            statusType,
-            GetStatusIconDebugLabel(statusType));
+        s_statusIconFailures.insert(statusType);
         return false;
     }
 
     QImage decodedImage;
     if (!TryBuildGameImageWithBitmapRes(path, true, &decodedImage)) {
-        DbgLog("[QtUiStatusIcon] decode failed: statusType=%d label='%s' path='%s'\n",
+        LOG_QTUI_STATUS_ICON("[QtUiStatusIcon] decode failed: statusType=%d label='%s' path='%s'\n",
             statusType,
             GetStatusIconDebugLabel(statusType),
             path.c_str());
+        s_statusIconFailures.insert(statusType);
         return false;
     }
 
     *outImage = decodedImage;
-    if (!outImage->isNull()) {
-        s_statusIconCache[statusType] = *outImage;
-        DbgLog("[QtUiStatusIcon] loaded statusType=%d label='%s' path='%s' size=%dx%d\n",
-            statusType,
-            GetStatusIconDebugLabel(statusType),
-            path.c_str(),
-            outImage->width(),
-            outImage->height());
-    } else {
-        DbgLog("[QtUiStatusIcon] Qt copy failed: statusType=%d label='%s' path='%s'\n",
+    if (outImage->isNull()) {
+        LOG_QTUI_STATUS_ICON("[QtUiStatusIcon] Qt copy failed: statusType=%d label='%s' path='%s'\n",
             statusType,
             GetStatusIconDebugLabel(statusType),
             path.c_str());
+        s_statusIconFailures.insert(statusType);
+        return false;
     }
-    return !outImage->isNull();
+
+    s_statusIconCache[statusType] = *outImage;
+    return true;
 }
 
 enum class MenuPointerCaptureTarget {

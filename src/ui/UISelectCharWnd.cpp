@@ -62,6 +62,9 @@ constexpr int kSelectCharChargeX = 314;
 constexpr int kSelectCharChargeW = 85;
 constexpr char kSelectCharSection[] = "SelectChar";
 constexpr char kCurSlotValue[] = "CurrentSlot";
+constexpr bool kLogSelectChar = false;
+
+#define LOG_SELECT_CHAR(...) do { if constexpr (kLogSelectChar) { DbgLog(__VA_ARGS__); } } while (0)
 
 shopui::BitmapPixels LoadBitmapPixelsFromGameData(const char* path)
 {
@@ -635,7 +638,7 @@ UISelectCharWnd::UISelectCharWnd()
 {
     m_defPushId = 118;
     m_defCancelPushId = 119;
-    DbgLog("[SelectChar] ctor this=%p selectedSlot=%d page=%d\n", this, m_selectedSlot, m_page);
+    LOG_SELECT_CHAR("[SelectChar] ctor this=%p selectedSlot=%d page=%d\n", this, m_selectedSlot, m_page);
 }
 
 UISelectCharWnd::~UISelectCharWnd()
@@ -646,7 +649,7 @@ UISelectCharWnd::~UISelectCharWnd()
 
 void UISelectCharWnd::EnsureQtLayout()
 {
-    DbgLog("[SelectChar] EnsureQtLayout this=%p show=%d\n", this, m_show);
+    LOG_SELECT_CHAR("[SelectChar] EnsureQtLayout this=%p show=%d\n", this, m_show);
     if (!g_hMainWnd) {
         return;
     }
@@ -661,7 +664,7 @@ void UISelectCharWnd::EnsureQtLayout()
 
 bool UISelectCharWnd::GetQtBackgroundBitmap(const unsigned int** pixels, int* width, int* height)
 {
-    DbgLog("[SelectChar] GetQtBackgroundBitmap this=%p\n", this);
+    LOG_SELECT_CHAR("[SelectChar] GetQtBackgroundBitmap this=%p\n", this);
     if (!pixels || !width || !height) {
         return false;
     }
@@ -672,7 +675,7 @@ bool UISelectCharWnd::GetQtBackgroundBitmap(const unsigned int** pixels, int* wi
 
     EnsureResourceCache();
     if (!m_backgroundBmp.IsValid() || m_backgroundBmp.pixels.empty()) {
-        DbgLog("[SelectChar] GetQtBackgroundBitmap missing background valid=%d pixels=%zu\n",
+        LOG_SELECT_CHAR("[SelectChar] GetQtBackgroundBitmap missing background valid=%d pixels=%zu\n",
             m_backgroundBmp.IsValid() ? 1 : 0,
             m_backgroundBmp.pixels.size());
         return false;
@@ -681,7 +684,7 @@ bool UISelectCharWnd::GetQtBackgroundBitmap(const unsigned int** pixels, int* wi
     *pixels = m_backgroundBmp.pixels.data();
     *width = m_backgroundBmp.width;
     *height = m_backgroundBmp.height;
-    DbgLog("[SelectChar] GetQtBackgroundBitmap ready width=%d height=%d path='%s'\n",
+    LOG_SELECT_CHAR("[SelectChar] GetQtBackgroundBitmap ready width=%d height=%d path='%s'\n",
         *width,
         *height,
         m_backgroundPath.c_str());
@@ -716,7 +719,7 @@ int UISelectCharWnd::GetCurrentPageCount() const
 
 bool UISelectCharWnd::GetVisibleSlotDisplay(int visibleIndex, VisibleSlotDisplay* out) const
 {
-    DbgLog("[SelectChar] GetVisibleSlotDisplay this=%p visibleIndex=%d selectedSlot=%d page=%d\n",
+    LOG_SELECT_CHAR("[SelectChar] GetVisibleSlotDisplay this=%p visibleIndex=%d selectedSlot=%d page=%d\n",
         this,
         visibleIndex,
         m_selectedSlot,
@@ -737,7 +740,7 @@ bool UISelectCharWnd::GetVisibleSlotDisplay(int visibleIndex, VisibleSlotDisplay
     const int charIndex = FindCharacterIndexForSlot(slotNumber);
     CHARACTER_INFO* chars = GetCharacters();
     if (charIndex < 0 || !chars) {
-        DbgLog("[SelectChar] GetVisibleSlotDisplay empty slot=%d charIndex=%d chars=%p\n",
+        LOG_SELECT_CHAR("[SelectChar] GetVisibleSlotDisplay empty slot=%d charIndex=%d chars=%p\n",
             slotNumber,
             charIndex,
             chars);
@@ -751,7 +754,7 @@ bool UISelectCharWnd::GetVisibleSlotDisplay(int visibleIndex, VisibleSlotDisplay
     out->name = nameBuf;
     out->job = ResolveJobName(info.job);
     out->level = info.level;
-    DbgLog("[SelectChar] GetVisibleSlotDisplay filled slot=%d charIndex=%d job=%d name='%s' jobName='%s' level=%d\n",
+    LOG_SELECT_CHAR("[SelectChar] GetVisibleSlotDisplay filled slot=%d charIndex=%d job=%d name='%s' jobName='%s' level=%d\n",
         slotNumber,
         charIndex,
         static_cast<int>(info.job),
@@ -763,7 +766,7 @@ bool UISelectCharWnd::GetVisibleSlotDisplay(int visibleIndex, VisibleSlotDisplay
 
 bool UISelectCharWnd::GetSelectedCharacterDisplay(SelectedCharacterDisplay* out) const
 {
-    DbgLog("[SelectChar] GetSelectedCharacterDisplay this=%p selectedSlot=%d page=%d\n",
+    LOG_SELECT_CHAR("[SelectChar] GetSelectedCharacterDisplay this=%p selectedSlot=%d page=%d\n",
         this,
         m_selectedSlot,
         m_page);
@@ -775,7 +778,7 @@ bool UISelectCharWnd::GetSelectedCharacterDisplay(SelectedCharacterDisplay* out)
     CHARACTER_INFO* chars = GetCharacters();
     const int selectedIndex = FindCharacterIndexForSlot(m_selectedSlot);
     if (selectedIndex < 0 || !chars) {
-        DbgLog("[SelectChar] GetSelectedCharacterDisplay empty selectedIndex=%d chars=%p\n",
+        LOG_SELECT_CHAR("[SelectChar] GetSelectedCharacterDisplay empty selectedIndex=%d chars=%p\n",
             selectedIndex,
             chars);
         return true;
@@ -797,7 +800,7 @@ bool UISelectCharWnd::GetSelectedCharacterDisplay(SelectedCharacterDisplay* out)
     out->intStat = info.Int;
     out->dex = info.Dex;
     out->luk = info.Luk;
-    DbgLog("[SelectChar] GetSelectedCharacterDisplay filled index=%d slot=%d job=%d name='%s' jobName='%s'\n",
+    LOG_SELECT_CHAR("[SelectChar] GetSelectedCharacterDisplay filled index=%d slot=%d job=%d name='%s' jobName='%s'\n",
         selectedIndex,
         m_selectedSlot,
         static_cast<int>(info.job),
@@ -1073,7 +1076,7 @@ bool UISelectCharWnd::EnsureComposeSurface(int width, int height)
 
 void UISelectCharWnd::EnsureResourceCache()
 {
-    DbgLog("[SelectChar] EnsureResourceCache this=%p assetsProbed=%d\n", this, m_assetsProbed ? 1 : 0);
+    LOG_SELECT_CHAR("[SelectChar] EnsureResourceCache this=%p assetsProbed=%d\n", this, m_assetsProbed ? 1 : 0);
     if (m_assetsProbed) {
         return;
     }
@@ -1089,7 +1092,7 @@ void UISelectCharWnd::EnsureResourceCache()
 
     for (int i = 0; panelNames[i] && !m_backgroundBmp.IsValid(); ++i) {
         m_backgroundBmp = LoadFirstBitmapPixelsFromCandidates(BuildUiAssetCandidates(panelNames[i]), &m_backgroundPath);
-        DbgLog("[SelectChar] EnsureResourceCache panel candidate='%s' valid=%d path='%s'\n",
+        LOG_SELECT_CHAR("[SelectChar] EnsureResourceCache panel candidate='%s' valid=%d path='%s'\n",
             panelNames[i],
             m_backgroundBmp.IsValid() ? 1 : 0,
             m_backgroundPath.c_str());
@@ -1104,12 +1107,12 @@ void UISelectCharWnd::EnsureResourceCache()
     };
     for (int i = 0; selSlotBmpNames[i] && !m_slotSelectedBmp.IsValid(); ++i) {
         m_slotSelectedBmp = LoadFirstBitmapPixelsFromCandidates(BuildUiAssetCandidates(selSlotBmpNames[i]), nullptr);
-        DbgLog("[SelectChar] EnsureResourceCache selected-slot candidate='%s' valid=%d\n",
+        LOG_SELECT_CHAR("[SelectChar] EnsureResourceCache selected-slot candidate='%s' valid=%d\n",
             selSlotBmpNames[i],
             m_slotSelectedBmp.IsValid() ? 1 : 0);
     }
 
-    DbgLog("[SelectChar] EnsureResourceCache finished backgroundValid=%d selectedSlotValid=%d\n",
+    LOG_SELECT_CHAR("[SelectChar] EnsureResourceCache finished backgroundValid=%d selectedSlotValid=%d\n",
         m_backgroundBmp.IsValid() ? 1 : 0,
         m_slotSelectedBmp.IsValid() ? 1 : 0);
 }
@@ -1188,19 +1191,19 @@ void UISelectCharWnd::UpdateActionButtons()
 
 void UISelectCharWnd::OnCreate(int cx, int cy)
 {
-    DbgLog("[SelectChar] OnCreate this=%p cx=%d cy=%d controlsCreated=%d\n", this, cx, cy, m_controlsCreated ? 1 : 0);
+    LOG_SELECT_CHAR("[SelectChar] OnCreate this=%p cx=%d cy=%d controlsCreated=%d\n", this, cx, cy, m_controlsCreated ? 1 : 0);
     if (!m_controlsCreated) {
         Create(kWindowWidth, kWindowHeight);
         LoadSelectionFromSettings();
         m_controlsCreated = true;
-        DbgLog("[SelectChar] OnCreate initialized controls selectedSlot=%d page=%d\n", m_selectedSlot, m_page);
+        LOG_SELECT_CHAR("[SelectChar] OnCreate initialized controls selectedSlot=%d page=%d\n", m_selectedSlot, m_page);
     }
 
     Move((cx - 640) / 2 + 33, (cy - 480) / 2 + 65);
     ClampSelection();
     UpdateActionButtons();
     RebuildVisiblePreviews();
-    DbgLog("[SelectChar] OnCreate finished x=%d y=%d w=%d h=%d selectedSlot=%d page=%d\n", m_x, m_y, m_w, m_h, m_selectedSlot, m_page);
+    LOG_SELECT_CHAR("[SelectChar] OnCreate finished x=%d y=%d w=%d h=%d selectedSlot=%d page=%d\n", m_x, m_y, m_w, m_h, m_selectedSlot, m_page);
 }
 
 void UISelectCharWnd::OnProcess()
@@ -1288,7 +1291,7 @@ void UISelectCharWnd::LoadSelectionFromSettings()
 {
     m_selectedSlot = LoadSettingsIniInt(kSelectCharSection, kCurSlotValue, 0);
     m_page = m_selectedSlot / kVisibleSlotsPerPage;
-    DbgLog("[SelectChar] LoadSelectionFromSettings selectedSlot=%d page=%d\n", m_selectedSlot, m_page);
+    LOG_SELECT_CHAR("[SelectChar] LoadSelectionFromSettings selectedSlot=%d page=%d\n", m_selectedSlot, m_page);
 }
 
 void UISelectCharWnd::SetSelectedSlot(int slotNumber)
@@ -1366,7 +1369,7 @@ void UISelectCharWnd::ActivateDelete()
 
 void UISelectCharWnd::BuildPreviewForSlot(int visibleIndex, const CHARACTER_INFO& info)
 {
-    DbgLog("[SelectChar] BuildPreviewForSlot start visibleIndex=%d job=%d head=%d bodyPal=%d headPal=%d weapon=%d shield=%d accBottom=%d accMid=%d accTop=%d\n",
+    LOG_SELECT_CHAR("[SelectChar] BuildPreviewForSlot start visibleIndex=%d job=%d head=%d bodyPal=%d headPal=%d weapon=%d shield=%d accBottom=%d accMid=%d accTop=%d\n",
         visibleIndex,
         static_cast<int>(info.job),
         static_cast<int>(info.head),
@@ -1403,13 +1406,13 @@ void UISelectCharWnd::BuildPreviewForSlot(int visibleIndex, const CHARACTER_INFO
 
     preview.actName[0] = g_session.GetJobActName(info.job, sex, path);
     preview.sprName[0] = g_session.GetJobSprName(info.job, sex, path);
-    DbgLog("[SelectChar] BuildPreviewForSlot body visibleIndex=%d act='%s' spr='%s'\n",
+    LOG_SELECT_CHAR("[SelectChar] BuildPreviewForSlot body visibleIndex=%d act='%s' spr='%s'\n",
         visibleIndex,
         preview.actName[0].c_str(),
         preview.sprName[0].c_str());
     preview.actName[1] = g_session.GetHeadActName(info.job, &head, sex, path);
     preview.sprName[1] = g_session.GetHeadSprName(info.job, &head, sex, path);
-    DbgLog("[SelectChar] BuildPreviewForSlot head visibleIndex=%d resolvedHead=%d act='%s' spr='%s'\n",
+    LOG_SELECT_CHAR("[SelectChar] BuildPreviewForSlot head visibleIndex=%d resolvedHead=%d act='%s' spr='%s'\n",
         visibleIndex,
         head,
         preview.actName[1].c_str(),
@@ -1420,13 +1423,13 @@ void UISelectCharWnd::BuildPreviewForSlot(int visibleIndex, const CHARACTER_INFO
     preview.sprName[3] = g_session.GetAccessorySprName(info.job, &head, sex, preview.accessoryMid, path);
     preview.actName[4] = g_session.GetAccessoryActName(info.job, &head, sex, preview.accessoryTop, path);
     preview.sprName[4] = g_session.GetAccessorySprName(info.job, &head, sex, preview.accessoryTop, path);
-    DbgLog("[SelectChar] BuildPreviewForSlot accessories visibleIndex=%d bottomAct='%s' midAct='%s' topAct='%s'\n",
+    LOG_SELECT_CHAR("[SelectChar] BuildPreviewForSlot accessories visibleIndex=%d bottomAct='%s' midAct='%s' topAct='%s'\n",
         visibleIndex,
         preview.actName[2].c_str(),
         preview.actName[3].c_str(),
         preview.actName[4].c_str());
     preview.imfName = g_session.GetImfName(info.job, head, sex, path);
-    DbgLog("[SelectChar] BuildPreviewForSlot imf visibleIndex=%d imf='%s'\n",
+    LOG_SELECT_CHAR("[SelectChar] BuildPreviewForSlot imf visibleIndex=%d imf='%s'\n",
         visibleIndex,
         preview.imfName.c_str());
 
@@ -1436,12 +1439,12 @@ void UISelectCharWnd::BuildPreviewForSlot(int visibleIndex, const CHARACTER_INFO
     if (preview.headPalette > 0) {
         preview.headPaletteName = g_session.GetHeadPaletteName(head, info.job, sex, preview.headPalette, path);
     }
-    DbgLog("[SelectChar] BuildPreviewForSlot palettes visibleIndex=%d bodyPal='%s' headPal='%s'\n",
+    LOG_SELECT_CHAR("[SelectChar] BuildPreviewForSlot palettes visibleIndex=%d bodyPal='%s' headPal='%s'\n",
         visibleIndex,
         preview.bodyPaletteName.c_str(),
         preview.headPaletteName.c_str());
 
-    DbgLog("[SelectChar] preview slot=%d job=%d sex=%d head=%d act='%s' spr='%s' headAct='%s' headSpr='%s' imf='%s' bodyPal='%s' headPal='%s' accBtmAct='%s' accMidAct='%s' accTopAct='%s'\n",
+    LOG_SELECT_CHAR("[SelectChar] preview slot=%d job=%d sex=%d head=%d act='%s' spr='%s' headAct='%s' headSpr='%s' imf='%s' bodyPal='%s' headPal='%s' accBtmAct='%s' accMidAct='%s' accTopAct='%s'\n",
         visibleIndex,
         info.job,
         sex,
@@ -1461,23 +1464,23 @@ void UISelectCharWnd::BuildPreviewForSlot(int visibleIndex, const CHARACTER_INFO
 void UISelectCharWnd::RebuildVisiblePreviews()
 {
     std::lock_guard<std::mutex> lock(m_previewMutex);
-    DbgLog("[SelectChar] RebuildVisiblePreviews start selectedSlot=%d page=%d\n", m_selectedSlot, m_page);
+    LOG_SELECT_CHAR("[SelectChar] RebuildVisiblePreviews start selectedSlot=%d page=%d\n", m_selectedSlot, m_page);
     for (PreviewState& preview : m_visiblePreviews) {
         preview = PreviewState{};
     }
 
     CHARACTER_INFO* chars = GetCharacters();
     if (!chars) {
-        DbgLog("[SelectChar] RebuildVisiblePreviews no character array\n");
+        LOG_SELECT_CHAR("[SelectChar] RebuildVisiblePreviews no character array\n");
         return;
     }
 
     const int baseSlot = GetVisibleSlotStart();
-    DbgLog("[SelectChar] RebuildVisiblePreviews baseSlot=%d\n", baseSlot);
+    LOG_SELECT_CHAR("[SelectChar] RebuildVisiblePreviews baseSlot=%d\n", baseSlot);
     for (int visibleIndex = 0; visibleIndex < kVisibleSlotsPerPage; ++visibleIndex) {
         const int slotNumber = baseSlot + visibleIndex;
         const int charIndex = FindCharacterIndexForSlot(slotNumber);
-        DbgLog("[SelectChar] RebuildVisiblePreviews visibleIndex=%d slot=%d charIndex=%d\n",
+        LOG_SELECT_CHAR("[SelectChar] RebuildVisiblePreviews visibleIndex=%d slot=%d charIndex=%d\n",
             visibleIndex,
             slotNumber,
             charIndex);
@@ -1485,7 +1488,7 @@ void UISelectCharWnd::RebuildVisiblePreviews()
             BuildPreviewForSlot(visibleIndex, chars[charIndex]);
         }
     }
-    DbgLog("[SelectChar] RebuildVisiblePreviews finished\n");
+    LOG_SELECT_CHAR("[SelectChar] RebuildVisiblePreviews finished\n");
 }
 
 void UISelectCharWnd::DrawPreview(HDC hdc, const PreviewState& preview) const
@@ -1504,7 +1507,7 @@ void UISelectCharWnd::DrawPreview(HDC hdc, const PreviewState& preview) const
 #if RO_ENABLE_QT6_UI
 void UISelectCharWnd::DrawQtPreviews(QImage* image)
 {
-    DbgLog("[SelectChar] DrawQtPreviews this=%p image=%p\n", this, image);
+    LOG_SELECT_CHAR("[SelectChar] DrawQtPreviews this=%p image=%p\n", this, image);
     if (!image || image->isNull()) {
         return;
     }
@@ -1514,7 +1517,7 @@ void UISelectCharWnd::DrawQtPreviews(QImage* image)
         std::lock_guard<std::mutex> lock(m_previewMutex);
         previews = m_visiblePreviews;
     }
-    DbgLog("[SelectChar] DrawQtPreviews using cached previews width=%d height=%d selectedSlot=%d page=%d\n",
+    LOG_SELECT_CHAR("[SelectChar] DrawQtPreviews using cached previews width=%d height=%d selectedSlot=%d page=%d\n",
         image->width(),
         image->height(),
         m_selectedSlot,
@@ -1543,7 +1546,7 @@ void UISelectCharWnd::DrawQtPreviews(QImage* image)
         QImage::Format_ARGB32);
     QPainter painter(image);
     painter.drawImage(0, 0, overlay);
-    DbgLog("[SelectChar] DrawQtPreviews finished\n");
+    LOG_SELECT_CHAR("[SelectChar] DrawQtPreviews finished\n");
 }
 #endif
 

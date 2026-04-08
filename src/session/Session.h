@@ -146,6 +146,7 @@ public:
     int m_GaugePacket = 0;
     
     void SetServerTime(u32 time);
+    void UpdateServerTime(u32 time);
     u32 GetServerTime() const;
     void SetPlayerPosDir(int x, int y, int dir);
     void SetSelectedCharacterAppearance(const CHARACTER_INFO& info);
@@ -237,6 +238,7 @@ private:
     void InitWeaponHitWaveName();
     int NormalizeJob(int job) const;
     u32 m_serverTime;
+    int m_numLatePacket;
     CHARACTER_INFO m_selectedCharacterInfo;
     bool m_hasSelectedCharacterInfo;
     int m_baseExpValue;

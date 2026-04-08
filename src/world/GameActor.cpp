@@ -83,6 +83,10 @@ constexpr int kJobPreWarpPortal = 0x81;
 constexpr u32 kRemoteMoveStallLogThresholdMs = 250;
 constexpr u32 kRuwachRelaunchTicks = 200;
 constexpr int kEffectStateRuwachMask = 0x2000;
+constexpr int kEffectStateHidingMask = 0x0004;
+constexpr int kEffectStateSpecialHidingMask = 0x0040;
+constexpr int kEffectStateBurrowMask = 0x0002;
+constexpr u32 kHideFadeDurationMs = 180;
 
 struct MoveStallTraceState {
     float lastPosX = 0.0f;
@@ -3805,6 +3809,37 @@ CRagEffect* CAbleToMakeEffect::LaunchEffect(int effectId, vector3d deltaPos, flo
     return effect;
 }
 
+void CAbleToMakeEffect::RemoveEffectById(int effectId)
+{
+    if (effectId <= 0) {
+        return;
+    }
+
+    for (auto it = m_effectList.begin(); it != m_effectList.end();) {
+        CRagEffect* effect = *it;
+        if (!effect) {
+            it = m_effectList.erase(it);
+            continue;
+        }
+
+        if (effect->GetEffectType() != effectId) {
+            ++it;
+            continue;
+        }
+
+        if (m_beginSpellEffect == effect) {
+            m_beginSpellEffect = nullptr;
+        }
+        if (m_magicTargetEffect == effect) {
+            m_magicTargetEffect = nullptr;
+        }
+
+        effect->SendMsg(effect, 109, 0, 0, 0);
+        effect->DetachFromMaster();
+        it = m_effectList.erase(it);
+    }
+}
+
 void CAbleToMakeEffect::DetachEffects()
 {
     for (CRagEffect* effect : m_effectList) {
@@ -3883,6 +3918,8 @@ CGameActor::CGameActor()
     , m_damageDestZ(0.0f)
     , m_effectLaunchCnt(3600)
     , m_vanishTime(0)
+    , m_hideFadeStartTick(0)
+    , m_hideFadeEndTick(0)
     , m_actorType(0)
     , m_bIsMemberAndVisible(0)
     , m_gdid(0)
@@ -3950,8 +3987,51 @@ bool CGameActor::HasActiveChatBubble(u32 now) const
         && static_cast<s32>(m_chatTick - now) > 0;
 }
 
+void CGameActor::StartHideFade(u32 durationMs)
+{
+    const u32 now = timeGetTime();
+    const u32 clampedDuration = (std::max)(1u, durationMs);
+    m_hideFadeStartTick = now;
+    m_hideFadeEndTick = now + clampedDuration;
+    m_isVisible = 1;
+    m_isVisibleBody = 1;
+    m_shadowOn = 0;
+}
+
+void CGameActor::CancelHideFade()
+{
+    m_hideFadeStartTick = 0;
+    m_hideFadeEndTick = 0;
+}
+
+bool CGameActor::IsHideFadeActive(u32 now) const
+{
+    return m_hideFadeEndTick != 0 && now < m_hideFadeEndTick;
+}
+
+u32 CGameActor::GetHideFadeAlpha(u32 now) const
+{
+    if (!IsHideFadeActive(now) || m_hideFadeEndTick <= m_hideFadeStartTick) {
+        return 255u;
+    }
+
+    const u32 total = m_hideFadeEndTick - m_hideFadeStartTick;
+    const u32 remaining = m_hideFadeEndTick - now;
+    return (std::min)(255u, (remaining * 255u) / total);
+}
+
 u8 CGameActor::ProcessState() {
     ProcessWillBeAttacked();
+
+    if (m_hideFadeEndTick != 0 && timeGetTime() >= m_hideFadeEndTick) {
+        const bool hiding = (m_effectState & kEffectStateHidingMask) != 0;
+        const bool specialHiding = (m_effectState & kEffectStateSpecialHidingMask) != 0;
+        const bool burrow = (m_effectState & kEffectStateBurrowMask) != 0;
+        CancelHideFade();
+        m_isVisibleBody = (!(hiding || specialHiding || burrow)) ? 1 : 0;
+        m_isVisible = (!(hiding || specialHiding)) ? 1 : 0;
+        m_shadowOn = (!(hiding || specialHiding || burrow)) ? 1 : 0;
+    }
 
     if (m_effectState == 0) {
         m_effectLaunchCnt = 36000;
@@ -4171,6 +4251,9 @@ void CGameActor::SendMsg(CGameObject* src, int msg, msgparam_t par1, msgparam_t 
     case 28:
         SetState(kDeathStateId);
         return;
+    case 109:
+        RemoveEffectById(static_cast<int>(par1));
+        return;
     case 81:
         m_targetGid = static_cast<u32>(par1);
         return;
@@ -4193,6 +4276,7 @@ void CGameActor::SendMsg(CGameObject* src, int msg, msgparam_t par1, msgparam_t 
         return;
     case 85: {
         const int effectId = static_cast<int>(par1);
+        const bool forceRestartBeginEffect = effectId == 123;
         if (effectId <= 0) {
             if (m_beginSpellEffect) {
                 m_beginSpellEffect->DetachFromMaster();
@@ -4200,13 +4284,21 @@ void CGameActor::SendMsg(CGameObject* src, int msg, msgparam_t par1, msgparam_t 
             }
             return;
         }
+        if (m_beginSpellEffect
+            && std::find(m_effectList.begin(), m_effectList.end(), m_beginSpellEffect) == m_effectList.end()) {
+            m_beginSpellEffect = nullptr;
+        }
         // Same begin-spell / buff ring STR as already showing: only refresh duration (msg 80). Re-launching
         // would run CRagEffect::Init again and replay EzStr startup SFX (e.g. Angelus after level-up refresh).
         if (m_beginSpellEffect && m_beginSpellEffect->GetEffectType() == effectId) {
-            if (static_cast<int>(par2) > 0) {
-                m_beginSpellEffect->SendMsg(m_beginSpellEffect, 80, par2, 0, 0);
+            if (!forceRestartBeginEffect) {
+                if (static_cast<int>(par2) > 0) {
+                    m_beginSpellEffect->SendMsg(m_beginSpellEffect, 80, par2, 0, 0);
+                }
+                return;
             }
-            return;
+
+            RemoveEffectById(effectId);
         }
         if (m_beginSpellEffect) {
             m_beginSpellEffect->DetachFromMaster();

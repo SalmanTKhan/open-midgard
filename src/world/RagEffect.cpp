@@ -289,6 +289,8 @@ void SubmitScreenQuad(const tlvertex3d& anchor,
     int renderFlags);
 
 const std::string& ResolveDataPathByBasename(const char* basename);
+CTexture* GetSoftGlowTexture(bool cloudVariant = false);
+float ResolveGroundHeight(const vector3d& position);
 
 void SubmitScreenQuadPivot(const tlvertex3d& anchor,
     CTexture* texture,
@@ -476,6 +478,121 @@ void SubmitWorldQuad(const vector3d (&quad)[4],
     }
 
     g_renderer.AddRP(face, renderFlags);
+}
+
+void SubmitWorldTriangle(const vector3d (&triangle)[3],
+    const matrix& viewMatrix,
+    CTexture* texture,
+    unsigned int color,
+    const float (&uvs)[3][2],
+    D3DBLEND destBlend,
+    float alphaSortKey,
+    int renderFlags)
+{
+    if (!texture || texture == &CTexMgr::s_dummy_texture) {
+        return;
+    }
+
+    RPFace* face = g_renderer.BorrowNullRP();
+    if (!face) {
+        return;
+    }
+
+    face->primType = D3DPT_TRIANGLELIST;
+    face->verts = face->m_verts;
+    face->numVerts = 3;
+    face->indices = nullptr;
+    face->numIndices = 0;
+    face->tex = texture;
+    face->mtPreset = 0;
+    face->cullMode = D3DCULL_NONE;
+    face->srcAlphaMode = D3DBLEND_SRCALPHA;
+    face->destAlphaMode = destBlend;
+    face->alphaSortKey = alphaSortKey;
+
+    for (int index = 0; index < 3; ++index) {
+        if (!ProjectPoint(triangle[index], viewMatrix, &face->m_verts[index])) {
+            return;
+        }
+        face->m_verts[index].color = color;
+        face->m_verts[index].specular = 0xFF000000u;
+        face->m_verts[index].tu = uvs[index][0];
+        face->m_verts[index].tv = uvs[index][1];
+    }
+
+    g_renderer.AddRP(face, renderFlags);
+}
+
+void RenderQuadHornPrimitive(const CEffectPrim& prim,
+    const vector3d& base,
+    const matrix& viewMatrix,
+    float normalizedAlpha)
+{
+    CTexture* texture = !prim.m_texture.empty()
+        ? prim.m_texture[(std::min)(prim.m_curMotion, static_cast<int>(prim.m_texture.size()) - 1)]
+        : nullptr;
+    if (!texture || texture == &CTexMgr::s_dummy_texture) {
+        return;
+    }
+
+    matrix rotation = prim.m_matrix;
+    if (rotation.m[0][0] == 1.0f
+        && rotation.m[1][1] == 1.0f
+        && rotation.m[2][2] == 1.0f
+        && rotation.m[0][1] == 0.0f
+        && rotation.m[0][2] == 0.0f
+        && rotation.m[1][0] == 0.0f
+        && rotation.m[1][2] == 0.0f
+        && rotation.m[2][0] == 0.0f
+        && rotation.m[2][1] == 0.0f) {
+        MatrixIdentity(rotation);
+        MatrixAppendXRotation(rotation, prim.m_latitude * (kPi / 180.0f));
+        MatrixAppendYRotation(rotation, prim.m_longitude * (kPi / 180.0f));
+    }
+
+    const vector3d origin = {
+        base.x + prim.m_deltaPos2.x,
+        ResolveGroundHeight(vector3d{ base.x + prim.m_deltaPos2.x, base.y, base.z + prim.m_deltaPos2.z }),
+        base.z + prim.m_deltaPos2.z,
+    };
+    const float halfSize = (std::max)(0.9f, prim.m_size * 1.7f);
+    const float spikeHeight = (std::max)(12.0f, (std::max)(prim.m_heightSize * 1.35f, halfSize * 5.0f));
+    const int renderFlags = 1;
+    const D3DBLEND destBlend = D3DBLEND_INVSRCALPHA;
+    const unsigned int color = PackColor(static_cast<unsigned int>(normalizedAlpha), prim.m_tintColor);
+
+    const vector3d localCorners[4] = {
+        { -halfSize, -halfSize, 0.0f },
+        { halfSize, -halfSize, 0.0f },
+        { halfSize, halfSize, 0.0f },
+        { -halfSize, halfSize, 0.0f },
+    };
+    const vector3d localTip = { 0.0f, 0.0f, spikeHeight };
+
+    auto transformPoint = [&](const vector3d& local) -> vector3d {
+        return {
+            origin.x + local.x * rotation.m[0][0] + local.y * rotation.m[1][0] + local.z * rotation.m[2][0],
+            origin.y + local.x * rotation.m[0][1] + local.y * rotation.m[1][1] + local.z * rotation.m[2][1],
+            origin.z + local.x * rotation.m[0][2] + local.y * rotation.m[1][2] + local.z * rotation.m[2][2],
+        };
+    };
+
+    for (int faceIndex = 0; faceIndex < 4; ++faceIndex) {
+        const int nextIndex = (faceIndex + 1) % 4;
+        const float u0 = static_cast<float>(faceIndex) * 0.2f;
+        const float u1 = (std::min)(1.0f, u0 + 0.2f);
+        const vector3d triangle[3] = {
+            transformPoint(localCorners[faceIndex]),
+            transformPoint(localTip),
+            transformPoint(localCorners[nextIndex]),
+        };
+        const float uvs[3][2] = {
+            { u0, 1.0f },
+            { u0, 0.0f },
+            { u1, 1.0f },
+        };
+        SubmitWorldTriangle(triangle, viewMatrix, texture, color, uvs, destBlend, 0.0f, renderFlags);
+    }
 }
 
 // vec1=base0 (angle0, ground), vec2=base1 (angle1, ground), vec3=top1, vec4=top0.
@@ -2251,8 +2368,7 @@ void CEffectPrim::Render(matrix* viewMatrix)
             renderFlags);
         break;
     }
-    case PP_3DCROSSTEXTURE:
-    case PP_3DQUADHORN: {
+    case PP_3DCROSSTEXTURE: {
         CTexture* texture = !m_texture.empty()
             ? m_texture[(std::min)(m_curMotion, static_cast<int>(m_texture.size()) - 1)]
             : GetSoftGlowTexture(false);
@@ -2281,6 +2397,9 @@ void CEffectPrim::Render(matrix* viewMatrix)
             renderFlags);
         break;
     }
+    case PP_3DQUADHORN:
+        RenderQuadHornPrimitive(*this, base, *viewMatrix, normalizedAlpha);
+        break;
     case PP_MAPPARTICLE: {
         const int particles = (std::max)(4, m_spawnCount);
         CTexture* texture = !m_texture.empty() ? m_texture[0] : GetSoftGlowTexture(true);
@@ -2640,6 +2759,9 @@ CRagEffect::CRagEffect()
     , m_tickCarryMs(kEffectTickMs)
     , m_cachedPos{}
     , m_deltaPos{}
+    , m_targetPos{}
+    , m_grimToothStep{}
+    , m_grimToothRemaining{}
     , m_param{ 0.0f, 0.0f, 0.0f, 0.0f }
     , m_emitSpeed(1.0f)
     , m_longitude(0.0f)
@@ -2931,6 +3053,8 @@ void CRagEffect::Init(CRenderObject* master, int effectId, const vector3d& delta
     m_tickCarryMs = kEffectTickMs;
     m_targetPos = vector3d{};
     m_hasTargetPos = false;
+    m_grimToothStep = vector3d{};
+    m_grimToothRemaining = vector3d{};
 
     switch (effectId) {
     case 158:
@@ -2990,6 +3114,18 @@ void CRagEffect::Init(CRenderObject* master, int effectId, const vector3d& delta
     case 325:
         m_handler = Handler::HealLarge;
         m_duration = 40;
+        break;
+    case 159:
+        m_handler = Handler::HideStart;
+        m_duration = 14;
+        break;
+    case 123:
+        m_handler = Handler::GrimTooth;
+        m_duration = 24;
+        break;
+    case 132:
+        m_handler = Handler::GrimToothAtk;
+        m_duration = 10;
         break;
     case 54:
     case 55:
@@ -3146,12 +3282,28 @@ CEffectPrim* CRagEffect::LaunchEffectPrim(EFFECTPRIMID effectPrimId, const vecto
 
 void CRagEffect::DetachFromMaster()
 {
-    if (m_master) {
-        m_cachedPos = m_master->m_pos;
+    const vector3d base = ResolveBasePosition();
+    if (CAbleToMakeEffect* owner = dynamic_cast<CAbleToMakeEffect*>(m_master)) {
+        if (owner->m_beginSpellEffect == this) {
+            owner->m_beginSpellEffect = nullptr;
+        }
+        if (owner->m_magicTargetEffect == this) {
+            owner->m_magicTargetEffect = nullptr;
+        }
     }
-    if (!m_ownsMaster) {
-        m_master = nullptr;
+
+    m_cachedPos = base;
+
+    if (m_ownsMaster) {
+        if (m_master) {
+            m_master->m_pos = base;
+        }
+        return;
     }
+
+    m_master = new CWorldAnchor(base);
+    m_ownsMaster = true;
+    m_deltaPos = vector3d{};
 }
 
 vector3d CRagEffect::ResolveBasePosition() const
@@ -3203,6 +3355,9 @@ bool CRagEffect::ResolveCullSphere(vector3d* outCenter, float* outRadius) const
     case Handler::HealLight:
     case Handler::HealMedium:
     case Handler::HealLarge:
+    case Handler::HideStart:
+    case Handler::GrimTooth:
+    case Handler::GrimToothAtk:
     case Handler::Sight:
     case Handler::SightState:
     case Handler::FireBall:
@@ -4245,6 +4400,174 @@ void CRagEffect::SpawnHealLarge()
     }
 }
 
+void CRagEffect::SpawnHideStart()
+{
+    if (m_stateCnt != 0) {
+        return;
+    }
+
+    CTexture* wingTexture = ResolveEffectTextureCandidates({
+        "effect\\wing003.bmp",
+        "effect\\wing003.tga",
+    }, false);
+    if (!wingTexture) {
+        return;
+    }
+
+    const int offsets[2] = { -14, 14 };
+    for (int index = 0; index < 2; ++index) {
+        if (CEffectPrim* prim = LaunchEffectPrim(PP_2DTEXTURE, vector3d{})) {
+            prim->m_renderFlag = 5;
+            prim->m_duration = m_duration;
+            prim->m_alpha = 220.0f;
+            prim->m_size = 0.8f;
+            prim->m_heightSize = 4.5f;
+            prim->m_fadeOutCnt = 6;
+            prim->m_tintColor = RGB(255, 255, 255);
+            prim->m_texture.push_back(wingTexture);
+            prim->m_deltaPos2.x = static_cast<float>(offsets[index]);
+            prim->m_deltaPos2.y = -10.0f;
+            prim->m_sizeSpeed = 0.02f;
+            prim->m_alphaSpeed = -12.0f;
+        }
+    }
+
+    if (CEffectPrim* prim = LaunchEffectPrim(PP_2DFLASH, vector3d{})) {
+        prim->m_renderFlag = 5;
+        prim->m_duration = 10;
+        prim->m_alpha = 180.0f;
+        prim->m_size = 0.65f;
+        prim->m_fadeOutCnt = 4;
+        prim->m_tintColor = RGB(235, 245, 255);
+        prim->m_alphaSpeed = -18.0f;
+    }
+}
+
+void CRagEffect::SpawnGrimTooth()
+{
+    if (!m_hasTargetPos) {
+        return;
+    }
+
+    const vector3d base = ResolveBasePosition();
+    const vector3d totalDelta = {
+        m_targetPos.x - base.x,
+        m_targetPos.y - base.y,
+        m_targetPos.z - base.z,
+    };
+    const float totalDistance = std::sqrt(totalDelta.x * totalDelta.x + totalDelta.z * totalDelta.z);
+
+    if (m_stateCnt == 0) {
+        TryPlayEffectWaveAt(base, {
+            "effect\\ef_frostdiver.wav",
+            "effect\\EF_FrostDiver.wav",
+        });
+    }
+
+    if (m_flag != 0) {
+        return;
+    }
+
+    if ((m_stateCnt % 3) == 0) {
+        const float traveledDistance = std::sqrt(
+            m_grimToothRemaining.x * m_grimToothRemaining.x
+            + m_grimToothRemaining.z * m_grimToothRemaining.z);
+        if (traveledDistance >= (std::max)(0.0f, totalDistance - 2.5f)) {
+            m_flag = 1;
+        }
+
+        CTexture* stoneTexture = ResolveEffectTextureCandidates({
+            "effect\\stone.bmp",
+            "effect\\stone.tga",
+        }, false);
+        if (stoneTexture) {
+            if (CEffectPrim* prim = LaunchEffectPrim(PP_3DQUADHORN, vector3d{})) {
+                prim->m_renderFlag = 0u;
+                prim->m_pattern |= 1;
+                prim->m_duration = 40;
+                prim->m_deltaPos2 = {
+                    m_grimToothRemaining.x,
+                    20.0f + totalDelta.y * (totalDistance > 0.0f ? (traveledDistance / totalDistance) : 0.0f),
+                    m_grimToothRemaining.z,
+                };
+                prim->m_size = static_cast<float>(rand() % 40 + 60) * 0.01f;
+                prim->m_heightSize = 10.0f;
+                prim->m_longitude = static_cast<float>(rand() % 360);
+                prim->m_latitude = static_cast<float>(rand() % 30 + 75);
+                MatrixIdentity(prim->m_matrix);
+                MatrixAppendXRotation(prim->m_matrix, prim->m_latitude * (kPi / 180.0f));
+                MatrixAppendYRotation(prim->m_matrix, prim->m_longitude * (kPi / 180.0f));
+                prim->m_speed = 3.0f;
+                prim->m_accel = prim->m_speed / static_cast<float>(prim->m_duration) * -2.0f;
+                prim->m_alpha = 255.0f;
+                prim->m_maxAlpha = 255.0f;
+                prim->m_fadeOutCnt = prim->m_duration - 10;
+                prim->m_texture.push_back(stoneTexture);
+                prim->m_tintColor = RGB(255, 255, 255);
+                if (m_stateCnt <= 6) {
+                    DbgLog("[Projectile] grimtooth effect123 step=%d base=(%.2f,%.2f,%.2f) travel=(%.2f,%.2f,%.2f) total=(%.2f,%.2f,%.2f)\n",
+                        m_stateCnt,
+                        base.x,
+                        base.y,
+                        base.z,
+                        prim->m_deltaPos2.x,
+                        prim->m_deltaPos2.y,
+                        prim->m_deltaPos2.z,
+                        totalDelta.x,
+                        totalDelta.y,
+                        totalDelta.z);
+                }
+            }
+        }
+    }
+
+    m_grimToothRemaining = {
+        m_grimToothRemaining.x + m_grimToothStep.x,
+        m_grimToothRemaining.y + m_grimToothStep.y,
+        m_grimToothRemaining.z + m_grimToothStep.z,
+    };
+}
+
+void CRagEffect::SpawnGrimToothAtk()
+{
+    if (m_stateCnt != 0) {
+        return;
+    }
+
+    CTexture* stoneTexture = ResolveEffectTextureCandidates({
+        "effect\\stone.bmp",
+        "effect\\stone.tga",
+    }, false);
+    if (!stoneTexture) {
+        return;
+    }
+
+    const vector3d offsets[3] = {
+        { 0.0f, 40.0f, -12.0f },
+        { 12.0f, 40.0f, 6.0f },
+        { -12.0f, 40.0f, 6.0f },
+    };
+
+    for (int index = 0; index < 3; ++index) {
+        if (CEffectPrim* prim = LaunchEffectPrim(PP_3DQUADHORN, vector3d{})) {
+            prim->m_renderFlag = 0u;
+            prim->m_duration = 24;
+            prim->m_deltaPos2 = offsets[index];
+            prim->m_size = 0.9f;
+            prim->m_heightSize = 25.0f;
+            prim->m_longitude = static_cast<float>(120 * (6 - index));
+            prim->m_latitude = 75.0f;
+            MatrixIdentity(prim->m_matrix);
+            MatrixAppendXRotation(prim->m_matrix, prim->m_latitude * (kPi / 180.0f));
+            MatrixAppendYRotation(prim->m_matrix, prim->m_longitude * (kPi / 180.0f));
+            prim->m_alpha = 255.0f;
+            prim->m_fadeOutCnt = prim->m_duration - 8;
+            prim->m_texture.push_back(stoneTexture);
+            prim->m_tintColor = RGB(255, 255, 255);
+        }
+    }
+}
+
 void CRagEffect::SpawnBeginCasting()
 {
     if (m_stateCnt != 0) {
@@ -4858,6 +5181,15 @@ u8 CRagEffect::OnProcess()
         case Handler::HealLarge:
             SpawnHealLarge();
             break;
+        case Handler::HideStart:
+            SpawnHideStart();
+            break;
+        case Handler::GrimTooth:
+            SpawnGrimTooth();
+            break;
+        case Handler::GrimToothAtk:
+            SpawnGrimToothAtk();
+            break;
         case Handler::IncAgility:
             SpawnIncAgility();
             break;
@@ -4923,14 +5255,56 @@ void CRagEffect::SendMsg(CGameObject*, int msg, msgparam_t par1, msgparam_t, msg
 {
     switch (msg) {
     case 14:
-        if (m_type == 24 && par1 != 0) {
+        if ((m_type == 24 || m_type == 123) && par1 != 0) {
             const vector3d* targetPos = reinterpret_cast<const vector3d*>(par1);
             m_targetPos = *targetPos;
             m_hasTargetPos = true;
-            if (m_handler != Handler::FireBoltRain) {
+            if (m_type == 24 && m_handler != Handler::FireBoltRain) {
                 ClearPrims();
                 m_handler = Handler::FireBoltRain;
                 m_duration = 18;
+                m_stateCnt = 0;
+            } else if (m_type == 123) {
+                const vector3d base = ResolveBasePosition();
+                const float dx = m_targetPos.x - base.x;
+                const float dy = m_targetPos.y - base.y;
+                const float dz = m_targetPos.z - base.z;
+                const float distance = std::sqrt(dx * dx + dz * dz);
+                ClearPrims();
+                m_handler = Handler::GrimTooth;
+                if (CAbleToMakeEffect* owner = dynamic_cast<CAbleToMakeEffect*>(m_master)) {
+                    owner->m_effectList.remove(this);
+                    if (owner->m_beginSpellEffect == this) {
+                        owner->m_beginSpellEffect = nullptr;
+                    }
+                    if (owner->m_magicTargetEffect == this) {
+                        owner->m_magicTargetEffect = nullptr;
+                    }
+                }
+                DetachFromMaster();
+                m_cachedPos = base;
+                m_deltaPos = vector3d{};
+                if (distance > 0.0001f) {
+                    const float invDistance = 2.0f / distance;
+                    m_grimToothStep = { dx * invDistance, 0.0f, dz * invDistance };
+                    m_grimToothRemaining = vector3d{};
+                    m_flag = 0;
+                } else {
+                    m_grimToothStep = vector3d{};
+                    m_grimToothRemaining = vector3d{};
+                    m_flag = 1;
+                }
+                DbgLog("[Projectile] grimtooth effect123 init base=(%.2f,%.2f,%.2f) target=(%.2f,%.2f,%.2f) step=(%.2f,%.2f,%.2f)\n",
+                    base.x,
+                    base.y,
+                    base.z,
+                    m_targetPos.x,
+                    m_targetPos.y,
+                    m_targetPos.z,
+                    m_grimToothStep.x,
+                    m_grimToothStep.y,
+                    m_grimToothStep.z);
+                m_duration = (std::max)(6, static_cast<int>(std::ceil(distance / 2.0f)) + 2);
                 m_stateCnt = 0;
             }
         }
@@ -4940,6 +5314,12 @@ void CRagEffect::SendMsg(CGameObject*, int msg, msgparam_t par1, msgparam_t, msg
         return;
     case 80:
         m_duration = static_cast<int>(par1);
+        return;
+    case 109:
+        ClearPrims();
+        m_loop = false;
+        m_duration = 0;
+        m_stateCnt = 1;
         return;
     default:
         return;

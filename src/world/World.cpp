@@ -465,6 +465,9 @@ CTexture* GetEffectTexture(const char* path)
     }
 
     CTexture* texture = g_texMgr.GetTexture(path, false);
+    if (texture == &CTexMgr::s_dummy_texture) {
+        texture = nullptr;
+    }
     if (!texture && !loggedMissing[key]) {
         DbgLog("[World] missing effect texture '%s'\n", path);
         loggedMissing[key] = true;
@@ -481,6 +484,132 @@ CTexture* GetAngelWingTexture()
 CTexture* GetJobLevelTexture()
 {
     return GetEffectTexture("data\\texture\\effect\\explosive_1_128.bmp");
+}
+
+void SetDebugTextureName(CTexture* texture, const char* name)
+{
+    if (!texture || !name || name[0] == '\0') {
+        return;
+    }
+
+    std::strncpy(texture->m_texName, name, sizeof(texture->m_texName) - 1);
+    texture->m_texName[sizeof(texture->m_texName) - 1] = '\0';
+}
+
+CTexture* CreateProceduralArrowProjectileTexture()
+{
+    constexpr int kWidth = 64;
+    constexpr int kHeight = 16;
+    std::vector<unsigned int> pixels(static_cast<size_t>(kWidth) * static_cast<size_t>(kHeight), 0u);
+    for (int y = 0; y < kHeight; ++y) {
+        for (int x = 0; x < kWidth; ++x) {
+            float alpha = 0.0f;
+            const float fy = static_cast<float>(y - kHeight / 2);
+            if (x >= 8 && x < 44 && std::fabs(fy) <= 1.5f) {
+                alpha = 0.85f;
+            }
+            if (x >= 42) {
+                const float tip = static_cast<float>(x - 42) / 21.0f;
+                const float maxOffset = 6.0f * (1.0f - tip);
+                if (std::fabs(fy) <= maxOffset) {
+                    alpha = 1.0f;
+                }
+            }
+            if (x < 12 && std::fabs(fy) <= 3.0f) {
+                alpha = (std::max)(alpha, 0.55f);
+            }
+            if (alpha <= 0.0f) {
+                continue;
+            }
+            const unsigned int a = static_cast<unsigned int>(alpha * 255.0f);
+            const unsigned int color = (a << 24) | 0x00F2E3C4u;
+            pixels[static_cast<size_t>(y) * static_cast<size_t>(kWidth) + static_cast<size_t>(x)] = color;
+        }
+    }
+
+    CTexture* texture = g_texMgr.CreateTexture(kWidth, kHeight, pixels.data(), PF_A8R8G8B8, false);
+    SetDebugTextureName(texture, "__projectile_arrow__");
+    return texture;
+}
+
+CTexture* CreateProceduralStoneProjectileTexture()
+{
+    constexpr int kSize = 32;
+    std::vector<unsigned int> pixels(static_cast<size_t>(kSize) * static_cast<size_t>(kSize), 0u);
+    const float center = (static_cast<float>(kSize) - 1.0f) * 0.5f;
+    for (int y = 0; y < kSize; ++y) {
+        for (int x = 0; x < kSize; ++x) {
+            const float dx = static_cast<float>(x) - center;
+            const float dy = static_cast<float>(y) - center;
+            const float radius = std::sqrt(dx * dx + dy * dy);
+            if (radius > 11.5f) {
+                continue;
+            }
+            const float edge = (std::max)(0.0f, 1.0f - (radius / 11.5f));
+            const unsigned int alpha = static_cast<unsigned int>((0.35f + edge * 0.65f) * 255.0f);
+            const unsigned int shade = static_cast<unsigned int>(150.0f + edge * 70.0f);
+            const unsigned int pixel = (alpha << 24) | (shade << 16) | (shade << 8) | (shade - 10);
+            pixels[static_cast<size_t>(y) * static_cast<size_t>(kSize) + static_cast<size_t>(x)] = pixel;
+        }
+    }
+
+    CTexture* texture = g_texMgr.CreateTexture(kSize, kSize, pixels.data(), PF_A8R8G8B8, false);
+    SetDebugTextureName(texture, "__projectile_stone__");
+    return texture;
+}
+
+CTexture* GetArrowProjectileTexture()
+{
+    static CTexture* texture = nullptr;
+    static bool resolved = false;
+    if (resolved) {
+        return texture;
+    }
+
+    resolved = true;
+    texture = CreateProceduralArrowProjectileTexture();
+    if (!texture) {
+        const char* candidates[] = {
+            "data\\texture\\effect\\icearrow.tga",
+            "data\\texture\\effect\\throw.bmp",
+            "data\\texture\\effect\\spear.bmp",
+            "data\\texture\\effect\\line.bmp",
+        };
+        for (const char* candidate : candidates) {
+            texture = GetEffectTexture(candidate);
+            if (texture) {
+                break;
+            }
+        }
+    }
+    return texture;
+}
+
+CTexture* GetStoneProjectileTexture()
+{
+    static CTexture* texture = nullptr;
+    static bool resolved = false;
+    if (resolved) {
+        return texture;
+    }
+
+    resolved = true;
+    texture = CreateProceduralStoneProjectileTexture();
+    if (!texture) {
+        const char* candidates[] = {
+            "data\\texture\\effect\\stone.tga",
+            "data\\texture\\effect\\stone.bmp",
+            "data\\texture\\effect\\stone64.bmp",
+            "data\\texture\\effect\\throw.bmp",
+        };
+        for (const char* candidate : candidates) {
+            texture = GetEffectTexture(candidate);
+            if (texture) {
+                break;
+            }
+        }
+    }
+    return texture;
 }
 
 struct ActorShadowResource {
@@ -793,6 +922,76 @@ void SubmitScreenSpacePerspectiveSprite(float left,
     face->m_verts[3].tv = 1.0f;
     face->m_verts[3].color = color;
     face->m_verts[3].specular = 0xFF000000u;
+
+    g_renderer.AddRP(face, renderFlags);
+}
+
+void SubmitScreenSpaceRotatedQuad(const tlvertex3d& anchor,
+    CTexture* texture,
+    float dirX,
+    float dirY,
+    float length,
+    float width,
+    unsigned int color,
+    D3DBLEND destBlend,
+    float alphaSortKey,
+    int renderFlags = 1)
+{
+    if (!texture || length <= 0.0f || width <= 0.0f) {
+        return;
+    }
+
+    const float dirLenSq = dirX * dirX + dirY * dirY;
+    if (!std::isfinite(dirLenSq) || dirLenSq <= 1.0e-6f) {
+        SubmitScreenSpaceBillboard(anchor,
+            texture,
+            0.0f,
+            0.0f,
+            length,
+            width,
+            color,
+            destBlend,
+            alphaSortKey,
+            renderFlags);
+        return;
+    }
+
+    const float invDirLen = 1.0f / std::sqrt(dirLenSq);
+    const float axisX = dirX * invDirLen;
+    const float axisY = dirY * invDirLen;
+    const float perpX = -axisY;
+    const float perpY = axisX;
+    const float halfLength = length * 0.5f;
+    const float halfWidth = width * 0.5f;
+
+    RPFace* face = g_renderer.BorrowNullRP();
+    if (!face) {
+        return;
+    }
+
+    face->primType = D3DPT_TRIANGLESTRIP;
+    face->verts = face->m_verts;
+    face->numVerts = 4;
+    face->indices = nullptr;
+    face->numIndices = 0;
+    face->tex = texture;
+    face->mtPreset = 0;
+    face->cullMode = D3DCULL_NONE;
+    face->srcAlphaMode = D3DBLEND_SRCALPHA;
+    face->destAlphaMode = destBlend;
+    face->alphaSortKey = alphaSortKey;
+
+    const float centerX = anchor.x;
+    const float centerY = anchor.y;
+    const float alongX = axisX * halfLength;
+    const float alongY = axisY * halfLength;
+    const float acrossX = perpX * halfWidth;
+    const float acrossY = perpY * halfWidth;
+
+    face->m_verts[0] = { centerX - alongX - acrossX, centerY - alongY - acrossY, anchor.z, anchor.oow, color, 0xFF000000u, 0.0f, 0.0f };
+    face->m_verts[1] = { centerX + alongX - acrossX, centerY + alongY - acrossY, anchor.z, anchor.oow, color, 0xFF000000u, 1.0f, 0.0f };
+    face->m_verts[2] = { centerX - alongX + acrossX, centerY - alongY + acrossY, anchor.z, anchor.oow, color, 0xFF000000u, 0.0f, 1.0f };
+    face->m_verts[3] = { centerX + alongX + acrossX, centerY + alongY + acrossY, anchor.z, anchor.oow, color, 0xFF000000u, 1.0f, 1.0f };
 
     g_renderer.AddRP(face, renderFlags);
 }
@@ -1662,6 +1861,247 @@ private:
     CRagEffect* m_effect;
 };
 
+vector3d LerpVec3(const vector3d& a, const vector3d& b, float t)
+{
+    return vector3d{
+        a.x + (b.x - a.x) * t,
+        a.y + (b.y - a.y) * t,
+        a.z + (b.z - a.z) * t,
+    };
+}
+
+class CWorldProjectile : public CGameObject {
+public:
+    CWorldProjectile(const vector3d& startPos,
+        const vector3d& targetPos,
+        u32 targetGid,
+        WorldProjectileVisual visual,
+        float travelFrames,
+        float delayFrames)
+        : m_startPos(ResolveAnchorPosition(startPos))
+        , m_currentPos(ResolveAnchorPosition(startPos))
+        , m_lastPos(ResolveAnchorPosition(startPos))
+        , m_snapshotTargetPos(ResolveAnchorPosition(targetPos))
+        , m_targetPos(ResolveAnchorPosition(targetPos))
+        , m_targetGid(targetGid)
+        , m_visual(visual)
+        , m_travelFrames((std::max)(1.0f, travelFrames))
+        , m_delayFrames((std::max)(0.0f, delayFrames))
+        , m_startTick(timeGetTime())
+    {
+    }
+
+    u8 OnProcess() override
+    {
+        const u32 now = timeGetTime();
+        const float elapsedFrames = static_cast<float>(now - m_startTick) / 24.0f;
+        if (elapsedFrames < m_delayFrames) {
+            return 1;
+        }
+
+        if (!m_initializedTravel) {
+            vector3d resolvedTarget{};
+            if (ResolveLiveTargetPosition(&resolvedTarget)) {
+                m_targetPos = resolvedTarget;
+            }
+            m_currentPos = m_startPos;
+            m_lastPos = m_startPos;
+            m_initializedTravel = true;
+        }
+
+        const float travelElapsed = elapsedFrames - m_delayFrames;
+        const float progress = (std::min)(1.0f, (std::max)(0.0f, travelElapsed / m_travelFrames));
+        m_lastPos = m_currentPos;
+        m_currentPos = LerpVec3(m_startPos, m_targetPos, progress);
+        return progress < 1.0f ? 1 : 0;
+    }
+
+    void Render(matrix* viewMatrix) override
+    {
+        if (!viewMatrix || !m_initializedTravel) {
+            return;
+        }
+
+        CTexture* texture = ResolveTexture();
+        if (!texture) {
+            if (!m_loggedTextureFailure) {
+                DbgLog("[Projectile] render skipped visual=%d reason=no-texture start=(%.2f,%.2f,%.2f) target=(%.2f,%.2f,%.2f)\n",
+                    static_cast<int>(m_visual),
+                    m_startPos.x,
+                    m_startPos.y,
+                    m_startPos.z,
+                    m_targetPos.x,
+                    m_targetPos.y,
+                    m_targetPos.z);
+                m_loggedTextureFailure = true;
+            }
+            return;
+        }
+
+        tlvertex3d anchor{};
+        if (!ProjectPoint(g_renderer, *viewMatrix, m_currentPos, &anchor)) {
+            if (!m_loggedProjectionFailure) {
+                DbgLog("[Projectile] render skipped visual=%d reason=project-fail pos=(%.2f,%.2f,%.2f) target=(%.2f,%.2f,%.2f)\n",
+                    static_cast<int>(m_visual),
+                    m_currentPos.x,
+                    m_currentPos.y,
+                    m_currentPos.z,
+                    m_targetPos.x,
+                    m_targetPos.y,
+                    m_targetPos.z);
+                m_loggedProjectionFailure = true;
+            }
+            return;
+        }
+
+        vector3d dirTarget = m_targetPos;
+        const float frameDeltaSq = SquareDistance2d(m_currentPos, m_lastPos);
+        if (frameDeltaSq > 1.0e-4f) {
+            dirTarget = vector3d{
+                m_currentPos.x + (m_currentPos.x - m_lastPos.x),
+                m_currentPos.y + (m_currentPos.y - m_lastPos.y),
+                m_currentPos.z + (m_currentPos.z - m_lastPos.z),
+            };
+        }
+
+        tlvertex3d dirAnchor{};
+        float dirX = 1.0f;
+        float dirY = 0.0f;
+        if (ProjectPoint(g_renderer, *viewMatrix, dirTarget, &dirAnchor)) {
+            dirX = dirAnchor.x - anchor.x;
+            dirY = dirAnchor.y - anchor.y;
+        }
+
+        const float screenSpeed = std::sqrt((std::max)(0.0f, dirX * dirX + dirY * dirY));
+        const float baseLength = m_visual == WorldProjectileVisual::Arrow ? 24.0f : 18.0f;
+        const float baseWidth = m_visual == WorldProjectileVisual::Arrow ? 7.0f : 13.0f;
+        const float length = baseLength + (std::min)(12.0f, screenSpeed * 0.2f);
+        const unsigned int mainColor = m_visual == WorldProjectileVisual::Arrow ? 0xF0FFFFFFu : 0xE8FFFFFFu;
+        const unsigned int trailColor = m_visual == WorldProjectileVisual::Arrow ? 0x70D8C8A0u : 0x70FFFFFFu;
+
+        if (screenSpeed > 2.0f) {
+            tlvertex3d trailAnchor = anchor;
+            trailAnchor.x -= dirX * 0.2f;
+            trailAnchor.y -= dirY * 0.2f;
+            SubmitScreenSpaceRotatedQuad(trailAnchor,
+                texture,
+                dirX,
+                dirY,
+                length * 1.45f,
+                baseWidth * 0.9f,
+                trailColor,
+                D3DBLEND_ONE,
+                anchor.oow - 0.0001f,
+                1 | 4 | 8);
+        }
+
+        SubmitScreenSpaceRotatedQuad(anchor,
+            texture,
+            dirX,
+            dirY,
+            length,
+            baseWidth,
+            mainColor,
+            D3DBLEND_INVSRCALPHA,
+            anchor.oow,
+            1 | 4 | 8);
+
+        if (!m_loggedFirstRender) {
+            DbgLog("[Projectile] render visual=%d pos=(%.2f,%.2f,%.2f) target=(%.2f,%.2f,%.2f) screen=(%.1f,%.1f) speed=%.2f\n",
+                static_cast<int>(m_visual),
+                m_currentPos.x,
+                m_currentPos.y,
+                m_currentPos.z,
+                m_targetPos.x,
+                m_targetPos.y,
+                m_targetPos.z,
+                anchor.x,
+                anchor.y,
+                screenSpeed);
+            m_loggedFirstRender = true;
+        }
+    }
+
+    bool ResolveCullSphere(vector3d* outCenter, float* outRadius) const
+    {
+        if (!outCenter || !outRadius) {
+            return false;
+        }
+
+        const vector3d start = m_initializedTravel ? m_currentPos : m_startPos;
+        const vector3d end = m_initializedTravel ? m_targetPos : m_snapshotTargetPos;
+        *outCenter = vector3d{
+            (start.x + end.x) * 0.5f,
+            (start.y + end.y) * 0.5f,
+            (start.z + end.z) * 0.5f,
+        };
+        const float dx = end.x - start.x;
+        const float dy = end.y - start.y;
+        const float dz = end.z - start.z;
+        const float halfDistance = std::sqrt(dx * dx + dy * dy + dz * dz) * 0.5f;
+        *outRadius = halfDistance + (m_visual == WorldProjectileVisual::Arrow ? 12.0f : 16.0f);
+        return true;
+    }
+
+private:
+    static vector3d ResolveAnchorPosition(const vector3d& pos)
+    {
+        vector3d adjusted = pos;
+        adjusted.y -= 10.0f;
+        return adjusted;
+    }
+
+    static float SquareDistance2d(const vector3d& a, const vector3d& b)
+    {
+        const float dx = a.x - b.x;
+        const float dz = a.z - b.z;
+        return dx * dx + dz * dz;
+    }
+
+    bool ResolveLiveTargetPosition(vector3d* outTargetPos) const
+    {
+        if (!outTargetPos || m_targetGid == 0) {
+            return false;
+        }
+
+        if (g_world.m_player && g_world.m_player->m_gid == m_targetGid) {
+            *outTargetPos = ResolveAnchorPosition(g_world.m_player->m_pos);
+            return true;
+        }
+
+        for (CGameActor* actor : g_world.m_actorList) {
+            if (actor && actor->m_gid == m_targetGid) {
+                *outTargetPos = ResolveAnchorPosition(actor->m_pos);
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    CTexture* ResolveTexture() const
+    {
+        return m_visual == WorldProjectileVisual::Arrow
+            ? GetArrowProjectileTexture()
+            : GetStoneProjectileTexture();
+    }
+
+    vector3d m_startPos{};
+    vector3d m_currentPos{};
+    vector3d m_lastPos{};
+    vector3d m_snapshotTargetPos{};
+    vector3d m_targetPos{};
+    u32 m_targetGid = 0;
+    WorldProjectileVisual m_visual = WorldProjectileVisual::Arrow;
+    float m_travelFrames = 8.0f;
+    float m_delayFrames = 0.0f;
+    u32 m_startTick = 0;
+    bool m_initializedTravel = false;
+    bool m_loggedFirstRender = false;
+    bool m_loggedTextureFailure = false;
+    bool m_loggedProjectionFailure = false;
+};
+
 class CLevelUpEffect : public CGameObject {
 public:
     CLevelUpEffect(CGameActor* actor, u32 effectId)
@@ -1719,6 +2159,16 @@ public:
             RenderAngel(anchor, normalized, fadeOut);
             break;
         }
+    }
+
+    void OnActorDeleted(const CGameActor* actor) override
+    {
+        if (!actor || m_actor != actor) {
+            return;
+        }
+
+        m_origin = m_actor->m_pos;
+        m_actor = nullptr;
     }
 
 private:
@@ -2138,6 +2588,10 @@ bool ResolveGameObjectCullSphere(const CGameObject& object, vector3d* outCenter,
         return effect->ResolveCullSphere(outCenter, outRadius);
     }
 
+    if (const CWorldProjectile* projectile = dynamic_cast<const CWorldProjectile*>(&object)) {
+        return projectile->ResolveCullSphere(outCenter, outRadius);
+    }
+
     return false;
 }
 
@@ -2187,17 +2641,23 @@ bool RenderCachedBillboard(const CWorld::BillboardScreenEntry& entry)
         return false;
     }
 
-    u32 billboardColor = 0xFFFFFFFFu;
+    u32 alpha = 255u;
+    const u32 now = timeGetTime();
+    if (actor->IsHideFadeActive(now)) {
+        alpha = (std::min)(alpha, actor->GetHideFadeAlpha(now));
+    }
+
     if (actor->m_vanishTime != 0) {
-        const u32 now = timeGetTime();
         if (now > actor->m_vanishTime) {
             return false;
         }
 
         const int fadeAlpha = static_cast<int>((actor->m_vanishTime - now) >> 1);
         const u32 clampedAlpha = static_cast<u32>((std::max)(0, (std::min)(255, fadeAlpha)));
-        billboardColor = (clampedAlpha << 24) | 0x00FFFFFFu;
+        alpha = (std::min)(alpha, clampedAlpha);
     }
+
+    const u32 billboardColor = (alpha << 24) | 0x00FFFFFFu;
 
     RPFace* face = g_renderer.BorrowNullRP();
     if (!face) {
@@ -4499,6 +4959,20 @@ void CWorld::ClearFixedObjects()
     m_itemList.clear();
 }
 
+void CWorld::NotifyActorDeleted(const CGameActor* actor)
+{
+    if (!actor) {
+        return;
+    }
+
+    for (CGameObject* object : m_gameObjectList) {
+        if (!object) {
+            continue;
+        }
+        object->OnActorDeleted(actor);
+    }
+}
+
 void CWorld::ResetSceneGraph()
 {
     m_rootNode.ClearChildren();
@@ -5624,6 +6098,32 @@ bool CWorld::HasWarpAtAttrCell(int attrX, int attrY) const
     }
 
     return false;
+}
+
+void CWorld::SpawnProjectileEffect(const vector3d& startPos,
+    const vector3d& targetPos,
+    u32 targetGid,
+    WorldProjectileVisual visual,
+    float travelFrames,
+    float delayFrames)
+{
+    DbgLog("[Projectile] spawn visual=%d start=(%.2f,%.2f,%.2f) target=(%.2f,%.2f,%.2f) targetGid=%u travel=%.2f delay=%.2f\n",
+        static_cast<int>(visual),
+        startPos.x,
+        startPos.y,
+        startPos.z,
+        targetPos.x,
+        targetPos.y,
+        targetPos.z,
+        static_cast<unsigned int>(targetGid),
+        travelFrames,
+        delayFrames);
+    m_gameObjectList.push_back(new CWorldProjectile(startPos,
+        targetPos,
+        targetGid,
+        visual,
+        travelFrames,
+        delayFrames));
 }
 
 void CWorld::RenderBackgroundObjects(const matrix& viewMatrix) const

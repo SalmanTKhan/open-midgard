@@ -58,6 +58,8 @@
 #pragma comment(lib, "msimg32.lib")
 #endif
 
+void NoteLocalHideSkillRequest(u16 skillId, u32 targetGid);
+
 namespace {
 CGameModePacketRouter g_gameModePacketRouter;
 
@@ -4920,6 +4922,9 @@ bool SendUseSkillToIdPacket(u16 skillId, u16 skillLevel, u32 targetGid)
     const bool sent = CRagConnection::instance()->SendPacket(
         reinterpret_cast<const char*>(&packet),
         static_cast<int>(sizeof(packet)));
+    if (sent) {
+        NoteLocalHideSkillRequest(skillId, targetGid);
+    }
     DbgLog("[GameMode] useskilltoid skillId=%u level=%u target=%u sent=%d\n",
         static_cast<unsigned int>(skillId),
         static_cast<unsigned int>(skillLevel),
@@ -5943,16 +5948,33 @@ void PumpPendingPickupRequest(CGameMode& mode)
 
 void ClearRuntimeActors(CGameMode& mode)
 {
+    CWorld* const world = mode.m_world ? mode.m_world : &g_world;
+    if (world) {
+        world->m_player = nullptr;
+        world->ClearFixedObjects();
+    }
+
+    ClearQueuedMsgEffects();
+
     for (auto& entry : mode.m_runtimeActors) {
         CGameActor* actor = entry.second;
         if (!actor) {
             continue;
+        }
+        if (world) {
+            world->NotifyActorDeleted(actor);
         }
         actor->UnRegisterPos();
         delete actor;
     }
     mode.m_runtimeActors.clear();
     mode.m_actorPosList.clear();
+
+    if (world) {
+        world->m_actorList.clear();
+        world->RebuildSceneGraph();
+        world->InvalidateBillboardFrameCache();
+    }
 }
 
 void EnsureBootstrapSelfActor(CGameMode& mode)
