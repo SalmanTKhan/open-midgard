@@ -1,2 +1,0 @@
-C:\Qt\Tools\mingw1310_64\bin\ar.exe qc libro_qtui.a CMakeFiles/ro_qtui.dir/ro_qtui_autogen/mocs_compilation.cpp.obj CMakeFiles/ro_qtui.dir/QtUiSpikeBridge.cpp.obj CMakeFiles/ro_qtui.dir/QtUiStateAdapter.cpp.obj CMakeFiles/ro_qtui.dir/ro_qtui_autogen/EWIEGA46WW/qrc_QtUiSpikeAssets.cpp.obj
-C:\Qt\Tools\mingw1310_64\bin\ranlib.exe libro_qtui.a

@@ -1,9 +1,0 @@
-This product includes Qt 6 libraries made available under the GNU Lesser General Public License version 3 and other open-source licenses used by Qt.
-
-The OpenMidgard executable dynamically links against Qt runtime DLLs. You may replace those Qt DLLs with a modified, interface-compatible version for debugging your modifications, and reverse engineering for that purpose is not restricted by this product's license terms.
-
-Copies of the applicable GNU LGPLv3 and GNU GPLv3 texts are included in this directory.
-
-If you distribute a build of this product that includes Qt, you must also provide the complete corresponding source code for the exact Qt libraries you ship, including any modifications, or a valid written offer / download location that satisfies the LGPL requirements for your distribution model.
-
-This notice is provided as technical packaging guidance only and is not legal advice.

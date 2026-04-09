@@ -1,2 +1,0 @@
-C:\Qt\Tools\mingw1310_64\bin\ar.exe qc libro_item.a CMakeFiles/ro_item.dir/Item.cpp.obj
-C:\Qt\Tools\mingw1310_64\bin\ranlib.exe libro_item.a

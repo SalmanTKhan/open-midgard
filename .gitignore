@@ -13,6 +13,7 @@ build-linux-local/
 build-linux-make/
 build-linux-qt-vulkan/
 build-mingw-direct/
+build-mingw-preset-debug/
 build-mingw-preset/
 build-mingw-qt/
 build-mingw-qt-ninja/
