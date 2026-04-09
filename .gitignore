@@ -20,3 +20,8 @@ build-wsl-perm-test/
 build-wsl-smoke/
 
 compile_commands.json
+
+tools/
+build_output*.txt
+*.ps1
+*.py
