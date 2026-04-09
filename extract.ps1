@@ -1,1 +1,0 @@
-﻿$target = $args[0]; $content = [System.IO.File]::ReadAllText("HighPriest.exe.h", [System.Text.Encoding]::Unicode); if ($content -match "(?s)(const )?struct __cppobj $target( : [^`r`n]+)?`r`n\{.*?`r`n\};") { $matches[0] } else { Write-Host "Not found" }
