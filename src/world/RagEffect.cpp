@@ -1829,6 +1829,66 @@ void UpdateAlphaFade(CEffectPrim* prim)
     }
 }
 
+bool UpdateScreenTexturePrimitive(CEffectPrim* prim)
+{
+    if (!prim || !prim->m_master) {
+        return false;
+    }
+
+    ++prim->m_stateCnt;
+    prim->m_speed += prim->m_accel;
+    prim->m_size += prim->m_sizeSpeed;
+    prim->m_sizeSpeed += prim->m_sizeAccel;
+    prim->m_radius += prim->m_radiusSpeed;
+    prim->m_radiusSpeed += prim->m_radiusAccel;
+    prim->m_heightSize += prim->m_heightSpeed;
+    prim->m_heightSpeed += prim->m_heightAccel;
+    prim->m_longitude += prim->m_longSpeed;
+    prim->m_gravSpeed += prim->m_gravAccel;
+
+    if (prim->m_speed != 0.0f) {
+        const float radians = prim->m_longitude * (kPi / 180.0f);
+        prim->m_deltaPos2.x += std::sin(radians) * prim->m_speed;
+        prim->m_deltaPos2.y -= std::cos(radians) * prim->m_speed;
+    }
+
+    UpdateAlphaFade(prim);
+    if (!AdvanceTextureMotion(prim)) {
+        return false;
+    }
+    return prim->m_stateCnt <= prim->m_duration || prim->m_alpha > 0.0f;
+}
+
+bool UpdateCrossTexturePrimitive(CEffectPrim* prim)
+{
+    if (!prim || !prim->m_master) {
+        return false;
+    }
+
+    ++prim->m_stateCnt;
+    prim->m_speed += prim->m_accel;
+    prim->m_size += prim->m_sizeSpeed;
+    prim->m_sizeSpeed += prim->m_sizeAccel;
+    prim->m_radius += prim->m_radiusSpeed;
+    prim->m_radiusSpeed += prim->m_radiusAccel;
+    prim->m_heightSize += prim->m_heightSpeed;
+    prim->m_heightSpeed += prim->m_heightAccel;
+    prim->m_longitude += prim->m_longSpeed;
+    prim->m_gravSpeed += prim->m_gravAccel;
+
+    if (prim->m_speed != 0.0f) {
+        prim->m_deltaPos.x += prim->m_matrix.m[2][0] * prim->m_speed;
+        prim->m_deltaPos.y += prim->m_matrix.m[2][1] * prim->m_speed;
+        prim->m_deltaPos.z += prim->m_matrix.m[2][2] * prim->m_speed;
+    }
+
+    UpdateAlphaFade(prim);
+    if (!AdvanceTextureMotion(prim)) {
+        return false;
+    }
+    return prim->m_stateCnt <= prim->m_duration || prim->m_alpha > 0.0f;
+}
+
 bool UpdateCirclePrimitive(CEffectPrim* prim)
 {
     if (!prim || !prim->m_master) {
@@ -2126,6 +2186,12 @@ bool CEffectPrim::OnProcess()
     if (m_type == PP_3DPARTICLESPLINE) {
         return UpdateFreeParticlePrimitive(this, true, true);
     }
+    if (m_type == PP_3DCROSSTEXTURE) {
+        return UpdateCrossTexturePrimitive(this);
+    }
+    if (m_type == PP_2DTEXTURE || m_type == PP_2DFLASH || m_type == PP_2DCIRCLE) {
+        return UpdateScreenTexturePrimitive(this);
+    }
     if (m_type == PP_PORTAL) {
         UpdatePortalBands(this);
         ++m_stateCnt;
@@ -2373,8 +2439,8 @@ void CEffectPrim::Render(matrix* viewMatrix)
             ? m_texture[(std::min)(m_curMotion, static_cast<int>(m_texture.size()) - 1)]
             : GetSoftGlowTexture(false);
         const vector3d pos = AddVec3(base, m_deltaPos2);
-        const float width = (std::max)(10.0f, m_size * 34.0f + m_outerSize * 8.0f);
-        const float height = (std::max)(10.0f, m_heightSize > 0.0f ? m_heightSize * 12.0f : width * 1.6f);
+        const float width = (std::max)(0.5f, m_size * 34.0f + m_outerSize * 8.0f);
+        const float height = (std::max)(0.1f, m_heightSize > 0.0f ? m_heightSize * 12.0f : width * 1.6f);
         const int renderFlags = ResolveEffectRenderFlags(m_renderFlag, 1 | 2);
         const D3DBLEND destBlend = ResolveEffectDestBlend(m_renderFlag);
         SubmitBillboard(pos,
@@ -2432,7 +2498,7 @@ void CEffectPrim::Render(matrix* viewMatrix)
     case PP_2DTEXTURE:
     case PP_2DFLASH:
     case PP_2DCIRCLE: {
-        vector3d anchorPos = AddVec3(base, m_deltaPos2);
+        vector3d anchorPos = base;
         anchorPos.y += m_param[2];
         tlvertex3d anchor{};
         if (!ProjectPoint(anchorPos, *viewMatrix, &anchor)) {
@@ -3154,7 +3220,7 @@ void CRagEffect::Init(CRenderObject* master, int effectId, const vector3d& delta
     case 37:
     case 43:
         m_handler = Handler::IncAgility;
-        m_duration = 60;
+            m_duration = 100;
         break;
     case 42:
         m_handler = Handler::Blessing;
@@ -5126,97 +5192,100 @@ u8 CRagEffect::OnProcess()
     }
 
     for (int step = 0; step < steps && alive; ++step) {
-        switch (m_handler) {
-        case Handler::EzStr:
-            ProcessEZ2STR();
-            break;
-        case Handler::Entry2:
-            SpawnEntry2();
-            break;
-        case Handler::JobLevelUp50:
-            SpawnJobLevelUp50();
-            break;
-        case Handler::Portal:
-            SpawnPortal();
-            break;
-        case Handler::ReadyPortal:
-            SpawnReadyPortal();
-            break;
-        case Handler::WarpZone:
-            SpawnWarpZone();
-            break;
-        case Handler::Portal2:
-            SpawnPortal2();
-            break;
-        case Handler::ReadyPortal2:
-            SpawnReadyPortal2();
-            break;
-        case Handler::WarpZone2:
-            SpawnWarpZone2();
-            break;
-        case Handler::MapMagicZone:
-            SpawnMapMagicZone();
-            break;
-        case Handler::MapParticle:
-            SpawnMapParticle();
-            break;
-        case Handler::SuperAngel:
-            UpdateSuperAngel();
-            break;
-        case Handler::RecoveryHp:
-            SpawnRecoveryHp();
-            break;
-        case Handler::RecoverySp:
-            SpawnRecoverySp();
-            break;
-        case Handler::BeginCasting:
-            SpawnBeginCasting();
-            break;
-        case Handler::HealLight:
-            SpawnHealLight();
-            break;
-        case Handler::HealMedium:
-            SpawnHealMedium();
-            break;
-        case Handler::HealLarge:
-            SpawnHealLarge();
-            break;
-        case Handler::HideStart:
-            SpawnHideStart();
-            break;
-        case Handler::GrimTooth:
-            SpawnGrimTooth();
-            break;
-        case Handler::GrimToothAtk:
-            SpawnGrimToothAtk();
-            break;
-        case Handler::IncAgility:
-            SpawnIncAgility();
-            break;
-        case Handler::Blessing:
-            SpawnBlessing();
-            break;
-        case Handler::Sight:
-            SpawnSight();
-            break;
-        case Handler::SightState:
-            SpawnSightState();
-            break;
-        case Handler::FireBall:
-            SpawnFireBall();
-            break;
-        case Handler::Ruwach:
-            SpawnRuwach();
-            break;
-        case Handler::SightAura:
-            SpawnSightAura();
-            break;
-        case Handler::FireBoltRain:
-            SpawnFireBoltRain();
-            break;
-        case Handler::None:
-        default:
-            break;
+        const bool dispatchHandler = m_loop || frameDrivenStrHandler || m_stateCnt < m_duration;
+        if (dispatchHandler) {
+            switch (m_handler) {
+            case Handler::EzStr:
+                ProcessEZ2STR();
+                break;
+            case Handler::Entry2:
+                SpawnEntry2();
+                break;
+            case Handler::JobLevelUp50:
+                SpawnJobLevelUp50();
+                break;
+            case Handler::Portal:
+                SpawnPortal();
+                break;
+            case Handler::ReadyPortal:
+                SpawnReadyPortal();
+                break;
+            case Handler::WarpZone:
+                SpawnWarpZone();
+                break;
+            case Handler::Portal2:
+                SpawnPortal2();
+                break;
+            case Handler::ReadyPortal2:
+                SpawnReadyPortal2();
+                break;
+            case Handler::WarpZone2:
+                SpawnWarpZone2();
+                break;
+            case Handler::MapMagicZone:
+                SpawnMapMagicZone();
+                break;
+            case Handler::MapParticle:
+                SpawnMapParticle();
+                break;
+            case Handler::SuperAngel:
+                UpdateSuperAngel();
+                break;
+            case Handler::RecoveryHp:
+                SpawnRecoveryHp();
+                break;
+            case Handler::RecoverySp:
+                SpawnRecoverySp();
+                break;
+            case Handler::BeginCasting:
+                SpawnBeginCasting();
+                break;
+            case Handler::HealLight:
+                SpawnHealLight();
+                break;
+            case Handler::HealMedium:
+                SpawnHealMedium();
+                break;
+            case Handler::HealLarge:
+                SpawnHealLarge();
+                break;
+            case Handler::HideStart:
+                SpawnHideStart();
+                break;
+            case Handler::GrimTooth:
+                SpawnGrimTooth();
+                break;
+            case Handler::GrimToothAtk:
+                SpawnGrimToothAtk();
+                break;
+            case Handler::IncAgility:
+                SpawnIncAgility();
+                break;
+            case Handler::Blessing:
+                SpawnBlessing();
+                break;
+            case Handler::Sight:
+                SpawnSight();
+                break;
+            case Handler::SightState:
+                SpawnSightState();
+                break;
+            case Handler::FireBall:
+                SpawnFireBall();
+                break;
+            case Handler::Ruwach:
+                SpawnRuwach();
+                break;
+            case Handler::SightAura:
+                SpawnSightAura();
+                break;
+            case Handler::FireBoltRain:
+                SpawnFireBoltRain();
+                break;
+            case Handler::None:
+            default:
+                break;
+            }
         }
 
         for (auto it = m_primList.begin(); it != m_primList.end(); ) {
