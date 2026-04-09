@@ -1,7 +1,10 @@
 #include "MsgEffect.h"
 
 #include "World.h"
+#include "audio/Audio.h"
 #include "DebugLog.h"
+#include "gamemode/GameMode.h"
+#include "gamemode/Mode.h"
 #include "main/WinMain.h"
 #include "render/Renderer.h"
 #include "render3d/Device.h"
@@ -10,8 +13,11 @@
 #include "res/Res.h"
 
 #include <algorithm>
+#include <array>
+#include <cctype>
 #include <cmath>
 #include <cstdint>
+#include <string>
 #include <vector>
 
 namespace {
@@ -20,6 +26,11 @@ constexpr float kMsgEffectNearPlane = 10.0f;
 constexpr float kMsgEffectSubmitNearPlane = 80.0f;
 constexpr const char* kDamageNumberSpritePath = "data\\sprite\\\xC0\xCC\xC6\xD1\xC6\xAE\\\xBC\xFD\xC0\xDA.spr";
 constexpr const char* kDamageNumberActPath = "data\\sprite\\\xC0\xCC\xC6\xD1\xC6\xAE\\\xBC\xFD\xC0\xDA.act";
+constexpr const char* kMissEffectSpritePath = "data\\sprite\\\xC0\xCC\xC6\xD1\xC6\xAE\\msg.spr";
+constexpr const char* kMissEffectActPath = "data\\sprite\\\xC0\xCC\xC6\xD1\xC6\xAE\\msg.act";
+constexpr int kMissMsgEffectType = 13;
+constexpr int kCriticalMsgEffectType = 15;
+constexpr int kLuckyDodgeMsgEffectType = 17;
 
 struct QueuedMsgEffectDraw {
     int screenX = 0;
@@ -31,7 +42,103 @@ struct QueuedMsgEffectDraw {
     int sprShift = 0;
 };
 
+struct QueuedMsgSpriteEffectDraw {
+    int screenX = 0;
+    int screenY = 0;
+    int actionIndex = 0;
+    int motionIndex = 0;
+    u32 colorArgb = 0xFFFFFFFFu;
+    int alpha = 255;
+    float zoom = 1.0f;
+    float alphaSortBase = 1.7f;
+};
+
 std::vector<QueuedMsgEffectDraw> g_queuedMsgEffects;
+std::vector<QueuedMsgSpriteEffectDraw> g_queuedMsgSpriteEffects;
+
+CActRes* GetMissEffectAct();
+
+bool ContainsAsciiCaseInsensitive(const char* text, const char* token)
+{
+    if (!text || !token || !*text || !*token) {
+        return false;
+    }
+
+    std::string loweredText(text);
+    std::string loweredToken(token);
+    std::transform(loweredText.begin(), loweredText.end(), loweredText.begin(), [](unsigned char ch) {
+        return static_cast<char>(std::tolower(ch));
+    });
+    std::transform(loweredToken.begin(), loweredToken.end(), loweredToken.begin(), [](unsigned char ch) {
+        return static_cast<char>(std::tolower(ch));
+    });
+    return loweredText.find(loweredToken) != std::string::npos;
+}
+
+std::string NormalizeWaveEventPath(const char* eventName)
+{
+    std::string normalized = eventName ? eventName : "";
+    std::replace(normalized.begin(), normalized.end(), '/', '\\');
+    return normalized;
+}
+
+bool IsSpriteBackedMsgEffectType(int msgEffectType)
+{
+    return msgEffectType == kMissMsgEffectType
+        || msgEffectType == kCriticalMsgEffectType
+        || msgEffectType == kLuckyDodgeMsgEffectType;
+}
+
+bool IsAnimatedSpriteBackedMsgEffectType(int msgEffectType)
+{
+    return msgEffectType == kCriticalMsgEffectType
+        || msgEffectType == kLuckyDodgeMsgEffectType;
+}
+
+bool TryPlayMsgSpriteMotionEvent(const CMsgEffect& effect, int motionIndex)
+{
+    CActRes* act = GetMissEffectAct();
+    if (!act) {
+        return false;
+    }
+
+    const CMotion* motion = act->GetMotion(effect.m_spriteActionIndex, motionIndex);
+    if (!motion || motion->eventId < 0) {
+        return false;
+    }
+
+    const char* eventName = act->GetEventName(motion->eventId);
+    if (!ContainsAsciiCaseInsensitive(eventName, ".wav")) {
+        return false;
+    }
+
+    CAudio* audio = CAudio::GetInstance();
+    CGameMode* gameMode = g_modeMgr.GetCurrentGameMode();
+    if (!audio || !gameMode || !gameMode->m_world || !gameMode->m_world->m_player) {
+        return false;
+    }
+
+    const vector3d origin = effect.m_masterActor ? effect.m_masterActor->m_pos : effect.m_pos;
+    const vector3d listenerPos = gameMode->m_world->m_player->m_pos;
+    const std::string normalized = NormalizeWaveEventPath(eventName);
+    if (normalized.empty()) {
+        return false;
+    }
+
+    std::array<std::string, 3> candidates = {
+        normalized,
+        std::string("wav\\") + normalized,
+        std::string("data\\wav\\") + normalized,
+    };
+
+    for (const std::string& candidate : candidates) {
+        if (audio->PlaySound3D(candidate.c_str(), origin, listenerPos)) {
+            return true;
+        }
+    }
+
+    return false;
+}
 
 bool ProjectMsgEffectPoint(const matrix& viewMatrix, const vector3d& point, tlvertex3d* outVertex)
 {
@@ -93,10 +200,43 @@ CActRes* GetDamageCountAct()
     return act;
 }
 
+CSprRes* GetMissEffectSprite()
+{
+    static CSprRes* sprite = nullptr;
+    static bool attemptedLoad = false;
+    if (!attemptedLoad) {
+        attemptedLoad = true;
+        sprite = g_resMgr.GetAs<CSprRes>(kMissEffectSpritePath);
+        if (!sprite) {
+            DbgLog("[MsgEffect] Failed to load miss effect sprite '%s'\n", kMissEffectSpritePath);
+        }
+    }
+    return sprite;
+}
+
+CActRes* GetMissEffectAct()
+{
+    static CActRes* act = nullptr;
+    static bool attemptedLoad = false;
+    if (!attemptedLoad) {
+        attemptedLoad = true;
+        act = g_resMgr.GetAs<CActRes>(kMissEffectActPath);
+        if (!act) {
+            DbgLog("[MsgEffect] Failed to load miss effect act '%s'\n", kMissEffectActPath);
+        }
+    }
+    return act;
+}
+
 float ResolveDigitScale(float zoom)
 {
     const float scale = 1.8f + zoom * 0.6f;
     return (std::max)(1.8f, (std::min)(4.8f, scale));
+}
+
+float ResolveMsgSpriteScale(float zoom)
+{
+    return (std::max)(0.75f, (std::min)(2.0f, zoom));
 }
 
 int ResolveDigitShiftPixels(const QueuedMsgEffectDraw& draw)
@@ -295,6 +435,61 @@ CTexture* GetOrCreateDigitClipTexture(CSprRes* sprite, const SprImg* image)
     return texture;
 }
 
+CTexture* GetOrCreateSpriteClipTexture(CSprRes* sprite, const SprImg* image)
+{
+    if (!sprite || !image || image->width <= 0 || image->height <= 0) {
+        return nullptr;
+    }
+
+    SprImg* mutableImage = const_cast<SprImg*>(image);
+    if (mutableImage->tex && mutableImage->tex != &CTexMgr::s_dummy_texture) {
+        return mutableImage->tex;
+    }
+
+    std::vector<unsigned int> pixels(static_cast<size_t>(image->width) * static_cast<size_t>(image->height), 0u);
+    if (!image->rgba.empty()) {
+        for (int y = 0; y < image->height; ++y) {
+            for (int x = 0; x < image->width; ++x) {
+                const unsigned int rgba = image->rgba[static_cast<size_t>(y) * static_cast<size_t>(image->width) + static_cast<size_t>(x)];
+                const unsigned int alpha = (rgba >> 24) & 0xFFu;
+                if (alpha == 0u) {
+                    continue;
+                }
+                pixels[static_cast<size_t>(y) * static_cast<size_t>(image->width) + static_cast<size_t>(x)] =
+                    (alpha << 24) | (rgba & 0x00FFFFFFu);
+            }
+        }
+    } else if (!image->indices.empty()) {
+        for (int y = 0; y < image->height; ++y) {
+            for (int x = 0; x < image->width; ++x) {
+                const unsigned char paletteIndex = image->indices[static_cast<size_t>(y) * static_cast<size_t>(image->width) + static_cast<size_t>(x)];
+                if (paletteIndex == 0) {
+                    continue;
+                }
+                pixels[static_cast<size_t>(y) * static_cast<size_t>(image->width) + static_cast<size_t>(x)] =
+                    0xFF000000u | (sprite->m_pal[paletteIndex] & 0x00FFFFFFu);
+            }
+        }
+    } else {
+        return nullptr;
+    }
+
+    CTexture* texture = new CTexture();
+    if (!texture || !texture->Create(static_cast<unsigned int>(image->width), static_cast<unsigned int>(image->height), PF_A8R8G8B8, false)) {
+        delete texture;
+        return nullptr;
+    }
+    texture->Update(0,
+        0,
+        image->width,
+        image->height,
+        pixels.data(),
+        true,
+        image->width * static_cast<int>(sizeof(unsigned int)));
+    mutableImage->tex = texture;
+    return texture;
+}
+
 u32 BuildDigitClipColor(const QueuedMsgEffectDraw& draw, const CSprClip& clip)
 {
     const unsigned int tintAlpha = (draw.colorArgb >> 24) & 0xFFu;
@@ -436,6 +631,199 @@ bool GetDigitDrawBounds(const QueuedMsgEffectDraw& draw, RECT* outRect)
     return true;
 }
 
+bool ResolveMsgSpriteClipBox(CSprRes* sprite, CActRes* act, int actionIndex, int motionIndex, RECT* outClipBox)
+{
+    if (!sprite || !act || !outClipBox) {
+        return false;
+    }
+
+    const CMotion* motion = act->GetMotion(actionIndex, motionIndex);
+    if (!motion) {
+        motion = act->GetMotion(actionIndex, 0);
+    }
+    if (!motion) {
+        return false;
+    }
+
+    RECT clipBox{};
+    bool hasClip = false;
+    for (const CSprClip& clip : motion->sprClips) {
+        const SprImg* image = sprite->GetSprite(clip.clipType, clip.sprIndex);
+        if (!image || image->width <= 0 || image->height <= 0) {
+            continue;
+        }
+
+        const int drawX = clip.x - image->width / 2;
+        const int drawY = clip.y - image->height / 2;
+        RECT current = { drawX, drawY, drawX + image->width, drawY + image->height };
+        if (!hasClip) {
+            clipBox = current;
+            hasClip = true;
+        } else {
+            clipBox.left = (std::min)(clipBox.left, current.left);
+            clipBox.top = (std::min)(clipBox.top, current.top);
+            clipBox.right = (std::max)(clipBox.right, current.right);
+            clipBox.bottom = (std::max)(clipBox.bottom, current.bottom);
+        }
+    }
+
+    if (!hasClip) {
+        return false;
+    }
+
+    *outClipBox = clipBox;
+    return true;
+}
+
+u32 BuildMsgSpriteClipColor(const QueuedMsgSpriteEffectDraw& draw, const CSprClip& clip)
+{
+    const unsigned int tintAlpha = (draw.colorArgb >> 24) & 0xFFu;
+    const unsigned int totalAlpha = static_cast<unsigned int>((std::max)(0, (std::min)(255, draw.alpha))) * tintAlpha / 255u;
+    const unsigned int tintRed = (draw.colorArgb >> 16) & 0xFFu;
+    const unsigned int tintGreen = (draw.colorArgb >> 8) & 0xFFu;
+    const unsigned int tintBlue = draw.colorArgb & 0xFFu;
+    const unsigned int clipAlpha = static_cast<unsigned int>(clip.a) * totalAlpha / 255u;
+    const unsigned int clipRed = tintRed * clip.r / 255u;
+    const unsigned int clipGreen = tintGreen * clip.g / 255u;
+    const unsigned int clipBlue = tintBlue * clip.b / 255u;
+    return (clipAlpha << 24)
+        | (clipRed << 16)
+        | (clipGreen << 8)
+        | clipBlue;
+}
+
+bool QueueMsgSpriteQuad(const QueuedMsgSpriteEffectDraw& draw)
+{
+    CSprRes* sprite = GetMissEffectSprite();
+    CActRes* act = GetMissEffectAct();
+    if (!sprite || !act) {
+        return false;
+    }
+
+    const CMotion* motion = act->GetMotion(draw.actionIndex, draw.motionIndex);
+    if (!motion) {
+        motion = act->GetMotion(draw.actionIndex, 0);
+    }
+    if (!motion) {
+        return false;
+    }
+
+    RECT clipBox{};
+    if (!ResolveMsgSpriteClipBox(sprite, act, draw.actionIndex, draw.motionIndex, &clipBox)) {
+        return false;
+    }
+
+    const float scale = ResolveMsgSpriteScale(draw.zoom);
+    const int nativeWidth = (std::max)(1, static_cast<int>(clipBox.right - clipBox.left));
+    const int nativeHeight = (std::max)(1, static_cast<int>(clipBox.bottom - clipBox.top));
+    const int outWidth = (std::max)(1, static_cast<int>(std::lround(static_cast<float>(nativeWidth) * scale)));
+    const int outHeight = (std::max)(1, static_cast<int>(std::lround(static_cast<float>(nativeHeight) * scale)));
+    const float originX = static_cast<float>(draw.screenX - outWidth / 2) - 0.5f;
+    const float originY = static_cast<float>(draw.screenY - outHeight / 2) - 0.5f;
+
+    bool queuedAny = false;
+    float clipSortOffset = 0.0f;
+    for (const CSprClip& clip : motion->sprClips) {
+        const SprImg* image = sprite->GetSprite(clip.clipType, clip.sprIndex);
+        if (!image || image->width <= 0 || image->height <= 0) {
+            continue;
+        }
+
+        CTexture* texture = GetOrCreateSpriteClipTexture(sprite, image);
+        if (!texture || texture == &CTexMgr::s_dummy_texture) {
+            continue;
+        }
+
+        const float drawLeft = originX + static_cast<float>(clip.x - image->width / 2 - clipBox.left) * scale;
+        const float drawTop = originY + static_cast<float>(clip.y - image->height / 2 - clipBox.top) * scale;
+        const float drawRight = drawLeft + static_cast<float>(image->width) * scale;
+        const float drawBottom = drawTop + static_cast<float>(image->height) * scale;
+
+        const float maxU = texture->m_w != 0
+            ? static_cast<float>(texture->m_surfaceUpdateWidth > 0 ? texture->m_surfaceUpdateWidth : static_cast<unsigned int>(image->width))
+                / static_cast<float>(texture->m_w)
+            : 1.0f;
+        const float maxV = texture->m_h != 0
+            ? static_cast<float>(texture->m_surfaceUpdateHeight > 0 ? texture->m_surfaceUpdateHeight : static_cast<unsigned int>(image->height))
+                / static_cast<float>(texture->m_h)
+            : 1.0f;
+
+        RPFace* face = g_renderer.BorrowNullRP();
+        if (!face) {
+            continue;
+        }
+
+        const bool flipX = (clip.flags & 1) != 0;
+        const u32 color = BuildMsgSpriteClipColor(draw, clip);
+        if (((color >> 24) & 0xFFu) == 0u) {
+            continue;
+        }
+
+        face->primType = D3DPT_TRIANGLESTRIP;
+        face->verts = face->m_verts;
+        face->numVerts = 4;
+        face->indices = nullptr;
+        face->numIndices = 0;
+        face->tex = texture;
+        face->mtPreset = 0;
+        face->cullMode = D3DCULL_NONE;
+        face->srcAlphaMode = D3DBLEND_SRCALPHA;
+        face->destAlphaMode = D3DBLEND_INVSRCALPHA;
+        face->alphaSortKey = draw.alphaSortBase + clipSortOffset;
+
+        face->m_verts[0] = { drawLeft,  drawTop,    0.0f, 1.0f, color, 0xFF000000u, flipX ? maxU : 0.0f, 0.0f };
+        face->m_verts[1] = { drawRight, drawTop,    0.0f, 1.0f, color, 0xFF000000u, flipX ? 0.0f : maxU, 0.0f };
+        face->m_verts[2] = { drawLeft,  drawBottom, 0.0f, 1.0f, color, 0xFF000000u, flipX ? maxU : 0.0f, maxV };
+        face->m_verts[3] = { drawRight, drawBottom, 0.0f, 1.0f, color, 0xFF000000u, flipX ? 0.0f : maxU, maxV };
+        g_renderer.AddRP(face, 1 | 8);
+        clipSortOffset += 0.0001f;
+        queuedAny = true;
+    }
+
+    return queuedAny;
+}
+
+bool GetMsgSpriteDrawBounds(const QueuedMsgSpriteEffectDraw& draw, RECT* outRect)
+{
+    if (!outRect) {
+        return false;
+    }
+
+    CSprRes* sprite = GetMissEffectSprite();
+    CActRes* act = GetMissEffectAct();
+    RECT clipBox{};
+    if (!ResolveMsgSpriteClipBox(sprite, act, draw.actionIndex, draw.motionIndex, &clipBox)) {
+        return false;
+    }
+
+    const float scale = ResolveMsgSpriteScale(draw.zoom);
+    const int nativeWidth = (std::max)(1, static_cast<int>(clipBox.right - clipBox.left));
+    const int nativeHeight = (std::max)(1, static_cast<int>(clipBox.bottom - clipBox.top));
+    const int outWidth = (std::max)(1, static_cast<int>(std::lround(static_cast<float>(nativeWidth) * scale)));
+    const int outHeight = (std::max)(1, static_cast<int>(std::lround(static_cast<float>(nativeHeight) * scale)));
+    const int originX = draw.screenX - outWidth / 2;
+    const int originY = draw.screenY - outHeight / 2;
+    outRect->left = originX - 1;
+    outRect->top = originY - 1;
+    outRect->right = originX + outWidth + 1;
+    outRect->bottom = originY + outHeight + 1;
+    return true;
+}
+
+int ResolveMsgSpriteMotionCount(int actionIndex)
+{
+    CActRes* act = GetMissEffectAct();
+    if (!act) {
+        return 0;
+    }
+
+    int motionCount = 0;
+    while (act->GetMotion(actionIndex, motionCount)) {
+        ++motionCount;
+    }
+    return motionCount;
+}
+
 void ResolveLateralOffset(float rotationDegrees, float* outX, float* outZ)
 {
     if (!outX || !outZ) {
@@ -491,6 +879,9 @@ CMsgEffect::CMsgEffect()
     , m_digit(0)
     , m_numberValue(0)
     , m_sprShift(0)
+    , m_spriteActionIndex(0)
+    , m_spriteMotionIndex(0)
+    , m_lastProcessedSpriteMotionIndex(-1)
     , m_alpha(255)
     , m_masterGid(0)
     , m_colorArgb(0xFFFFFFFFu)
@@ -537,6 +928,69 @@ u8 CMsgEffect::OnProcess()
 
     const float stateCount = static_cast<float>(timeGetTime() - m_stateStartTick) * 0.041666668f;
     switch (m_msgEffectType) {
+    case kCriticalMsgEffectType: {
+        if (m_destPos.x == 0.0f && m_masterActor) {
+            ResolveLateralOffset(m_masterActor->m_roty, &m_destPos.x, &m_destPos.z);
+            m_destPos.x *= 0.625f;
+            m_destPos.z *= 0.625f;
+        }
+
+        m_pos.x = m_orgPos.x + (stateCount * 0.33333334f + 3.0f) * m_destPos.x + m_destPos2.x;
+        m_pos.z = m_orgPos.z + (stateCount * 0.33333334f + 3.0f) * m_destPos.z + m_destPos2.z;
+        m_pos.y = m_orgPos.y + 8.0f - (2.0f - stateCount * 0.033333335f) * stateCount + m_destPos.y;
+        m_destPos.y = m_pos.y >= 0.0f ? 1.3333334f : -1.3333334f;
+
+        m_zoom = stateCount >= 0.0f ? (std::max)(1.0f, m_orgZoom - stateCount * 0.14400001f) : m_orgZoom;
+        m_alpha = (std::max)(0, static_cast<int>(255.0f - stateCount * 3.45f));
+
+        const int motionCount = ResolveMsgSpriteMotionCount(m_spriteActionIndex);
+        if (motionCount <= 0) {
+            m_isDisappear = 1;
+            break;
+        }
+
+        const int nextMotionIndex = (std::min)(static_cast<int>(stateCount * 0.5f), motionCount - 1);
+        if (m_lastProcessedSpriteMotionIndex >= 0 && nextMotionIndex > m_lastProcessedSpriteMotionIndex) {
+            for (int motionIndex = m_lastProcessedSpriteMotionIndex + 1; motionIndex <= nextMotionIndex; ++motionIndex) {
+                TryPlayMsgSpriteMotionEvent(*this, motionIndex);
+            }
+        }
+
+        m_spriteMotionIndex = nextMotionIndex;
+        m_lastProcessedSpriteMotionIndex = nextMotionIndex;
+        if (stateCount >= 70.0f) {
+            m_isDisappear = 1;
+        }
+        break;
+    }
+    case kLuckyDodgeMsgEffectType: {
+        if (m_masterActor) {
+            m_pos.x = m_masterActor->m_pos.x;
+            m_pos.z = m_masterActor->m_pos.z;
+        }
+
+        const int motionCount = ResolveMsgSpriteMotionCount(m_spriteActionIndex);
+        if (motionCount <= 0) {
+            m_isDisappear = 1;
+            break;
+        }
+
+        const int nextMotionIndex = (std::min)(static_cast<int>(stateCount), motionCount - 1);
+        if (m_lastProcessedSpriteMotionIndex >= 0 && nextMotionIndex > m_lastProcessedSpriteMotionIndex) {
+            for (int motionIndex = m_lastProcessedSpriteMotionIndex + 1; motionIndex <= nextMotionIndex; ++motionIndex) {
+                TryPlayMsgSpriteMotionEvent(*this, motionIndex);
+            }
+        }
+
+        m_spriteMotionIndex = nextMotionIndex;
+        m_lastProcessedSpriteMotionIndex = nextMotionIndex;
+        m_alpha = 255;
+        m_zoom = m_orgZoom;
+        if (stateCount >= static_cast<float>(motionCount)) {
+            m_isDisappear = 1;
+        }
+        break;
+    }
     case 14:
     case 21: {
         if (m_destPos.x == 0.0f && m_masterActor) {
@@ -623,6 +1077,10 @@ void CMsgEffect::SendMsg(CGameObject* sender, int msg, msgparam_t par1, msgparam
             m_pos.x = m_masterActor->m_pos.x;
             m_pos.z = m_masterActor->m_pos.z;
         }
+        if (m_masterActor && IsAnimatedSpriteBackedMsgEffectType(m_msgEffectType)) {
+            m_lastProcessedSpriteMotionIndex = m_spriteMotionIndex;
+            TryPlayMsgSpriteMotionEvent(*this, m_spriteMotionIndex);
+        }
         return;
     case 53:
         m_isDisappear = 1;
@@ -671,6 +1129,20 @@ void CMsgEffect::Render(matrix* viewMatrix)
         return;
     }
 
+    if (IsSpriteBackedMsgEffectType(m_msgEffectType)) {
+        QueuedMsgSpriteEffectDraw draw{};
+        draw.screenX = static_cast<int>(std::lround(projected.x));
+        draw.screenY = static_cast<int>(std::lround(projected.y));
+        draw.actionIndex = m_spriteActionIndex;
+        draw.motionIndex = m_spriteMotionIndex;
+        draw.colorArgb = m_colorArgb;
+        draw.alpha = m_alpha;
+        draw.zoom = m_zoom;
+        draw.alphaSortBase = m_msgEffectType == kCriticalMsgEffectType ? 1.6f : 1.7f;
+        g_queuedMsgSpriteEffects.push_back(draw);
+        return;
+    }
+
     const int digitCount = CountDamageDigits(m_numberValue);
     int digits[6] = {};
     int digitWidths[6] = {};
@@ -708,6 +1180,10 @@ bool QueueQueuedMsgEffectsQuads()
         queuedAny = QueueDigitSpriteQuad(draw) || queuedAny;
     }
     g_queuedMsgEffects.clear();
+    for (const QueuedMsgSpriteEffectDraw& draw : g_queuedMsgSpriteEffects) {
+        queuedAny = QueueMsgSpriteQuad(draw) || queuedAny;
+    }
+    g_queuedMsgSpriteEffects.clear();
     return queuedAny;
 }
 
@@ -734,6 +1210,21 @@ bool GetQueuedMsgEffectsBounds(RECT* outRect)
         }
     }
 
+    for (const QueuedMsgSpriteEffectDraw& draw : g_queuedMsgSpriteEffects) {
+        RECT spriteRect{};
+        if (!GetMsgSpriteDrawBounds(draw, &spriteRect)) {
+            continue;
+        }
+        if (!hasBounds) {
+            *outRect = spriteRect;
+            hasBounds = true;
+        } else {
+            RECT combined{};
+            UnionRect(&combined, outRect, &spriteRect);
+            *outRect = combined;
+        }
+    }
+
     if (hasBounds) {
         InflateRect(outRect, 4, 4);
     }
@@ -743,11 +1234,12 @@ bool GetQueuedMsgEffectsBounds(RECT* outRect)
 void ClearQueuedMsgEffects()
 {
     g_queuedMsgEffects.clear();
+    g_queuedMsgSpriteEffects.clear();
 }
 
 bool HasQueuedMsgEffects()
 {
-    return !g_queuedMsgEffects.empty();
+    return !g_queuedMsgEffects.empty() || !g_queuedMsgSpriteEffects.empty();
 }
 
 bool HasActiveMsgEffects()

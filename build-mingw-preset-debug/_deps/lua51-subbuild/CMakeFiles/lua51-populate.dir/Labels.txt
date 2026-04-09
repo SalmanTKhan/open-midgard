@@ -1,0 +1,14 @@
+# Target labels
+ lua51-populate
+# Source files and their labels
+D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/build-mingw-preset-debug/_deps/lua51-subbuild/CMakeFiles/lua51-populate
+D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/build-mingw-preset-debug/_deps/lua51-subbuild/CMakeFiles/lua51-populate.rule
+D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/build-mingw-preset-debug/_deps/lua51-subbuild/CMakeFiles/lua51-populate-complete.rule
+D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/build-mingw-preset-debug/_deps/lua51-subbuild/lua51-populate-prefix/src/lua51-populate-stamp/lua51-populate-build.rule
+D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/build-mingw-preset-debug/_deps/lua51-subbuild/lua51-populate-prefix/src/lua51-populate-stamp/lua51-populate-configure.rule
+D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/build-mingw-preset-debug/_deps/lua51-subbuild/lua51-populate-prefix/src/lua51-populate-stamp/lua51-populate-download.rule
+D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/build-mingw-preset-debug/_deps/lua51-subbuild/lua51-populate-prefix/src/lua51-populate-stamp/lua51-populate-install.rule
+D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/build-mingw-preset-debug/_deps/lua51-subbuild/lua51-populate-prefix/src/lua51-populate-stamp/lua51-populate-mkdir.rule
+D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/build-mingw-preset-debug/_deps/lua51-subbuild/lua51-populate-prefix/src/lua51-populate-stamp/lua51-populate-patch.rule
+D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/build-mingw-preset-debug/_deps/lua51-subbuild/lua51-populate-prefix/src/lua51-populate-stamp/lua51-populate-test.rule
+D:/Spel/RoRebuild/Ragnarok___Win32_HighPriest2008_Release/build-mingw-preset-debug/_deps/lua51-subbuild/lua51-populate-prefix/src/lua51-populate-stamp/lua51-populate-update.rule

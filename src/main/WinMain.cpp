@@ -84,6 +84,16 @@ static unsigned int g_windowTitleFrameCount = 0;
 
 namespace {
 
+constexpr int kCrashMiniDumpType = 0x1065;
+
+using MiniDumpWriteDumpFn = BOOL (WINAPI*)(HANDLE, DWORD, HANDLE, int, void*, void*, void*);
+
+struct CrashMiniDumpExceptionInfo {
+    DWORD threadId;
+    EXCEPTION_POINTERS* exceptionPointers;
+    BOOL clientPointers;
+};
+
 RECT GetPrimaryMonitorRect()
 {
     RECT rect{ 0, 0, GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN) };
@@ -107,6 +117,148 @@ void ApplyConfiguredWindowSize()
     const GraphicsSettings& settings = GetCachedGraphicsSettings();
     WINDOW_WIDTH = settings.width;
     WINDOW_HEIGHT = settings.height;
+}
+
+std::string GetExecutableDirectory()
+{
+    char modulePath[MAX_PATH] = {};
+    const DWORD len = GetModuleFileNameA(nullptr, modulePath, MAX_PATH);
+    if (len == 0 || len >= MAX_PATH) {
+        return std::string();
+    }
+
+    for (int index = static_cast<int>(len) - 1; index >= 0; --index) {
+        if (modulePath[index] == '\\' || modulePath[index] == '/') {
+            modulePath[index] = '\0';
+            break;
+        }
+    }
+
+    return std::string(modulePath);
+}
+
+std::string BuildCrashArtifactStem()
+{
+    SYSTEMTIME localTime{};
+    GetLocalTime(&localTime);
+
+    const std::string exeDir = GetExecutableDirectory();
+    const std::string crashDir = exeDir.empty()
+        ? std::string("crash-dumps")
+        : exeDir + "\\crash-dumps";
+    CreateDirectoryA(crashDir.c_str(), nullptr);
+
+    char stem[512] = {};
+    std::snprintf(stem,
+        sizeof(stem),
+        "%s\\open-midgard-crash-%04u%02u%02u-%02u%02u%02u-pid%lu",
+        crashDir.c_str(),
+        static_cast<unsigned int>(localTime.wYear),
+        static_cast<unsigned int>(localTime.wMonth),
+        static_cast<unsigned int>(localTime.wDay),
+        static_cast<unsigned int>(localTime.wHour),
+        static_cast<unsigned int>(localTime.wMinute),
+        static_cast<unsigned int>(localTime.wSecond),
+        static_cast<unsigned long>(GetCurrentProcessId()));
+    return std::string(stem);
+}
+
+void WriteCrashReportText(const std::string& reportPath,
+    DWORD exceptionCode,
+    const void* exceptionAddress,
+    const std::string& dumpPath,
+    bool dumpWritten)
+{
+    HANDLE reportFile = CreateFileA(
+        reportPath.c_str(),
+        GENERIC_WRITE,
+        0,
+        nullptr,
+        CREATE_ALWAYS,
+        FILE_ATTRIBUTE_NORMAL,
+        nullptr);
+    if (reportFile == INVALID_HANDLE_VALUE) {
+        return;
+    }
+
+    char report[1024] = {};
+    const int written = std::snprintf(
+        report,
+        sizeof(report),
+        "Unhandled exception code=0x%08lX address=%p\r\n"
+        "Minidump=%s\r\n"
+        "MinidumpWritten=%d\r\n",
+        static_cast<unsigned long>(exceptionCode),
+        exceptionAddress,
+        dumpPath.c_str(),
+        dumpWritten ? 1 : 0);
+    if (written > 0) {
+        DWORD bytesWritten = 0;
+        WriteFile(reportFile, report, static_cast<DWORD>(written), &bytesWritten, nullptr);
+    }
+
+    CloseHandle(reportFile);
+}
+
+LONG WINAPI WriteUnhandledCrashDump(EXCEPTION_POINTERS* exceptionInfo)
+{
+    const DWORD exceptionCode = (exceptionInfo && exceptionInfo->ExceptionRecord)
+        ? exceptionInfo->ExceptionRecord->ExceptionCode
+        : 0;
+    const void* exceptionAddress = (exceptionInfo && exceptionInfo->ExceptionRecord)
+        ? exceptionInfo->ExceptionRecord->ExceptionAddress
+        : nullptr;
+
+    const std::string artifactStem = BuildCrashArtifactStem();
+    const std::string dumpPath = artifactStem + ".dmp";
+    const std::string reportPath = artifactStem + ".txt";
+
+    bool dumpWritten = false;
+    HMODULE dbghelp = LoadLibraryA("dbghelp.dll");
+    if (dbghelp) {
+        MiniDumpWriteDumpFn miniDumpWriteDump = reinterpret_cast<MiniDumpWriteDumpFn>(
+            GetProcAddress(dbghelp, "MiniDumpWriteDump"));
+        if (miniDumpWriteDump) {
+            HANDLE dumpFile = CreateFileA(
+                dumpPath.c_str(),
+                GENERIC_WRITE,
+                0,
+                nullptr,
+                CREATE_ALWAYS,
+                FILE_ATTRIBUTE_NORMAL,
+                nullptr);
+            if (dumpFile != INVALID_HANDLE_VALUE) {
+                CrashMiniDumpExceptionInfo dumpInfo{};
+                dumpInfo.threadId = GetCurrentThreadId();
+                dumpInfo.exceptionPointers = exceptionInfo;
+                dumpInfo.clientPointers = FALSE;
+
+                dumpWritten = miniDumpWriteDump(
+                    GetCurrentProcess(),
+                    GetCurrentProcessId(),
+                    dumpFile,
+                    kCrashMiniDumpType,
+                    exceptionInfo ? &dumpInfo : nullptr,
+                    nullptr,
+                    nullptr) == TRUE;
+
+                CloseHandle(dumpFile);
+                if (!dumpWritten) {
+                    DeleteFileA(dumpPath.c_str());
+                }
+            }
+        }
+        FreeLibrary(dbghelp);
+    }
+
+    WriteCrashReportText(reportPath, exceptionCode, exceptionAddress, dumpPath, dumpWritten);
+    DbgLog("[Crash] Unhandled exception code=0x%08lX address=%p dump='%s' report='%s' wroteDump=%d\n",
+        static_cast<unsigned long>(exceptionCode),
+        exceptionAddress,
+        dumpPath.c_str(),
+        reportPath.c_str(),
+        dumpWritten ? 1 : 0);
+    return EXCEPTION_EXECUTE_HANDLER;
 }
 
 } // namespace
@@ -561,8 +713,8 @@ int __stdcall WinMain(HINSTANCE hInstance, HINSTANCE /*hPrevInstance*/,
         if (lastSlash) { *lastSlash = '\0'; SetCurrentDirectoryA(exePath); }
     }
 
-    // Set unhandled exception filter
-    SetUnhandledExceptionFilter(nullptr);
+    // Install an unhandled exception filter that writes a minidump next to the executable.
+    SetUnhandledExceptionFilter(WriteUnhandledCrashDump);
 
     // Initialise high-resolution timer
     TIMECAPS tc{};

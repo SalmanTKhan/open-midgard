@@ -1,0 +1,30 @@
+src/lua/CMakeFiles/lua51.dir/__/__/_deps/lua51-src/src/lstring.c.obj: \
+ D:\Spel\RoRebuild\Ragnarok___Win32_HighPriest2008_Release\build-mingw-preset-debug\_deps\lua51-src\src\lstring.c \
+ C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/string.h \
+ C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/crtdefs.h \
+ C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/corecrt.h \
+ C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/_mingw.h \
+ C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/_mingw_mac.h \
+ C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/_mingw_secapi.h \
+ C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/vadefs.h \
+ C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/sdks/_mingw_ddk.h \
+ C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/sec_api/string_s.h \
+ D:\Spel\RoRebuild\Ragnarok___Win32_HighPriest2008_Release\build-mingw-preset-debug\_deps\lua51-src\src\lua.h \
+ C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/stdarg.h \
+ C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/stdarg.h \
+ C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/_mingw_stdarg.h \
+ C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/stddef.h \
+ C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/stddef.h \
+ D:\Spel\RoRebuild\Ragnarok___Win32_HighPriest2008_Release\build-mingw-preset-debug\_deps\lua51-src\src\luaconf.h \
+ C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/limits.h \
+ C:/Qt/Tools/mingw1310_64/lib/gcc/x86_64-w64-mingw32/13.1.0/include/syslimits.h \
+ C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/limits.h \
+ C:/Qt/Tools/mingw1310_64/x86_64-w64-mingw32/include/math.h \
+ D:\Spel\RoRebuild\Ragnarok___Win32_HighPriest2008_Release\build-mingw-preset-debug\_deps\lua51-src\src\lmem.h \
+ D:\Spel\RoRebuild\Ragnarok___Win32_HighPriest2008_Release\build-mingw-preset-debug\_deps\lua51-src\src\llimits.h \
+ D:\Spel\RoRebuild\Ragnarok___Win32_HighPriest2008_Release\build-mingw-preset-debug\_deps\lua51-src\src\lobject.h \
+ D:\Spel\RoRebuild\Ragnarok___Win32_HighPriest2008_Release\build-mingw-preset-debug\_deps\lua51-src\src\lstate.h \
+ D:\Spel\RoRebuild\Ragnarok___Win32_HighPriest2008_Release\build-mingw-preset-debug\_deps\lua51-src\src\ltm.h \
+ D:\Spel\RoRebuild\Ragnarok___Win32_HighPriest2008_Release\build-mingw-preset-debug\_deps\lua51-src\src\lzio.h \
+ D:\Spel\RoRebuild\Ragnarok___Win32_HighPriest2008_Release\build-mingw-preset-debug\_deps\lua51-src\src\lstring.h \
+ D:\Spel\RoRebuild\Ragnarok___Win32_HighPriest2008_Release\build-mingw-preset-debug\_deps\lua51-src\src\lgc.h

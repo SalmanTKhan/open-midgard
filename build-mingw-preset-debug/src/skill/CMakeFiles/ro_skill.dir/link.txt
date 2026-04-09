@@ -1,0 +1,2 @@
+C:\Qt\Tools\mingw1310_64\bin\ar.exe qc libro_skill.a CMakeFiles/ro_skill.dir/Skill.cpp.obj
+C:\Qt\Tools\mingw1310_64\bin\ranlib.exe libro_skill.a

@@ -1,0 +1,11 @@
+Qt-enabled distributions of OpenMidgard must be accompanied by access to the complete corresponding source code for the exact Qt libraries that were shipped, including any modifications.
+
+For internal and local developer builds, the expected release workflow is:
+
+1. Record the exact Qt kit root used for the build, for example `C:\Qt\6.11.0\msvc2022_64`.
+2. Record the exact Qt version number used for deployment.
+3. Archive the matching Qt source package or provide a written offer / hosted download that remains available for the required compliance window for your distribution model.
+
+This project does not automatically vendor Qt source into the repository because Qt source packages are large and may be provisioned separately by the release pipeline.
+
+Before distributing a Qt-enabled build outside the local machine, replace this placeholder with your actual source-delivery instructions or bundle the corresponding source archive with the release.

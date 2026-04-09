@@ -550,6 +550,20 @@ void ApplyQueuedHitReaction(CGameActor& actor, const WBA& hitInfo)
     actor.m_damageDestX = hitInfo.damageDestX;
     actor.m_damageDestZ = hitInfo.damageDestZ;
 
+    if (hitInfo.message == 94) {
+        actor.SendMsg(nullptr, 95, 0, 0, 0);
+        return;
+    }
+
+    if (hitInfo.damage == 0) {
+        if (sourceActor) {
+            sourceActor->SendMsg(&actor, 89, 0, 0, 0);
+        } else {
+            actor.SendMsg(nullptr, 89, 0, 0, 0);
+        }
+        return;
+    }
+
     if (hitInfo.waveName[0] != '\0') {
         TryPlayQueuedWaveAtActor(actor, hitInfo.waveName);
     } else if (const char* genericWave = g_session.GetWeaponHitWaveName(-1)) {
@@ -571,6 +585,10 @@ void ApplyQueuedHitReaction(CGameActor& actor, const WBA& hitInfo)
             hitInfo.damage,
             static_cast<int>(hitInfo.damageColor),
             hitInfo.damageKind);
+
+        if (hitInfo.message == 93) {
+            actor.SendMsg(nullptr, 92, 0, 0, 0);
+        }
     }
 
     actor.SetState(kHitReactionStateId);
@@ -808,11 +826,11 @@ int CountDamageDigits(int value)
     return 1;
 }
 
-void SpawnDamageNumberEffect(CGameActor& actor, CGameActor* sourceActor, int value, u32 colorArgb, int kind)
+CMsgEffect* SpawnDamageNumberEffect(CGameActor& actor, CGameActor* sourceActor, int value, u32 colorArgb, int kind)
 {
     CMsgEffect* effect = new CMsgEffect();
     if (!effect) {
-        return;
+        return nullptr;
     }
 
     effect->m_colorArgb = colorArgb;
@@ -839,6 +857,87 @@ void SpawnDamageNumberEffect(CGameActor& actor, CGameActor* sourceActor, int val
             effect->m_destPos.z = dz * invLength;
         }
     }
+
+    g_world.m_gameObjectList.push_back(effect);
+    actor.m_msgEffectList.push_back(effect);
+    actor.m_lastDamageNumberEffect = effect;
+    return effect;
+}
+
+void SpawnMissEffect(CGameActor& actor)
+{
+    CMsgEffect* effect = new CMsgEffect();
+    if (!effect) {
+        return;
+    }
+
+    effect->SendMsg(nullptr, 22, static_cast<int>(actor.m_gid), 13, 0);
+    effect->m_isVisible = 1;
+    effect->m_stateStartTick = timeGetTime();
+    effect->m_pos = actor.m_pos;
+    effect->m_pos.y -= 12.0f;
+    effect->m_orgPos = effect->m_pos;
+    effect->m_zoom = 1.0f;
+    effect->m_orgZoom = 1.0f;
+    effect->m_colorArgb = 0xFFFFFFFFu;
+    effect->m_spriteActionIndex = 0;
+    effect->m_spriteMotionIndex = 0;
+    effect->SendMsg(&actor, 50, 0, 0, 0);
+
+    g_world.m_gameObjectList.push_back(effect);
+    actor.m_msgEffectList.push_back(effect);
+}
+
+void SpawnCriticalEffect(CGameActor& actor)
+{
+    CMsgEffect* effect = new CMsgEffect();
+    if (!effect) {
+        return;
+    }
+
+    CMsgEffect* anchorEffect = actor.m_lastDamageNumberEffect;
+
+    effect->SendMsg(nullptr, 22, static_cast<int>(actor.m_gid), 15, 0);
+    effect->m_isVisible = 1;
+    effect->m_stateStartTick = anchorEffect ? anchorEffect->m_stateStartTick : timeGetTime();
+    effect->m_pos = anchorEffect ? anchorEffect->m_pos : actor.m_pos;
+    if (!anchorEffect) {
+        effect->m_pos.y -= 12.0f;
+    }
+    effect->m_orgPos = anchorEffect ? anchorEffect->m_orgPos : effect->m_pos;
+    effect->m_destPos = anchorEffect ? anchorEffect->m_destPos : vector3d{};
+    effect->m_destPos2 = anchorEffect ? anchorEffect->m_destPos2 : vector3d{};
+    effect->m_zoom = 1.0f;
+    effect->m_orgZoom = 1.0f;
+    effect->m_colorArgb = 0xFFFFFFFFu;
+    effect->m_spriteActionIndex = 2;
+    effect->m_spriteMotionIndex = 0;
+    effect->SendMsg(&actor, 50, 0, 0, 0);
+
+    g_world.m_gameObjectList.push_back(effect);
+    actor.m_msgEffectList.push_back(effect);
+    actor.m_lastDamageNumberEffect = nullptr;
+}
+
+void SpawnLuckyDodgeEffect(CGameActor& actor)
+{
+    CMsgEffect* effect = new CMsgEffect();
+    if (!effect) {
+        return;
+    }
+
+    effect->SendMsg(nullptr, 22, static_cast<int>(actor.m_gid), 17, 0);
+    effect->m_isVisible = 1;
+    effect->m_stateStartTick = timeGetTime();
+    effect->m_pos = actor.m_pos;
+    effect->m_pos.y -= 12.0f;
+    effect->m_orgPos = effect->m_pos;
+    effect->m_zoom = 1.0f;
+    effect->m_orgZoom = 1.0f;
+    effect->m_colorArgb = 0xFFFFFFFFu;
+    effect->m_spriteActionIndex = 3;
+    effect->m_spriteMotionIndex = 0;
+    effect->SendMsg(&actor, 50, 0, 0, 0);
 
     g_world.m_gameObjectList.push_back(effect);
     actor.m_msgEffectList.push_back(effect);
@@ -3932,6 +4031,7 @@ CGameActor::CGameActor()
     , m_merMsg{}
     , m_merResMsg{}
     , m_birdEffect(nullptr)
+    , m_lastDamageNumberEffect(nullptr)
     , m_moveStartPos{ 0.0f, 0.0f, 0.0f }
     , m_moveEndPos{ 0.0f, 0.0f, 0.0f }
     , m_moveEndTime(0)
@@ -4357,6 +4457,15 @@ void CGameActor::SendMsg(CGameObject* src, int msg, msgparam_t par1, msgparam_t 
         MakeDamageNumber(*this, sourceActor, static_cast<int>(par1), static_cast<u32>(par2), static_cast<int>(par3));
         return;
     }
+    case 89:
+        SpawnMissEffect(*this);
+        return;
+    case 92:
+        SpawnCriticalEffect(*this);
+        return;
+    case 95:
+        SpawnLuckyDodgeEffect(*this);
+        return;
     default:
         return;
     }
@@ -4601,6 +4710,9 @@ void CGameActor::DeleteMatchingEffect(CMsgEffect* effect)
 
     if (m_birdEffect == effect) {
         m_birdEffect = nullptr;
+    }
+    if (m_lastDamageNumberEffect == effect) {
+        m_lastDamageNumberEffect = nullptr;
     }
 
     const auto it = std::find(m_msgEffectList.begin(), m_msgEffectList.end(), effect);

@@ -1,0 +1,2 @@
+build-mingw-preset-debug/src/ui/libro_ui.a filter=lfs diff=lfs merge=lfs -text
+build-mingw-preset-debug/open-midgard.exe filter=lfs diff=lfs merge=lfs -text

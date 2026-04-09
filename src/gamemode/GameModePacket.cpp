@@ -3147,6 +3147,11 @@ std::vector<ScheduledAttackHit> ResolveAttackHitSchedule(const CGameActor& sourc
     const bool hasRefOffhandFollowup = leftDamage != 0
         && (sourceActor.m_job < 1000 || sourceActor.m_job > 4000);
 
+    if (actionType == kNotifyActLuckyDodge) {
+        scheduledHits.push_back({ 0, impactDelayMs });
+        return scheduledHits;
+    }
+
     if (damage != 0) {
         if (repeatHitCount <= 1) {
             scheduledHits.push_back({ damage, impactDelayMs });
@@ -3173,7 +3178,22 @@ std::vector<ScheduledAttackHit> ResolveAttackHitSchedule(const CGameActor& sourc
         scheduledHits.push_back({ leftDamage, offhandDelayMs });
     }
 
+    if (scheduledHits.empty() && actionType != kNotifyActLuckyDodge) {
+        scheduledHits.push_back({ 0, impactDelayMs });
+    }
+
     return scheduledHits;
+}
+
+int ResolveQueuedCombatMessage(u8 actionType)
+{
+    if (actionType == kNotifyActLuckyDodge) {
+        return 94;
+    }
+    if (actionType == kNotifyActCriticalDamage) {
+        return 93;
+    }
+    return 133;
 }
 
 void PopulateCombatHitWaveName(CGameActor* sourceActor, CGameActor* targetActor, char* waveName, size_t waveNameSize)
@@ -3266,18 +3286,20 @@ void EmitSkillImpactEffects(CGameActor* targetActor, u16 skillId, u16 hitCountRa
 
 void QueueCombatHitReaction(CGameActor* sourceActor, CGameActor* targetActor, int attackedMT, int damage, u8 actionType)
 {
-    if (!targetActor || damage == 0 || actionType == kNotifyActLuckyDodge) {
+    if (!targetActor) {
         return;
     }
 
     WBA hitInfo{};
     hitInfo.gid = sourceActor ? sourceActor->m_gid : 0;
     hitInfo.time = timeGetTime();
-    hitInfo.message = 133;
+    hitInfo.message = ResolveQueuedCombatMessage(actionType);
     hitInfo.attackedMotionTime = attackedMT;
     hitInfo.damageDestX = targetActor->m_pos.x;
     hitInfo.damageDestZ = targetActor->m_pos.z;
-    PopulateCombatHitWaveName(sourceActor, targetActor, hitInfo.waveName, sizeof(hitInfo.waveName));
+    if (actionType != kNotifyActLuckyDodge) {
+        PopulateCombatHitWaveName(sourceActor, targetActor, hitInfo.waveName, sizeof(hitInfo.waveName));
+    }
 
     targetActor->QueueWillBeAttacked(hitInfo);
 }
@@ -3289,25 +3311,29 @@ void QueueTimedAttackHit(CGameActor* sourceActor,
     u8 actionType,
     u32 queueTime)
 {
-    if (!targetActor || damage == 0 || actionType == kNotifyActLuckyDodge) {
+    if (!targetActor) {
         return;
     }
 
     WBA hitInfo{};
     hitInfo.gid = sourceActor ? sourceActor->m_gid : 0;
     hitInfo.time = queueTime;
-    hitInfo.message = 133;
+    hitInfo.message = ResolveQueuedCombatMessage(actionType);
     hitInfo.attackedMotionTime = attackedMT;
     hitInfo.damage = damage < 0 ? -damage : damage;
-    const bool isLocalPlayerTarget = targetActor->m_gid == g_session.m_gid || targetActor->m_gid == g_session.m_aid;
-    const bool isLocalPlayerSource = sourceActor && (sourceActor->m_gid == g_session.m_gid || sourceActor->m_gid == g_session.m_aid);
-    hitInfo.damageColor = (isLocalPlayerTarget && !isLocalPlayerSource)
-        ? 0xFFFF4040u
-        : ResolveCombatNumberColor(damage, actionType);
-    hitInfo.damageKind = ResolveCombatNumberKind(damage, actionType);
+    if (damage != 0) {
+        const bool isLocalPlayerTarget = targetActor->m_gid == g_session.m_gid || targetActor->m_gid == g_session.m_aid;
+        const bool isLocalPlayerSource = sourceActor && (sourceActor->m_gid == g_session.m_gid || sourceActor->m_gid == g_session.m_aid);
+        hitInfo.damageColor = (isLocalPlayerTarget && !isLocalPlayerSource)
+            ? 0xFFFF4040u
+            : ResolveCombatNumberColor(damage, actionType);
+        hitInfo.damageKind = ResolveCombatNumberKind(damage, actionType);
+    }
     hitInfo.damageDestX = targetActor->m_pos.x;
     hitInfo.damageDestZ = targetActor->m_pos.z;
-    PopulateCombatHitWaveName(sourceActor, targetActor, hitInfo.waveName, sizeof(hitInfo.waveName));
+    if (actionType != kNotifyActLuckyDodge) {
+        PopulateCombatHitWaveName(sourceActor, targetActor, hitInfo.waveName, sizeof(hitInfo.waveName));
+    }
     targetActor->QueueWillBeAttacked(hitInfo);
 }
 

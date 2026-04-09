@@ -1,0 +1,2 @@
+C:\Qt\Tools\mingw1310_64\bin\ar.exe qc libro_session.a CMakeFiles/ro_session.dir/Session.cpp.obj CMakeFiles/ro_session.dir/SkillActionInfo.cpp.obj CMakeFiles/ro_session.dir/SkillActionInfo2.cpp.obj
+C:\Qt\Tools\mingw1310_64\bin\ranlib.exe libro_session.a

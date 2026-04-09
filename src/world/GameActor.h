@@ -243,6 +243,7 @@ public:
     u8 m_objectType;
     _MSG2AI m_homunMsg, m_homunResMsg, m_merMsg, m_merResMsg;
     CMsgEffect* m_birdEffect;
+    CMsgEffect* m_lastDamageNumberEffect;
     std::list<CMsgEffect*> m_msgEffectList;
     vector3d m_moveStartPos;
     vector3d m_moveEndPos;
@@ -284,6 +285,9 @@ public:
     int m_digit;
     int m_numberValue;
     int m_sprShift;
+    int m_spriteActionIndex;
+    int m_spriteMotionIndex;
+    int m_lastProcessedSpriteMotionIndex;
     int m_alpha;
     u32 m_masterGid;
     u32 m_colorArgb;
