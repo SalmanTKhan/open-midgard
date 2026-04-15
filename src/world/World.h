@@ -295,7 +295,7 @@ public:
     void UpdateBackgroundObjects(const matrix* viewMatrix);
     void UpdateActors();
     void ProcessActorSkillRechargeGages(const matrix& viewMatrix, float cameraLongitude);
-    void RenderSky(const matrix& viewMatrix, const vector3d& cameraPos, float cameraLongitude);
+    void RenderSky(const matrix& viewMatrix, const vector3d& cameraPos, float cameraLongitude, float cameraLatitude);
     void RenderActors(const matrix& viewMatrix, float cameraLongitude);
     bool GetPlayerScreenLabel(const matrix& viewMatrix,
         float cameraLongitude,

@@ -3560,9 +3560,23 @@ bool IsUsableSkyTexture(CTexture* texture)
     return texture && texture != &CTexMgr::s_dummy_texture && texture->m_pddsSurface;
 }
 
+vector3d RotateSkyPointY(const vector3d& point, float degrees)
+{
+    const float radians = degrees * 3.14159265f / 180.0f;
+    const float sine = std::sin(radians);
+    const float cosine = std::cos(radians);
+    return vector3d{
+        point.x * cosine - point.z * sine,
+        point.y,
+        point.z * cosine + point.x * sine
+    };
+}
+
 bool SubmitSkyQuadFace(const matrix& viewMatrix,
-    const vector3d& origin,
-    const vector3d (&localCorners)[4],
+    const vector3d& cameraPos,
+    const vector3d* localVertices,
+    const int (&indices)[4],
+    float loopRotationDegrees,
     CTexture* texture)
 {
     if (!IsUsableSkyTexture(texture)) {
@@ -3582,7 +3596,8 @@ bool SubmitSkyQuadFace(const matrix& viewMatrix,
     };
 
     for (int index = 0; index < 4; ++index) {
-        const vector3d worldPoint = AddVec3(origin, localCorners[index]);
+        const vector3d rotated = RotateSkyPointY(localVertices[indices[index]], loopRotationDegrees);
+        const vector3d worldPoint = AddVec3(cameraPos, rotated);
         tlvertex3d projected{};
         if (!ProjectPoint(g_renderer, viewMatrix, worldPoint, &projected)) {
             return false;
@@ -3594,22 +3609,22 @@ bool SubmitSkyQuadFace(const matrix& viewMatrix,
         face->m_verts[index] = projected;
     }
 
-    face->primType = D3DPT_TRIANGLELIST;
+    face->primType = D3DPT_TRIANGLEFAN;
     face->verts = face->m_verts;
     face->numVerts = 4;
-    face->indices = const_cast<unsigned short*>(kGroundQuadIndices);
-    face->numIndices = 6;
+    face->indices = nullptr;
+    face->numIndices = 0;
     face->tex = texture;
     face->mtPreset = 0;
     face->cullMode = D3DCULL_NONE;
     face->srcAlphaMode = D3DBLEND_SRCALPHA;
     face->destAlphaMode = D3DBLEND_INVSRCALPHA;
     face->alphaSortKey = 0.0f;
-    g_renderer.AddRP(face, 0);
+    g_renderer.AddRP(face, 1);
     return true;
 }
 
-bool RenderSkyFallbackFaces(const matrix& viewMatrix, const vector3d& cameraPos)
+bool RenderSkyFallbackFaces(const matrix& viewMatrix, const vector3d& cameraPos, float cameraLongitude, float cameraLatitude)
 {
     static const char* const kSkyTextureNames[] = {
         "effect\\skybox_front.bmp",
@@ -3624,49 +3639,51 @@ bool RenderSkyFallbackFaces(const matrix& viewMatrix, const vector3d& cameraPos)
         textures[index] = g_texMgr.GetTexture(kSkyTextureNames[index], false);
     }
 
-    const vector3d origin{
-        cameraPos.x,
-        cameraPos.y + kSkyboxCameraHeightOffset,
-        cameraPos.z
+    static const vector3d kSkyVertices[8] = {
+        { -1250.0f, -450.0f, 1250.0f },
+        { 1250.0f, -450.0f, 1250.0f },
+        { -1250.0f, 650.0f, 1250.0f },
+        { 1250.0f, 650.0f, 1250.0f },
+        { -1250.0f, -450.0f, -1250.0f },
+        { 1250.0f, -450.0f, -1250.0f },
+        { -1250.0f, 650.0f, -1250.0f },
+        { 1250.0f, 650.0f, -1250.0f },
     };
+    static const int kBackIndices[4] = { 0, 1, 2, 3 };
+    static const int kFrontIndices[4] = { 4, 5, 6, 7 };
+    static const int kRightIndices[4] = { 1, 3, 5, 7 };
+    static const int kLeftIndices[4] = { 0, 2, 4, 6 };
+    static const int kTopIndices[4] = { 0, 1, 4, 5 };
 
-    static const vector3d kFrontFace[4] = {
-        { -1250.0f, -450.0f, 1250.0f },
-        { 1250.0f, -450.0f, 1250.0f },
-        { 1250.0f, 650.0f, 1250.0f },
-        { -1250.0f, 650.0f, 1250.0f },
-    };
-    static const vector3d kBackFace[4] = {
-        { 1250.0f, -450.0f, -1250.0f },
-        { -1250.0f, -450.0f, -1250.0f },
-        { -1250.0f, 650.0f, -1250.0f },
-        { 1250.0f, 650.0f, -1250.0f },
-    };
-    static const vector3d kLeftFace[4] = {
-        { -1250.0f, -450.0f, -1250.0f },
-        { -1250.0f, -450.0f, 1250.0f },
-        { -1250.0f, 650.0f, 1250.0f },
-        { -1250.0f, 650.0f, -1250.0f },
-    };
-    static const vector3d kRightFace[4] = {
-        { 1250.0f, -450.0f, 1250.0f },
-        { 1250.0f, -450.0f, -1250.0f },
-        { 1250.0f, 650.0f, -1250.0f },
-        { 1250.0f, 650.0f, 1250.0f },
-    };
-    static const vector3d kTopFace[4] = {
-        { -1250.0f, 650.0f, -1250.0f },
-        { 1250.0f, 650.0f, -1250.0f },
-        { 1250.0f, 650.0f, 1250.0f },
-        { -1250.0f, 650.0f, 1250.0f },
-    };
+    static float s_loopRotationDegrees = 0.0f;
+    s_loopRotationDegrees += 0.1f;
+    if (s_loopRotationDegrees >= 360.0f) {
+        s_loopRotationDegrees -= 360.0f;
+    }
+
+    float relativeLongitude = cameraLongitude - s_loopRotationDegrees;
+    while (relativeLongitude < 0.0f) {
+        relativeLongitude += 360.0f;
+    }
+    while (relativeLongitude >= 360.0f) {
+        relativeLongitude -= 360.0f;
+    }
 
     int submittedFaces = 0;
-    submittedFaces += SubmitSkyQuadFace(viewMatrix, origin, kFrontFace, textures[0]) ? 1 : 0;
-    submittedFaces += SubmitSkyQuadFace(viewMatrix, origin, kBackFace, textures[1]) ? 1 : 0;
-    submittedFaces += SubmitSkyQuadFace(viewMatrix, origin, kLeftFace, textures[2]) ? 1 : 0;
-    submittedFaces += SubmitSkyQuadFace(viewMatrix, origin, kRightFace, textures[3]) ? 1 : 0;
-    submittedFaces += SubmitSkyQuadFace(viewMatrix, origin, kTopFace, textures[4]) ? 1 : 0;
+    if (relativeLongitude < 90.0f || relativeLongitude > 270.0f) {
+        submittedFaces += SubmitSkyQuadFace(viewMatrix, cameraPos, kSkyVertices, kBackIndices, s_loopRotationDegrees, textures[1]) ? 1 : 0;
+    }
+    if (relativeLongitude >= 90.0f && relativeLongitude < 270.0f) {
+        submittedFaces += SubmitSkyQuadFace(viewMatrix, cameraPos, kSkyVertices, kFrontIndices, s_loopRotationDegrees, textures[0]) ? 1 : 0;
+    }
+    if (relativeLongitude < 180.0f) {
+        submittedFaces += SubmitSkyQuadFace(viewMatrix, cameraPos, kSkyVertices, kRightIndices, s_loopRotationDegrees, textures[3]) ? 1 : 0;
+    } else {
+        submittedFaces += SubmitSkyQuadFace(viewMatrix, cameraPos, kSkyVertices, kLeftIndices, s_loopRotationDegrees, textures[2]) ? 1 : 0;
+    }
+    if (cameraLatitude > -11.0f) {
+        submittedFaces += SubmitSkyQuadFace(viewMatrix, cameraPos, kSkyVertices, kTopIndices, s_loopRotationDegrees, textures[4]) ? 1 : 0;
+    }
 
     static bool loggedFallbackActive = false;
     static bool loggedFallbackMissing = false;
@@ -4386,6 +4403,24 @@ bool C3dGround::AssignGnd(const CGndRes& gnd, const vector3d& lightDir, const ve
                     surface.tex ? static_cast<void*>(surface.tex->m_pddsSurface) : nullptr,
                     surface.lightmapId,
                     static_cast<void*>(surface.lmtex));
+            }
+        }
+
+        int loggedMissingTerrainNames = 0;
+        for (const CGroundSurface& surface : m_surfaces) {
+            if (surface.tex != &CTexMgr::s_dummy_texture) {
+                continue;
+            }
+            if (surface.textureId < 0 || surface.textureId >= static_cast<int>(m_textureNames.size())) {
+                continue;
+            }
+
+            DbgLog("[GND] unresolved terrain texture id=%d name='%s'\n",
+                surface.textureId,
+                m_textureNames[static_cast<size_t>(surface.textureId)].c_str());
+            ++loggedMissingTerrainNames;
+            if (loggedMissingTerrainNames >= 12) {
+                break;
             }
         }
     }
@@ -5778,11 +5813,10 @@ void CWorld::ProcessActorSkillRechargeGages(const matrix& viewMatrix, float came
     }
 }
 
-void CWorld::RenderSky(const matrix& viewMatrix, const vector3d& cameraPos, float cameraLongitude)
+void CWorld::RenderSky(const matrix& viewMatrix, const vector3d& cameraPos, float cameraLongitude, float cameraLatitude)
 {
-    (void)cameraLongitude;
     if (!EnsureSkyActor() || !m_skyActor) {
-        RenderSkyFallbackFaces(viewMatrix, cameraPos);
+        RenderSkyFallbackFaces(viewMatrix, cameraPos, cameraLongitude, cameraLatitude);
         return;
     }
 

@@ -315,6 +315,7 @@ std::string ResolveTexturePath(const char* name)
     const std::string normalizedName = NormalizeTexturePath(name);
     const std::vector<std::string> prefixes = {
         "",
+        "data\\",
         "texture\\",
         "data\\texture\\"
     };
@@ -445,6 +446,7 @@ void CTexMgr::DestroyAllTexture() {
         }
     }
     m_texTable.clear();
+    m_missingTexTable.clear();
 }
 
 CTexture* LoadManagedTexture(CTexMgr& texMgr, const char* name, TextureLoadMode mode) {
@@ -461,6 +463,9 @@ CTexture* LoadManagedTexture(CTexMgr& texMgr, const char* name, TextureLoadMode 
         it->second->m_timeStamp = GetTickCount();
         return it->second;
     }
+    if (texMgr.m_missingTexTable.find(cacheKey) != texMgr.m_missingTexTable.end()) {
+        return &CTexMgr::s_dummy_texture;
+    }
 
     const std::string texturePath = ResolveTexturePath(name);
     if (texturePath.empty()) {
@@ -469,6 +474,7 @@ CTexture* LoadManagedTexture(CTexMgr& texMgr, const char* name, TextureLoadMode 
         if (loggedMissingTextures.size() < 24 && loggedMissingTextures.emplace(logKey, true).second) {
             DbgLog("[Texture] unresolved name='%s' mode=%s\n", name ? name : "(null)", modeName);
         }
+        texMgr.m_missingTexTable.insert(cacheKey);
         return &CTexMgr::s_dummy_texture;
     }
 
@@ -484,6 +490,7 @@ CTexture* LoadManagedTexture(CTexMgr& texMgr, const char* name, TextureLoadMode 
                     modeName);
             }
         }
+        texMgr.m_missingTexTable.insert(cacheKey);
         return &CTexMgr::s_dummy_texture;
     }
 
@@ -557,6 +564,7 @@ CTexture* LoadManagedTexture(CTexMgr& texMgr, const char* name, TextureLoadMode 
                     modeName);
             }
         }
+        texMgr.m_missingTexTable.insert(cacheKey);
         return &CTexMgr::s_dummy_texture;
     }
 

@@ -4,6 +4,7 @@
 #include <vector>
 #include <list>
 #include <map>
+#include <set>
 #include <string>
 #include "Types.h"
 #include "res/Texture.h"
@@ -116,6 +117,7 @@ public:
 
     static CTexture s_dummy_texture;
     std::map<const char*, CTexture*, CharPrtLess> m_texTable;
+    std::set<std::string> m_missingTexTable;
 
 private:
     void AddTexture(CTexture* tex);
