@@ -283,6 +283,16 @@ const char* RefParticle6SpriteStem()
     return "particle6";
 }
 
+const char* RefChimneySmokeSpriteStem()
+{
+    return "\xB1\xBC\xB6\xD2\xBF\xAC\xB1\xE2";
+}
+
+const char* RefTorchSpriteStem()
+{
+    return "torch_01";
+}
+
 bool ConfigureEffectSpritePrim(CEffectPrim* prim,
     std::initializer_list<const char*> stems,
     int actionIndex,
@@ -290,6 +300,9 @@ bool ConfigureEffectSpritePrim(CEffectPrim* prim,
     bool repeat,
     float frameDelay,
     int motionBase);
+
+CTexture* TryResolveEffectTextureCandidates(std::initializer_list<const char*> paths);
+CTexture* ResolveEffectTextureCandidates(std::initializer_list<const char*> paths, bool cloudFallback);
 
 void ConfigureEnchantPoisonParticle(CEffectPrim* prim, int speedBase, int speedSpan, int sizeBase, int sizeSpan)
 {
@@ -321,6 +334,50 @@ void ConfigureEnchantPoisonParticle(CEffectPrim* prim, int speedBase, int speedS
     prim->m_fadeOutCnt = prim->m_duration - prim->m_duration / 5;
     prim->m_tintColor = RGB(255, 255, 255);
     ConfigureEffectSpritePrim(prim, { RefParticle3SpriteStem(), RefParticle2SpriteStem() }, 0, 1.0f, true, 0.0f, 0);
+}
+
+void AppendTorchFallbackTextures(CEffectPrim* prim, const std::string& effectName)
+{
+    if (!prim) {
+        return;
+    }
+
+    auto appendSequence = [&](const char* prefix) {
+        for (int frameIndex = 1; frameIndex <= 13; ++frameIndex) {
+            std::string path = std::string("effect\\") + prefix;
+            if (frameIndex < 10) {
+                path += '0';
+            }
+            path += std::to_string(frameIndex);
+            path += ".bmp";
+            if (CTexture* texture = TryResolveEffectTextureCandidates({ path.c_str() })) {
+                prim->m_texture.push_back(texture);
+            }
+        }
+    };
+
+    if (ContainsIgnoreCaseAscii(effectName, "red")) {
+        appendSequence("torch_red");
+    } else if (ContainsIgnoreCaseAscii(effectName, "violet") || ContainsIgnoreCaseAscii(effectName, "purple")) {
+        appendSequence("torch_violet");
+    } else if (ContainsIgnoreCaseAscii(effectName, "green")) {
+        appendSequence("torch_green");
+    }
+
+    if (prim->m_texture.empty()) {
+        appendSequence("torch_red");
+        appendSequence("torch_green");
+        appendSequence("torch_violet");
+    }
+
+    if (prim->m_texture.empty()) {
+        prim->m_texture.push_back(ResolveEffectTextureCandidates({
+            "effect\\torch_red01.bmp",
+            "effect\\torch_green01.bmp",
+            "effect\\torch_violet01.bmp",
+            "effect\\magic_red.tga",
+        }, false));
+    }
 }
 
 void SubmitScreenQuad(const tlvertex3d& anchor,
@@ -3766,10 +3823,14 @@ void CRagEffect::InitWorld(const C3dWorldRes::effectSrcInfo& source)
     } else if (source.type == 81 || ContainsIgnoreCaseAscii(source.name, "ready")) {
         m_type = kRagEffectReadyPortal;
         m_handler = Handler::ReadyPortal;
+    } else if (source.type == 44) {
+        m_handler = Handler::Smoke;
+    } else if (source.type == 47) {
+        m_handler = Handler::Torch;
     } else if (ContainsIgnoreCaseAscii(source.name, "warp") || ContainsIgnoreCaseAscii(source.name, "portal")) {
         m_type = kRagEffectWarpZone;
         m_handler = Handler::WarpZone;
-    } else if (source.type == 44 || std::fabs(source.param[0]) > 20.0f) {
+    } else if (std::fabs(source.param[0]) > 20.0f) {
         m_handler = Handler::MapMagicZone;
     } else {
         m_handler = Handler::MapParticle;
@@ -3853,6 +3914,8 @@ bool CRagEffect::ResolveCullSphere(vector3d* outCenter, float* outRadius) const
     case Handler::MapParticle:
         radius = 128.0f;
         break;
+    case Handler::Smoke:
+    case Handler::Torch:
     case Handler::EzStr:
     case Handler::Entry2:
     case Handler::JobLevelUp50:
@@ -5349,6 +5412,57 @@ void CRagEffect::SpawnBlessing()
     }
 }
 
+void CRagEffect::SpawnSmoke()
+{
+    if (m_stateCnt != 0) {
+        return;
+    }
+
+    const int smokeCount = rand() % 4 + 1;
+    for (int smokeIndex = 0; smokeIndex < smokeCount; ++smokeIndex) {
+        if (CEffectPrim* prim = LaunchEffectPrim(PP_3DPARTICLE, vector3d{})) {
+            prim->m_duration = m_duration;
+            MatrixIdentity(prim->m_matrix);
+            MatrixAppendXRotation(prim->m_matrix, static_cast<float>(rand() % 30 + 75) * (kPi / 180.0f));
+            MatrixAppendYRotation(prim->m_matrix, static_cast<float>(rand() % 360) * (kPi / 180.0f));
+            prim->m_deltaPos2.y = -9.0f;
+            prim->m_rollSpeed = 0.75f;
+            prim->m_speed = static_cast<float>(rand() % 3 + 3) * 0.1f;
+            prim->m_size = 1.5f;
+            prim->m_fadeOutCnt = prim->m_duration - prim->m_duration / 3;
+            prim->m_tintColor = RGB(255, 255, 255);
+
+            if (!ConfigureEffectSpritePrim(prim, { RefChimneySmokeSpriteStem() }, 0, 1.0f, true, 0.0f, 0)) {
+                prim->m_texture.push_back(ResolveEffectTextureCandidates({
+                    "effect\\smoke.tga",
+                    "effect\\smoke.bmp",
+                    "effect\\smoke2.bmp",
+                }, true));
+            }
+        }
+    }
+}
+
+void CRagEffect::SpawnTorch()
+{
+    if (m_stateCnt != 0) {
+        return;
+    }
+
+    if (CEffectPrim* prim = LaunchEffectPrim(PP_3DPARTICLE, vector3d{})) {
+        prim->m_pattern |= 0x200;
+        prim->m_duration = m_duration;
+        prim->m_deltaPos2.y = -10.0f;
+        prim->m_size = m_param[0] > 0.0f ? m_param[0] : 1.0f;
+        prim->m_animSpeed = (std::max)(1, static_cast<int>(m_param[1]));
+        prim->m_tintColor = RGB(255, 255, 255);
+
+        if (!ConfigureEffectSpritePrim(prim, { RefTorchSpriteStem() }, 0, 1.0f, true, 0.0f, 0)) {
+            AppendTorchFallbackTextures(prim, m_effectName);
+        }
+    }
+}
+
 void CRagEffect::SpawnEnchantPoison()
 {
     const vector3d base = ResolveBasePosition();
@@ -5815,6 +5929,12 @@ u8 CRagEffect::OnProcess()
                 break;
             case Handler::Blessing:
                 SpawnBlessing();
+                break;
+            case Handler::Smoke:
+                SpawnSmoke();
+                break;
+            case Handler::Torch:
+                SpawnTorch();
                 break;
             case Handler::Sight:
                 SpawnSight();

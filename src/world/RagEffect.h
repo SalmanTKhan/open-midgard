@@ -196,6 +196,8 @@ private:
         EnchantPoison,
         EnchantPoison2,
         Blessing,
+        Smoke,
+        Torch,
         Sight,
         SightState,
         FireBall,
@@ -242,6 +244,8 @@ private:
     void SpawnEnchantPoison();
     void SpawnEnchantPoison2();
     void SpawnBlessing();
+    void SpawnSmoke();
+    void SpawnTorch();
     void SpawnSight();
     void SpawnSightState();
     void SpawnFireBall();
