@@ -1227,19 +1227,29 @@ CTexture* ResolveEffectTextureCandidates(std::initializer_list<const char*> path
 
 CTexture* ResolveWeatherCloudTexture(int mapVariant)
 {
-    if (mapVariant == 3) {
-        return ResolveEffectTextureCandidates({
-            "effect\\fog1.tga",
-            "effect\\fog2.tga",
-            "effect\\fog3.tga",
-        }, true);
-    }
-
-    return ResolveEffectTextureCandidates({
+    static const char* const kFogTextures[] = {
+        "effect\\fog1.tga",
+        "effect\\fog2.tga",
+        "effect\\fog3.tga",
+    };
+    static const char* const kCloudTextures[] = {
         "effect\\cloud4.tga",
         "effect\\cloud1.tga",
         "effect\\cloud2.tga",
-    }, true);
+    };
+
+    const char* const* textureNames = mapVariant == 3 ? kFogTextures : kCloudTextures;
+    constexpr int kTextureCount = 3;
+    const int startIndex = rand() % kTextureCount;
+    for (int offset = 0; offset < kTextureCount; ++offset) {
+        if (CTexture* texture = ResolveEffectTextureCandidates({
+                textureNames[(startIndex + offset) % kTextureCount],
+            }, true)) {
+            return texture;
+        }
+    }
+
+    return GetSoftGlowTexture(true);
 }
 
 float ResolveWeatherCloudAlphaCeiling(int mapVariant)
@@ -1272,9 +1282,13 @@ COLORREF ResolveWeatherCloudTint(int mapVariant)
 {
     switch (mapVariant) {
     case 3:
-        return RGB(214, 214, 214);
+        return RGB(252, 171, 143);
     case 5:
-        return RGB(255, 239, 226);
+        return RGB(94, 0, 0);
+    case 7:
+        return RGB(0, 0, 0);
+    case 8:
+        return RGB(255, 180, 180);
     default:
         return RGB(255, 255, 255);
     }
@@ -1337,6 +1351,9 @@ void InitWeatherCloudSegment(CEffectPrim* prim, int index, int mapVariant, const
     };
     segment.pos = origin;
     segment.alpha = 0.0f;
+    segment.process = 0;
+    segment.displayAngle = static_cast<float>(rand() % 360);
+    segment.phaseDegrees = static_cast<float>(rand() % 360);
     segment.radius = (mapVariant == 3 ? 35.0f : 30.0f) + static_cast<float>(rand() % (mapVariant == 3 ? 10 : 20));
     segment.size = 0.85f + static_cast<float>(rand() % 40) * 0.01f;
 
@@ -1393,6 +1410,9 @@ bool UpdateWeatherCloudPrimitive(CEffectPrim* prim)
         segment.pos.x = segment.transform.m[3][0] + segment.transform.m[0][0] * localTick + std::sin(phase) * sway;
         segment.pos.y = segment.transform.m[3][1] + segment.transform.m[0][1] * localTick + std::sin(phase * 0.47f) * segment.transform.m[2][2];
         segment.pos.z = segment.transform.m[3][2] + segment.transform.m[0][2] * localTick + std::cos(phase * 0.83f) * sway;
+        segment.process = static_cast<int>(localTick);
+        segment.displayAngle = std::fmod(segment.displayAngle + (mapVariant == 3 ? 0.18f : 0.32f), 360.0f);
+        segment.phaseDegrees = std::fmod(segment.phaseDegrees + (mapVariant == 3 ? 0.9f : 1.4f), 360.0f);
         anyVisible = true;
     }
 
@@ -2717,8 +2737,9 @@ void CEffectPrim::Render(matrix* viewMatrix)
                 continue;
             }
 
-            const float width = (std::max)(56.0f, segment.radius * ResolveWeatherCloudWidthScale(mapVariant) * segment.size);
-            const float height = (std::max)(28.0f, segment.radius * ResolveWeatherCloudHeightScale(mapVariant) * segment.size);
+            const float sizePulse = 1.0f + std::sin(segment.phaseDegrees * (kPi / 180.0f)) * 0.05f;
+            const float width = (std::max)(56.0f, segment.radius * ResolveWeatherCloudWidthScale(mapVariant) * segment.size * sizePulse);
+            const float height = (std::max)(28.0f, segment.radius * ResolveWeatherCloudHeightScale(mapVariant) * segment.size * sizePulse);
             SubmitBillboard(segment.pos,
                 *viewMatrix,
                 texture,
@@ -2726,7 +2747,7 @@ void CEffectPrim::Render(matrix* viewMatrix)
                 height,
                 PackColor(static_cast<unsigned int>((std::max)(0.0f, (std::min)(255.0f, segment.alpha))), tintColor),
                 destBlend,
-                0.0f,
+                segment.displayAngle * (kPi / 180.0f),
                 renderFlags);
         }
         break;
@@ -4346,7 +4367,6 @@ void CRagEffect::SpawnWeatherCloud()
     const int mapVariant = static_cast<int>(m_param[0]);
     const int cloudCount = (std::max)(1, static_cast<int>(m_param[1]));
     const vector3d center = ResolveBasePosition();
-    CTexture* texture = ResolveWeatherCloudTexture(mapVariant);
 
     for (int cloudIndex = 0; cloudIndex < cloudCount; ++cloudIndex) {
         CEffectPrim* prim = LaunchEffectPrim(PP_CLOUD, vector3d{});
@@ -4361,7 +4381,7 @@ void CRagEffect::SpawnWeatherCloud()
         prim->m_numSegments = 4;
         prim->m_param[0] = static_cast<float>(mapVariant);
         prim->m_tintColor = ResolveWeatherCloudTint(mapVariant);
-        prim->m_texture.push_back(texture);
+        prim->m_texture.push_back(ResolveWeatherCloudTexture(mapVariant));
         for (int segmentIndex = 0; segmentIndex < prim->m_numSegments; ++segmentIndex) {
             InitWeatherCloudSegment(prim, segmentIndex, mapVariant, center);
         }

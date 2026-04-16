@@ -30,6 +30,15 @@ struct lmtlvertex3d {
     float tu2, tv2;
 };
 
+struct FogPara {
+    float start;
+    float end;
+    DWORD color;
+    float density;
+    int useRange;
+    int mode;
+};
+
 struct RPFace {
     D3DPRIMITIVETYPE primType;
     tlvertex3d* verts;
@@ -150,6 +159,8 @@ public:
     
     void SetLookAt(struct vector3d& eye, struct vector3d& at, struct vector3d& up);
     void SetLight(struct vector3d* dir, struct vector3d* diffuse, struct vector3d* ambient);
+    void SetFogParameters(float start, float end, DWORD color, float density);
+    void FogSwitch(int sw);
     
     int TextOutScreen(int x, int y, const char* text, unsigned long colorRef, int fontHeight, char fontPrint);
     tagSIZE* GetTextSize(const char* text, int textLen, int fontType, int fontHeight, unsigned char bold);
@@ -185,6 +196,7 @@ public:
     bool m_isVertexFog;
     bool m_isFoggy;
     bool m_fogChanged;
+    FogPara m_fogPara;
 
     CTexture* m_oldTexture;
     CTexture* m_oldLmapTexture;
@@ -222,6 +234,7 @@ public:
     std::list<CacheSurface> m_cacheSurfaces[16];
 
 private:
+    void ApplyFogState();
     void FlushAlphaDepthList();
     void FlushAlphaList();
     void FlushAlphaRawList();

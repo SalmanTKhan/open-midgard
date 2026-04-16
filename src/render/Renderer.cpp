@@ -21,12 +21,80 @@ constexpr bool kLogTexture = false;
 constexpr unsigned int kEffectBlackKeyThreshold = 9u;
 constexpr unsigned int kMagentaMaskMinChannel = 0xF8u;
 constexpr unsigned int kMagentaMaskMaxGreen = 0x18u;
+constexpr float kFogNearPlane = 10.0f;
+constexpr float kFogFarPlane = 1500.0f;
 
 enum class TextureLoadMode {
     ColorKey,
     BlackKey,
     MagentaMask,
 };
+
+DWORD FloatToRenderStateBits(float value)
+{
+    union {
+        float asFloat;
+        DWORD asDword;
+    } bits = { value };
+    return bits.asDword;
+}
+
+float ComputeFogStartDistance(const FogPara& fog)
+{
+    return (kFogFarPlane - kFogNearPlane) * fog.start + kFogNearPlane;
+}
+
+float ComputeFogEndDistance(const FogPara& fog)
+{
+    return (kFogFarPlane - kFogNearPlane) * fog.end + kFogNearPlane;
+}
+
+float ComputeFogVisibility(const FogPara& fog, float oow)
+{
+    if (!(oow > 0.0f)) {
+        return 0.0f;
+    }
+
+    const float fogStart = ComputeFogStartDistance(fog);
+    const float fogEnd = ComputeFogEndDistance(fog);
+    const float range = fogEnd - fogStart;
+    if (std::fabs(range) <= 1.0e-6f) {
+        return 1.0f;
+    }
+
+    const float depth = 1.0f / oow;
+    const float fogAmount = (depth - fogStart) / range;
+    return 1.0f - (std::min)(1.0f, (std::max)(0.0f, fogAmount));
+}
+
+DWORD ComputeFogSpecular(const FogPara& fog, float oow)
+{
+    const float visibility = ComputeFogVisibility(fog, oow);
+    const unsigned int alpha = static_cast<unsigned int>(visibility * 255.0f + 0.5f);
+    return (std::min)(255u, alpha) << 24;
+}
+
+void ApplyFogToVertices(tlvertex3d* verts, int numVerts, bool fogEnabled, const FogPara& fog)
+{
+    if (!verts || numVerts <= 0) {
+        return;
+    }
+
+    for (int index = 0; index < numVerts; ++index) {
+        verts[index].specular = fogEnabled ? ComputeFogSpecular(fog, verts[index].oow) : 0xFF000000u;
+    }
+}
+
+void ApplyFogToLightmapVertices(lmtlvertex3d* verts, int numVerts, bool fogEnabled, const FogPara& fog)
+{
+    if (!verts || numVerts <= 0) {
+        return;
+    }
+
+    for (int index = 0; index < numVerts; ++index) {
+        verts[index].vert.specular = fogEnabled ? ComputeFogSpecular(fog, verts[index].vert.oow) : 0xFF000000u;
+    }
+}
 
 bool ShouldLogGroundTextureName(const char* name)
 {
@@ -121,19 +189,23 @@ std::string CollapseUtf8Latin1ToBytes(const std::string& value)
     bool changed = false;
     for (size_t i = 0; i < value.size(); ++i) {
         const unsigned char ch = static_cast<unsigned char>(value[i]);
-        if (ch == 0xC2 && i + 1 < value.size()) {
-            out.push_back(value[i + 1]);
-            ++i;
-            changed = true;
+        if (ch < 0x80u) {
+            out.push_back(static_cast<char>(ch));
             continue;
         }
-        if (ch == 0xC3 && i + 1 < value.size()) {
-            out.push_back(static_cast<char>(static_cast<unsigned char>(value[i + 1]) + 0x40u));
-            ++i;
-            changed = true;
-            continue;
+        if ((ch == 0xC2 || ch == 0xC3) && i + 1 < value.size()) {
+            const unsigned char next = static_cast<unsigned char>(value[i + 1]);
+            if (next >= 0x80u && next <= 0xBFu) {
+                out.push_back(ch == 0xC2
+                    ? static_cast<char>(next)
+                    : static_cast<char>(static_cast<unsigned char>(next + 0x40u)));
+                ++i;
+                changed = true;
+                continue;
+            }
         }
-        out.push_back(static_cast<char>(ch));
+
+        return value;
     }
     return changed ? out : value;
 }
@@ -152,6 +224,11 @@ std::string BaseNameOfTexturePath(const std::string& path)
         return normalized;
     }
     return normalized.substr(slash + 1);
+}
+
+bool HasTextureDirectoryComponent(const std::string& path)
+{
+    return NormalizeTexturePath(path).find('\\') != std::string::npos;
 }
 
 const std::map<std::string, std::string>& GetTextureAliases()
@@ -218,13 +295,6 @@ std::string ResolveTextureAlias(const std::string& candidate)
     const auto it = aliases.find(normalized);
     if (it != aliases.end()) {
         return it->second;
-    }
-
-    const std::string candidateBase = ToLowerAsciiTexture(BaseNameOfTexturePath(normalized));
-    for (const auto& entry : aliases) {
-        if (ToLowerAsciiTexture(BaseNameOfTexturePath(entry.first)) == candidateBase) {
-            return entry.second;
-        }
     }
 
     return std::string();
@@ -296,34 +366,28 @@ std::string ResolveTextureDataPath(const std::string& fileName, const char* ext,
         }
     }
 
-    const std::string wantedBase = ToLowerAsciiTexture(BaseNameOfTexturePath(normalizedName));
-    const std::string wantedStem = wantedBase.rfind('.') != std::string::npos
-        ? wantedBase.substr(0, wantedBase.rfind('.'))
-        : wantedBase;
     const auto& knownNames = GetTextureDataNamesByExtension(ext);
+    const std::string wantedLower = ToLowerAsciiTexture(normalizedName);
+    if (HasTextureDirectoryComponent(normalizedName)) {
+        for (const std::string& known : knownNames) {
+            const std::string knownLower = ToLowerAsciiTexture(NormalizeTexturePath(known));
+            if (knownLower == wantedLower) {
+                return known;
+            }
+
+            if (knownLower.size() > wantedLower.size()
+                && knownLower.compare(knownLower.size() - wantedLower.size(), wantedLower.size(), wantedLower) == 0
+                && knownLower[knownLower.size() - wantedLower.size() - 1] == '\\') {
+                return known;
+            }
+        }
+        return std::string();
+    }
+
+    const std::string wantedBase = ToLowerAsciiTexture(BaseNameOfTexturePath(normalizedName));
     for (const std::string& known : knownNames) {
         if (ToLowerAsciiTexture(BaseNameOfTexturePath(known)) == wantedBase) {
             return known;
-        }
-    }
-
-    for (const std::string& known : knownNames) {
-        const std::string knownLower = ToLowerAsciiTexture(known);
-        if (knownLower.find(wantedStem) != std::string::npos) {
-            return known;
-        }
-    }
-
-    for (const std::string& prefix : directPrefixes) {
-        const std::string alias = ResolveTextureAlias(prefix + normalizedName);
-        if (!alias.empty()) {
-            const std::string aliasBase = ToLowerAsciiTexture(BaseNameOfTexturePath(alias));
-            if (aliasBase == wantedBase || aliasBase.find(wantedStem) != std::string::npos) {
-                const std::string resolvedAlias = ResolveExistingTexturePath(alias, directPrefixes);
-                if (!resolvedAlias.empty()) {
-                    return resolvedAlias;
-                }
-            }
         }
     }
 
@@ -336,7 +400,6 @@ std::string ResolveTexturePath(const char* name)
         return std::string();
     }
 
-    const std::string normalizedName = NormalizeTexturePath(CollapseUtf8Latin1ToBytes(name));
     const std::vector<std::string> prefixes = {
         "",
         "data\\",
@@ -344,19 +407,35 @@ std::string ResolveTexturePath(const char* name)
         "data\\texture\\"
     };
 
-    const char* dot = std::strrchr(normalizedName.c_str(), '.');
-    if (dot) {
-        const std::string resolvedWithExistingExt = ResolveTextureDataPath(normalizedName, dot, prefixes);
-        if (!resolvedWithExistingExt.empty()) {
-            return resolvedWithExistingExt;
+    const auto tryResolve = [&](const std::string& candidateName) -> std::string {
+        const char* dot = std::strrchr(candidateName.c_str(), '.');
+        if (dot) {
+            const std::string resolvedWithExistingExt = ResolveTextureDataPath(candidateName, dot, prefixes);
+            if (!resolvedWithExistingExt.empty()) {
+                return resolvedWithExistingExt;
+            }
         }
+
+        static const char* const kTextureExts[] = { ".bmp", ".jpg", ".jpeg", ".tga", ".png" };
+        for (const char* ext : kTextureExts) {
+            const std::string candidate = dot ? candidateName : candidateName + ext;
+            const std::string resolved = ResolveTextureDataPath(candidate, ext, prefixes);
+            if (!resolved.empty()) {
+                return resolved;
+            }
+        }
+
+        return std::string();
+    };
+
+    const std::string normalizedName = NormalizeTexturePath(name);
+    if (const std::string resolved = tryResolve(normalizedName); !resolved.empty()) {
+        return resolved;
     }
 
-    static const char* const kTextureExts[] = { ".bmp", ".jpg", ".jpeg", ".tga", ".png" };
-    for (const char* ext : kTextureExts) {
-        const std::string candidate = dot ? normalizedName : normalizedName + ext;
-        const std::string resolved = ResolveTextureDataPath(candidate, ext, prefixes);
-        if (!resolved.empty()) {
+    const std::string collapsedName = NormalizeTexturePath(CollapseUtf8Latin1ToBytes(normalizedName));
+    if (collapsedName != normalizedName) {
+        if (const std::string resolved = tryResolve(collapsedName); !resolved.empty()) {
             return resolved;
         }
     }
@@ -671,6 +750,7 @@ CRenderer::CRenderer() {
     m_isVertexFog = false;
     m_isFoggy = false;
     m_fogChanged = false;
+    m_fogPara = FogPara{ 0.0f, 1.0f, 0u, 0.0f, 1, 3 };
     m_nClearColor = 0;
     m_lpSurfacePtr = nullptr;
     m_lPitch = 0;
@@ -742,6 +822,8 @@ bool CRenderer::DrawScene() {
     if (!m_renderDevice || !m_renderDevice->BeginScene())
         return false;
 
+    ApplyFogState();
+
     FlushRenderList();
 
     m_renderDevice->EndScene();
@@ -756,6 +838,9 @@ void CRenderer::Flip(bool vertSync) {
 }
 
 void CRenderer::AddRP(RPFace* face, int renderFlag) {
+    if (face) {
+        ApplyFogToVertices(face->verts, face->numVerts, m_isFoggy, m_fogPara);
+    }
     if (renderFlag & 1) { // Alpha
         float sortKey = face->alphaSortKey;
         if (sortKey <= 0.0f && face->verts && face->numVerts > 0) {
@@ -788,15 +873,63 @@ void CRenderer::AddRP(RPFace* face, int renderFlag) {
 }
 
 void CRenderer::AddLmRP(RPLmFace* face, int renderFlag) {
+    if (face) {
+        ApplyFogToLightmapVertices(face->lmverts, face->numVerts, m_isFoggy, m_fogPara);
+    }
     m_rpLmList.push_back(face);
 }
 
 void CRenderer::AddRawRP(RPRaw* face, int renderFlag) {
+    if (face) {
+        ApplyFogToVertices(face->verts, face->numVerts, m_isFoggy, m_fogPara);
+    }
     if (renderFlag & 1) {
         m_rpRawAlphaList.push_back(face);
     } else {
         m_rpRawList.push_back(face);
     }
+}
+
+void CRenderer::SetFogParameters(float start, float end, DWORD color, float density)
+{
+    m_fogPara.start = start;
+    m_fogPara.end = end;
+    m_fogPara.color = color;
+    m_fogPara.density = density;
+    m_fogPara.useRange = 1;
+    m_fogPara.mode = 3;
+    m_fogChanged = true;
+}
+
+void CRenderer::FogSwitch(int sw)
+{
+    m_isVertexFog = true;
+    m_isFoggy = sw != 0;
+    m_fogPara.useRange = 1;
+    m_fogPara.mode = 3;
+    m_fogChanged = true;
+}
+
+void CRenderer::ApplyFogState()
+{
+    if (!m_renderDevice || !m_fogChanged) {
+        return;
+    }
+
+    m_renderDevice->SetRenderState(D3DRENDERSTATE_FOGENABLE, m_isFoggy ? TRUE : FALSE);
+    if (m_isFoggy) {
+        const float fogStart = ComputeFogStartDistance(m_fogPara);
+        const float fogEnd = ComputeFogEndDistance(m_fogPara);
+        m_renderDevice->SetRenderState(D3DRENDERSTATE_FOGCOLOR, m_fogPara.color);
+        m_renderDevice->SetRenderState(D3DRENDERSTATE_FOGSTART, FloatToRenderStateBits(fogStart));
+        m_renderDevice->SetRenderState(D3DRENDERSTATE_FOGEND, FloatToRenderStateBits(fogEnd));
+        m_renderDevice->SetRenderState(D3DRENDERSTATE_FOGDENSITY, FloatToRenderStateBits(m_fogPara.density));
+        m_renderDevice->SetRenderState(D3DRENDERSTATE_FOGTABLEMODE, 0u);
+        m_renderDevice->SetRenderState(D3DRENDERSTATE_FOGVERTEXMODE, static_cast<DWORD>(m_fogPara.mode));
+        m_renderDevice->SetRenderState(D3DRENDERSTATE_RANGEFOGENABLE, m_fogPara.useRange ? TRUE : FALSE);
+    }
+
+    m_fogChanged = false;
 }
 
 void CRenderer::SetLmapTexture(CTexture* tex) {

@@ -12,6 +12,17 @@
 namespace {
 constexpr bool kLogCRes = false;
 constexpr bool kLogResMgr = false;
+
+std::string ToLowerAscii(std::string value)
+{
+    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char ch) {
+        if (ch >= 'A' && ch <= 'Z') {
+            return static_cast<char>(ch - 'A' + 'a');
+        }
+        return static_cast<char>(ch);
+    });
+    return value;
+}
 }
 
 #define LOG_CRES(...) do { if constexpr (kLogCRes) { DbgLog(__VA_ARGS__); } } while (0)
@@ -94,7 +105,7 @@ CResMgr::~CResMgr()
 void CResMgr::RegisterType(const char* ext, const char* defaultDir, CRes* factoryObj)
 {
     int index = (int)m_objTypes.size();
-    m_resExt[std::string(ext)] = index;
+    m_resExt[ToLowerAscii(ext ? ext : "")] = index;
     m_objTypes.push_back(factoryObj);
     m_typeDir.push_back(std::string(defaultDir));
     m_fileList.emplace_back();
@@ -113,8 +124,9 @@ CRes* CResMgr::Get(const char* fNameInput, bool bRefresh)
         return nullptr;
     }
     const char* ext = dot + 1;
-    
-    auto itExt = m_resExt.find(std::string(ext));
+    const std::string normalizedExt = ToLowerAscii(ext ? ext : "");
+
+    auto itExt = m_resExt.find(normalizedExt);
     if (itExt == m_resExt.end()) {
         LeaveCriticalSection(&m_GetResSection);
         return nullptr;

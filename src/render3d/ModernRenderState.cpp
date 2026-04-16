@@ -11,11 +11,24 @@ void ResetModernFixedFunctionState(ModernFixedFunctionState* state)
     state->alphaBlendEnable = FALSE;
     state->depthEnable = TRUE;
     state->depthWriteEnable = TRUE;
+    state->fogEnable = FALSE;
+    state->fogColor = 0u;
+    state->fogStart = 10.0f;
+    state->fogEnd = 1500.0f;
     state->cullMode = D3DCULL_NONE;
     state->colorKeyEnable = TRUE;
     state->srcBlend = D3DBLEND_SRCALPHA;
     state->destBlend = D3DBLEND_INVSRCALPHA;
     ResetModernTextureStageStates(state->textureStages);
+}
+
+float RenderStateBitsToFloat(DWORD value)
+{
+    union {
+        DWORD asDword;
+        float asFloat;
+    } bits = { value };
+    return bits.asFloat;
 }
 
 void ApplyModernRenderState(ModernFixedFunctionState* state, D3DRENDERSTATETYPE renderState, DWORD value)
@@ -30,6 +43,10 @@ void ApplyModernRenderState(ModernFixedFunctionState* state, D3DRENDERSTATETYPE 
     case D3DRENDERSTATE_ALPHABLENDENABLE: state->alphaBlendEnable = value; break;
     case D3DRENDERSTATE_ZENABLE: state->depthEnable = value; break;
     case D3DRENDERSTATE_ZWRITEENABLE: state->depthWriteEnable = value; break;
+    case D3DRENDERSTATE_FOGENABLE: state->fogEnable = value; break;
+    case D3DRENDERSTATE_FOGCOLOR: state->fogColor = value; break;
+    case D3DRENDERSTATE_FOGSTART: state->fogStart = RenderStateBitsToFloat(value); break;
+    case D3DRENDERSTATE_FOGEND: state->fogEnd = RenderStateBitsToFloat(value); break;
     case D3DRENDERSTATE_CULLMODE: state->cullMode = static_cast<D3DCULL>(value); break;
     case D3DRENDERSTATE_COLORKEYENABLE: state->colorKeyEnable = value; break;
     case D3DRENDERSTATE_SRCBLEND: state->srcBlend = static_cast<D3DBLEND>(value); break;
@@ -102,6 +119,9 @@ unsigned int BuildModernDrawFlags(DWORD vertexFormat,
         && state.textureStages[0].alphaArg1 == D3DTA_TEXTURE
         && state.textureStages[0].alphaArg2 == D3DTA_DIFFUSE) {
         flags |= ModernDrawFlag_Stage0AlphaModulate;
+    }
+    if (state.fogEnable != FALSE) {
+        flags |= ModernDrawFlag_FogEnabled;
     }
     return flags;
 }

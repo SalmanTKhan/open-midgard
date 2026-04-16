@@ -71,6 +71,7 @@ constexpr bool kRejectOversizedGroundFaces = false;
 constexpr bool kUseGroundLightmaps = true;
 constexpr bool kLogGnd = false;
 constexpr bool kLogGround = false;
+constexpr unsigned int kGroundLightmapUpscaleFactor = 2u;
 constexpr int kLightmapEdge = 8;
 constexpr int kLightmapAtlasEdge = 256;
 constexpr float kPortalBaseHeightOffset = 0.05f;
@@ -3723,11 +3724,6 @@ u32 ResolveSurfaceColor(const CGroundSurface& surface)
     return 0xFF000000u | color;
 }
 
-u8 Expand5To8(u8 value)
-{
-    return static_cast<u8>((value << 3) | (value >> 2));
-}
-
 void Unpack5BitChannel(const ColorChannel& channel, std::array<u8, 64>* outValues)
 {
     if (!outValues) {
@@ -3739,15 +3735,16 @@ void Unpack5BitChannel(const ColorChannel& channel, std::array<u8, 64>* outValue
         const int byteOffset = bitOffset / 8;
         const int bitShift = bitOffset % 8;
 
-        unsigned int packed = channel.m_buffer[byteOffset];
-        if (byteOffset + 1 < static_cast<int>(sizeof(channel.m_buffer))) {
-            packed |= static_cast<unsigned int>(channel.m_buffer[byteOffset + 1]) << 8;
-        }
-        if (byteOffset + 2 < static_cast<int>(sizeof(channel.m_buffer))) {
-            packed |= static_cast<unsigned int>(channel.m_buffer[byteOffset + 2]) << 16;
+        u8 unpacked = 0;
+        if (bitShift >= 4) {
+            unpacked = static_cast<u8>(
+                ((channel.m_buffer[byteOffset] & static_cast<u8>(0xF8u >> bitShift)) << bitShift)
+                | ((channel.m_buffer[byteOffset + 1] & static_cast<u8>(0xF8u << (8 - bitShift))) >> (8 - bitShift)));
+        } else {
+            unpacked = static_cast<u8>((channel.m_buffer[byteOffset] & static_cast<u8>(0xF8u >> bitShift)) << bitShift);
         }
 
-        (*outValues)[static_cast<size_t>(i)] = Expand5To8(static_cast<u8>((packed >> bitShift) & 0x1Fu));
+        (*outValues)[static_cast<size_t>(i)] = unpacked;
     }
 }
 
@@ -3818,23 +3815,33 @@ vector3d UnpackSurfaceColor(u32 color)
     };
 }
 
-u32 MakeGroundLitColor(const vector3d& normal,
-    const vector3d& lightDir,
-    const vector3d& diffuseCol,
-    const vector3d& ambientCol,
-    u32 surfaceColor)
+u32 MakeGroundVertexColor(u32 surfaceColor)
 {
-    (void)normal;
-    (void)lightDir;
     const vector3d baseColor = UnpackSurfaceColor(surfaceColor);
-    const float litR = ClampUnitFloat((ambientCol.x + diffuseCol.x) * baseColor.x);
-    const float litG = ClampUnitFloat((ambientCol.y + diffuseCol.y) * baseColor.y);
-    const float litB = ClampUnitFloat((ambientCol.z + diffuseCol.z) * baseColor.z);
     return PackColor(
         255,
-        static_cast<u8>(litR * 255.0f + 0.5f),
-        static_cast<u8>(litG * 255.0f + 0.5f),
-        static_cast<u8>(litB * 255.0f + 0.5f));
+        static_cast<u8>(ClampUnitFloat(baseColor.x) * 255.0f + 0.5f),
+        static_cast<u8>(ClampUnitFloat(baseColor.y) * 255.0f + 0.5f),
+        static_cast<u8>(ClampUnitFloat(baseColor.z) * 255.0f + 0.5f));
+}
+
+vector3d ComputeGroundEnvDiff(const vector3d& ambientCol, const vector3d& diffuseCol)
+{
+    return vector3d{
+        ClampUnitFloat(1.0f - (1.0f - ambientCol.x) * (1.0f - diffuseCol.x)),
+        ClampUnitFloat(1.0f - (1.0f - ambientCol.y) * (1.0f - diffuseCol.y)),
+        ClampUnitFloat(1.0f - (1.0f - ambientCol.z) * (1.0f - diffuseCol.z))
+    };
+}
+
+u32 MakeGroundVertexColor(u32 surfaceColor, const vector3d& envDiff)
+{
+    const vector3d baseColor = UnpackSurfaceColor(surfaceColor);
+    return PackColor(
+        255,
+        static_cast<u8>(ClampUnitFloat(baseColor.x * envDiff.x) * 255.0f + 0.5f),
+        static_cast<u8>(ClampUnitFloat(baseColor.y * envDiff.y) * 255.0f + 0.5f),
+        static_cast<u8>(ClampUnitFloat(baseColor.z * envDiff.z) * 255.0f + 0.5f));
 }
 
 u32 SampleLmIntensity(const CLMInfo& lminfo, int y, int x)
@@ -3930,8 +3937,7 @@ bool CLightmapMgr::Create(const CGndRes& gnd)
                 for (int x = 0; x < kLightmapEdge; ++x) {
                     const size_t pixelIndex = static_cast<size_t>(baseY + y) * static_cast<size_t>(kLightmapAtlasEdge)
                         + static_cast<size_t>(baseX + x);
-                    const u8 intensity = lminfo.idata[y][x];
-                    atlasPixels[pixelIndex] = PackColor(intensity, intensity, intensity, intensity);
+                    atlasPixels[pixelIndex] = SampleLmIntensity(lminfo, y, x);
                 }
             }
 
@@ -3964,7 +3970,7 @@ bool CLightmapMgr::Create(const CGndRes& gnd)
         std::snprintf(atlasName, sizeof(atlasName), "__lightmap_atlas_%d__", atlasIndex);
         std::strncpy(atlasTexture->m_texName, atlasName, sizeof(atlasTexture->m_texName) - 1);
         atlasTexture->m_texName[sizeof(atlasTexture->m_texName) - 1] = '\0';
-        if (!atlasTexture->Create(kLightmapAtlasEdge, kLightmapAtlasEdge, PF_A8R8G8B8, false)) {
+        if (!atlasTexture->Create(kLightmapAtlasEdge, kLightmapAtlasEdge, PF_A4R4G4B4, true, kGroundLightmapUpscaleFactor)) {
             delete atlasTexture;
             Reset();
             return false;
@@ -4703,6 +4709,7 @@ void C3dGround::FlushGround(const matrix& viewMatrix)
     tlvertex3d sampleVerts[4]{};
     const CGroundSurface* sampleSurfaceInfo = nullptr;
     static bool loggedSubmittedGroundTexture = false;
+    const vector3d groundEnvDiff = ComputeGroundEnvDiff(m_ambientCol, m_diffuseCol);
 
     auto submitSurface = [&](const CGroundSurface* surface, const vector3d (&worldVerts)[4], int* submittedCounter) {
         if (!surface) {
@@ -4730,12 +4737,8 @@ void C3dGround::FlushGround(const matrix& viewMatrix)
         const vector3d surfaceNormal = NormalizeVec3(CrossVec3(
             SubtractVec3(worldVerts[1], worldVerts[0]),
             SubtractVec3(worldVerts[2], worldVerts[0])));
-        const u32 litColor = MakeGroundLitColor(
-            surfaceNormal,
-            m_lightDir,
-            m_diffuseCol,
-            m_ambientCol,
-            surface->color);
+        (void)surfaceNormal;
+        const u32 litColor = MakeGroundVertexColor(surface->color, groundEnvDiff);
         for (int i = 0; i < 4; ++i) {
             tlvertex3d projected{};
             if (!ProjectPoint(g_renderer, viewMatrix, worldVerts[i], &projected)) {
@@ -5592,7 +5595,10 @@ bool CWorld::AppendBackgroundObjects(const C3dWorldRes& worldRes,
         actor->m_debugModelPath = modelPath;
         actor->m_debugNodeName = actorInfo->nodeName;
 
-        if (!actor->AssignModel(*modelRes)) {
+        const bool assigned = rootNode
+            ? actor->AssignModel(*rootNode, *modelRes)
+            : actor->AssignModel(*modelRes);
+        if (!assigned) {
             if (failedModelAssigns.emplace(modelRootKey, true).second) {
                 DbgLog("[World] background object assign failed model='%s' node='%s'\n", modelPath.c_str(), actorInfo->nodeName);
             }

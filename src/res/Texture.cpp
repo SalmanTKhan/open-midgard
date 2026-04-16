@@ -15,13 +15,14 @@ namespace {
 
 constexpr bool kLogTexture = false;
 
-unsigned int GetTextureUpscaleFactor(bool allowUpscale)
+unsigned int GetTextureUpscaleFactor(bool allowUpscale, unsigned int minUpscaleFactor)
 {
     if (!allowUpscale) {
         return 1u;
     }
 
-    return static_cast<unsigned int>((std::max)(1, GetCachedGraphicsSettings().textureUpscaleFactor));
+    const unsigned int configuredFactor = static_cast<unsigned int>((std::max)(1, GetCachedGraphicsSettings().textureUpscaleFactor));
+    return (std::max)(configuredFactor, (std::max)(1u, minUpscaleFactor));
 }
 
 unsigned int CountTrailingZeros(unsigned int mask)
@@ -393,10 +394,10 @@ CTexture::~CTexture() {
     GetRenderDevice().ReleaseTextureResource(this);
 }
 
-bool CTexture::Create(unsigned int w, unsigned int h, PixelFormat format, bool allowUpscale) {
+bool CTexture::Create(unsigned int w, unsigned int h, PixelFormat format, bool allowUpscale, unsigned int minUpscaleFactor) {
     GetRenderDevice().ReleaseTextureResource(this);
 
-    m_upscaleFactor = GetTextureUpscaleFactor(allowUpscale);
+    m_upscaleFactor = GetTextureUpscaleFactor(allowUpscale, minUpscaleFactor);
 
     const unsigned int scaledWidth = (std::max)(1u, w * m_upscaleFactor);
     const unsigned int scaledHeight = (std::max)(1u, h * m_upscaleFactor);
@@ -418,8 +419,8 @@ bool CTexture::Create(unsigned int w, unsigned int h, PixelFormat format, bool a
     m_surfaceUpdateHeight = (std::min)(textureH, scaledHeight);
     return true;
 }
-bool CTexture::CreateBump(unsigned int w, unsigned int h, bool allowUpscale) { return Create(w, h, PF_BUMP, allowUpscale); }
-bool CTexture::CreateBump(unsigned int w, unsigned int h, IDirectDrawSurface7* pSurface, bool allowUpscale) { (void)pSurface; return Create(w, h, PF_BUMP, allowUpscale); }
+bool CTexture::CreateBump(unsigned int w, unsigned int h, bool allowUpscale, unsigned int minUpscaleFactor) { return Create(w, h, PF_BUMP, allowUpscale, minUpscaleFactor); }
+bool CTexture::CreateBump(unsigned int w, unsigned int h, IDirectDrawSurface7* pSurface, bool allowUpscale, unsigned int minUpscaleFactor) { (void)pSurface; return Create(w, h, PF_BUMP, allowUpscale, minUpscaleFactor); }
 void CTexture::SetUVAdjust(unsigned int width, unsigned int height)
 {
     unsigned int adjustedWidth = width;

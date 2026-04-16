@@ -38,9 +38,9 @@ public:
     CTexture(unsigned int w, unsigned int h, PixelFormat pf, IDirectDrawSurface7* pSurface);
     virtual ~CTexture();
 
-    bool Create(unsigned int w, unsigned int h, PixelFormat pf, bool allowUpscale = true);
-    bool CreateBump(unsigned int w, unsigned int h, bool allowUpscale = true);
-    bool CreateBump(unsigned int w, unsigned int h, IDirectDrawSurface7* pSurface, bool allowUpscale = true);
+    bool Create(unsigned int w, unsigned int h, PixelFormat pf, bool allowUpscale = true, unsigned int minUpscaleFactor = 1u);
+    bool CreateBump(unsigned int w, unsigned int h, bool allowUpscale = true, unsigned int minUpscaleFactor = 1u);
+    bool CreateBump(unsigned int w, unsigned int h, IDirectDrawSurface7* pSurface, bool allowUpscale = true, unsigned int minUpscaleFactor = 1u);
     
     void SetUVAdjust(unsigned int w, unsigned int h);
     void UpdateMipmap(RECT* rect);

@@ -6,6 +6,7 @@
 #include "DebugLog.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cstdlib>
 #include <cstring>
 #include <cstdio>
@@ -72,10 +73,80 @@ constexpr const char* kBodyTokenPecoLordKnight = "\xC6\xE4\xC4\xDA\xC6\xE4\xC4\x
 constexpr const char* kBodyTokenPecoPaladin = "\xC6\xE4\xC4\xDA\xC6\xC8\xB6\xF3\xB5\xF2";
 constexpr u32 kServerTimeLeadMs = 72u;
 constexpr u32 kServerTimeLateToleranceMs = 144u;
+constexpr const char* kFogParameterTableFile = "fogparametertable.txt";
 
 int ClampShortcutPageIndex(int page)
 {
     return (std::max)(0, (std::min)(page, kShortcutPageCount - 1));
+}
+
+std::string TrimAscii(std::string value)
+{
+    size_t start = 0;
+    while (start < value.size() && std::isspace(static_cast<unsigned char>(value[start]))) {
+        ++start;
+    }
+
+    size_t end = value.size();
+    while (end > start && std::isspace(static_cast<unsigned char>(value[end - 1]))) {
+        --end;
+    }
+
+    return value.substr(start, end - start);
+}
+
+std::string ToLowerAscii(std::string value)
+{
+    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char ch) {
+        if (ch >= 0x80u) {
+            return static_cast<char>(ch);
+        }
+        return static_cast<char>(std::tolower(ch));
+    });
+    return value;
+}
+
+bool LoadTextFileFromGameData(const char* fileName, std::string& outText)
+{
+    outText.clear();
+    if (!fileName || !*fileName) {
+        return false;
+    }
+
+    std::vector<std::string> candidates;
+    candidates.emplace_back(fileName);
+    if (!std::strchr(fileName, '\\') && !std::strchr(fileName, '/')) {
+        candidates.emplace_back(std::string("data\\") + fileName);
+        candidates.emplace_back(std::string("data/") + fileName);
+    }
+
+    for (const std::string& candidate : candidates) {
+        int size = 0;
+        unsigned char* bytes = g_fileMgr.GetData(candidate.c_str(), &size);
+        if (!bytes || size <= 0) {
+            delete[] bytes;
+            continue;
+        }
+
+        outText.assign(reinterpret_cast<const char*>(bytes), static_cast<size_t>(size));
+        delete[] bytes;
+        return true;
+    }
+
+    return false;
+}
+
+std::string NormalizeFogMapName(const char* rswName)
+{
+    std::string normalized = ToLowerAscii(TrimAscii(rswName ? rswName : ""));
+    if (normalized.empty()) {
+        return normalized;
+    }
+
+    if (normalized.size() < 4 || normalized.compare(normalized.size() - 4, 4, ".rsw") != 0) {
+        normalized += ".rsw";
+    }
+    return normalized;
 }
 
 constexpr const char* kEnemyHitNormalWaves[] = {
@@ -1126,14 +1197,14 @@ char* BuildPlayerBodyResourceName(const CSession& session,
 
 } // namespace
 
-CSession::CSession() : m_aid(0), m_authCode(0), m_sex(0), m_isEffectOn(true), m_isMinEffect(false),
+CSession::CSession() : m_aid(0), m_authCode(0), m_sex(0), m_isEffectOn(true), m_isMinEffect(false), m_fogOn(true),
     m_charServerPort(0), m_pendingReturnToCharSelect(0),
     m_playerPosX(0), m_playerPosY(0), m_playerDir(0), m_playerJob(0), m_playerHead(0), m_playerBodyPalette(0),
     m_playerHeadPalette(0), m_playerWeapon(0), m_playerShield(0), m_playerAccessory(0), m_playerAccessory2(0),
     m_playerAccessory3(0), m_serverTime(0), m_numLatePacket(0), m_hasSelectedCharacterInfo(false), m_baseExpValue(0),
     m_nextBaseExpValue(0), m_jobExpValue(0), m_nextJobExpValue(0), m_hasBaseExpValue(false),
     m_hasNextBaseExpValue(false), m_hasJobExpValue(false), m_hasNextJobExpValue(false),
-    m_accessoryNameTableLoaded(false), m_GaugePacket(0)
+    m_fogParameterTableLoaded(false), m_accessoryNameTableLoaded(false), m_GaugePacket(0)
 {
     std::memset(m_userId, 0, sizeof(m_userId));
     std::memset(m_userPassword, 0, sizeof(m_userPassword));
@@ -1182,6 +1253,71 @@ bool CSession::InitAccountInfo()
         child = child->FindNext("connection");
     } while (child);
 
+    return true;
+}
+
+void CSession::EnsureFogParameterTableLoaded()
+{
+    if (m_fogParameterTableLoaded) {
+        return;
+    }
+
+    m_fogParameterTableLoaded = true;
+    m_fogParameterTable.clear();
+
+    std::string fogTableText;
+    if (!LoadTextFileFromGameData(kFogParameterTableFile, fogTableText)) {
+        DbgLog("[Session] Failed to load fog parameter table '%s'.\n", kFogParameterTableFile);
+        return;
+    }
+
+    std::vector<std::string> tokens;
+    std::string current;
+    for (char ch : fogTableText) {
+        if (ch == '#') {
+            std::string token = TrimAscii(current);
+            if (!token.empty()) {
+                tokens.push_back(std::move(token));
+            }
+            current.clear();
+            continue;
+        }
+
+        current.push_back(ch);
+    }
+
+    for (size_t index = 0; index + 4 < tokens.size(); index += 5) {
+        const std::string mapName = NormalizeFogMapName(tokens[index].c_str());
+        if (mapName.empty()) {
+            continue;
+        }
+
+        SessionFogParameter parameter{};
+        parameter.start = static_cast<float>(std::atof(tokens[index + 1].c_str()));
+        parameter.end = static_cast<float>(std::atof(tokens[index + 2].c_str()));
+        parameter.color = static_cast<u32>(std::strtoul(tokens[index + 3].c_str(), nullptr, 0));
+        parameter.density = static_cast<float>(std::atof(tokens[index + 4].c_str()));
+        m_fogParameterTable[mapName] = parameter;
+    }
+
+    DbgLog("[Session] Loaded %zu fog parameter entries.\n", m_fogParameterTable.size());
+}
+
+bool CSession::GetFogParameter(const char* rswName, SessionFogParameter* outParameter)
+{
+    if (!outParameter) {
+        return false;
+    }
+
+    EnsureFogParameterTableLoaded();
+
+    const std::string normalizedName = NormalizeFogMapName(rswName);
+    const auto it = m_fogParameterTable.find(normalizedName);
+    if (it == m_fogParameterTable.end()) {
+        return false;
+    }
+
+    *outParameter = it->second;
     return true;
 }
 

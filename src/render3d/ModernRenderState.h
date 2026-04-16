@@ -22,6 +22,10 @@ struct ModernFixedFunctionState {
     DWORD alphaBlendEnable;
     DWORD depthEnable;
     DWORD depthWriteEnable;
+    DWORD fogEnable;
+    DWORD fogColor;
+    float fogStart;
+    float fogEnd;
     D3DCULL cullMode;
     DWORD colorKeyEnable;
     D3DBLEND srcBlend;
@@ -33,7 +37,13 @@ struct ModernDrawConstants {
     float screenWidth;
     float screenHeight;
     float alphaRef;
+    float fogStart;
+    float fogEnd;
+    float fogColorR;
+    float fogColorG;
+    float fogColorB;
     unsigned int flags;
+    float padding[3];
 };
 
 enum ModernDrawFlags : unsigned int {
@@ -44,6 +54,7 @@ enum ModernDrawFlags : unsigned int {
     ModernDrawFlag_Stage0AlphaUseTexture = 1u << 4,
     ModernDrawFlag_Stage0AlphaModulate = 1u << 5,
     ModernDrawFlag_Stage1LightmapAlpha = 1u << 6,
+    ModernDrawFlag_FogEnabled = 1u << 7,
 };
 
 constexpr DWORD kModernLightmapFvf = D3DFVF_XYZRHW | D3DFVF_DIFFUSE | D3DFVF_SPECULAR | D3DFVF_TEX2;

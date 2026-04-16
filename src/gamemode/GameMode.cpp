@@ -177,6 +177,16 @@ std::string ToLowerAsciiMapName(const char* rswName)
     return value;
 }
 
+bool MatchMapName(const std::string& mapName, std::initializer_list<const char*> candidates)
+{
+    for (const char* candidate : candidates) {
+        if (candidate && mapName == candidate) {
+            return true;
+        }
+    }
+    return false;
+}
+
 bool IsWeatherCloudEffectId(int effectId)
 {
     for (int candidate : kWeatherCloudEffectIds) {
@@ -190,26 +200,34 @@ bool IsWeatherCloudEffectId(int effectId)
 int ResolveRefWeatherCloudEffectId(const char* rswName)
 {
     const std::string mapName = ToLowerAsciiMapName(rswName);
-    if (mapName == "yuno.rsw"
-        || mapName == "schgld.rsw"
-        || mapName == "bat_fild02.rsw"
-        || mapName == "bat_b01.rsw"
-        || mapName == "bat_b02.rsw") {
+    if (MatchMapName(mapName, {
+            "yuno.rsw",
+            "gonryun.rsw",
+            "gon_dun02.rsw",
+            "ra_temsky.rsw",
+            "que_temsky.rsw",
+            "schgld.rsw",
+            "bat_fild02.rsw",
+            "bat_b01.rsw",
+            "bat_b02.rsw",
+        })) {
         return 230;
     }
-    if (mapName == "valkyrie.rsw"
-        || mapName == "rwc01.rsw"
-        || mapName == "himinn.rsw"
-        || mapName == "que_qsch01.rsw"
-        || mapName == "que_qsch02.rsw"
-        || mapName == "que_qsch03.rsw"
-        || mapName == "que_qsch04.rsw"
-        || mapName == "que_qsch05.rsw"
-        || mapName == "que_qaru01.rsw"
-        || mapName == "que_qaru02.rsw"
-        || mapName == "que_qaru03.rsw"
-        || mapName == "que_qaru04.rsw"
-        || mapName == "que_qaru05.rsw") {
+    if (MatchMapName(mapName, {
+            "valkyrie.rsw",
+            "rwc01.rsw",
+            "himinn.rsw",
+            "que_qsch01.rsw",
+            "que_qsch02.rsw",
+            "que_qsch03.rsw",
+            "que_qsch04.rsw",
+            "que_qsch05.rsw",
+            "que_qaru01.rsw",
+            "que_qaru02.rsw",
+            "que_qaru03.rsw",
+            "que_qaru04.rsw",
+            "que_qaru05.rsw",
+        })) {
         return 233;
     }
     if (mapName == "einbroch.rsw") {
@@ -228,6 +246,72 @@ int ResolveRefWeatherCloudEffectId(const char* rswName)
         return 698;
     }
     return 0;
+}
+
+int ResolveRefMapClearColor(const char* rswName)
+{
+    const std::string mapName = ToLowerAsciiMapName(rswName);
+
+    if (MatchMapName(mapName, {
+            "yuno.rsw",
+            "valkyrie.rsw",
+            "rwc01.rsw",
+            "himinn.rsw",
+            "airplane.rsw",
+            "airplane01.rsw",
+            "schgld.rsw",
+            "bat_fild02.rsw",
+            "que_qsch01.rsw",
+            "que_qsch02.rsw",
+            "que_qsch03.rsw",
+            "que_qsch04.rsw",
+            "que_qsch05.rsw",
+            "que_qaru01.rsw",
+            "que_qaru02.rsw",
+            "que_qaru03.rsw",
+            "que_qaru04.rsw",
+            "que_qaru05.rsw",
+            "bat_b01.rsw",
+            "bat_b02.rsw",
+        })) {
+        return static_cast<int>(0xFF99CCFFu);
+    }
+
+    if (MatchMapName(mapName, {
+            "gonryun.rsw",
+            "gon_dun02.rsw",
+            "ra_temsky.rsw",
+            "que_temsky.rsw",
+        })) {
+        return static_cast<int>(0xFF6699CCu);
+    }
+
+    if (mapName == "thana_boss.rsw") {
+        return static_cast<int>(0xFFE0D5C2u);
+    }
+
+    if (mapName == "5@tower.rsw" || mapName == "5tower.rsw") {
+        return static_cast<int>(0xFF330033u);
+    }
+
+    return 0;
+}
+
+void ApplyRefFogForMap(const char* rswName, int fogOn)
+{
+    if (!fogOn) {
+        g_renderer.FogSwitch(0);
+        return;
+    }
+
+    SessionFogParameter parameter{};
+    if (!g_session.GetFogParameter(rswName, &parameter)) {
+        g_renderer.FogSwitch(0);
+        return;
+    }
+
+    g_renderer.SetFogParameters(parameter.start, parameter.end, parameter.color, parameter.density);
+    g_renderer.FogSwitch(1);
 }
 
 void EnsureMapWeatherEffects(CGameMode& mode)
@@ -8420,9 +8504,17 @@ void CGameMode::OnInit(const char* worldName) {
         audio->PlayBGM(m_streamFileName.c_str());
     }
 
-    g_renderer.m_nClearColor = RGB(0, 0, 0);
+    g_renderer.m_nClearColor = ResolveRefMapClearColor(m_rswName);
+    MakeFog(g_session.m_fogOn);
 }
+
+void CGameMode::MakeFog(int fogOn)
+{
+    ApplyRefFogForMap(m_rswName, fogOn);
+}
+
 void CGameMode::OnExit() {
+    g_renderer.FogSwitch(0);
     g_gameModePacketRouter.Clear();
     g_windowMgr.RemoveAllWindows();
     ClearRuntimeActors(*this);

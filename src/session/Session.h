@@ -68,6 +68,13 @@ struct ACTIVE_STATUS_ICON {
     u32 expireServerTime = 0;
 };
 
+struct SessionFogParameter {
+    float start = 0.0f;
+    float end = 1.0f;
+    u32 color = 0;
+    float density = 0.0f;
+};
+
 constexpr int kShortcutSlotsPerPage = 9;
 constexpr int kShortcutPageCount = 3;
 constexpr int kShortcutSlotCount = kShortcutSlotsPerPage * kShortcutPageCount;
@@ -90,6 +97,7 @@ public:
     u8   m_sex;
     bool m_isEffectOn;
     bool m_isMinEffect;
+    bool m_fogOn;
     char m_charServerAddr[64];
     int  m_charServerPort;
     int  m_pendingReturnToCharSelect;
@@ -148,6 +156,7 @@ public:
     void SetServerTime(u32 time);
     void UpdateServerTime(u32 time);
     u32 GetServerTime() const;
+    bool GetFogParameter(const char* rswName, SessionFogParameter* outParameter);
     void SetPlayerPosDir(int x, int y, int dir);
     void SetSelectedCharacterAppearance(const CHARACTER_INFO& info);
     const CHARACTER_INFO* GetSelectedCharacterInfo() const;
@@ -233,6 +242,7 @@ public:
     char* GetHeadPaletteName(int head, int job, int sex, int palNum, char* buf);
     
 private:
+    void EnsureFogParameterTableLoaded();
     void EnsureAccessoryNameTableLoaded();
     void InitJobHitWaveName();
     void InitWeaponHitWaveName();
@@ -256,6 +266,8 @@ private:
     mutable std::mutex m_jobDisplayNameMutex;
     mutable std::unordered_map<int, std::string> m_jobDisplayNameCache;
     std::vector<ACTIVE_STATUS_ICON> m_activeStatusIcons;
+    bool m_fogParameterTableLoaded;
+    std::unordered_map<std::string, SessionFogParameter> m_fogParameterTable;
     bool m_accessoryNameTableLoaded;
     std::vector<std::string> m_accessoryNameTable;
     std::vector<std::string> m_jobHitWaveNameTable;

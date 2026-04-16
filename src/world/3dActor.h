@@ -50,6 +50,7 @@ public:
     C3dActor();
     ~C3dActor();
 
+    bool AssignModel(const C3dNodeRes& nodeRes, const C3dModelRes& modelRes);
     bool AssignModel(const C3dModelRes& modelRes);
     void SetFrame(int frame);
     void AdvanceFrame();

@@ -112,6 +112,7 @@ public:
     virtual void OnUpdate() override;
     virtual msgresult_t SendMsg(int msg, msgparam_t wparam, msgparam_t lparam, msgparam_t extra) override;
     virtual void OnChangeState(int newState) override;
+    void MakeFog(int fogOn);
 
     // Memory layout from HighPriest.exe.h:30992
     int m_areaLeft, m_areaRight, m_areaTop, m_areaBottom;

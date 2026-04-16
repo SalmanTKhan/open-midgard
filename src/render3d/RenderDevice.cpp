@@ -9,6 +9,7 @@
 #include "qtui/QtPlatformWindow.h"
 #include "render/Renderer.h"
 #include "res/Texture.h"
+#include "VulkanFxaaShaders.generated.h"
 #include "VulkanSmaaShaders.generated.h"
 #include "VulkanShaders.generated.h"
 
@@ -1033,7 +1034,13 @@ cbuffer DrawConstants : register(b0)
     float g_screenWidth;
     float g_screenHeight;
     float g_alphaRef;
+    float g_fogStart;
+    float g_fogEnd;
+    float g_fogColorR;
+    float g_fogColorG;
+    float g_fogColorB;
     uint g_flags;
+    float3 g_padding;
 };
 
 Texture2D g_texture0 : register(t0);
@@ -1058,6 +1065,7 @@ struct VSOutput {
     noperspective float4 color : COLOR0;
     noperspective float2 uv0 : TEXCOORD0;
     noperspective float2 uv1 : TEXCOORD1;
+    noperspective float fogDepth : TEXCOORD2;
 };
 
 VSOutput VSMainTL(VSInputTL input)
@@ -1071,6 +1079,7 @@ VSOutput VSMainTL(VSInputTL input)
     output.color = input.color;
     output.uv0 = input.uv0;
     output.uv1 = float2(0.0f, 0.0f);
+    output.fogDepth = clipW;
     return output;
 }
 
@@ -1085,6 +1094,7 @@ VSOutput VSMainLM(VSInputLM input)
     output.color = input.color;
     output.uv0 = input.uv0;
     output.uv1 = input.uv1;
+    output.fogDepth = clipW;
     return output;
 }
 
@@ -1107,6 +1117,12 @@ float4 PSMain(VSOutput input) : SV_Target
     if ((g_flags & 64u) != 0u) {
         float lightmapAlpha = g_texture1.Sample(g_sampler0, input.uv1).a;
         color.rgb *= lightmapAlpha.xxx;
+    }
+
+    if ((g_flags & 128u) != 0u) {
+        float fogRange = max(g_fogEnd - g_fogStart, 1e-6f);
+        float fogVisibility = 1.0f - saturate((input.fogDepth - g_fogStart) / fogRange);
+        color.rgb = lerp(float3(g_fogColorR, g_fogColorG, g_fogColorB), color.rgb, fogVisibility);
     }
 
     if ((g_flags & 8u) != 0u && (g_flags & 1u) != 0u && tex0Alpha <= 0.0f) {
@@ -2643,6 +2659,11 @@ private:
         constants.screenWidth = static_cast<float>((std::max)(1, m_renderWidth));
         constants.screenHeight = static_cast<float>((std::max)(1, m_renderHeight));
         constants.alphaRef = static_cast<float>(m_pipelineState.alphaRef) / 255.0f;
+        constants.fogStart = m_pipelineState.fogStart;
+        constants.fogEnd = m_pipelineState.fogEnd;
+        constants.fogColorR = static_cast<float>((m_pipelineState.fogColor >> 16) & 0xFFu) / 255.0f;
+        constants.fogColorG = static_cast<float>((m_pipelineState.fogColor >> 8) & 0xFFu) / 255.0f;
+        constants.fogColorB = static_cast<float>(m_pipelineState.fogColor & 0xFFu) / 255.0f;
         constants.flags = BuildModernDrawFlags(
             vertexFormat,
             m_pipelineState,
@@ -4659,6 +4680,16 @@ private:
         constants.screenWidth = static_cast<float>((std::max)(1, m_renderWidth));
         constants.screenHeight = static_cast<float>((std::max)(1, m_renderHeight));
         constants.alphaRef = static_cast<float>(m_pipelineState.alphaRef) / 255.0f;
+        constants.fogStart = m_pipelineState.fogStart;
+        constants.fogEnd = m_pipelineState.fogEnd;
+        constants.fogColorR = static_cast<float>((m_pipelineState.fogColor >> 16) & 0xFFu) / 255.0f;
+        constants.fogColorG = static_cast<float>((m_pipelineState.fogColor >> 8) & 0xFFu) / 255.0f;
+        constants.fogColorB = static_cast<float>(m_pipelineState.fogColor & 0xFFu) / 255.0f;
+        constants.fogStart = m_pipelineState.fogStart;
+        constants.fogEnd = m_pipelineState.fogEnd;
+        constants.fogColorR = static_cast<float>((m_pipelineState.fogColor >> 16) & 0xFFu) / 255.0f;
+        constants.fogColorG = static_cast<float>((m_pipelineState.fogColor >> 8) & 0xFFu) / 255.0f;
+        constants.fogColorB = static_cast<float>(m_pipelineState.fogColor & 0xFFu) / 255.0f;
         constants.flags = BuildModernDrawFlags(vertexFormat, m_pipelineState, hasTexture0, hasTexture1);
         void* constantUpload = nullptr;
         UINT64 constantGpuAddress = 0;
@@ -7504,6 +7535,11 @@ private:
         constants.screenWidth = static_cast<float>((std::max)(1, m_renderWidth));
         constants.screenHeight = static_cast<float>((std::max)(1, m_renderHeight));
         constants.alphaRef = static_cast<float>(m_pipelineState.alphaRef) / 255.0f;
+        constants.fogStart = m_pipelineState.fogStart;
+        constants.fogEnd = m_pipelineState.fogEnd;
+        constants.fogColorR = static_cast<float>((m_pipelineState.fogColor >> 16) & 0xFFu) / 255.0f;
+        constants.fogColorG = static_cast<float>((m_pipelineState.fogColor >> 8) & 0xFFu) / 255.0f;
+        constants.fogColorB = static_cast<float>(m_pipelineState.fogColor & 0xFFu) / 255.0f;
         const VulkanTextureHandle* texture0 = GetVulkanTextureHandle(m_boundTextures[0]);
         const VulkanTextureHandle* texture1 = GetVulkanTextureHandle(m_boundTextures[1]);
         const bool hasTexture0 = texture0 && texture0->m_view != VK_NULL_HANDLE && texture0->m_layout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;

@@ -691,7 +691,7 @@ void C3dNode::Render(const matrix& parentWorld, const matrix& viewMatrix, bool f
             renderFace->mtPreset = 0;
             renderFace->cullMode = (forceDoubleSided || face.twoSide)
                 ? static_cast<D3DCULL>(D3DCULL_NONE)
-                : static_cast<D3DCULL>(D3DCULL_CW);
+                : static_cast<D3DCULL>(flipNormal ? D3DCULL_CCW : D3DCULL_CW);
             renderFace->srcAlphaMode = D3DBLEND_SRCALPHA;
             renderFace->destAlphaMode = D3DBLEND_INVSRCALPHA;
             renderFace->alphaSortKey = 0.0f;
@@ -736,6 +736,26 @@ C3dActor::~C3dActor()
     delete m_node;
 }
 
+bool C3dActor::AssignModel(const C3dNodeRes& nodeRes, const C3dModelRes& modelRes)
+{
+    delete m_node;
+    m_node = new C3dNode();
+    if (!m_node) {
+        return false;
+    }
+    if (!m_node->AssignModel(nodeRes, modelRes)) {
+        delete m_node;
+        m_node = nullptr;
+        return false;
+    }
+
+    m_animLen = modelRes.m_animLen;
+    SetFrame(0);
+    UpdateBound();
+    UpdateMatrix();
+    return true;
+}
+
 bool C3dActor::AssignModel(const C3dModelRes& modelRes)
 {
     const C3dNodeRes* rootRes = nullptr;
@@ -750,22 +770,7 @@ bool C3dActor::AssignModel(const C3dModelRes& modelRes)
         return false;
     }
 
-    delete m_node;
-    m_node = new C3dNode();
-    if (!m_node) {
-        return false;
-    }
-    if (!m_node->AssignModel(*rootRes, modelRes)) {
-        delete m_node;
-        m_node = nullptr;
-        return false;
-    }
-
-    m_animLen = modelRes.m_animLen;
-    SetFrame(0);
-    UpdateBound();
-    UpdateMatrix();
-    return true;
+    return AssignModel(*rootRes, modelRes);
 }
 
 void C3dActor::SetFrame(int frame)
