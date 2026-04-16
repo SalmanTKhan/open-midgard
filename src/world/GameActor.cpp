@@ -1510,6 +1510,14 @@ bool IsTransientActionActive(const CGameActor& actor, CActRes* actRes, int actio
         return false;
     }
 
+    const int actionBand = action & ~7;
+    if (actor.m_stateId == 0 && (actionBand == 0 || actionBand == 8 || actionBand == 16)) {
+        return false;
+    }
+    if (actor.m_stateStartTick == 0) {
+        return false;
+    }
+
     const bool allowWhileMoving = actor.m_stateId == kAttackStateId
         || actor.m_stateId == kSecondAttackStateId
         || actor.m_stateId == kGameActorPickupStateId

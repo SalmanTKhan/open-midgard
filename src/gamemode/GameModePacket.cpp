@@ -3566,6 +3566,12 @@ void StartLocalPickupAnimation(CGameMode& mode, u32 objectAid)
         objectAid);
 }
 
+int ResolveWorldActionDirFromRotation(float rotationDegrees)
+{
+    const int roundedDir = static_cast<int>(std::floor((rotationDegrees + 22.5f) / 45.0f));
+    return roundedDir & 7;
+}
+
 void StartSitStandAnimation(CGameActor* actor, bool sitting)
 {
     if (!actor) {
@@ -3585,7 +3591,7 @@ void StartSitStandAnimation(CGameActor* actor, bool sitting)
     // Posture updates should snap directly to the steady sit/idle pose instead
     // of entering a transient animation state like attack or pickup.
     const int baseAction = (actor->m_isPc && sitting) ? 16 : 0;
-    const int resolvedAction = baseAction + actor->Get8Dir(actor->m_roty);
+    const int resolvedAction = baseAction + ResolveWorldActionDirFromRotation(actor->m_roty);
     actor->m_baseAction = baseAction;
     actor->m_curAction = resolvedAction;
     actor->m_curMotion = 0;
@@ -5835,7 +5841,7 @@ void HandleActorDirection(CGameMode& mode, const PacketView& packet)
     actor->m_roty = PacketDirToRotationDegrees(dir);
     if (actor->m_isSitting != 0) {
         const int baseAction = (actor->m_isPc != 0) ? 16 : 0;
-        const int resolvedAction = baseAction + actor->Get8Dir(actor->m_roty);
+        const int resolvedAction = baseAction + ((static_cast<int>(dir) + 4) & 7);
         actor->m_baseAction = baseAction;
         actor->m_curAction = resolvedAction;
         actor->m_oldBaseAction = baseAction;

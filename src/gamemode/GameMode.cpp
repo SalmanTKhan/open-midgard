@@ -4401,7 +4401,7 @@ void ApplyLocalPlayerDirection(CGameMode& mode, u8 headDir, u8 dir)
 
     if (player->m_isSitting != 0) {
         const int baseAction = (player->m_isPc != 0) ? 16 : 0;
-        const int resolvedAction = baseAction + player->Get8Dir(player->m_roty);
+        const int resolvedAction = baseAction + ((static_cast<int>(dir) + 4) & 7);
         player->m_baseAction = baseAction;
         player->m_curAction = resolvedAction;
         player->m_oldBaseAction = baseAction;
