@@ -31,6 +31,7 @@ constexpr float kSubmitNearPlane = 80.0f;
 constexpr float kPi = 3.14159265f;
 constexpr float kEffectTickMs = 24.0f;
 constexpr float kEffectPixelRatioScale = 0.14285715f;
+constexpr float kEffectSpriteDepthBias = 0.0002f;
 constexpr float kWeatherCloudDurationFrames = 960.0f;
 // Ref/Wave.cpp PlayWave defaults used for skill / EzStr SFX.
 constexpr int kRefEffectWaveMaxDist = 250;
@@ -405,7 +406,8 @@ void SubmitScreenQuadPivot(const tlvertex3d& anchor,
     unsigned int color,
     D3DBLEND destBlend,
     float alphaSortKey,
-    int renderFlags)
+    int renderFlags,
+    float depthBias = 0.0f)
 {
     if (!texture || texture == &CTexMgr::s_dummy_texture) {
         return;
@@ -452,6 +454,9 @@ void SubmitScreenQuadPivot(const tlvertex3d& anchor,
     for (int index = 0; index < 4; ++index) {
         tlvertex3d& vert = face->m_verts[index];
         vert = anchor;
+        if (depthBias > 0.0f) {
+            vert.z = (std::max)(0.0f, anchor.z - depthBias);
+        }
         vert.x = anchor.x + xs[index] * c - ys[index] * s;
         vert.y = anchor.y + xs[index] * s + ys[index] * c;
         vert.color = color;
@@ -1774,6 +1779,148 @@ struct BakedEffectSpriteFrame {
     bool isValid = false;
 };
 
+unsigned int BakeEffectClipColor(unsigned int src, const CSprClip& clip)
+{
+    const unsigned int srcA = (src >> 24) & 0xFFu;
+    const unsigned int srcR = (src >> 16) & 0xFFu;
+    const unsigned int srcG = (src >> 8) & 0xFFu;
+    const unsigned int srcB = src & 0xFFu;
+
+    const unsigned int outA = srcA * clip.a / 255u;
+    const unsigned int outR = srcR * clip.r / 255u;
+    const unsigned int outG = srcG * clip.g / 255u;
+    const unsigned int outB = srcB * clip.b / 255u;
+    return (outA << 24) | (outR << 16) | (outG << 8) | outB;
+}
+
+unsigned int BakeEffectPremultiplyColor(unsigned int color)
+{
+    const unsigned int alpha = (color >> 24) & 0xFFu;
+    if (alpha == 0u || alpha == 0xFFu) {
+        return color;
+    }
+
+    const unsigned int red = ((color >> 16) & 0xFFu) * alpha / 255u;
+    const unsigned int green = ((color >> 8) & 0xFFu) * alpha / 255u;
+    const unsigned int blue = (color & 0xFFu) * alpha / 255u;
+    return (alpha << 24) | (red << 16) | (green << 8) | blue;
+}
+
+void BakeEffectAlphaBlendPixel(unsigned int& dst, unsigned int src)
+{
+    const unsigned int srcA = (src >> 24) & 0xFFu;
+    if (srcA == 0u) {
+        return;
+    }
+    if (srcA == 0xFFu) {
+        dst = src;
+        return;
+    }
+
+    const unsigned int dstA = (dst >> 24) & 0xFFu;
+    const unsigned int srcR = (src >> 16) & 0xFFu;
+    const unsigned int srcG = (src >> 8) & 0xFFu;
+    const unsigned int srcB = src & 0xFFu;
+    const unsigned int dstR = (dst >> 16) & 0xFFu;
+    const unsigned int dstG = (dst >> 8) & 0xFFu;
+    const unsigned int dstB = dst & 0xFFu;
+
+    const unsigned int invA = 255u - srcA;
+    const unsigned int outA = srcA + (dstA * invA) / 255u;
+    const unsigned int outR = srcR + (dstR * invA) / 255u;
+    const unsigned int outG = srcG + (dstG * invA) / 255u;
+    const unsigned int outB = srcB + (dstB * invA) / 255u;
+    dst = (outA << 24) | (outR << 16) | (outG << 8) | outB;
+}
+
+void BlitScaledEffectMotionToArgb(unsigned int* dest,
+    int destW,
+    int destH,
+    int baseX,
+    int baseY,
+    CSprRes* sprRes,
+    const CMotion* motion,
+    unsigned int* palette)
+{
+    if (!dest || !sprRes || !motion || !palette) {
+        return;
+    }
+
+    for (const CSprClip& clip : motion->sprClips) {
+        if (clip.sprIndex < 0) {
+            continue;
+        }
+
+        const SprImg* image = sprRes->GetSprite(clip.clipType, clip.sprIndex);
+        if (!image || image->width <= 0 || image->height <= 0) {
+            continue;
+        }
+
+        const float clipZoomX = clip.zoomX > 0.0f ? clip.zoomX : 1.0f;
+        const float clipZoomY = clip.zoomY > 0.0f ? clip.zoomY : 1.0f;
+        const bool flipX = (clip.flags & 1) != 0;
+        const int logicalWidth = image->width * (image->isHalfW + 1);
+        const int logicalHeight = image->height * (image->isHalfH + 1);
+        if (logicalWidth <= 0 || logicalHeight <= 0) {
+            continue;
+        }
+
+        const float left = static_cast<float>(clip.x) - static_cast<float>(logicalWidth) * clipZoomX * 0.5f;
+        const float top = static_cast<float>(clip.y) - static_cast<float>(logicalHeight) * clipZoomY * 0.5f;
+        const int drawLeft = static_cast<int>(std::floor(left));
+        const int drawTop = static_cast<int>(std::floor(top));
+        const int drawRight = static_cast<int>(std::ceil(left + static_cast<float>(logicalWidth) * clipZoomX));
+        const int drawBottom = static_cast<int>(std::ceil(top + static_cast<float>(logicalHeight) * clipZoomY));
+
+        for (int dy = drawTop; dy < drawBottom; ++dy) {
+            const int destY = baseY + dy;
+            if (destY < 0 || destY >= destH) {
+                continue;
+            }
+
+            const int logicalY = static_cast<int>(std::floor((static_cast<float>(dy) + 0.5f - top) / clipZoomY));
+            if (logicalY < 0 || logicalY >= logicalHeight) {
+                continue;
+            }
+            const int sourceY = logicalY / (image->isHalfH + 1);
+
+            for (int dx = drawLeft; dx < drawRight; ++dx) {
+                const int destX = baseX + dx;
+                if (destX < 0 || destX >= destW) {
+                    continue;
+                }
+
+                int logicalX = static_cast<int>(std::floor((static_cast<float>(dx) + 0.5f - left) / clipZoomX));
+                if (logicalX < 0 || logicalX >= logicalWidth) {
+                    continue;
+                }
+                if (flipX) {
+                    logicalX = logicalWidth - 1 - logicalX;
+                }
+                const int sourceX = logicalX / (image->isHalfW + 1);
+
+                unsigned int srcColor = 0u;
+                if (clip.clipType == 0) {
+                    const unsigned char index = image->indices[static_cast<size_t>(sourceY) * image->width + sourceX];
+                    if (index == 0u) {
+                        continue;
+                    }
+                    srcColor = 0xFF000000u | (palette[index] & 0x00FFFFFFu);
+                } else {
+                    srcColor = image->rgba[static_cast<size_t>(sourceY) * image->width + sourceX];
+                    if ((srcColor >> 24) == 0u) {
+                        continue;
+                    }
+                }
+
+                srcColor = BakeEffectClipColor(srcColor, clip);
+                srcColor = BakeEffectPremultiplyColor(srcColor);
+                BakeEffectAlphaBlendPixel(dest[static_cast<size_t>(destY) * destW + destX], srcColor);
+            }
+        }
+    }
+}
+
 const BakedEffectSpriteFrame* GetBakedEffectSpriteFrame(const std::string& actPath,
     const std::string& sprPath,
     int actionIndex,
@@ -1795,7 +1942,7 @@ const BakedEffectSpriteFrame* GetBakedEffectSpriteFrame(const std::string& actPa
                 constexpr int kCanvasSize = 384;
                 constexpr int kCanvasCenter = kCanvasSize / 2;
                 std::vector<unsigned int> canvasPixels(static_cast<size_t>(kCanvasSize) * static_cast<size_t>(kCanvasSize), 0u);
-                BlitMotionToArgb(canvasPixels.data(), kCanvasSize, kCanvasSize, kCanvasCenter, kCanvasCenter, sprRes, motion, sprRes->m_pal);
+                BlitScaledEffectMotionToArgb(canvasPixels.data(), kCanvasSize, kCanvasSize, kCanvasCenter, kCanvasCenter, sprRes, motion, sprRes->m_pal);
 
                 RECT bounds{};
                 if (FindOpaqueBounds(canvasPixels.data(), kCanvasSize, kCanvasSize, &bounds)) {
@@ -1969,7 +2116,8 @@ bool SubmitAnimatedSpriteParticle(const CEffectPrim& prim,
         color,
         destBlend,
         0.0f,
-        renderFlags);
+        renderFlags,
+        kEffectSpriteDepthBias);
     if (logEnchantPoison && prim.m_stateCnt <= 3) {
         DbgLog("[EnchantPoisonDbg] sprite submit ok state=%d pos=(%.2f,%.2f,%.2f) screen=(%.2f,%.2f) size=(%.2f,%.2f) pivot=(%.2f,%.2f) roll=%.2f alpha=%u\n",
             prim.m_stateCnt,
@@ -3229,7 +3377,8 @@ void CEffectPrim::Render(matrix* viewMatrix)
             color,
             destBlend,
             0.0f,
-            renderFlags);
+            renderFlags,
+            kEffectSpriteDepthBias);
         break;
     }
     default:
@@ -3723,6 +3872,10 @@ void CRagEffect::Init(CRenderObject* master, int effectId, const vector3d& delta
     case 42:
         m_handler = Handler::Blessing;
         m_duration = 60;
+        break;
+    case 44:
+        m_handler = Handler::Smoke;
+        m_duration = 100;
         break;
     case 601:
         m_handler = Handler::SightState;
@@ -5428,6 +5581,9 @@ void CRagEffect::SpawnSmoke()
             prim->m_deltaPos2.y = -9.0f;
             prim->m_rollSpeed = 0.75f;
             prim->m_speed = static_cast<float>(rand() % 3 + 3) * 0.1f;
+            prim->m_alpha = 0.0f;
+            prim->m_maxAlpha = 100.0f;
+            prim->m_alphaSpeed = prim->m_maxAlpha * 0.033333335f;
             prim->m_size = 1.5f;
             prim->m_fadeOutCnt = prim->m_duration - prim->m_duration / 3;
             prim->m_tintColor = RGB(255, 255, 255);
@@ -5453,6 +5609,9 @@ void CRagEffect::SpawnTorch()
         prim->m_pattern |= 0x200;
         prim->m_duration = m_duration;
         prim->m_deltaPos2.y = -10.0f;
+        prim->m_alpha = 0.0f;
+        prim->m_maxAlpha = 180.0f;
+        prim->m_alphaSpeed = 12.0f;
         prim->m_size = m_param[0] > 0.0f ? m_param[0] : 1.0f;
         prim->m_animSpeed = (std::max)(1, static_cast<int>(m_param[1]));
         prim->m_tintColor = RGB(255, 255, 255);
@@ -6055,6 +6214,15 @@ void CRagEffect::SendMsg(CGameObject*, int msg, msgparam_t par1, msgparam_t, msg
         return;
     case 44:
         m_level = static_cast<int>(par1);
+        return;
+    case 46:
+        if (par1 != 0) {
+            const vector3d* params = reinterpret_cast<const vector3d*>(par1);
+            m_param[0] = params[0].x;
+            m_param[1] = params[0].y;
+            m_param[2] = params[0].z;
+            m_param[3] = params[1].x;
+        }
         return;
     case 80:
         m_duration = static_cast<int>(par1);

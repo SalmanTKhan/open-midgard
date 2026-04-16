@@ -1707,13 +1707,22 @@ void RenderPortalEffectAtPosition(const vector3d& sourcePos,
 
 bool DoesWorldPositionCoverAttrCell(const C3dAttr& attr, const vector3d& pos, float radius, int attrX, int attrY);
 
-class CFixedWorldEffect : public CGameObject {
+class CFixedWorldEffect : public CAbleToMakeEffect {
 public:
     explicit CFixedWorldEffect(const C3dWorldRes::effectSrcInfo& source)
         : m_source(source)
         , m_spawnTick(timeGetTime())
-        , m_effect(CreateWorldRagEffect(source))
+        , m_effect(nullptr)
+        , m_useEmitter(source.type == 44)
+        , m_emitFrames((std::max)(1, static_cast<int>(source.emitSpeed)))
+        , m_processCnt(0)
     {
+        m_pos = source.pos;
+        if (m_useEmitter) {
+            m_processCnt = m_emitFrames - (rand() % 24);
+        } else {
+            m_effect = CreateWorldRagEffect(source);
+        }
     }
 
     ~CFixedWorldEffect() override
@@ -1723,6 +1732,29 @@ public:
 
     u8 OnProcess() override
     {
+        if (m_useEmitter) {
+            if (g_world.m_player) {
+                const float dx = g_world.m_player->m_pos.x - m_source.pos.x;
+                const float dz = g_world.m_player->m_pos.z - m_source.pos.z;
+                if (std::sqrt(dx * dx + dz * dz) < 130.0f && m_processCnt >= m_emitFrames) {
+                    m_processCnt = 0;
+                    if (CRagEffect* effect = LaunchEffect(m_source.type, vector3d{}, 0.0f)) {
+                        const vector3d params[2] = {
+                            vector3d{ m_source.param[0], m_source.param[1], m_source.param[2] },
+                            vector3d{ m_source.param[3], 0.0f, 0.0f }
+                        };
+                        effect->SendMsg(effect,
+                            46,
+                            reinterpret_cast<msgparam_t>(params),
+                            0,
+                            0);
+                    }
+                }
+            }
+            ++m_processCnt;
+            return 1;
+        }
+
         if (m_effect) {
             return m_effect->OnProcess();
         }
@@ -1745,7 +1777,7 @@ public:
             return false;
         }
 
-        if (m_effect && m_effect->ResolveCullSphere(outCenter, outRadius)) {
+        if (!m_useEmitter && m_effect && m_effect->ResolveCullSphere(outCenter, outRadius)) {
             return true;
         }
 
@@ -1758,6 +1790,10 @@ public:
 
     void Render(matrix* viewMatrix) override
     {
+        if (m_useEmitter) {
+            return;
+        }
+
         if (m_effect) {
             m_effect->Render(viewMatrix);
             return;
@@ -1863,6 +1899,9 @@ private:
     C3dWorldRes::effectSrcInfo m_source;
     DWORD m_spawnTick;
     CRagEffect* m_effect;
+    bool m_useEmitter;
+    int m_emitFrames;
+    int m_processCnt;
 };
 
 vector3d LerpVec3(const vector3d& a, const vector3d& b, float t)
