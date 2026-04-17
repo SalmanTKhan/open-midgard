@@ -31,6 +31,8 @@ constexpr int kChatWindowMargin = 12;
 constexpr int kChatWindowWidth = 420;
 constexpr int kChatLineHeight = 19;
 constexpr int kChatInputHeight = 22;
+constexpr int kChatWhisperInputWidth = 118;
+constexpr int kChatInputGap = 4;
 constexpr int kChatPanelPadding = 8;
 constexpr int kChatMessageGap = 2;
 constexpr int kChatVisibleLineCount = 12;
@@ -38,9 +40,17 @@ constexpr int kChatHistoryHeight =
     (kChatLineHeight * kChatVisibleLineCount) + (kChatMessageGap * (kChatVisibleLineCount - 1));
 constexpr int kChatScrollbarWidth = 8;
 constexpr int kChatScrollbarGap = 4;
+constexpr size_t kMaxWhisperTargetChars = 24;
 constexpr size_t kMaxInputChars = 180;
 constexpr size_t kMaxInputHistory = 5;
 constexpr int kChatWheelScrollLines = 3;
+
+struct ChatLayoutRects {
+    RECT panel;
+    RECT history;
+    RECT whisperInput;
+    RECT messageInput;
+};
 
 bool PointInRectXY(const RECT& rc, int x, int y)
 {
@@ -214,11 +224,45 @@ void FillRectStippled(HDC target, const RECT& rect)
         }
     }
 }
+
+ChatLayoutRects BuildChatLayoutRects(int x, int y, int w, int h)
+{
+    ChatLayoutRects rects{};
+    rects.panel = { x, y, x + w, y + h };
+
+    const int inputLeft = x + kChatPanelPadding;
+    const int inputRight = x + w - kChatPanelPadding;
+    const int inputTop = y + h - kChatInputHeight - kChatPanelPadding;
+    const int inputBottom = y + h - kChatPanelPadding;
+    const int totalInputWidth = (std::max)(0, inputRight - inputLeft);
+    int whisperWidth = (std::min)(kChatWhisperInputWidth, (std::max)(80, totalInputWidth / 3));
+    whisperWidth = (std::min)(whisperWidth, (std::max)(80, totalInputWidth - (48 + kChatInputGap)));
+
+    rects.whisperInput = {
+        inputLeft,
+        inputTop,
+        inputLeft + whisperWidth,
+        inputBottom
+    };
+    rects.messageInput = {
+        rects.whisperInput.right + kChatInputGap,
+        inputTop,
+        inputRight,
+        inputBottom
+    };
+    rects.history = {
+        inputLeft,
+        y + kChatPanelPadding,
+        inputRight,
+        inputTop - kChatPanelPadding
+    };
+    return rects;
+}
 }
 
 UINewChatWnd::UINewChatWnd()
     : m_lastDrawTick(0),
-      m_inputActive(0),
+      m_activeInputField(InputField_None),
       m_historyBrowseIndex(-1),
       m_scrollLineOffset(0),
       m_firstVisibleLineIndex(0),
@@ -287,6 +331,11 @@ const std::vector<ChatLine>& UINewChatWnd::GetLines() const
 const std::vector<ChatLine>& UINewChatWnd::GetVisibleLines() const
 {
     return m_visibleLines;
+}
+
+const std::string& UINewChatWnd::GetWhisperTargetText() const
+{
+    return m_whisperTargetText;
 }
 
 const std::string& UINewChatWnd::GetInputText() const
@@ -370,24 +419,16 @@ void UINewChatWnd::OnDraw()
     const int savedDc = SaveDC(hdc);
     SelectObject(hdc, GetChatUiFont());
 
-    RECT panelRc = { m_x, m_y, m_x + m_w, m_y + m_h };
-    RECT inputRc = {
-        m_x + kChatPanelPadding,
-        m_y + m_h - kChatInputHeight - kChatPanelPadding,
-        m_x + m_w - kChatPanelPadding,
-        m_y + m_h - kChatPanelPadding
-    };
-    RECT historyRc = {
-        inputRc.left,
-        m_y + kChatPanelPadding,
-        inputRc.right,
-        inputRc.top - kChatPanelPadding
-    };
+    const ChatLayoutRects layout = BuildChatLayoutRects(m_x, m_y, m_w, m_h);
+    RECT panelRc = layout.panel;
+    RECT historyRc = layout.history;
+    RECT whisperInputRc = layout.whisperInput;
+    RECT messageInputRc = layout.messageInput;
     const RECT topStrip = { panelRc.left, panelRc.top, panelRc.right, historyRc.top };
     const RECT leftStrip = { panelRc.left, historyRc.top, historyRc.left, panelRc.bottom };
     const RECT rightStrip = { historyRc.right, historyRc.top, panelRc.right, panelRc.bottom };
-    const RECT middleStrip = { panelRc.left, historyRc.bottom, panelRc.right, inputRc.top };
-    const RECT bottomStrip = { panelRc.left, inputRc.bottom, panelRc.right, panelRc.bottom };
+    const RECT middleStrip = { panelRc.left, historyRc.bottom, panelRc.right, whisperInputRc.top };
+    const RECT bottomStrip = { panelRc.left, whisperInputRc.bottom, panelRc.right, panelRc.bottom };
     FillRectStippled(hdc, topStrip);
     FillRectStippled(hdc, leftStrip);
     FillRectStippled(hdc, rightStrip);
@@ -462,22 +503,45 @@ void UINewChatWnd::OnDraw()
         DeleteObject(thumbBrush);
     }
 
-    HBRUSH inputBg = CreateSolidBrush(m_inputActive ? RGB(245, 245, 220) : RGB(210, 210, 210));
-    FillRect(hdc, &inputRc, inputBg);
-    DeleteObject(inputBg);
-    FrameRect(hdc, &inputRc, static_cast<HBRUSH>(GetStockObject(BLACK_BRUSH)));
+    HBRUSH whisperBg = CreateSolidBrush(IsWhisperTargetActive() ? RGB(245, 245, 220) : RGB(210, 210, 210));
+    FillRect(hdc, &whisperInputRc, whisperBg);
+    DeleteObject(whisperBg);
+    FrameRect(hdc, &whisperInputRc, static_cast<HBRUSH>(GetStockObject(BLACK_BRUSH)));
 
-    std::string drawText = m_inputText;
-    if (m_inputActive) {
-        drawText += '_';
+    HBRUSH messageBg = CreateSolidBrush(IsMessageInputActive() ? RGB(245, 245, 220) : RGB(210, 210, 210));
+    FillRect(hdc, &messageInputRc, messageBg);
+    DeleteObject(messageBg);
+    FrameRect(hdc, &messageInputRc, static_cast<HBRUSH>(GetStockObject(BLACK_BRUSH)));
+
+    std::string whisperDrawText = m_whisperTargetText;
+    COLORREF whisperTextColor = RGB(16, 16, 16);
+    if (whisperDrawText.empty() && !IsWhisperTargetActive()) {
+        whisperDrawText = "To";
+        whisperTextColor = RGB(96, 96, 96);
+    }
+    if (IsWhisperTargetActive()) {
+        whisperDrawText += '_';
     }
 
-    RECT inputTextRc = { inputRc.left + 4, inputRc.top + 2, inputRc.right - 2, inputRc.bottom - 2 };
+    std::string messageDrawText = m_inputText;
+    if (IsMessageInputActive()) {
+        messageDrawText += '_';
+    }
+
+    RECT whisperTextRc = { whisperInputRc.left + 4, whisperInputRc.top + 2, whisperInputRc.right - 2, whisperInputRc.bottom - 2 };
+    SetTextColor(hdc, whisperTextColor);
+#if RO_ENABLE_QT6_UI
+    DrawChatTextQt(hdc, whisperTextRc, whisperDrawText, whisperTextColor, false);
+#else
+    DrawTextA(hdc, whisperDrawText.c_str(), -1, &whisperTextRc, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+#endif
+
+    RECT messageTextRc = { messageInputRc.left + 4, messageInputRc.top + 2, messageInputRc.right - 2, messageInputRc.bottom - 2 };
     SetTextColor(hdc, RGB(16, 16, 16));
 #if RO_ENABLE_QT6_UI
-    DrawChatTextQt(hdc, inputTextRc, drawText, RGB(16, 16, 16), false);
+    DrawChatTextQt(hdc, messageTextRc, messageDrawText, RGB(16, 16, 16), false);
 #else
-    DrawTextA(hdc, drawText.c_str(), -1, &inputTextRc, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+    DrawTextA(hdc, messageDrawText.c_str(), -1, &messageTextRc, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
 #endif
 
     RestoreDC(hdc, savedDc);
@@ -553,15 +617,16 @@ void UINewChatWnd::ClearLines()
 
 void UINewChatWnd::OnLBtnDown(int x, int y)
 {
-    const RECT inputRc = {
-        m_x + kChatPanelPadding,
-        m_y + m_h - kChatInputHeight - kChatPanelPadding,
-        m_x + m_w - kChatPanelPadding,
-        m_y + m_h - kChatPanelPadding
-    };
+    const ChatLayoutRects layout = BuildChatLayoutRects(m_x, m_y, m_w, m_h);
+    if (PointInRectXY(layout.whisperInput, x, y)) {
+        SetActiveInputField(InputField_WhisperTarget);
+        m_dragArmed = 0;
+        m_isDragging = 0;
+        return;
+    }
 
-    if (PointInRectXY(inputRc, x, y)) {
-        SetInputActive(true);
+    if (PointInRectXY(layout.messageInput, x, y)) {
+        SetActiveInputField(InputField_Message);
         m_dragArmed = 0;
         m_isDragging = 0;
         return;
@@ -603,14 +668,9 @@ void UINewChatWnd::OnLBtnUp(int x, int y)
     if (m_isDragging != 0) {
         StoreInfo();
     } else if (m_dragArmed != 0) {
-        const RECT inputRc = {
-            m_x + kChatPanelPadding,
-            m_y + m_h - kChatInputHeight - kChatPanelPadding,
-            m_x + m_w - kChatPanelPadding,
-            m_y + m_h - kChatPanelPadding
-        };
-        if (!PointInRectXY(inputRc, x, y)) {
-            SetInputActive(true);
+        const ChatLayoutRects layout = BuildChatLayoutRects(m_x, m_y, m_w, m_h);
+        if (!PointInRectXY(layout.whisperInput, x, y) && !PointInRectXY(layout.messageInput, x, y)) {
+            SetActiveInputField(InputField_Message);
         }
     }
 
@@ -629,19 +689,32 @@ void UINewChatWnd::OnWheel(int delta)
 
 bool UINewChatWnd::HandleKeyDown(int virtualKey)
 {
+    if (virtualKey == VK_TAB) {
+        if (m_activeInputField == InputField_WhisperTarget) {
+            SetActiveInputField(InputField_Message);
+        } else {
+            SetActiveInputField(InputField_WhisperTarget);
+        }
+        return true;
+    }
+
     if (virtualKey == VK_RETURN) {
-        if (m_inputActive == 0) {
-            SetInputActive(true);
+        if (m_activeInputField == InputField_None) {
+            SetActiveInputField(InputField_Message);
+            return true;
+        }
+        if (m_activeInputField == InputField_WhisperTarget) {
+            SetActiveInputField(InputField_Message);
             return true;
         }
         return SubmitInput();
     }
 
-    if ((virtualKey == VK_UP || virtualKey == VK_DOWN) && m_inputActive == 0) {
-        SetInputActive(true);
+    if ((virtualKey == VK_UP || virtualKey == VK_DOWN) && m_activeInputField == InputField_None) {
+        SetActiveInputField(InputField_Message);
     }
 
-    if (virtualKey == VK_UP && m_inputActive != 0) {
+    if (virtualKey == VK_UP && m_activeInputField == InputField_Message) {
         if (m_inputHistory.empty()) {
             return true;
         }
@@ -656,7 +729,7 @@ bool UINewChatWnd::HandleKeyDown(int virtualKey)
         return true;
     }
 
-    if (virtualKey == VK_DOWN && m_inputActive != 0) {
+    if (virtualKey == VK_DOWN && m_activeInputField == InputField_Message) {
         if (m_historyBrowseIndex < 0) {
             return true;
         }
@@ -671,20 +744,20 @@ bool UINewChatWnd::HandleKeyDown(int virtualKey)
         return true;
     }
 
-    if (virtualKey == VK_BACK && m_inputActive != 0) {
-        if (!m_inputText.empty()) {
+    if (virtualKey == VK_BACK && m_activeInputField != InputField_None) {
+        if (std::string* const activeBuffer = GetActiveInputBuffer(); activeBuffer && !activeBuffer->empty()) {
             if (m_historyBrowseIndex >= 0) {
                 m_historyBrowseIndex = -1;
                 m_historyDraft.clear();
             }
-            m_inputText.pop_back();
+            activeBuffer->pop_back();
             Invalidate();
         }
         return true;
     }
 
-    if (virtualKey == VK_ESCAPE && m_inputActive != 0) {
-        SetInputActive(false);
+    if (virtualKey == VK_ESCAPE && m_activeInputField != InputField_None) {
+        SetActiveInputField(InputField_None);
         return true;
     }
 
@@ -693,7 +766,7 @@ bool UINewChatWnd::HandleKeyDown(int virtualKey)
 
 bool UINewChatWnd::HandleChar(char c)
 {
-    if (m_inputActive == 0) {
+    if (m_activeInputField == InputField_None) {
         return false;
     }
 
@@ -705,7 +778,13 @@ bool UINewChatWnd::HandleChar(char c)
         return false;
     }
 
-    if (m_inputText.size() >= kMaxInputChars) {
+    std::string* const activeBuffer = GetActiveInputBuffer();
+    if (!activeBuffer) {
+        return false;
+    }
+
+    const size_t maxChars = (m_activeInputField == InputField_WhisperTarget) ? kMaxWhisperTargetChars : kMaxInputChars;
+    if (activeBuffer->size() >= maxChars) {
         return true;
     }
 
@@ -713,14 +792,24 @@ bool UINewChatWnd::HandleChar(char c)
         m_historyBrowseIndex = -1;
         m_historyDraft.clear();
     }
-    m_inputText += c;
+    *activeBuffer += c;
     Invalidate();
     return true;
 }
 
+bool UINewChatWnd::IsWhisperTargetActive() const
+{
+    return m_activeInputField == InputField_WhisperTarget;
+}
+
+bool UINewChatWnd::IsMessageInputActive() const
+{
+    return m_activeInputField == InputField_Message;
+}
+
 bool UINewChatWnd::IsInputActive() const
 {
-    return m_inputActive != 0;
+    return m_activeInputField != InputField_None;
 }
 
 void UINewChatWnd::Layout()
@@ -759,21 +848,37 @@ void UINewChatWnd::ClampScrollOffset()
     m_scrollLineOffset = std::clamp(m_scrollLineOffset, 0, maxOffset);
 }
 
-void UINewChatWnd::SetInputActive(bool active)
+void UINewChatWnd::SetActiveInputField(ActiveInputField field)
 {
-    m_inputActive = active ? 1 : 0;
-    if (!m_inputActive) {
+    if (m_activeInputField == field) {
+        return;
+    }
+
+    m_activeInputField = field;
+    if (m_activeInputField != InputField_Message) {
         m_historyBrowseIndex = -1;
         m_historyDraft.clear();
     }
     Invalidate();
 }
 
+std::string* UINewChatWnd::GetActiveInputBuffer()
+{
+    switch (m_activeInputField) {
+    case InputField_WhisperTarget:
+        return &m_whisperTargetText;
+    case InputField_Message:
+        return &m_inputText;
+    default:
+        return nullptr;
+    }
+}
+
 bool UINewChatWnd::SubmitInput()
 {
     std::string text = m_inputText;
     if (text.empty()) {
-        SetInputActive(false);
+        SetActiveInputField(InputField_None);
         return true;
     }
 
@@ -787,12 +892,25 @@ bool UINewChatWnd::SubmitInput()
     const size_t lastNonSpace = text.find_last_not_of(" \t\r\n");
     text = text.substr(firstNonSpace, lastNonSpace - firstNonSpace + 1);
 
-    const msgresult_t sent = g_modeMgr.SendMsg(CGameMode::GameMsg_SubmitChat, reinterpret_cast<msgparam_t>(text.c_str()), 0, 0);
+    std::string whisperTarget = m_whisperTargetText;
+    const size_t targetFirstNonSpace = whisperTarget.find_first_not_of(" \t\r\n");
+    if (targetFirstNonSpace == std::string::npos) {
+        whisperTarget.clear();
+    } else {
+        const size_t targetLastNonSpace = whisperTarget.find_last_not_of(" \t\r\n");
+        whisperTarget = whisperTarget.substr(targetFirstNonSpace, targetLastNonSpace - targetFirstNonSpace + 1);
+    }
+
+    const msgresult_t sent = g_modeMgr.SendMsg(CGameMode::GameMsg_SubmitChat,
+        reinterpret_cast<msgparam_t>(text.c_str()),
+        reinterpret_cast<msgparam_t>(whisperTarget.c_str()),
+        0);
     if (sent != 0) {
         AddInputHistory(text);
         m_inputText.clear();
         m_historyBrowseIndex = -1;
         m_historyDraft.clear();
+        SetActiveInputField(InputField_Message);
         Invalidate();
         return true;
     }
@@ -817,16 +935,28 @@ void UINewChatWnd::AddInputHistory(const std::string& text)
 }
 
 void UINewChatWnd::RestorePersistentState(const std::vector<std::string>& inputHistory,
+    const std::string& whisperTargetText,
     const std::string& inputText,
-    bool inputActive,
+    int activeInputField,
     int scrollLineOffset)
 {
     m_inputHistory = inputHistory;
     if (m_inputHistory.size() > kMaxInputHistory) {
         m_inputHistory.resize(kMaxInputHistory);
     }
+    m_whisperTargetText = whisperTargetText.substr(0, kMaxWhisperTargetChars);
     m_inputText = inputText;
-    m_inputActive = inputActive ? 1 : 0;
+    switch (activeInputField) {
+    case InputField_WhisperTarget:
+        m_activeInputField = InputField_WhisperTarget;
+        break;
+    case InputField_Message:
+        m_activeInputField = InputField_Message;
+        break;
+    default:
+        m_activeInputField = InputField_None;
+        break;
+    }
     m_historyBrowseIndex = -1;
     m_historyDraft.clear();
     m_scrollLineOffset = scrollLineOffset;

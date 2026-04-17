@@ -90,6 +90,7 @@ private:
     void ClearAssets();
     void ReleaseComposeSurface();
     bool EnsureComposeSurface(int width, int height);
+    void LayoutControls();
     bool HitQtButton(int x, int y, int* outIndex) const;
     void SetQtPressedButtonIndex(int index);
     void DrawHexagon(HDC hdc) const;

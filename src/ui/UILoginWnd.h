@@ -50,6 +50,7 @@ private:
     void ClearUiAssets();
     void ReleaseComposeSurface();
     bool EnsureComposeSurface(int width, int height);
+    void LayoutControls();
 
     bool m_controlsCreated;
     bool m_assetsProbed;

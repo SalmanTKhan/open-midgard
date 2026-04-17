@@ -4500,6 +4500,35 @@ bool SendGlobalChatMessage(const char* playerName, const std::string& message)
     return sent;
 }
 
+bool SendWhisperChatMessage(const std::string& targetName, const std::string& message)
+{
+    if (targetName.empty() || targetName.size() > 24 || message.empty()) {
+        return false;
+    }
+
+    const size_t packetSize = 28 + message.size() + 1;
+    if (packetSize > 0xFFFFu) {
+        return false;
+    }
+
+    std::vector<u8> packet(packetSize, 0);
+    packet[0] = static_cast<u8>(PacketProfile::ActiveMapServerSend::kWhisper & 0xFFu);
+    packet[1] = static_cast<u8>((PacketProfile::ActiveMapServerSend::kWhisper >> 8) & 0xFFu);
+    packet[2] = static_cast<u8>(packetSize & 0xFFu);
+    packet[3] = static_cast<u8>((packetSize >> 8) & 0xFFu);
+    std::memcpy(packet.data() + 4, targetName.data(), targetName.size());
+    std::memcpy(packet.data() + 28, message.c_str(), message.size());
+
+    const bool sent = CRagConnection::instance()->SendPacket(
+        reinterpret_cast<const char*>(packet.data()), static_cast<int>(packet.size()));
+    DbgLog("[GameMode] whisper send opcode=0x%04X target='%s' text='%s' sent=%d\n",
+        PacketProfile::ActiveMapServerSend::kWhisper,
+        targetName.c_str(),
+        message.c_str(),
+        sent ? 1 : 0);
+    return sent;
+}
+
 bool ResolveMoveSourceTile(const CGameMode& mode, int* outTileX, int* outTileY)
 {
     if (!outTileX || !outTileY || !mode.m_world || !mode.m_world->m_player) {
@@ -9243,6 +9272,24 @@ msgresult_t CGameMode::SendMsg(int msg, msgparam_t wparam, msgparam_t lparam, ms
         if (!text || *text == '\0') {
             return 0;
         }
+        std::string whisperTarget = lparam != 0 ? reinterpret_cast<const char*>(lparam) : std::string();
+        const size_t targetFirstNonSpace = whisperTarget.find_first_not_of(" \t\r\n");
+        if (targetFirstNonSpace == std::string::npos) {
+            whisperTarget.clear();
+        } else {
+            const size_t targetLastNonSpace = whisperTarget.find_last_not_of(" \t\r\n");
+            whisperTarget = whisperTarget.substr(targetFirstNonSpace, targetLastNonSpace - targetFirstNonSpace + 1);
+        }
+
+        if (!whisperTarget.empty()) {
+            const bool sent = SendWhisperChatMessage(whisperTarget, text);
+            if (sent) {
+                m_lastWhisperName = whisperTarget;
+                m_lastWhisper = text;
+            }
+            return sent ? 1 : 0;
+        }
+
         std::string command = text;
         std::transform(command.begin(), command.end(), command.begin(), [](unsigned char ch) {
             return static_cast<char>(std::tolower(ch));

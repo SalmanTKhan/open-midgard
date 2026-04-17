@@ -155,6 +155,9 @@ void ClearGameplayUiState(QtUiState* state)
     state->setChatWindowVisible(false);
     state->setChatWindowGeometry(0, 0, 0, 0);
     state->setChatWindowInputActive(false);
+    state->setChatWindowWhisperInputActive(false);
+    state->setChatWindowMessageInputActive(false);
+    state->setChatWindowWhisperTargetText(QString());
     state->setChatWindowInputText(QString());
     state->setChatWindowLines(QVariantList{});
     state->setChatWindowScrollBar(QVariantMap{});
@@ -1700,6 +1703,9 @@ void PopulateChatWindowState(QtUiState* state)
     if (!visible) {
         state->setChatWindowGeometry(0, 0, 0, 0);
         state->setChatWindowInputActive(false);
+        state->setChatWindowWhisperInputActive(false);
+        state->setChatWindowMessageInputActive(false);
+        state->setChatWindowWhisperTargetText(QString());
         state->setChatWindowInputText(QString());
         state->setChatWindowLines(QVariantList{});
         state->setChatWindowScrollBar(QVariantMap{});
@@ -1708,6 +1714,9 @@ void PopulateChatWindowState(QtUiState* state)
 
     state->setChatWindowGeometry(chatWnd->m_x, chatWnd->m_y, chatWnd->m_w, chatWnd->m_h);
     state->setChatWindowInputActive(chatWnd->IsInputActive());
+    state->setChatWindowWhisperInputActive(chatWnd->IsWhisperTargetActive());
+    state->setChatWindowMessageInputActive(chatWnd->IsMessageInputActive());
+    state->setChatWindowWhisperTargetText(ToQString(chatWnd->GetWhisperTargetText()));
     state->setChatWindowInputText(ToQString(chatWnd->GetInputText()));
 
     QVariantList lines;

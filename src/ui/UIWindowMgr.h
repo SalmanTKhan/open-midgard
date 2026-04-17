@@ -194,8 +194,9 @@ public:
 
     std::vector<UIChatEvent> m_chatEvents;
     std::vector<std::string> m_chatInputHistory;
+    std::string m_chatWhisperTargetText;
     std::string m_chatInputText;
-    int m_chatInputActive;
+    int m_chatActiveInputField;
     int m_chatScrollLineOffset;
 
 private:

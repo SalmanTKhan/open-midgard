@@ -15,6 +15,7 @@
 #include "res/PaletteRes.h"
 #include "res/Sprite.h"
 #include "session/Session.h"
+#include "ui/UiScale.h"
 #include "ui/UIWindowMgr.h"
 
 #include <windows.h>
@@ -34,6 +35,16 @@
 #include <vector>
 
 namespace {
+
+int GetMenuLayoutClientExtent(int rawExtent)
+{
+#if RO_ENABLE_QT6_UI
+    if (IsQtUiRuntimeEnabled()) {
+        return UiScaleRawToLogicalCoordinate(rawExtent);
+    }
+#endif
+    return rawExtent;
+}
 
 constexpr int kWindowWidth = 576;
 constexpr int kWindowHeight = 342;
@@ -1199,7 +1210,9 @@ void UISelectCharWnd::OnCreate(int cx, int cy)
         LOG_SELECT_CHAR("[SelectChar] OnCreate initialized controls selectedSlot=%d page=%d\n", m_selectedSlot, m_page);
     }
 
-    Move((cx - 640) / 2 + 33, (cy - 480) / 2 + 65);
+    const int logicalCx = GetMenuLayoutClientExtent(cx);
+    const int logicalCy = GetMenuLayoutClientExtent(cy);
+    Move((logicalCx - 640) / 2 + 33, (logicalCy - 480) / 2 + 65);
     ClampSelection();
     UpdateActionButtons();
     RebuildVisiblePreviews();

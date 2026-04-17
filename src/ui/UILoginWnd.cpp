@@ -7,6 +7,7 @@
 #include "main/WinMain.h"
 #include "qtui/QtUiRuntime.h"
 #include "res/Bitmap.h"
+#include "ui/UiScale.h"
 #include "ui/UIWindowMgr.h"
 #include "DebugLog.h"
 
@@ -38,12 +39,39 @@ struct LoginButtonHitArea {
     const char* label;
 };
 
+struct LoginButtonSpec {
+    const char* normal;
+    const char* hover;
+    const char* pressed;
+    int id;
+    int x;
+    int y;
+};
+
 constexpr LoginButtonHitArea kQtLoginButtonAreas[] = {
     { 201, 4, 96, 52, 20, "Request" },
     { 219, 137, 96, 44, 20, "Intro" },
     { 120, 189, 96, 40, 20, "Connect" },
     { 155, 234, 96, 40, 20, "Exit" },
 };
+
+constexpr LoginButtonSpec kLoginButtonSpecs[] = {
+    { "btn_connect.bmp", "btn_connect_a.bmp", "btn_connect_b.bmp", 120, 189, 96 },
+    { "btn_exit.bmp", "btn_exit_a.bmp", "btn_exit_b.bmp", 155, 234, 96 },
+    { "btn_cancel.bmp", "btn_cancel_a.bmp", "btn_cancel_b.bmp", 119, 434, 96 },
+    { "btn_request.bmp", "btn_request_a.bmp", "btn_request_b.bmp", 201, 4, 96 },
+    { "btn_intro.bmp", "btn_intro_a.bmp", "btn_intro_b.bmp", 219, 137, 96 },
+};
+
+int GetMenuLayoutClientExtent(int rawExtent)
+{
+#if RO_ENABLE_QT6_UI
+    if (IsQtUiRuntimeEnabled()) {
+        return UiScaleRawToLogicalCoordinate(rawExtent);
+    }
+#endif
+    return rawExtent;
+}
 
 shopui::BitmapPixels LoadBitmapPixelsFromGameData(const char* path)
 {
@@ -571,7 +599,7 @@ bool UILoginWnd::HandleQtMouseDown(int x, int y)
         return false;
     }
 
-    if (!m_controlsCreated && g_hMainWnd) {
+    if (g_hMainWnd) {
         RECT clientRect{};
         GetClientRect(g_hMainWnd, &clientRect);
         OnCreate(clientRect.right - clientRect.left, clientRect.bottom - clientRect.top);
@@ -627,6 +655,33 @@ void UILoginWnd::EnsureQtLayout()
     OnCreate(clientRect.right - clientRect.left, clientRect.bottom - clientRect.top);
 }
 
+void UILoginWnd::LayoutControls()
+{
+    if (m_login) {
+        m_login->Move(m_x + kLoginFieldLeft, m_y + kLoginFieldTop);
+    }
+    if (m_password) {
+        m_password->Move(m_x + kLoginFieldLeft, m_y + kPasswordFieldTop);
+    }
+    if (m_saveAccountCheck) {
+        m_saveAccountCheck->Move(m_x + kSaveCheckLeft, m_y + kSaveCheckTop);
+    }
+
+    for (UIWindow* child : m_children) {
+        auto* button = dynamic_cast<UIBitmapButton*>(child);
+        if (!button) {
+            continue;
+        }
+
+        for (const LoginButtonSpec& spec : kLoginButtonSpecs) {
+            if (button->m_id == spec.id) {
+                button->Move(m_x + spec.x, m_y + spec.y);
+                break;
+            }
+        }
+    }
+}
+
 bool UILoginWnd::GetQtPanelBitmap(const unsigned int** pixels, int* width, int* height)
 {
     if (!pixels || !width || !height) {
@@ -667,99 +722,83 @@ void UILoginWnd::RefreshRememberedUserIdStorage()
 
 void UILoginWnd::OnCreate(int cx, int cy)
 {
-    if (m_controlsCreated) {
-        return;
-    }
-    m_controlsCreated = true;
+    const int logicalCx = GetMenuLayoutClientExtent(cx);
+    const int logicalCy = GetMenuLayoutClientExtent(cy);
 
-    Create(280, 120);
-    Move((cx - 640) / 2 + 185, (300 * cy) / 480);
+    if (!m_controlsCreated) {
+        m_controlsCreated = true;
 
-    struct ButtonSpec {
-        const char* normal;
-        const char* hover;
-        const char* pressed;
-        int id;
-        int x;
-        int y;
-    };
+        Create(280, 120);
 
-    const ButtonSpec specs[] = {
-        { "btn_connect.bmp", "btn_connect_a.bmp", "btn_connect_b.bmp", 120, 189, 96 },
-        { "btn_exit.bmp", "btn_exit_a.bmp", "btn_exit_b.bmp", 155, 234, 96 },
-        { "btn_cancel.bmp", "btn_cancel_a.bmp", "btn_cancel_b.bmp", 119, 434, 96 },
-        { "btn_request.bmp", "btn_request_a.bmp", "btn_request_b.bmp", 201, 4, 96 },
-        { "btn_intro.bmp", "btn_intro_a.bmp", "btn_intro_b.bmp", 219, 137, 96 },
-    };
-
-    if (!IsQtUiRuntimeEnabled()) {
-        for (const ButtonSpec& spec : specs) {
-            auto* button = new UIBitmapButton();
-            button->SetBitmapName(ResolveUiAssetPath(spec.normal).c_str(), 0);
-            button->SetBitmapName(ResolveUiAssetPath(spec.hover).c_str(), 1);
-            button->SetBitmapName(ResolveUiAssetPath(spec.pressed).c_str(), 2);
-            const int buttonWidth = button->m_bitmapWidth > 0 ? button->m_bitmapWidth : 40;
-            const int buttonHeight = button->m_bitmapHeight > 0 ? button->m_bitmapHeight : 20;
-            if (spec.x < 0 || spec.y < 0 || spec.x + buttonWidth > m_w || spec.y + buttonHeight > m_h) {
-                delete button;
-                continue;
-            }
-            button->Create(buttonWidth, buttonHeight);
-            button->Move(m_x + spec.x, m_y + spec.y);
-            button->m_id = spec.id;
-            AddChild(button);
-            if (spec.id == 119) {
-                m_cancelButton = button;
+        if (!IsQtUiRuntimeEnabled()) {
+            for (const LoginButtonSpec& spec : kLoginButtonSpecs) {
+                auto* button = new UIBitmapButton();
+                button->SetBitmapName(ResolveUiAssetPath(spec.normal).c_str(), 0);
+                button->SetBitmapName(ResolveUiAssetPath(spec.hover).c_str(), 1);
+                button->SetBitmapName(ResolveUiAssetPath(spec.pressed).c_str(), 2);
+                const int buttonWidth = button->m_bitmapWidth > 0 ? button->m_bitmapWidth : 40;
+                const int buttonHeight = button->m_bitmapHeight > 0 ? button->m_bitmapHeight : 20;
+                if (spec.x < 0 || spec.y < 0 || spec.x + buttonWidth > m_w || spec.y + buttonHeight > m_h) {
+                    delete button;
+                    continue;
+                }
+                button->Create(buttonWidth, buttonHeight);
+                button->Move(m_x + spec.x, m_y + spec.y);
+                button->m_id = spec.id;
+                AddChild(button);
+                if (spec.id == 119) {
+                    m_cancelButton = button;
+                }
             }
         }
+
+        constexpr int kLoginFieldWidth = 125;
+
+        m_password = new UIEditCtrl();
+        m_password->Create(kLoginFieldWidth, 18);
+        m_password->m_maxchar = 24;
+        m_password->m_maskchar = '*';
+        m_password->SetFrameColor(242, 242, 242);
+        if (!IsQtUiRuntimeEnabled()) {
+            AddChild(m_password);
+        }
+
+        m_login = new UIEditCtrl();
+        m_login->Create(kLoginFieldWidth, 18);
+        m_login->m_maxchar = 24;
+        m_login->SetFrameColor(242, 242, 242);
+        if (!IsQtUiRuntimeEnabled()) {
+            AddChild(m_login);
+        }
+
+        std::string rememberedUserId;
+        bool rememberUserId = false;
+        LoadRememberedUserId(&rememberedUserId, &rememberUserId);
+        m_saveAccountChecked = rememberUserId;
+        if (rememberUserId && !rememberedUserId.empty()) {
+            m_login->SetText(rememberedUserId.c_str());
+        }
+        m_hasRememberedUserIdSnapshot = true;
+        m_lastRememberedUserIdEnabled = rememberUserId;
+        m_lastRememberedUserId = rememberedUserId;
+
+        if (!IsQtUiRuntimeEnabled()) {
+            m_saveAccountCheck = new UICheckBox();
+            m_saveAccountCheck->SetBitmap(
+                ResolveUiAssetPath("chk_saveon.bmp").c_str(),
+                ResolveUiAssetPath("chk_saveoff.bmp").c_str());
+            m_saveAccountCheck->Create(m_saveAccountCheck->m_w > 0 ? m_saveAccountCheck->m_w : 16,
+                m_saveAccountCheck->m_h > 0 ? m_saveAccountCheck->m_h : 16);
+            m_saveAccountCheck->SetCheck(rememberUserId ? 1 : 0);
+            AddChild(m_saveAccountCheck);
+        }
+
+        const bool focusPassword = (m_login && m_login->GetText() && m_login->GetText()[0] != '\0');
+        SetLoginFieldFocus(m_login, m_password, focusPassword);
     }
 
-    constexpr int kLoginFieldWidth = 125;
-
-    m_password = new UIEditCtrl();
-    m_password->Create(kLoginFieldWidth, 18);
-    m_password->m_maxchar = 24;
-    m_password->Move(m_x + 92, m_y + 61);
-    m_password->m_maskchar = '*';
-    m_password->SetFrameColor(242, 242, 242);
-    if (!IsQtUiRuntimeEnabled()) {
-        AddChild(m_password);
-    }
-
-    m_login = new UIEditCtrl();
-    m_login->Create(kLoginFieldWidth, 18);
-    m_login->m_maxchar = 24;
-    m_login->Move(m_x + 92, m_y + 29);
-    m_login->SetFrameColor(242, 242, 242);
-    if (!IsQtUiRuntimeEnabled()) {
-        AddChild(m_login);
-    }
-
-    std::string rememberedUserId;
-    bool rememberUserId = false;
-    LoadRememberedUserId(&rememberedUserId, &rememberUserId);
-    m_saveAccountChecked = rememberUserId;
-    if (rememberUserId && !rememberedUserId.empty()) {
-        m_login->SetText(rememberedUserId.c_str());
-    }
-    m_hasRememberedUserIdSnapshot = true;
-    m_lastRememberedUserIdEnabled = rememberUserId;
-    m_lastRememberedUserId = rememberedUserId;
-
-    if (!IsQtUiRuntimeEnabled()) {
-        m_saveAccountCheck = new UICheckBox();
-        m_saveAccountCheck->SetBitmap(
-            ResolveUiAssetPath("chk_saveon.bmp").c_str(),
-            ResolveUiAssetPath("chk_saveoff.bmp").c_str());
-        m_saveAccountCheck->Create(m_saveAccountCheck->m_w > 0 ? m_saveAccountCheck->m_w : 16,
-            m_saveAccountCheck->m_h > 0 ? m_saveAccountCheck->m_h : 16);
-        m_saveAccountCheck->Move(m_x + 232, m_y + 33);
-        m_saveAccountCheck->SetCheck(rememberUserId ? 1 : 0);
-        AddChild(m_saveAccountCheck);
-    }
-
-    const bool focusPassword = (m_login && m_login->GetText() && m_login->GetText()[0] != '\0');
-    SetLoginFieldFocus(m_login, m_password, focusPassword);
+    Move((logicalCx - 640) / 2 + 185, (300 * logicalCy) / 480);
+    LayoutControls();
 }
 
 void UILoginWnd::ClearUiAssets()
@@ -901,9 +940,7 @@ void UILoginWnd::OnDraw()
         return;
     }
 
-    if (!m_controlsCreated) {
-        OnCreate(clientW, clientH);
-    }
+    OnCreate(clientW, clientH);
 
     if (IsQtUiRuntimeEnabled()) {
         return;
@@ -1060,16 +1097,6 @@ void UILoginWnd::OnKeyDown(int virtualKey)
                 m_login->Invalidate();
                 g_windowMgr.m_editWindow = m_login;
             }
-        }
-    } else if (virtualKey == VK_BACK)
-    {
-        // Pass-through events to the UIEditCtrl element
-        if (m_login && m_login->m_hasFocus)
-        {
-            m_login->OnKeyDown(virtualKey);
-        } else if (m_password && m_password->m_hasFocus)
-        {
-            m_password->OnKeyDown(virtualKey);
         }
     }
 }

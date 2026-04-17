@@ -1629,6 +1629,7 @@ Item {
                         required property var modelData
                         width: chatLinesColumn.width
                         text: modelData.text
+                        textFormat: Text.PlainText
                         color: modelData.color
                         font.pixelSize: 12
                         wrapMode: Text.WordWrap
@@ -1665,9 +1666,9 @@ Item {
         Rectangle {
             x: 8
             y: parent.height - 30
-            width: parent.width - 16
+            width: 118
             height: 22
-            color: uiState.chatWindowInputActive ? "#f5f5dc" : "#d2d2d2"
+            color: uiState.chatWindowWhisperInputActive ? "#f5f5dc" : "#d2d2d2"
             border.width: 1
             border.color: "#000000"
 
@@ -1675,7 +1676,32 @@ Item {
                 x: 4
                 anchors.verticalCenter: parent.verticalCenter
                 width: parent.width - 8
-                text: uiState.chatWindowInputText + (uiState.chatWindowInputActive ? "_" : "")
+                text: {
+                    const baseText = uiState.chatWindowWhisperTargetText.length > 0 || uiState.chatWindowWhisperInputActive
+                        ? uiState.chatWindowWhisperTargetText
+                        : "To"
+                    return baseText + (uiState.chatWindowWhisperInputActive ? "_" : "")
+                }
+                color: uiState.chatWindowWhisperTargetText.length > 0 || uiState.chatWindowWhisperInputActive ? "#101010" : "#606060"
+                font.pixelSize: 12
+                elide: Text.ElideLeft
+            }
+        }
+
+        Rectangle {
+            x: 130
+            y: parent.height - 30
+            width: parent.width - 138
+            height: 22
+            color: uiState.chatWindowMessageInputActive ? "#f5f5dc" : "#d2d2d2"
+            border.width: 1
+            border.color: "#000000"
+
+            Text {
+                x: 4
+                anchors.verticalCenter: parent.verticalCenter
+                width: parent.width - 8
+                text: uiState.chatWindowInputText + (uiState.chatWindowMessageInputActive ? "_" : "")
                 color: "#101010"
                 font.pixelSize: 12
                 elide: Text.ElideLeft

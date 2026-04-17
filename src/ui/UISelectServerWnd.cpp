@@ -8,6 +8,7 @@
 #include "qtui/QtUiRuntime.h"
 #include "render/DC.h"
 #include "render/DrawUtil.h"
+#include "ui/UiScale.h"
 #include "ui/UIWindowMgr.h"
 
 #if RO_ENABLE_QT6_UI
@@ -27,6 +28,16 @@ constexpr int kRowHeight = 24;
 constexpr int kWindowPadding = 10;
 constexpr int kBottomListPadding = 8;
 constexpr int kWindowGapAboveLogin = 10;
+
+int GetMenuLayoutClientExtent(int rawExtent)
+{
+#if RO_ENABLE_QT6_UI
+    if (IsQtUiRuntimeEnabled()) {
+        return UiScaleRawToLogicalCoordinate(rawExtent);
+    }
+#endif
+    return rawExtent;
+}
 
 #if RO_ENABLE_QT6_UI
 QFont BuildSelectServerFontFromHdc(HDC hdc)
@@ -130,8 +141,10 @@ void UISelectServerWnd::SyncGeometry()
         return;
     }
 
-    int x = (clientRect.right - clientRect.left - m_w) / 2;
-    int y = (clientRect.bottom - clientRect.top - m_h) / 2;
+    const int logicalW = GetMenuLayoutClientExtent(clientRect.right - clientRect.left);
+    const int logicalH = GetMenuLayoutClientExtent(clientRect.bottom - clientRect.top);
+    int x = (logicalW - m_w) / 2;
+    int y = (logicalH - m_h) / 2;
     if (g_windowMgr.m_loginWnd) {
         x = g_windowMgr.m_loginWnd->m_x;
         y = g_windowMgr.m_loginWnd->m_y - m_h - kWindowGapAboveLogin;
@@ -147,12 +160,13 @@ void UISelectServerWnd::SyncGeometry()
 void UISelectServerWnd::OnCreate(int cx, int cy)
 {
     if (m_controlsCreated) {
+        SyncGeometry();
         return;
     }
     m_controlsCreated = true;
 
     Create(kWindowWidth, ComputeWindowHeight());
-    Move((cx - m_w) / 2, (cy - m_h) / 2);
+    Move((GetMenuLayoutClientExtent(cx) - m_w) / 2, (GetMenuLayoutClientExtent(cy) - m_h) / 2);
     SyncGeometry();
 }
 

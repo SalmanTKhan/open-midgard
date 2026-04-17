@@ -162,6 +162,9 @@ class QtUiState : public QObject {
     Q_PROPERTY(int chatWindowWidth READ chatWindowWidth NOTIFY chatWindowGeometryChanged)
     Q_PROPERTY(int chatWindowHeight READ chatWindowHeight NOTIFY chatWindowGeometryChanged)
     Q_PROPERTY(bool chatWindowInputActive READ chatWindowInputActive NOTIFY chatWindowInputActiveChanged)
+    Q_PROPERTY(bool chatWindowWhisperInputActive READ chatWindowWhisperInputActive NOTIFY chatWindowWhisperInputActiveChanged)
+    Q_PROPERTY(bool chatWindowMessageInputActive READ chatWindowMessageInputActive NOTIFY chatWindowMessageInputActiveChanged)
+    Q_PROPERTY(QString chatWindowWhisperTargetText READ chatWindowWhisperTargetText NOTIFY chatWindowWhisperTargetTextChanged)
     Q_PROPERTY(QString chatWindowInputText READ chatWindowInputText NOTIFY chatWindowInputTextChanged)
     Q_PROPERTY(QVariantList chatWindowLines READ chatWindowLines NOTIFY chatWindowLinesChanged)
     Q_PROPERTY(QVariantMap chatWindowScrollBar READ chatWindowScrollBar NOTIFY chatWindowScrollBarChanged)
@@ -377,6 +380,9 @@ public:
     int chatWindowWidth() const { return m_chatWindowWidth; }
     int chatWindowHeight() const { return m_chatWindowHeight; }
     bool chatWindowInputActive() const { return m_chatWindowInputActive; }
+    bool chatWindowWhisperInputActive() const { return m_chatWindowWhisperInputActive; }
+    bool chatWindowMessageInputActive() const { return m_chatWindowMessageInputActive; }
+    const QString& chatWindowWhisperTargetText() const { return m_chatWindowWhisperTargetText; }
     const QString& chatWindowInputText() const { return m_chatWindowInputText; }
     const QVariantList& chatWindowLines() const { return m_chatWindowLines; }
     const QVariantMap& chatWindowScrollBar() const { return m_chatWindowScrollBar; }
@@ -1249,6 +1255,30 @@ public:
         emit chatWindowInputActiveChanged();
     }
 
+    void setChatWindowWhisperInputActive(bool value) {
+        if (m_chatWindowWhisperInputActive == value) {
+            return;
+        }
+        m_chatWindowWhisperInputActive = value;
+        emit chatWindowWhisperInputActiveChanged();
+    }
+
+    void setChatWindowMessageInputActive(bool value) {
+        if (m_chatWindowMessageInputActive == value) {
+            return;
+        }
+        m_chatWindowMessageInputActive = value;
+        emit chatWindowMessageInputActiveChanged();
+    }
+
+    void setChatWindowWhisperTargetText(const QString& value) {
+        if (m_chatWindowWhisperTargetText == value) {
+            return;
+        }
+        m_chatWindowWhisperTargetText = value;
+        emit chatWindowWhisperTargetTextChanged();
+    }
+
     void setChatWindowInputText(const QString& value) {
         if (m_chatWindowInputText == value) {
             return;
@@ -1594,6 +1624,9 @@ signals:
     void chatWindowVisibleChanged();
     void chatWindowGeometryChanged();
     void chatWindowInputActiveChanged();
+    void chatWindowWhisperInputActiveChanged();
+    void chatWindowMessageInputActiveChanged();
+    void chatWindowWhisperTargetTextChanged();
     void chatWindowInputTextChanged();
     void chatWindowLinesChanged();
     void chatWindowScrollBarChanged();
@@ -1781,6 +1814,9 @@ private:
     int m_chatWindowWidth = 0;
     int m_chatWindowHeight = 0;
     bool m_chatWindowInputActive = false;
+    bool m_chatWindowWhisperInputActive = false;
+    bool m_chatWindowMessageInputActive = false;
+    QString m_chatWindowWhisperTargetText;
     QString m_chatWindowInputText;
     QVariantList m_chatWindowLines;
     QVariantMap m_chatWindowScrollBar;

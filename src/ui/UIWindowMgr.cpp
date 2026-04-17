@@ -584,7 +584,7 @@ UIWindowMgr::UIWindowMgr()
       m_captureWindow(nullptr), m_editWindow(nullptr), m_modalWindow(nullptr), m_lastHitWindow(nullptr),
       m_loadingWnd(nullptr), m_roMapWnd(nullptr), m_minimapZoomWnd(nullptr), m_statusWnd(nullptr), m_sayDialogWnd(nullptr), m_npcMenuWnd(nullptr), m_npcInputWnd(nullptr), m_chooseSellBuyWnd(nullptr), m_itemShopWnd(nullptr), m_itemPurchaseWnd(nullptr), m_itemSellWnd(nullptr), m_shortCutWnd(nullptr), m_chatWnd(nullptr),
     m_loginWnd(nullptr), m_selectServerWnd(nullptr), m_selectCharWnd(nullptr), m_makeCharWnd(nullptr), m_waitWnd(nullptr), m_chooseWnd(nullptr), m_optionWnd(nullptr), m_itemWnd(nullptr), m_questWnd(nullptr), m_basicInfoWnd(nullptr), m_notifyLevelUpWnd(nullptr), m_notifyJobLevelUpWnd(nullptr), m_equipWnd(nullptr), m_skillListWnd(nullptr),
-            m_wallpaperSurface(nullptr), m_uiComposeSurface(), m_chatInputActive(0), m_chatScrollLineOffset(0)
+                        m_wallpaperSurface(nullptr), m_uiComposeSurface(), m_chatActiveInputField(0), m_chatScrollLineOffset(0)
 {
     m_loginStatus = "Login: idle";
 }
@@ -704,8 +704,9 @@ void UIWindowMgr::EnsureChatWindowVisible()
         m_chatWnd = new UINewChatWnd();
         m_children.push_back(m_chatWnd);
         m_chatWnd->RestorePersistentState(m_chatInputHistory,
+            m_chatWhisperTargetText,
             m_chatInputText,
-            m_chatInputActive != 0,
+            m_chatActiveInputField,
             m_chatScrollLineOffset);
     }
 
@@ -1182,8 +1183,15 @@ void UIWindowMgr::RemoveAllWindows()
 {
     if (m_chatWnd) {
         m_chatInputHistory = m_chatWnd->GetInputHistory();
+        m_chatWhisperTargetText = m_chatWnd->GetWhisperTargetText();
         m_chatInputText = m_chatWnd->GetInputText();
-        m_chatInputActive = m_chatWnd->IsInputActive() ? 1 : 0;
+        if (m_chatWnd->IsWhisperTargetActive()) {
+            m_chatActiveInputField = UINewChatWnd::InputField_WhisperTarget;
+        } else if (m_chatWnd->IsMessageInputActive()) {
+            m_chatActiveInputField = UINewChatWnd::InputField_Message;
+        } else {
+            m_chatActiveInputField = UINewChatWnd::InputField_None;
+        }
         m_chatScrollLineOffset = m_chatWnd->GetScrollBarState().totalLines > 0 ? m_chatWnd->GetScrollBarState().totalLines - (m_chatWnd->GetScrollBarState().firstVisibleLine + m_chatWnd->GetScrollBarState().visibleLineCount) : 0;
     }
 
@@ -1236,8 +1244,9 @@ void UIWindowMgr::Reset() {
     m_chatWnd = nullptr;
     m_chatEvents.clear();
     m_chatInputHistory.clear();
+    m_chatWhisperTargetText.clear();
     m_chatInputText.clear();
-    m_chatInputActive = 0;
+    m_chatActiveInputField = 0;
     m_chatScrollLineOffset = 0;
     m_skillListWnd = nullptr;
 

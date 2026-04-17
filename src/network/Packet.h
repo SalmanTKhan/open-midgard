@@ -40,6 +40,7 @@ constexpr u16 kNotifyActorInit = 0x007D;
 constexpr u16 kTickSend = 0x007E;
 constexpr u16 kWalkToXY = 0x0085;
 constexpr u16 kGetCharNameRequest = 0x0094;
+constexpr u16 kWhisper = 0x0096;
 constexpr u16 kGlobalMessage = 0x008C;
 constexpr u16 kSkillUp = 0x0112;
 }
@@ -63,6 +64,7 @@ constexpr u16 kWalkToXY = 0x00A7;
 constexpr u16 kChangeDir = 0x0085;
 constexpr u16 kTickSend = 0x0089;
 constexpr u16 kGetCharNameRequest = 0x008C;
+constexpr u16 kWhisper = 0x0096;
 constexpr u16 kGlobalMessage = 0x00F3;
 constexpr u16 kNotifyActorInit = 0x007D;
 }
@@ -85,6 +87,7 @@ constexpr u16 kTickSend = PacketVer23MapServerSend::kTickSend;
 constexpr u16 kWalkToXY = PacketVer23MapServerSend::kWalkToXY;
 constexpr u16 kChangeDir = PacketVer23MapServerSend::kChangeDir;
 constexpr u16 kGetCharNameRequest = PacketVer23MapServerSend::kGetCharNameRequest;
+constexpr u16 kWhisper = PacketVer23MapServerSend::kWhisper;
 constexpr u16 kGlobalMessage = PacketVer23MapServerSend::kGlobalMessage;
 }
 

@@ -20,6 +20,12 @@ struct ChatScrollBarState {
 
 class UINewChatWnd : public UIWindow {
 public:
+    enum ActiveInputField {
+        InputField_None = 0,
+        InputField_WhisperTarget = 1,
+        InputField_Message = 2,
+    };
+
     UINewChatWnd();
     ~UINewChatWnd() override;
 
@@ -35,22 +41,27 @@ public:
     void AddChatLine(const char* text, u32 color, u8 channel, u32 tick);
     const std::vector<ChatLine>& GetLines() const;
     const std::vector<ChatLine>& GetVisibleLines() const;
+    const std::string& GetWhisperTargetText() const;
     const std::string& GetInputText() const;
     const std::vector<std::string>& GetInputHistory() const;
     ChatScrollBarState GetScrollBarState() const;
     void ClearLines();
     bool HandleKeyDown(int virtualKey);
     bool HandleChar(char c);
+    bool IsWhisperTargetActive() const;
+    bool IsMessageInputActive() const;
     bool IsInputActive() const;
     void RestorePersistentState(const std::vector<std::string>& inputHistory,
+        const std::string& whisperTargetText,
         const std::string& inputText,
-        bool inputActive,
+        int activeInputField,
         int scrollLineOffset);
 
 private:
     void Layout();
     void RefreshVisibleLines(u32 nowTick);
-    void SetInputActive(bool active);
+    void SetActiveInputField(ActiveInputField field);
+    std::string* GetActiveInputBuffer();
     bool SubmitInput();
     void AddInputHistory(const std::string& text);
     void AdjustScroll(int lineDelta);
@@ -59,10 +70,11 @@ private:
     std::vector<ChatLine> m_lines;
     std::vector<ChatLine> m_visibleLines;
     std::vector<std::string> m_inputHistory;
+    std::string m_whisperTargetText;
     std::string m_inputText;
     std::string m_historyDraft;
     u32 m_lastDrawTick;
-    int m_inputActive;
+    ActiveInputField m_activeInputField;
     int m_historyBrowseIndex;
     int m_scrollLineOffset;
     int m_firstVisibleLineIndex;

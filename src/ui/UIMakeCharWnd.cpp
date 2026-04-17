@@ -10,6 +10,7 @@
 #include "gamemode/Mode.h"
 #include "DebugLog.h"
 #include "main/WinMain.h"
+#include "ui/UiScale.h"
 #include "qtui/QtUiRuntime.h"
 #include "ui/UIWindowMgr.h"
 
@@ -30,6 +31,16 @@
 #include <vector>
 
 namespace {
+
+int GetMenuLayoutClientExtent(int rawExtent)
+{
+#if RO_ENABLE_QT6_UI
+    if (IsQtUiRuntimeEnabled()) {
+        return UiScaleRawToLogicalCoordinate(rawExtent);
+    }
+#endif
+    return rawExtent;
+}
 
 constexpr int kMakeCharNameLeft = 62;
 constexpr int kMakeCharNameTop = 244;
@@ -564,7 +575,7 @@ bool UIMakeCharWnd::HandleQtMouseDown(int x, int y)
     GetClientRect(g_hMainWnd, &rcClient);
     const int clientW = rcClient.right - rcClient.left;
     const int clientH = rcClient.bottom - rcClient.top;
-    if (!m_controlsCreated && clientW > 0 && clientH > 0) {
+    if (clientW > 0 && clientH > 0) {
         OnCreate(clientW, clientH);
     }
 
@@ -758,6 +769,8 @@ void UIMakeCharWnd::EnsureButtons()
         btn->m_id = 118;
         AddChild(btn);
         m_okButton = btn;
+    } else {
+        m_okButton->Move(m_x + kMakeCharOkX, m_y + kMakeCharOkY);
     }
 
     if (!m_cancelButton) {
@@ -771,6 +784,8 @@ void UIMakeCharWnd::EnsureButtons()
         btn->m_id = 119;
         AddChild(btn);
         m_cancelButton = btn;
+    } else {
+        m_cancelButton->Move(m_x + kMakeCharCancelX, m_y + kMakeCharCancelY);
     }
 
     // Six stat-swap arrows at Ref-exact positions surrounding the hexagon.
@@ -796,7 +811,10 @@ void UIMakeCharWnd::EnsureButtons()
         "arw-dex1.bmp"
     };
     for (int i = 0; i < 6; ++i) {
-        if (m_statBtns[i]) continue;
+        if (m_statBtns[i]) {
+            m_statBtns[i]->Move(m_x + kStatX[i], m_y + kStatY[i]);
+            continue;
+        }
         auto* btn = new UIBitmapButton();
         btn->SetBitmapName(ResolveUiAssetPath(kMakeCharStatBmp[i]).c_str(), 0);
         btn->SetBitmapName(ResolveUiAssetPath(kStatBmpPressed[i]).c_str(), 1);
@@ -817,7 +835,10 @@ void UIMakeCharWnd::EnsureButtons()
     static const int kHairX[3]    = {  48, 130,  89 };
     static const int kHairY[3]    = { 135, 135, 101 };
     for (int i = 0; i < 3; ++i) {
-        if (m_hairBtns[i]) continue;
+        if (m_hairBtns[i]) {
+            m_hairBtns[i]->Move(m_x + kHairX[i], m_y + kHairY[i]);
+            continue;
+        }
         auto* btn = new UIBitmapButton();
         btn->SetBitmapName(ResolveUiAssetPath(kMakeCharHairBmp[i]).c_str(), 0);
         btn->Create(btn->m_bitmapWidth > 0 ? btn->m_bitmapWidth : 16,
@@ -826,6 +847,16 @@ void UIMakeCharWnd::EnsureButtons()
         btn->m_id = kHairIds[i];
         AddChild(btn);
         m_hairBtns[i] = btn;
+    }
+}
+
+void UIMakeCharWnd::LayoutControls()
+{
+    if (m_nameEditCtrl) {
+        m_nameEditCtrl->Move(m_x + kMakeCharNameLeft, m_y + kMakeCharNameTop);
+    }
+    if (!IsQtUiRuntimeEnabled()) {
+        EnsureButtons();
     }
 }
 
@@ -1038,35 +1069,34 @@ void UIMakeCharWnd::SetQtPressedButtonIndex(int index)
 
 void UIMakeCharWnd::OnCreate(int cx, int cy)
 {
-    if (m_controlsCreated) {
-        return;
+    const int logicalCx = GetMenuLayoutClientExtent(cx);
+    const int logicalCy = GetMenuLayoutClientExtent(cy);
+
+    if (!m_controlsCreated) {
+        m_controlsCreated = true;
+
+        Create(576, 342);
+
+        // Name edit at Ref position (62, 244)
+        m_nameEditCtrl = new UIEditCtrl();
+        m_nameEditCtrl->Create(100, 18);
+        m_nameEditCtrl->m_maxchar = 24;
+        m_nameEditCtrl->SetFrameColor(242, 242, 242);
+        m_nameEditCtrl->m_hasFocus = true;
+        if (!IsQtUiRuntimeEnabled()) {
+            AddChild(m_nameEditCtrl);
+        }
+
+        const CLoginMode* loginMode = g_modeMgr.GetCurrentLoginMode();
+        const char* savedName = loginMode ? loginMode->GetMakingCharName() : nullptr;
+        if (savedName) {
+            m_nameEditCtrl->SetText(savedName);
+        }
     }
-    m_controlsCreated = true;
 
-    Create(576, 342);
-    Move((cx - 640) / 2 + 33, (cy - 480) / 2 + 65);
-
-    // Name edit at Ref position (62, 244)
-    m_nameEditCtrl = new UIEditCtrl();
-    m_nameEditCtrl->Create(100, 18);
-    m_nameEditCtrl->Move(m_x + 62, m_y + 244);
-    m_nameEditCtrl->m_maxchar = 24;
-    m_nameEditCtrl->SetFrameColor(242, 242, 242);
-    m_nameEditCtrl->m_hasFocus = true;
-    if (!IsQtUiRuntimeEnabled()) {
-        AddChild(m_nameEditCtrl);
-    }
-
-    const CLoginMode* loginMode = g_modeMgr.GetCurrentLoginMode();
-    const char* savedName = loginMode ? loginMode->GetMakingCharName() : nullptr;
-    if (savedName) {
-        m_nameEditCtrl->SetText(savedName);
-    }
-
+    Move((logicalCx - 640) / 2 + 33, (logicalCy - 480) / 2 + 65);
+    LayoutControls();
     g_windowMgr.m_editWindow = m_nameEditCtrl;
-    if (!IsQtUiRuntimeEnabled()) {
-        EnsureButtons();
-    }
     RebuildPreview();
 }
 
@@ -1153,7 +1183,7 @@ void UIMakeCharWnd::OnDraw()
     GetClientRect(g_hMainWnd, &rcClient);
     const int clientW = rcClient.right - rcClient.left;
     const int clientH = rcClient.bottom - rcClient.top;
-    if (!m_controlsCreated && clientW > 0 && clientH > 0) {
+    if (clientW > 0 && clientH > 0) {
         OnCreate(clientW, clientH);
     }
 

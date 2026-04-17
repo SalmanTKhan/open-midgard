@@ -2707,6 +2707,25 @@ bool ParseHexColor(const std::string& src, size_t offset, u32& outColor)
     return true;
 }
 
+std::string StripInlineColorCodes(const std::string& text)
+{
+    if (text.empty()) {
+        return text;
+    }
+
+    std::string cleaned;
+    cleaned.reserve(text.size());
+    for (size_t i = 0; i < text.size(); ++i) {
+        u32 ignoredColor = 0;
+        if (text[i] == '^' && ParseHexColor(text, i + 1, ignoredColor)) {
+            i += 6;
+            continue;
+        }
+        cleaned.push_back(text[i]);
+    }
+    return cleaned;
+}
+
 bool ParseMapChangePacket(const PacketView& packet, MapChangeInfo& outInfo)
 {
     outInfo = {};
@@ -6406,14 +6425,14 @@ void HandleWhisper(CGameMode& mode, const PacketView& packet)
         name.resize(nulPos);
     }
 
-    const std::string msg = ExtractPacketString(packet, 28);
+    const std::string msg = StripInlineColorCodes(ExtractPacketString(packet, 28));
     mode.m_lastWhisperName = name;
     mode.m_lastWhisper = msg;
 
     if (!name.empty() && !msg.empty()) {
-        RecordChat(mode, name + " : " + msg, 0x00222222, kChatChannelWhisper);
+        RecordChat(mode, name + " : " + msg, 0x00FFFF00, kChatChannelWhisper);
     } else if (!msg.empty()) {
-        RecordChat(mode, msg, 0x00222222, kChatChannelWhisper);
+        RecordChat(mode, msg, 0x00FFFF00, kChatChannelWhisper);
     }
 }
 
