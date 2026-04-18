@@ -15,11 +15,14 @@ class UISelectCharWnd;
 class UIMakeCharWnd;
 class UIWaitWnd;
 class UIItemWnd;
+class UIItemInfoWnd;
+class UIItemCollectionWnd;
 class UIQuestWnd;
 class UIBasicInfoWnd;
 class UINotifyLevelUpWnd;
 class UINotifyJobLevelUpWnd;
 class UIEquipWnd;
+class UISkillDescribeWnd;
 class UISkillListWnd;
 class UIOptionWnd;
 class UIShortCutWnd;
@@ -34,6 +37,8 @@ class UIItemPurchaseWnd;
 class UIItemSellWnd;
 class CBitmapRes;
 class CSurface;
+struct ITEM_INFO;
+struct PLAYER_SKILL_INFO;
 
 struct CSnapInfo {
     int x, y;
@@ -61,6 +66,9 @@ public:
         WID_WAITWND           = 7,
         WID_ITEMWND           = 8,
         WID_NOTICECONFIRMWND  = 8,
+        WID_ITEMINFOWND       = 24,
+        WID_ITEMCOLLECTIONWND = 25,
+        WID_SKILLDESCRIBEWND  = 26,
         WID_SAYDIALOGWND      = 9,
         WID_LOADINGWND        = 10,
         WID_STATUSWND         = 11,
@@ -121,6 +129,8 @@ public:
     void OnLBtnDown(int x, int y);
     void OnLBtnDblClk(int x, int y);
     void OnLBtnUp(int x, int y);
+    void OnRBtnDown(int x, int y);
+    void OnRBtnUp(int x, int y);
     void OnMouseMove(int x, int y);
     bool OnWheel(int x, int y, int delta);
     void OnChar(char c);
@@ -134,6 +144,9 @@ public:
     bool HasActiveNpcDialog() const;
     void CloseNpcDialogWindows();
     void CloseNpcShopWindows();
+    void ShowItemInfoWindow(const ITEM_INFO& item, int preferredX, int preferredY);
+    void ShowItemCollectionWindow(const ITEM_INFO& item, int preferredX, int preferredY);
+    void ShowSkillDescribeWindow(const PLAYER_SKILL_INFO& skillInfo, int preferredX, int preferredY);
 
     // Memory layout from HighPriest.exe.h:10334
     int m_chatWndX, m_chatWndY;
@@ -180,11 +193,14 @@ public:
     UIChooseWnd* m_chooseWnd;
     UIOptionWnd* m_optionWnd;
     UIItemWnd* m_itemWnd;
+    UIItemInfoWnd* m_itemInfoWnd;
+    UIItemCollectionWnd* m_itemCollectionWnd;
     UIQuestWnd* m_questWnd;
     UIBasicInfoWnd* m_basicInfoWnd;
     UINotifyLevelUpWnd* m_notifyLevelUpWnd;
     UINotifyJobLevelUpWnd* m_notifyJobLevelUpWnd;
     UIEquipWnd* m_equipWnd;
+    UISkillDescribeWnd* m_skillDescribeWnd;
     UISkillListWnd* m_skillListWnd;
     std::string m_loginStatus;
     std::string m_loginWallpaper;

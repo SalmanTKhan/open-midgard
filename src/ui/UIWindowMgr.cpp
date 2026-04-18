@@ -9,11 +9,14 @@
 #include "UIChooseWnd.h"
 #include "UIChooseSellBuyWnd.h"
 #include "UIEquipWnd.h"
+#include "UIItemCollectionWnd.h"
+#include "UIItemInfoWnd.h"
 #include "UIItemWnd.h"
 #include "UIItemPurchaseWnd.h"
 #include "UIItemSellWnd.h"
 #include "UIItemShopWnd.h"
 #include "UIShortCutWnd.h"
+#include "UISkillDescribeWnd.h"
 #include "UIMinimapWnd.h"
 #include "UISkillListWnd.h"
 #include "UILoginWnd.h"
@@ -583,7 +586,7 @@ UIWindowMgr::UIWindowMgr()
       m_isDragAll(0), m_conversionMode(0),
       m_captureWindow(nullptr), m_editWindow(nullptr), m_modalWindow(nullptr), m_lastHitWindow(nullptr),
       m_loadingWnd(nullptr), m_roMapWnd(nullptr), m_minimapZoomWnd(nullptr), m_statusWnd(nullptr), m_sayDialogWnd(nullptr), m_npcMenuWnd(nullptr), m_npcInputWnd(nullptr), m_chooseSellBuyWnd(nullptr), m_itemShopWnd(nullptr), m_itemPurchaseWnd(nullptr), m_itemSellWnd(nullptr), m_shortCutWnd(nullptr), m_chatWnd(nullptr),
-    m_loginWnd(nullptr), m_selectServerWnd(nullptr), m_selectCharWnd(nullptr), m_makeCharWnd(nullptr), m_waitWnd(nullptr), m_chooseWnd(nullptr), m_optionWnd(nullptr), m_itemWnd(nullptr), m_questWnd(nullptr), m_basicInfoWnd(nullptr), m_notifyLevelUpWnd(nullptr), m_notifyJobLevelUpWnd(nullptr), m_equipWnd(nullptr), m_skillListWnd(nullptr),
+        m_loginWnd(nullptr), m_selectServerWnd(nullptr), m_selectCharWnd(nullptr), m_makeCharWnd(nullptr), m_waitWnd(nullptr), m_chooseWnd(nullptr), m_optionWnd(nullptr), m_itemWnd(nullptr), m_itemInfoWnd(nullptr), m_itemCollectionWnd(nullptr), m_questWnd(nullptr), m_basicInfoWnd(nullptr), m_notifyLevelUpWnd(nullptr), m_notifyJobLevelUpWnd(nullptr), m_equipWnd(nullptr), m_skillDescribeWnd(nullptr), m_skillListWnd(nullptr),
                         m_wallpaperSurface(nullptr), m_uiComposeSurface(), m_chatActiveInputField(0), m_chatScrollLineOffset(0)
 {
     m_loginStatus = "Login: idle";
@@ -894,6 +897,26 @@ UIWindow* UIWindowMgr::MakeWindow(int windowId)
         m_itemWnd->SetShow(1);
         return m_itemWnd;
 
+    case WID_ITEMINFOWND:
+        if (!m_itemInfoWnd) {
+            m_itemInfoWnd = new UIItemInfoWnd();
+            m_children.push_back(m_itemInfoWnd);
+        }
+        m_children.remove(m_itemInfoWnd);
+        m_children.push_back(m_itemInfoWnd);
+        m_itemInfoWnd->SetShow(1);
+        return m_itemInfoWnd;
+
+    case WID_ITEMCOLLECTIONWND:
+        if (!m_itemCollectionWnd) {
+            m_itemCollectionWnd = new UIItemCollectionWnd();
+            m_children.push_back(m_itemCollectionWnd);
+        }
+        m_children.remove(m_itemCollectionWnd);
+        m_children.push_back(m_itemCollectionWnd);
+        m_itemCollectionWnd->SetShow(1);
+        return m_itemCollectionWnd;
+
     case WID_EQUIPWND:
         if (!m_equipWnd) {
             m_equipWnd = new UIEquipWnd();
@@ -903,6 +926,16 @@ UIWindow* UIWindowMgr::MakeWindow(int windowId)
         m_children.push_back(m_equipWnd);
         m_equipWnd->SetShow(1);
         return m_equipWnd;
+
+    case WID_SKILLDESCRIBEWND:
+        if (!m_skillDescribeWnd) {
+            m_skillDescribeWnd = new UISkillDescribeWnd();
+            m_children.push_back(m_skillDescribeWnd);
+        }
+        m_children.remove(m_skillDescribeWnd);
+        m_children.push_back(m_skillDescribeWnd);
+        m_skillDescribeWnd->SetShow(1);
+        return m_skillDescribeWnd;
 
     case WID_SKILLLISTWND:
         if (!m_skillListWnd) {
@@ -1169,8 +1202,17 @@ void UIWindowMgr::DeleteWindow(UIWindow* window)
     if (window == m_itemWnd) {
         m_itemWnd = nullptr;
     }
+    if (window == m_itemInfoWnd) {
+        m_itemInfoWnd = nullptr;
+    }
+    if (window == m_itemCollectionWnd) {
+        m_itemCollectionWnd = nullptr;
+    }
     if (window == m_equipWnd) {
         m_equipWnd = nullptr;
+    }
+    if (window == m_skillDescribeWnd) {
+        m_skillDescribeWnd = nullptr;
     }
     if (window == m_skillListWnd) {
         m_skillListWnd = nullptr;
@@ -1228,9 +1270,12 @@ void UIWindowMgr::RemoveAllWindows()
     m_chooseWnd = nullptr;
     m_optionWnd = nullptr;
     m_itemWnd = nullptr;
+    m_itemInfoWnd = nullptr;
+    m_itemCollectionWnd = nullptr;
     m_questWnd = nullptr;
     m_basicInfoWnd = nullptr;
     m_equipWnd = nullptr;
+    m_skillDescribeWnd = nullptr;
     m_skillListWnd = nullptr;
 }
 
@@ -1858,6 +1903,43 @@ void UIWindowMgr::OnLBtnUp(int x, int y)
     }
 }
 
+void UIWindowMgr::OnRBtnDown(int x, int y)
+{
+    UIWindow* hit = HitTestWindow(x, y);
+    m_captureWindow = hit;
+
+    if (!hit) {
+        return;
+    }
+
+    UIWindow* topLevel = hit;
+    while (topLevel && topLevel->m_parent) {
+        topLevel = topLevel->m_parent;
+    }
+    if (topLevel) {
+        auto found = std::find(m_children.begin(), m_children.end(), topLevel);
+        if (found != m_children.end() && std::next(found) != m_children.end()) {
+            m_children.erase(found);
+            m_children.push_back(topLevel);
+        }
+    }
+
+    if (hit->CanReceiveKeyInput()) {
+        m_editWindow = hit;
+    }
+    hit->OnRBtnDown(x, y);
+}
+
+void UIWindowMgr::OnRBtnUp(int x, int y)
+{
+    if (!m_captureWindow) {
+        return;
+    }
+
+    m_captureWindow->OnRBtnUp(x, y);
+    m_captureWindow = nullptr;
+}
+
 void UIWindowMgr::OnMouseMove(int x, int y)
 {
     if (m_captureWindow) {
@@ -1896,6 +1978,33 @@ bool UIWindowMgr::OnWheel(int x, int y, int delta)
 
     hit->OnWheel(delta);
     return true;
+}
+
+void UIWindowMgr::ShowItemInfoWindow(const ITEM_INFO& item, int preferredX, int preferredY)
+{
+    UIItemInfoWnd* const window = static_cast<UIItemInfoWnd*>(MakeWindow(WID_ITEMINFOWND));
+    if (!window) {
+        return;
+    }
+    window->SetItemInfo(item, preferredX, preferredY);
+}
+
+void UIWindowMgr::ShowItemCollectionWindow(const ITEM_INFO& item, int preferredX, int preferredY)
+{
+    UIItemCollectionWnd* const window = static_cast<UIItemCollectionWnd*>(MakeWindow(WID_ITEMCOLLECTIONWND));
+    if (!window) {
+        return;
+    }
+    window->SetItemInfo(item, preferredX, preferredY);
+}
+
+void UIWindowMgr::ShowSkillDescribeWindow(const PLAYER_SKILL_INFO& skillInfo, int preferredX, int preferredY)
+{
+    UISkillDescribeWnd* const window = static_cast<UISkillDescribeWnd*>(MakeWindow(WID_SKILLDESCRIBEWND));
+    if (!window) {
+        return;
+    }
+    window->SetSkillInfo(skillInfo, preferredX, preferredY);
 }
 
 UIWindow* UIWindowMgr::HitTestWindow(int x, int y) const

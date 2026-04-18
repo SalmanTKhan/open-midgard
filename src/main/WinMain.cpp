@@ -606,7 +606,9 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
         const int y = GET_Y_LPARAM(lParam);
         const int uiX = IsQtUiRuntimeEnabled() ? UiScaleRawToLogicalCoordinate(x) : x;
         const int uiY = IsQtUiRuntimeEnabled() ? UiScaleRawToLogicalCoordinate(y) : y;
-        if (!g_windowMgr.HasWindowAtPoint(uiX, uiY)) {
+        const bool uiHit = g_windowMgr.HasWindowAtPoint(uiX, uiY);
+        g_windowMgr.OnRBtnDown(uiX, uiY);
+        if (!uiHit) {
             g_modeMgr.SendMsg(CGameMode::GameMsg_RButtonDown, x, y);
         }
         return 0;
@@ -618,7 +620,10 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
         const int y = GET_Y_LPARAM(lParam);
         const int uiX = IsQtUiRuntimeEnabled() ? UiScaleRawToLogicalCoordinate(x) : x;
         const int uiY = IsQtUiRuntimeEnabled() ? UiScaleRawToLogicalCoordinate(y) : y;
-        if (!g_windowMgr.HasWindowAtPoint(uiX, uiY)) {
+        const bool uiCaptured = (g_windowMgr.m_captureWindow != nullptr);
+        const bool uiHit = g_windowMgr.HasWindowAtPoint(uiX, uiY);
+        g_windowMgr.OnRBtnUp(uiX, uiY);
+        if (!uiCaptured && !uiHit) {
             g_modeMgr.SendMsg(CGameMode::GameMsg_RButtonUp, x, y);
         }
         return 0;

@@ -31,6 +31,10 @@ add_library(ro_ui STATIC
     UINotifyLevelUpWnd.cpp
     UIItemWnd.h
     UIItemWnd.cpp
+    UIItemInfoWnd.h
+    UIItemInfoWnd.cpp
+    UIItemCollectionWnd.h
+    UIItemCollectionWnd.cpp
     UIShortCutWnd.h
     UIShortCutWnd.cpp
     UIItemShopWnd.h
@@ -44,6 +48,8 @@ add_library(ro_ui STATIC
     UIMinimapWnd.cpp
     UIEquipWnd.h
     UIEquipWnd.cpp
+    UISkillDescribeWnd.h
+    UISkillDescribeWnd.cpp
     UISkillListWnd.h
     UISkillListWnd.cpp
     UIChooseWnd.h

@@ -133,6 +133,8 @@ enum class QtUiImageRequestKind {
     Minimap = 0,
     Wallpaper,
     Item,
+    Collection,
+    Illust,
     Skill,
     Status,
     Panel,
@@ -176,6 +178,12 @@ QtUiImageRequestKind CategorizeQtUiImageRequest(const QString& baseId)
     if (baseId.startsWith(QStringLiteral("item/"))) {
         return QtUiImageRequestKind::Item;
     }
+    if (baseId.startsWith(QStringLiteral("collection/"))) {
+        return QtUiImageRequestKind::Collection;
+    }
+    if (baseId.startsWith(QStringLiteral("illust/"))) {
+        return QtUiImageRequestKind::Illust;
+    }
     if (baseId.startsWith(QStringLiteral("skill/"))) {
         return QtUiImageRequestKind::Skill;
     }
@@ -204,6 +212,10 @@ const char* GetQtUiImageRequestKindName(QtUiImageRequestKind kind)
         return "wallpaper";
     case QtUiImageRequestKind::Item:
         return "item";
+    case QtUiImageRequestKind::Collection:
+        return "collection";
+    case QtUiImageRequestKind::Illust:
+        return "illust";
     case QtUiImageRequestKind::Skill:
         return "skill";
     case QtUiImageRequestKind::Status:
@@ -278,6 +290,12 @@ void MaybeLogQtUiPerfStats()
         GetQtUiImageRequestKindName(QtUiImageRequestKind::Item),
         static_cast<unsigned long long>(g_qtUiPerfStats.imageRequestCounts[static_cast<size_t>(QtUiImageRequestKind::Item)]),
         g_qtUiPerfStats.imageRequestMs[static_cast<size_t>(QtUiImageRequestKind::Item)],
+        GetQtUiImageRequestKindName(QtUiImageRequestKind::Collection),
+        static_cast<unsigned long long>(g_qtUiPerfStats.imageRequestCounts[static_cast<size_t>(QtUiImageRequestKind::Collection)]),
+        g_qtUiPerfStats.imageRequestMs[static_cast<size_t>(QtUiImageRequestKind::Collection)],
+        GetQtUiImageRequestKindName(QtUiImageRequestKind::Illust),
+        static_cast<unsigned long long>(g_qtUiPerfStats.imageRequestCounts[static_cast<size_t>(QtUiImageRequestKind::Illust)]),
+        g_qtUiPerfStats.imageRequestMs[static_cast<size_t>(QtUiImageRequestKind::Illust)],
         GetQtUiImageRequestKindName(QtUiImageRequestKind::Skill),
         static_cast<unsigned long long>(g_qtUiPerfStats.imageRequestCounts[static_cast<size_t>(QtUiImageRequestKind::Skill)]),
         g_qtUiPerfStats.imageRequestMs[static_cast<size_t>(QtUiImageRequestKind::Skill)],
@@ -362,6 +380,84 @@ bool TryBuildItemIconImage(unsigned int itemId, QImage* outImage)
     *outImage = source.copy();
     if (!outImage->isNull()) {
         s_itemIconCache[itemId] = *outImage;
+    }
+    return !outImage->isNull();
+}
+
+bool TryBuildItemCollectionImage(unsigned int itemId, QImage* outImage)
+{
+    if (!outImage || itemId == 0) {
+        return false;
+    }
+
+    static std::unordered_map<unsigned int, QImage> s_itemCollectionCache;
+    const auto cached = s_itemCollectionCache.find(itemId);
+    if (cached != s_itemCollectionCache.end()) {
+        *outImage = cached->second;
+        return !outImage->isNull();
+    }
+
+    const ITEM_INFO* item = g_session.GetInventoryItemByItemId(itemId);
+    ITEM_INFO fallbackItem;
+    if (!item) {
+        fallbackItem.SetItemId(itemId);
+        fallbackItem.m_isIdentified = 1;
+        item = &fallbackItem;
+    }
+
+    shopui::BitmapPixels bitmap;
+    if (!shopui::TryLoadItemCollectionPixels(*item, &bitmap) || !bitmap.IsValid()) {
+        return false;
+    }
+
+    const QImage source(
+        reinterpret_cast<const uchar*>(bitmap.pixels.data()),
+        bitmap.width,
+        bitmap.height,
+        bitmap.width * static_cast<int>(sizeof(unsigned int)),
+        QImage::Format_ARGB32);
+    *outImage = source.copy();
+    if (!outImage->isNull()) {
+        s_itemCollectionCache[itemId] = *outImage;
+    }
+    return !outImage->isNull();
+}
+
+bool TryBuildItemIllustImage(unsigned int itemId, QImage* outImage)
+{
+    if (!outImage || itemId == 0) {
+        return false;
+    }
+
+    static std::unordered_map<unsigned int, QImage> s_itemIllustCache;
+    const auto cached = s_itemIllustCache.find(itemId);
+    if (cached != s_itemIllustCache.end()) {
+        *outImage = cached->second;
+        return !outImage->isNull();
+    }
+
+    const ITEM_INFO* item = g_session.GetInventoryItemByItemId(itemId);
+    ITEM_INFO fallbackItem;
+    if (!item) {
+        fallbackItem.SetItemId(itemId);
+        fallbackItem.m_isIdentified = 1;
+        item = &fallbackItem;
+    }
+
+    shopui::BitmapPixels bitmap;
+    if (!shopui::TryLoadCardIllustPixels(*item, &bitmap) || !bitmap.IsValid()) {
+        return false;
+    }
+
+    const QImage source(
+        reinterpret_cast<const uchar*>(bitmap.pixels.data()),
+        bitmap.width,
+        bitmap.height,
+        bitmap.width * static_cast<int>(sizeof(unsigned int)),
+        QImage::Format_ARGB32);
+    *outImage = source.copy();
+    if (!outImage->isNull()) {
+        s_itemIllustCache[itemId] = *outImage;
     }
     return !outImage->isNull();
 }
@@ -750,6 +846,18 @@ public:
             const unsigned int itemId = baseId.mid(QStringLiteral("item/").size()).toUInt(&ok);
             if (ok) {
                 TryBuildItemIconImage(itemId, &image);
+            }
+        } else if (baseId.startsWith(QStringLiteral("collection/"))) {
+            bool ok = false;
+            const unsigned int itemId = baseId.mid(QStringLiteral("collection/").size()).toUInt(&ok);
+            if (ok) {
+                TryBuildItemCollectionImage(itemId, &image);
+            }
+        } else if (baseId.startsWith(QStringLiteral("illust/"))) {
+            bool ok = false;
+            const unsigned int itemId = baseId.mid(QStringLiteral("illust/").size()).toUInt(&ok);
+            if (ok) {
+                TryBuildItemIllustImage(itemId, &image);
             }
         } else if (baseId.startsWith(QStringLiteral("skill/"))) {
             bool ok = false;

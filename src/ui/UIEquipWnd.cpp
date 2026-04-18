@@ -1397,6 +1397,32 @@ void UIEquipWnd::OnLBtnUp(int x, int y)
     UIFrameWnd::OnLBtnUp(x, y);
 }
 
+void UIEquipWnd::OnRBtnDown(int x, int y)
+{
+    if (m_show == 0 || m_h <= kMiniHeight) {
+        return;
+    }
+
+    const std::vector<const ITEM_INFO*> slotItems = BuildSlotAssignments();
+    for (size_t i = 0; i < kEquipSlots.size(); ++i) {
+        const ITEM_INFO* const item = slotItems[i];
+        if (!item) {
+            continue;
+        }
+
+        const RECT slotRect{
+            m_x + GetEquipSlotX(kEquipSlots[i], m_w),
+            m_y + GetEquipSlotY(kEquipSlots[i], m_h),
+            m_x + GetEquipSlotX(kEquipSlots[i], m_w) + kSlotIconSize,
+            m_y + GetEquipSlotY(kEquipSlots[i], m_h) + kSlotIconSize
+        };
+        if (x >= slotRect.left && x < slotRect.right && y >= slotRect.top && y < slotRect.bottom) {
+            g_windowMgr.ShowItemInfoWindow(*item, x + 12, y + 12);
+            return;
+        }
+    }
+}
+
 void UIEquipWnd::OnMouseMove(int x, int y)
 {
     UIFrameWnd::OnMouseMove(x, y);

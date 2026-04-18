@@ -19,6 +19,69 @@ Item {
         return itemId > 0 ? "image://openmidgard/item/" + itemId : ""
     }
 
+    function collectionImageSource(itemId) {
+        return itemId > 0 ? "image://openmidgard/collection/" + itemId : ""
+    }
+
+    function illustImageSource(itemId) {
+        return itemId > 0 ? "image://openmidgard/illust/" + itemId : ""
+    }
+
+    function isHexDigit(ch) {
+        return (ch >= "0" && ch <= "9")
+            || (ch >= "a" && ch <= "f")
+            || (ch >= "A" && ch <= "F")
+    }
+
+    function escapeHtml(text) {
+        return String(text)
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/\"/g, "&quot;")
+            .replace(/'/g, "&#39;")
+    }
+
+    function roColorTextToRichText(text) {
+        if (!text) {
+            return ""
+        }
+
+        let out = "<span style=\"color:#111111\">"
+        let currentColor = "111111"
+        for (let index = 0; index < text.length; ++index) {
+            const ch = text[index]
+            if (ch === "^" && index + 6 < text.length) {
+                let isColor = true
+                for (let colorIndex = 1; colorIndex <= 6; ++colorIndex) {
+                    if (!isHexDigit(text[index + colorIndex])) {
+                        isColor = false
+                        break
+                    }
+                }
+                if (isColor) {
+                    currentColor = text.substring(index + 1, index + 7)
+                    out += "</span><span style=\"color:#" + currentColor + "\">"
+                    index += 6
+                    continue
+                }
+            }
+
+            if (ch === "\r") {
+                continue
+            }
+            if (ch === "\n") {
+                out += "<br>"
+                continue
+            }
+
+            out += escapeHtml(ch === "_" ? " " : ch)
+        }
+
+        out += "</span>"
+        return out
+    }
+
     function skillIconSource(skillId) {
         return skillId > 0 ? "image://openmidgard/skill/" + skillId : ""
     }
@@ -2850,6 +2913,378 @@ Item {
                     color: "#000000"
                     font.pixelSize: 10
                 }
+            }
+        }
+    }
+
+    Rectangle {
+        x: uiState.itemInfoX
+        y: uiState.itemInfoY
+        width: uiState.itemInfoWidth
+        height: uiState.itemInfoHeight
+        radius: 4
+        color: "#ede9df"
+        border.width: 1
+        border.color: "#6b675f"
+        visible: uiState.itemInfoVisible
+        z: 40
+
+        Rectangle {
+            x: 1
+            y: 1
+            width: parent.width - 2
+            height: 16
+            radius: 3
+            color: "#6e8194"
+            border.width: 1
+            border.color: "#4e5d6c"
+        }
+
+        Text {
+            x: 8
+            y: 3
+            text: uiState.itemInfoData.title || "Item Information"
+            color: "#ffffff"
+            font.pixelSize: 12
+            font.bold: true
+        }
+
+        Rectangle {
+            x: (uiState.itemInfoData.closeButton.x || 0) - uiState.itemInfoX
+            y: (uiState.itemInfoData.closeButton.y || 0) - uiState.itemInfoY
+            width: uiState.itemInfoData.closeButton.width || 0
+            height: uiState.itemInfoData.closeButton.height || 0
+            radius: 2
+            color: (uiState.itemInfoData.closeButton.pressed || false) ? "#b9c7de" : ((uiState.itemInfoData.closeButton.hovered || false) ? "#d7dff0" : "#e7e2d6")
+            border.width: 1
+            border.color: "#7f7a70"
+
+            Text {
+                anchors.centerIn: parent
+                text: uiState.itemInfoData.closeButton.label || "X"
+                color: "#000000"
+                font.pixelSize: 8
+                font.bold: true
+            }
+        }
+
+        Rectangle {
+            x: 8
+            y: 25
+            width: 96
+            height: 96
+            color: "#f5f2ea"
+            border.width: 1
+            border.color: "#a69f91"
+
+            Image {
+                anchors.fill: parent
+                anchors.margins: 2
+                fillMode: Image.PreserveAspectFit
+                smooth: false
+                cache: false
+                source: (uiState.itemInfoData.previewUsesCollection || false)
+                    ? root.collectionImageSource(uiState.itemInfoData.itemId || 0)
+                    : root.itemIconSource(uiState.itemInfoData.itemId || 0)
+            }
+
+            Rectangle {
+                x: 4
+                y: 4
+                width: (uiState.itemInfoData.graphicsButton.width || 0)
+                height: (uiState.itemInfoData.graphicsButton.height || 0)
+                radius: 2
+                visible: uiState.itemInfoData.graphicsButton.visible || false
+                color: (uiState.itemInfoData.graphicsButton.pressed || false) ? "#b9c7de" : ((uiState.itemInfoData.graphicsButton.hovered || false) ? "#d7dff0" : "#e9e4d8")
+                border.width: 1
+                border.color: "#8c8578"
+
+                Text {
+                    anchors.centerIn: parent
+                    text: uiState.itemInfoData.graphicsButton.label || "View"
+                    color: "#000000"
+                    font.pixelSize: 9
+                }
+            }
+        }
+
+        Text {
+            x: 112
+            y: 25
+            width: parent.width - 120
+            text: uiState.itemInfoData.name || ""
+            color: "#000000"
+            font.pixelSize: 11
+            font.bold: true
+            elide: Text.ElideRight
+        }
+
+        Column {
+            id: itemInfoDetailsColumn
+            x: 112
+            y: 45
+            width: parent.width - 120
+            spacing: 2
+
+            Repeater {
+                model: uiState.itemInfoData.detailLines || []
+
+                delegate: Text {
+                    required property var modelData
+                    width: parent.width
+                    text: modelData
+                    color: "#444444"
+                    font.pixelSize: 10
+                    elide: Text.ElideRight
+                }
+            }
+        }
+
+        Text {
+            x: 112
+            y: itemInfoDetailsColumn.y + itemInfoDetailsColumn.height + 4
+            width: parent.width - 120
+            height: parent.height - y - (((uiState.itemInfoData.slots || []).length > 0) ? 56 : 20)
+            text: root.roColorTextToRichText(uiState.itemInfoData.description || "")
+            textFormat: Text.RichText
+            color: "#111111"
+            font.pixelSize: 11
+            wrapMode: Text.WordWrap
+            verticalAlignment: Text.AlignTop
+        }
+
+        Repeater {
+            model: uiState.itemInfoData.slots || []
+
+            delegate: Rectangle {
+                required property var modelData
+                x: (modelData.x || 0) - uiState.itemInfoX
+                y: (modelData.y || 0) - uiState.itemInfoY
+                width: modelData.width || 0
+                height: modelData.height || 0
+                color: !(modelData.available || false)
+                    ? "#a6a6a6"
+                    : ((modelData.occupied || false) ? "#f5f2ea" : "#dfdfdf")
+                border.width: 1
+                border.color: (modelData.occupied || false) ? "#868176" : "#7e7e7e"
+
+                Image {
+                    anchors.fill: parent
+                    anchors.margins: 2
+                    fillMode: Image.PreserveAspectFit
+                    smooth: false
+                    cache: false
+                    visible: modelData.occupied || false
+                    source: root.itemIconSource(modelData.itemId || 0)
+                }
+
+                Rectangle {
+                    visible: (modelData.hovered || false) && (modelData.occupied || false) && !!modelData.tooltip
+                    x: (parent.width - width) / 2
+                    y: -24
+                    width: tooltipText.implicitWidth + 12
+                    height: tooltipText.implicitHeight + 8
+                    color: "#303030"
+                    border.width: 1
+                    border.color: "#606060"
+
+                    Text {
+                        id: tooltipText
+                        anchors.centerIn: parent
+                        text: modelData.tooltip || ""
+                        color: "#ffffff"
+                        font.pixelSize: 10
+                    }
+                }
+            }
+        }
+    }
+
+    Rectangle {
+        x: uiState.skillDescribeX
+        y: uiState.skillDescribeY
+        width: uiState.skillDescribeWidth
+        height: uiState.skillDescribeHeight
+        radius: 4
+        color: "#ede9df"
+        border.width: 1
+        border.color: "#6b675f"
+        visible: uiState.skillDescribeVisible
+        z: 41
+
+        Rectangle {
+            x: 1
+            y: 1
+            width: parent.width - 2
+            height: 16
+            radius: 3
+            color: "#6e8194"
+            border.width: 1
+            border.color: "#4e5d6c"
+        }
+
+        Text {
+            x: 8
+            y: 3
+            text: uiState.skillDescribeData.title || "Skill Information"
+            color: "#ffffff"
+            font.pixelSize: 12
+            font.bold: true
+        }
+
+        Rectangle {
+            x: (uiState.skillDescribeData.closeButton.x || 0) - uiState.skillDescribeX
+            y: (uiState.skillDescribeData.closeButton.y || 0) - uiState.skillDescribeY
+            width: uiState.skillDescribeData.closeButton.width || 0
+            height: uiState.skillDescribeData.closeButton.height || 0
+            radius: 2
+            color: (uiState.skillDescribeData.closeButton.pressed || false) ? "#b9c7de" : ((uiState.skillDescribeData.closeButton.hovered || false) ? "#d7dff0" : "#e7e2d6")
+            border.width: 1
+            border.color: "#7f7a70"
+
+            Text {
+                anchors.centerIn: parent
+                text: uiState.skillDescribeData.closeButton.label || "X"
+                color: "#000000"
+                font.pixelSize: 8
+                font.bold: true
+            }
+        }
+
+        Rectangle {
+            x: 8
+            y: 25
+            width: 52
+            height: 52
+            color: "#f5f2ea"
+            border.width: 1
+            border.color: "#a69f91"
+
+            Image {
+                anchors.fill: parent
+                anchors.margins: 2
+                fillMode: Image.PreserveAspectFit
+                smooth: false
+                cache: false
+                source: root.skillIconSource(uiState.skillDescribeData.skillId || 0)
+            }
+        }
+
+        Text {
+            x: 68
+            y: 25
+            width: parent.width - 76
+            text: uiState.skillDescribeData.name || ""
+            color: "#000000"
+            font.pixelSize: 11
+            font.bold: true
+            elide: Text.ElideRight
+        }
+
+        Column {
+            x: 68
+            y: 45
+            width: parent.width - 76
+            spacing: 2
+
+            Repeater {
+                model: uiState.skillDescribeData.detailLines || []
+
+                delegate: Text {
+                    required property var modelData
+                    width: parent.width
+                    text: modelData
+                    color: "#444444"
+                    font.pixelSize: 10
+                    elide: Text.ElideRight
+                }
+            }
+        }
+
+        Text {
+            x: 8
+            y: 88
+            width: parent.width - 16
+            height: parent.height - 96
+            text: uiState.skillDescribeData.description || ""
+            color: "#111111"
+            font.pixelSize: 10
+            wrapMode: Text.WordWrap
+            verticalAlignment: Text.AlignTop
+        }
+    }
+
+    Rectangle {
+        x: uiState.itemCollectionX
+        y: uiState.itemCollectionY
+        width: uiState.itemCollectionWidth
+        height: uiState.itemCollectionHeight
+        radius: 4
+        color: "#ede9df"
+        border.width: 1
+        border.color: "#6b675f"
+        visible: uiState.itemCollectionVisible
+        z: 42
+
+        Rectangle {
+            x: 1
+            y: 1
+            width: parent.width - 2
+            height: 16
+            radius: 3
+            color: "#6e8194"
+            border.width: 1
+            border.color: "#4e5d6c"
+        }
+
+        Text {
+            x: 8
+            y: 3
+            text: uiState.itemCollectionData.title || "Card illustration"
+            color: "#ffffff"
+            font.pixelSize: 12
+            font.bold: true
+        }
+
+        Rectangle {
+            x: (uiState.itemCollectionData.closeButton.x || 0) - uiState.itemCollectionX
+            y: (uiState.itemCollectionData.closeButton.y || 0) - uiState.itemCollectionY
+            width: uiState.itemCollectionData.closeButton.width || 0
+            height: uiState.itemCollectionData.closeButton.height || 0
+            radius: 2
+            color: (uiState.itemCollectionData.closeButton.pressed || false) ? "#b9c7de" : ((uiState.itemCollectionData.closeButton.hovered || false) ? "#d7dff0" : "#e7e2d6")
+            border.width: 1
+            border.color: "#7f7a70"
+
+            Text {
+                anchors.centerIn: parent
+                text: uiState.itemCollectionData.closeButton.label || "X"
+                color: "#000000"
+                font.pixelSize: 8
+                font.bold: true
+            }
+        }
+
+        Rectangle {
+            x: 8
+            y: 25
+            width: parent.width - 16
+            height: parent.height - 33
+            color: "#f5f2ea"
+            border.width: 1
+            border.color: "#a69f91"
+
+            Image {
+                anchors.fill: parent
+                anchors.margins: 0
+                fillMode: Image.PreserveAspectFit
+                smooth: false
+                cache: false
+                source: (uiState.itemCollectionData.mainUsesIllust || false)
+                    ? root.illustImageSource(uiState.itemCollectionData.itemId || 0)
+                    : ((uiState.itemCollectionData.mainUsesCollection || false)
+                        ? root.collectionImageSource(uiState.itemCollectionData.itemId || 0)
+                        : root.itemIconSource(uiState.itemCollectionData.itemId || 0))
             }
         }
     }

@@ -445,11 +445,24 @@ void UIShortCutWnd::OnRBtnDown(int x, int y)
         return;
     }
 
-    if (g_session.ClearShortcutSlotByVisibleIndex(visibleSlot)) {
-        const int absoluteSlot = g_session.GetShortcutSlotAbsoluteIndex(visibleSlot);
-        g_modeMgr.SendMsg(CGameMode::GameMsg_RequestShortcutUpdate, absoluteSlot, 0, 0);
-        Invalidate();
+    const SHORTCUT_SLOT* const slot = g_session.GetShortcutSlotByVisibleIndex(visibleSlot);
+    if (!slot || slot->id == 0) {
+        return;
     }
+
+    if (slot->isSkill != 0) {
+        const PLAYER_SKILL_INFO* const skill = g_session.GetSkillItemBySkillId(static_cast<int>(slot->id));
+        if (skill) {
+            g_windowMgr.ShowSkillDescribeWindow(*skill, x + 12, y + 12);
+        }
+        return;
+    }
+
+    ITEM_INFO fallbackItem{};
+    fallbackItem.SetItemId(slot->id);
+    fallbackItem.m_isIdentified = 1;
+    const ITEM_INFO* const item = g_session.GetInventoryItemByItemId(slot->id);
+    g_windowMgr.ShowItemInfoWindow(item ? *item : fallbackItem, x + 12, y + 12);
 }
 
 void UIShortCutWnd::OnWheel(int delta)

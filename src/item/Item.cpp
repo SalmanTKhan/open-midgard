@@ -82,6 +82,28 @@ bool ParseHashIdLine(const std::string& line, unsigned int& outId)
 	return outId != 0;
 }
 
+bool ParseDescriptionBlockHeaderLine(const std::string& line, unsigned int& outId)
+{
+	outId = 0;
+	if (line.empty() || line[0] == '/' || line[0] == '#') {
+		return false;
+	}
+
+	const size_t firstHash = line.find('#');
+	if (firstHash == std::string::npos || firstHash == 0) {
+		return false;
+	}
+
+	for (size_t index = firstHash + 1; index < line.size(); ++index) {
+		if (!std::isspace(static_cast<unsigned char>(line[index]))) {
+			return false;
+		}
+	}
+
+	outId = static_cast<unsigned int>(std::strtoul(line.substr(0, firstHash).c_str(), nullptr, 10));
+	return outId != 0;
+}
+
 void AssignUnidentifiedDisplayName(ItemMetadata& metadata, std::string&& value)
 {
 	metadata.unidentifiedDisplayName = NormalizeDisplayToken(std::move(value));
@@ -100,6 +122,16 @@ void AssignResourceName(ItemMetadata& metadata, std::string&& value)
 void AssignIdentifiedResourceName(ItemMetadata& metadata, std::string&& value)
 {
 	metadata.identifiedResourceName = std::move(value);
+}
+
+void AssignCardIllustName(ItemMetadata& metadata, std::string&& value)
+{
+	metadata.cardIllustName = std::move(value);
+}
+
+void AssignSlotCount(ItemMetadata& metadata, int value)
+{
+	metadata.slotCount = (std::max)(0, value);
 }
 
 bool LoadTextFileFromGameData(const char* fileName, std::string& outText)
@@ -189,6 +221,16 @@ std::string ITEM_INFO::GetResourceName() const
 	return g_ttemmgr.GetResourceName(GetItemId(), m_isIdentified != 0);
 }
 
+int ITEM_INFO::GetSlotCount() const
+{
+	return g_ttemmgr.GetSlotCount(GetItemId());
+}
+
+std::string ITEM_INFO::GetCardIllustName() const
+{
+	return g_ttemmgr.GetCardIllustName(GetItemId());
+}
+
 CItemMgr::CItemMgr()
 	: m_loaded(false)
 {
@@ -205,6 +247,8 @@ void CItemMgr::EnsureLoaded()
 	LoadDisplayTable();
 	LoadResourceTable();
 	LoadDescriptionTable();
+	LoadSlotCountTable();
+	LoadCardIllustTable();
 	LoadCardPrefixTable();
 	LoadCardPostfixTable();
 	LoadCardItemTable();
@@ -331,6 +375,22 @@ std::string CItemMgr::GetResourceName(unsigned int itemId, bool identified)
 	return std::string();
 }
 
+int CItemMgr::GetSlotCount(unsigned int itemId)
+{
+	if (const ItemMetadata* metadata = GetMetadata(itemId)) {
+		return metadata->slotCount;
+	}
+	return 0;
+}
+
+std::string CItemMgr::GetCardIllustName(unsigned int itemId)
+{
+	if (const ItemMetadata* metadata = GetMetadata(itemId)) {
+		return metadata->cardIllustName;
+	}
+	return std::string();
+}
+
 int CItemMgr::GetVisibleHeadgearViewId(unsigned int itemId)
 {
 	EnsureLoaded();
@@ -440,8 +500,19 @@ bool CItemMgr::LoadResourceTable()
 
 bool CItemMgr::LoadDescriptionTable()
 {
-	return ParseDescriptionBlocks("num2itemdesctable.txt")
-		|| ParseDescriptionBlocks("idnum2itemdesctable.txt");
+	const bool loadedUnidentified = ParseDescriptionBlocks("num2itemdesctable.txt");
+	const bool loadedIdentified = ParseDescriptionBlocks("idnum2itemdesctable.txt");
+	return loadedUnidentified || loadedIdentified;
+}
+
+bool CItemMgr::LoadSlotCountTable()
+{
+	return ParseIntegerPairTable("itemSlotCountTable.txt", AssignSlotCount);
+}
+
+bool CItemMgr::LoadCardIllustTable()
+{
+	return ParsePairTable("Num2CardIllustNameTable.txt", AssignCardIllustName);
 }
 
 bool CItemMgr::LoadCardPrefixTable()
@@ -496,6 +567,27 @@ bool CItemMgr::ParsePairTable(const char* fileName, void (*assignValue)(ItemMeta
 	return true;
 }
 
+bool CItemMgr::ParseIntegerPairTable(const char* fileName, void (*assignValue)(ItemMetadata&, int))
+{
+	std::string text;
+	if (!LoadTextFileFromGameData(fileName, text)) {
+		return false;
+	}
+
+	std::istringstream input(text);
+	std::string line;
+	while (std::getline(input, line)) {
+		unsigned int itemId = 0;
+		std::string value;
+		if (!ParseHashPairLine(TrimLine(line), itemId, value)) {
+			continue;
+		}
+		assignValue(m_metadata[itemId], std::atoi(value.c_str()));
+	}
+
+	return true;
+}
+
 bool CItemMgr::ParseDescriptionBlocks(const char* fileName)
 {
 	std::string text;
@@ -513,8 +605,7 @@ bool CItemMgr::ParseDescriptionBlocks(const char* fileName)
 		line = TrimLine(line);
 		if (!collecting) {
 			unsigned int itemId = 0;
-			std::string ignored;
-			if (ParseHashPairLine(line, itemId, ignored)) {
+			if (ParseDescriptionBlockHeaderLine(line, itemId)) {
 				currentItemId = itemId;
 				description.str(std::string());
 				description.clear();

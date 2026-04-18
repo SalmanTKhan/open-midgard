@@ -22,6 +22,8 @@
 #include "ui/UIChooseSellBuyWnd.h"
 #include "ui/UIBasicInfoWnd.h"
 #include "ui/UIEquipWnd.h"
+#include "ui/UIItemCollectionWnd.h"
+#include "ui/UIItemInfoWnd.h"
 #include "ui/UIItemWnd.h"
 #include "ui/UIItemPurchaseWnd.h"
 #include "ui/UIItemSellWnd.h"
@@ -36,6 +38,7 @@
 #include "ui/UISelectCharWnd.h"
 #include "ui/UISelectServerWnd.h"
 #include "ui/UISayDialogWnd.h"
+#include "ui/UISkillDescribeWnd.h"
 #include "ui/UISkillListWnd.h"
 #include "ui/UIShortCutWnd.h"
 #include "ui/UIStatusWnd.h"
@@ -181,6 +184,18 @@ void ClearGameplayUiState(QtUiState* state)
     state->setSkillListVisible(false);
     state->setSkillListGeometry(0, 0, 0, 0);
     state->setSkillListData(QVariantMap{});
+
+    state->setItemInfoVisible(false);
+    state->setItemInfoGeometry(0, 0, 0, 0);
+    state->setItemInfoData(QVariantMap{});
+
+    state->setSkillDescribeVisible(false);
+    state->setSkillDescribeGeometry(0, 0, 0, 0);
+    state->setSkillDescribeData(QVariantMap{});
+
+    state->setItemCollectionVisible(false);
+    state->setItemCollectionGeometry(0, 0, 0, 0);
+    state->setItemCollectionData(QVariantMap{});
 
     state->setOptionVisible(false);
     state->setOptionGeometry(0, 0, 0, 0);
@@ -2091,6 +2106,166 @@ void PopulateSkillListState(QtUiState* state)
     state->setSkillListData(data);
 }
 
+void PopulateItemInfoState(QtUiState* state)
+{
+    if (!state) {
+        return;
+    }
+
+    const UIItemInfoWnd* const itemInfoWnd = g_windowMgr.m_itemInfoWnd;
+    const bool visible = IsGameplayWindowVisible(state, itemInfoWnd) && itemInfoWnd->HasItem();
+    state->setItemInfoVisible(visible);
+    if (!visible) {
+        state->setItemInfoGeometry(0, 0, 0, 0);
+        state->setItemInfoData(QVariantMap{});
+        return;
+    }
+
+    state->setItemInfoGeometry(itemInfoWnd->m_x, itemInfoWnd->m_y, itemInfoWnd->m_w, itemInfoWnd->m_h);
+
+    UIItemInfoWnd::DisplayData display{};
+    QVariantMap data;
+    if (itemInfoWnd->GetDisplayDataForQt(&display)) {
+        data.insert(QStringLiteral("title"), ToQString(display.title));
+        data.insert(QStringLiteral("itemId"), static_cast<uint>(display.itemId));
+        data.insert(QStringLiteral("name"), ToQString(display.name));
+        data.insert(QStringLiteral("previewUsesCollection"), display.previewUsesCollection);
+        data.insert(QStringLiteral("description"), ToQString(display.description));
+
+        QVariantList detailLines;
+        detailLines.reserve(static_cast<qsizetype>(display.detailLines.size()));
+        for (const std::string& line : display.detailLines) {
+            detailLines.push_back(ToQString(line));
+        }
+        data.insert(QStringLiteral("detailLines"), detailLines);
+
+        QVariantMap closeButton;
+        closeButton.insert(QStringLiteral("x"), display.closeButton.x);
+        closeButton.insert(QStringLiteral("y"), display.closeButton.y);
+        closeButton.insert(QStringLiteral("width"), display.closeButton.width);
+        closeButton.insert(QStringLiteral("height"), display.closeButton.height);
+        closeButton.insert(QStringLiteral("hovered"), display.closeButton.hovered);
+        closeButton.insert(QStringLiteral("pressed"), display.closeButton.pressed);
+        closeButton.insert(QStringLiteral("label"), ToQString(display.closeButton.label));
+        data.insert(QStringLiteral("closeButton"), closeButton);
+
+        QVariantMap graphicsButton;
+        graphicsButton.insert(QStringLiteral("x"), display.graphicsButton.x);
+        graphicsButton.insert(QStringLiteral("y"), display.graphicsButton.y);
+        graphicsButton.insert(QStringLiteral("width"), display.graphicsButton.width);
+        graphicsButton.insert(QStringLiteral("height"), display.graphicsButton.height);
+        graphicsButton.insert(QStringLiteral("hovered"), display.graphicsButton.hovered);
+        graphicsButton.insert(QStringLiteral("pressed"), display.graphicsButton.pressed);
+        graphicsButton.insert(QStringLiteral("enabled"), display.graphicsButton.enabled);
+        graphicsButton.insert(QStringLiteral("visible"), display.graphicsButton.visible);
+        graphicsButton.insert(QStringLiteral("label"), ToQString(display.graphicsButton.label));
+        data.insert(QStringLiteral("graphicsButton"), graphicsButton);
+
+        QVariantList slotList;
+        slotList.reserve(static_cast<qsizetype>(display.slotEntries.size()));
+        for (const UIItemInfoWnd::DisplaySlot& slot : display.slotEntries) {
+            QVariantMap entry;
+            entry.insert(QStringLiteral("x"), slot.x);
+            entry.insert(QStringLiteral("y"), slot.y);
+            entry.insert(QStringLiteral("width"), slot.width);
+            entry.insert(QStringLiteral("height"), slot.height);
+            entry.insert(QStringLiteral("available"), slot.available);
+            entry.insert(QStringLiteral("occupied"), slot.occupied);
+            entry.insert(QStringLiteral("hovered"), slot.hovered);
+            entry.insert(QStringLiteral("itemId"), static_cast<uint>(slot.itemId));
+            entry.insert(QStringLiteral("tooltip"), ToQString(slot.tooltip));
+            slotList.push_back(entry);
+        }
+        data.insert(QStringLiteral("slots"), slotList);
+    }
+    state->setItemInfoData(data);
+}
+
+void PopulateSkillDescribeState(QtUiState* state)
+{
+    if (!state) {
+        return;
+    }
+
+    const UISkillDescribeWnd* const skillDescribeWnd = g_windowMgr.m_skillDescribeWnd;
+    const bool visible = IsGameplayWindowVisible(state, skillDescribeWnd) && skillDescribeWnd->HasSkill();
+    state->setSkillDescribeVisible(visible);
+    if (!visible) {
+        state->setSkillDescribeGeometry(0, 0, 0, 0);
+        state->setSkillDescribeData(QVariantMap{});
+        return;
+    }
+
+    state->setSkillDescribeGeometry(skillDescribeWnd->m_x, skillDescribeWnd->m_y, skillDescribeWnd->m_w, skillDescribeWnd->m_h);
+
+    UISkillDescribeWnd::DisplayData display{};
+    QVariantMap data;
+    if (skillDescribeWnd->GetDisplayDataForQt(&display)) {
+        data.insert(QStringLiteral("title"), ToQString(display.title));
+        data.insert(QStringLiteral("skillId"), display.skillId);
+        data.insert(QStringLiteral("name"), ToQString(display.name));
+        data.insert(QStringLiteral("description"), ToQString(display.description));
+
+        QVariantList detailLines;
+        detailLines.reserve(static_cast<qsizetype>(display.detailLines.size()));
+        for (const std::string& line : display.detailLines) {
+            if (!line.empty()) {
+                detailLines.push_back(ToQString(line));
+            }
+        }
+        data.insert(QStringLiteral("detailLines"), detailLines);
+
+        QVariantMap closeButton;
+        closeButton.insert(QStringLiteral("x"), display.closeButton.x);
+        closeButton.insert(QStringLiteral("y"), display.closeButton.y);
+        closeButton.insert(QStringLiteral("width"), display.closeButton.width);
+        closeButton.insert(QStringLiteral("height"), display.closeButton.height);
+        closeButton.insert(QStringLiteral("hovered"), display.closeButton.hovered);
+        closeButton.insert(QStringLiteral("pressed"), display.closeButton.pressed);
+        closeButton.insert(QStringLiteral("label"), ToQString(display.closeButton.label));
+        data.insert(QStringLiteral("closeButton"), closeButton);
+    }
+    state->setSkillDescribeData(data);
+}
+
+void PopulateItemCollectionState(QtUiState* state)
+{
+    if (!state) {
+        return;
+    }
+
+    const UIItemCollectionWnd* const itemCollectionWnd = g_windowMgr.m_itemCollectionWnd;
+    const bool visible = IsGameplayWindowVisible(state, itemCollectionWnd) && itemCollectionWnd->HasItem();
+    state->setItemCollectionVisible(visible);
+    if (!visible) {
+        state->setItemCollectionGeometry(0, 0, 0, 0);
+        state->setItemCollectionData(QVariantMap{});
+        return;
+    }
+
+    state->setItemCollectionGeometry(itemCollectionWnd->m_x, itemCollectionWnd->m_y, itemCollectionWnd->m_w, itemCollectionWnd->m_h);
+
+    UIItemCollectionWnd::DisplayData display{};
+    QVariantMap data;
+    if (itemCollectionWnd->GetDisplayDataForQt(&display)) {
+        data.insert(QStringLiteral("title"), ToQString(display.title));
+        data.insert(QStringLiteral("itemId"), static_cast<uint>(display.itemId));
+        data.insert(QStringLiteral("mainUsesIllust"), display.mainUsesIllust);
+        data.insert(QStringLiteral("mainUsesCollection"), display.mainUsesCollection);
+
+        QVariantMap closeButton;
+        closeButton.insert(QStringLiteral("x"), display.closeButton.x);
+        closeButton.insert(QStringLiteral("y"), display.closeButton.y);
+        closeButton.insert(QStringLiteral("width"), display.closeButton.width);
+        closeButton.insert(QStringLiteral("height"), display.closeButton.height);
+        closeButton.insert(QStringLiteral("hovered"), display.closeButton.hovered);
+        closeButton.insert(QStringLiteral("pressed"), display.closeButton.pressed);
+        closeButton.insert(QStringLiteral("label"), ToQString(display.closeButton.label));
+        data.insert(QStringLiteral("closeButton"), closeButton);
+    }
+    state->setItemCollectionData(data);
+}
+
 void PopulateOptionState(QtUiState* state)
 {
     if (!state) {
@@ -2674,6 +2849,9 @@ bool QtUiStateAdapter::syncGameplay(CGameMode& mode,
     PopulateInventoryState(m_state);
     PopulateEquipState(m_state);
     PopulateSkillListState(m_state);
+    PopulateItemInfoState(m_state);
+    PopulateSkillDescribeState(m_state);
+    PopulateItemCollectionState(m_state);
     PopulateOptionState(m_state);
     PopulateMinimapState(m_state);
     const int uiMouseX = UiScaleRawToLogicalCoordinate(mouseX);

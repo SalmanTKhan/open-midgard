@@ -788,6 +788,24 @@ void UISkillListWnd::OnLBtnUp(int x, int y)
     m_dragSkillLevel = 0;
 }
 
+void UISkillListWnd::OnRBtnDown(int x, int y)
+{
+    EnsureCreated();
+    RefreshVisibleSkillsForInteractionState();
+    UpdateHover(x, y);
+
+    if (m_hoveredRow < 0 || m_hoveredRow >= static_cast<int>(m_visibleSkills.size())) {
+        return;
+    }
+
+    const VisibleSkill& visible = m_visibleSkills[m_hoveredRow];
+    if (!visible.skill) {
+        return;
+    }
+
+    g_windowMgr.ShowSkillDescribeWindow(*visible.skill, x + 12, y + 12);
+}
+
 void UISkillListWnd::OnMouseMove(int x, int y)
 {
     if (IsQtUiRuntimeEnabled()) {

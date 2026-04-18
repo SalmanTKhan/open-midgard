@@ -430,6 +430,53 @@ inline std::vector<std::string> BuildItemIconCandidates(const ITEM_INFO& item)
     return out;
 }
 
+inline std::vector<std::string> BuildItemCollectionCandidates(const ITEM_INFO& item)
+{
+    static const char* kUiKorPrefix =
+        "texture\\"
+        "\xC0\xAF\xC0\xFA\xC0\xCE\xC5\xCD\xC6\xE4\xC0\xCC\xBD\xBA"
+        "\\collection\\";
+
+    std::vector<std::string> out;
+    const std::string resource = item.GetResourceName();
+    if (resource.empty()) {
+        return out;
+    }
+
+    std::string stem = NormalizeSlash(resource);
+    std::string filenameOnly = stem;
+    const size_t slashPos = filenameOnly.find_last_of('\\');
+    if (slashPos != std::string::npos && slashPos + 1 < filenameOnly.size()) {
+        filenameOnly = filenameOnly.substr(slashPos + 1);
+    }
+
+    AddUniqueCandidate(out, stem);
+    AddUniqueCandidate(out, stem + ".bmp");
+    AddUniqueCandidate(out, filenameOnly);
+    AddUniqueCandidate(out, filenameOnly + ".bmp");
+
+    const char* prefixes[] = {
+        kUiKorPrefix,
+        "data\\texture\\\xC0\xAF\xC0\xFA\xC0\xCE\xC5\xCD\xC6\xE4\xC0\xCC\xBD\xBA\\collection\\",
+        "collection\\",
+        "texture\\collection\\",
+        "texture\\interface\\collection\\",
+        "data\\collection\\",
+        "data\\texture\\collection\\",
+        "data\\texture\\interface\\collection\\",
+        nullptr
+    };
+
+    for (int index = 0; prefixes[index]; ++index) {
+        AddUniqueCandidate(out, std::string(prefixes[index]) + stem);
+        AddUniqueCandidate(out, std::string(prefixes[index]) + stem + ".bmp");
+        AddUniqueCandidate(out, std::string(prefixes[index]) + filenameOnly);
+        AddUniqueCandidate(out, std::string(prefixes[index]) + filenameOnly + ".bmp");
+    }
+
+    return out;
+}
+
 inline bool TryLoadItemIconPixels(const ITEM_INFO& item, BitmapPixels* outBitmap)
 {
     if (!outBitmap) {
@@ -438,6 +485,87 @@ inline bool TryLoadItemIconPixels(const ITEM_INFO& item, BitmapPixels* outBitmap
 
     outBitmap->Clear();
     for (const std::string& candidate : BuildItemIconCandidates(item)) {
+        if (!g_fileMgr.IsDataExist(candidate.c_str())) {
+            continue;
+        }
+
+        *outBitmap = LoadBitmapPixelsFromGameData(candidate, true);
+        if (outBitmap->IsValid()) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+inline bool TryLoadItemCollectionPixels(const ITEM_INFO& item, BitmapPixels* outBitmap)
+{
+    if (!outBitmap) {
+        return false;
+    }
+
+    outBitmap->Clear();
+    for (const std::string& candidate : BuildItemCollectionCandidates(item)) {
+        if (!g_fileMgr.IsDataExist(candidate.c_str())) {
+            continue;
+        }
+
+        *outBitmap = LoadBitmapPixelsFromGameData(candidate, true);
+        if (outBitmap->IsValid()) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+inline std::vector<std::string> BuildCardIllustCandidates(const ITEM_INFO& item)
+{
+    static const char* kIllustPrefix =
+        "texture\\"
+        "\xC0\xAF\xC0\xFA\xC0\xCE\xC5\xCD\xC6\xE4\xC0\xCC\xBD\xBA"
+        "\\Illust\\";
+    static const char* kCardBmpPrefix =
+        "texture\\"
+        "\xC0\xAF\xC0\xFA\xC0\xCE\xC5\xCD\xC6\xE4\xC0\xCC\xBD\xBA"
+        "\\cardbmp\\";
+
+    std::vector<std::string> out;
+    std::string illustName = item.GetCardIllustName();
+    if (illustName.empty()) {
+        return out;
+    }
+
+    illustName = NormalizeSlash(illustName);
+    AddUniqueCandidate(out, illustName);
+    AddUniqueCandidate(out, illustName + ".bmp");
+
+    const char* prefixes[] = {
+        kIllustPrefix,
+        kCardBmpPrefix,
+        "data\\texture\\\xC0\xAF\xC0\xFA\xC0\xCE\xC5\xCD\xC6\xE4\xC0\xCC\xBD\xBA\\Illust\\",
+        "data\\texture\\\xC0\xAF\xC0\xFA\xC0\xCE\xC5\xCD\xC6\xE4\xC0\xCC\xBD\xBA\\cardbmp\\",
+        "Illust\\",
+        "cardbmp\\",
+        nullptr
+    };
+
+    for (int index = 0; prefixes[index]; ++index) {
+        AddUniqueCandidate(out, std::string(prefixes[index]) + illustName);
+        AddUniqueCandidate(out, std::string(prefixes[index]) + illustName + ".bmp");
+    }
+
+    return out;
+}
+
+inline bool TryLoadCardIllustPixels(const ITEM_INFO& item, BitmapPixels* outBitmap)
+{
+    if (!outBitmap) {
+        return false;
+    }
+
+    outBitmap->Clear();
+    for (const std::string& candidate : BuildCardIllustCandidates(item)) {
         if (!g_fileMgr.IsDataExist(candidate.c_str())) {
             continue;
         }

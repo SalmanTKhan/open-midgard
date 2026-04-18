@@ -197,6 +197,24 @@ class QtUiState : public QObject {
     Q_PROPERTY(int skillListWidth READ skillListWidth NOTIFY skillListGeometryChanged)
     Q_PROPERTY(int skillListHeight READ skillListHeight NOTIFY skillListGeometryChanged)
     Q_PROPERTY(QVariantMap skillListData READ skillListData NOTIFY skillListDataChanged)
+    Q_PROPERTY(bool itemInfoVisible READ itemInfoVisible NOTIFY itemInfoVisibleChanged)
+    Q_PROPERTY(int itemInfoX READ itemInfoX NOTIFY itemInfoGeometryChanged)
+    Q_PROPERTY(int itemInfoY READ itemInfoY NOTIFY itemInfoGeometryChanged)
+    Q_PROPERTY(int itemInfoWidth READ itemInfoWidth NOTIFY itemInfoGeometryChanged)
+    Q_PROPERTY(int itemInfoHeight READ itemInfoHeight NOTIFY itemInfoGeometryChanged)
+    Q_PROPERTY(QVariantMap itemInfoData READ itemInfoData NOTIFY itemInfoDataChanged)
+    Q_PROPERTY(bool skillDescribeVisible READ skillDescribeVisible NOTIFY skillDescribeVisibleChanged)
+    Q_PROPERTY(int skillDescribeX READ skillDescribeX NOTIFY skillDescribeGeometryChanged)
+    Q_PROPERTY(int skillDescribeY READ skillDescribeY NOTIFY skillDescribeGeometryChanged)
+    Q_PROPERTY(int skillDescribeWidth READ skillDescribeWidth NOTIFY skillDescribeGeometryChanged)
+    Q_PROPERTY(int skillDescribeHeight READ skillDescribeHeight NOTIFY skillDescribeGeometryChanged)
+    Q_PROPERTY(QVariantMap skillDescribeData READ skillDescribeData NOTIFY skillDescribeDataChanged)
+    Q_PROPERTY(bool itemCollectionVisible READ itemCollectionVisible NOTIFY itemCollectionVisibleChanged)
+    Q_PROPERTY(int itemCollectionX READ itemCollectionX NOTIFY itemCollectionGeometryChanged)
+    Q_PROPERTY(int itemCollectionY READ itemCollectionY NOTIFY itemCollectionGeometryChanged)
+    Q_PROPERTY(int itemCollectionWidth READ itemCollectionWidth NOTIFY itemCollectionGeometryChanged)
+    Q_PROPERTY(int itemCollectionHeight READ itemCollectionHeight NOTIFY itemCollectionGeometryChanged)
+    Q_PROPERTY(QVariantMap itemCollectionData READ itemCollectionData NOTIFY itemCollectionDataChanged)
     Q_PROPERTY(bool optionVisible READ optionVisible NOTIFY optionVisibleChanged)
     Q_PROPERTY(int optionX READ optionX NOTIFY optionGeometryChanged)
     Q_PROPERTY(int optionY READ optionY NOTIFY optionGeometryChanged)
@@ -416,6 +434,24 @@ public:
     int skillListWidth() const { return m_skillListWidth; }
     int skillListHeight() const { return m_skillListHeight; }
     const QVariantMap& skillListData() const { return m_skillListData; }
+    bool itemInfoVisible() const { return m_itemInfoVisible; }
+    int itemInfoX() const { return m_itemInfoX; }
+    int itemInfoY() const { return m_itemInfoY; }
+    int itemInfoWidth() const { return m_itemInfoWidth; }
+    int itemInfoHeight() const { return m_itemInfoHeight; }
+    const QVariantMap& itemInfoData() const { return m_itemInfoData; }
+    bool skillDescribeVisible() const { return m_skillDescribeVisible; }
+    int skillDescribeX() const { return m_skillDescribeX; }
+    int skillDescribeY() const { return m_skillDescribeY; }
+    int skillDescribeWidth() const { return m_skillDescribeWidth; }
+    int skillDescribeHeight() const { return m_skillDescribeHeight; }
+    const QVariantMap& skillDescribeData() const { return m_skillDescribeData; }
+    bool itemCollectionVisible() const { return m_itemCollectionVisible; }
+    int itemCollectionX() const { return m_itemCollectionX; }
+    int itemCollectionY() const { return m_itemCollectionY; }
+    int itemCollectionWidth() const { return m_itemCollectionWidth; }
+    int itemCollectionHeight() const { return m_itemCollectionHeight; }
+    const QVariantMap& itemCollectionData() const { return m_itemCollectionData; }
     bool optionVisible() const { return m_optionVisible; }
     int optionX() const { return m_optionX; }
     int optionY() const { return m_optionY; }
@@ -1441,6 +1477,90 @@ public:
         emit skillListDataChanged();
     }
 
+    void setItemInfoVisible(bool value) {
+        if (m_itemInfoVisible == value) {
+            return;
+        }
+        m_itemInfoVisible = value;
+        emit itemInfoVisibleChanged();
+    }
+
+    void setItemInfoGeometry(int x, int y, int width, int height) {
+        if (m_itemInfoX == x && m_itemInfoY == y
+            && m_itemInfoWidth == width && m_itemInfoHeight == height) {
+            return;
+        }
+        m_itemInfoX = x;
+        m_itemInfoY = y;
+        m_itemInfoWidth = width;
+        m_itemInfoHeight = height;
+        emit itemInfoGeometryChanged();
+    }
+
+    void setItemInfoData(const QVariantMap& value) {
+        if (m_itemInfoData == value) {
+            return;
+        }
+        m_itemInfoData = value;
+        emit itemInfoDataChanged();
+    }
+
+    void setSkillDescribeVisible(bool value) {
+        if (m_skillDescribeVisible == value) {
+            return;
+        }
+        m_skillDescribeVisible = value;
+        emit skillDescribeVisibleChanged();
+    }
+
+    void setSkillDescribeGeometry(int x, int y, int width, int height) {
+        if (m_skillDescribeX == x && m_skillDescribeY == y
+            && m_skillDescribeWidth == width && m_skillDescribeHeight == height) {
+            return;
+        }
+        m_skillDescribeX = x;
+        m_skillDescribeY = y;
+        m_skillDescribeWidth = width;
+        m_skillDescribeHeight = height;
+        emit skillDescribeGeometryChanged();
+    }
+
+    void setSkillDescribeData(const QVariantMap& value) {
+        if (m_skillDescribeData == value) {
+            return;
+        }
+        m_skillDescribeData = value;
+        emit skillDescribeDataChanged();
+    }
+
+    void setItemCollectionVisible(bool value) {
+        if (m_itemCollectionVisible == value) {
+            return;
+        }
+        m_itemCollectionVisible = value;
+        emit itemCollectionVisibleChanged();
+    }
+
+    void setItemCollectionGeometry(int x, int y, int width, int height) {
+        if (m_itemCollectionX == x && m_itemCollectionY == y
+            && m_itemCollectionWidth == width && m_itemCollectionHeight == height) {
+            return;
+        }
+        m_itemCollectionX = x;
+        m_itemCollectionY = y;
+        m_itemCollectionWidth = width;
+        m_itemCollectionHeight = height;
+        emit itemCollectionGeometryChanged();
+    }
+
+    void setItemCollectionData(const QVariantMap& value) {
+        if (m_itemCollectionData == value) {
+            return;
+        }
+        m_itemCollectionData = value;
+        emit itemCollectionDataChanged();
+    }
+
     void setOptionVisible(bool value) {
         if (m_optionVisible == value) {
             return;
@@ -1653,6 +1773,15 @@ signals:
     void skillListVisibleChanged();
     void skillListGeometryChanged();
     void skillListDataChanged();
+    void itemInfoVisibleChanged();
+    void itemInfoGeometryChanged();
+    void itemInfoDataChanged();
+    void skillDescribeVisibleChanged();
+    void skillDescribeGeometryChanged();
+    void skillDescribeDataChanged();
+    void itemCollectionVisibleChanged();
+    void itemCollectionGeometryChanged();
+    void itemCollectionDataChanged();
     void optionVisibleChanged();
     void optionGeometryChanged();
     void optionDataChanged();
@@ -1857,6 +1986,24 @@ private:
     int m_skillListWidth = 0;
     int m_skillListHeight = 0;
     QVariantMap m_skillListData;
+    bool m_itemInfoVisible = false;
+    int m_itemInfoX = 0;
+    int m_itemInfoY = 0;
+    int m_itemInfoWidth = 0;
+    int m_itemInfoHeight = 0;
+    QVariantMap m_itemInfoData;
+    bool m_skillDescribeVisible = false;
+    int m_skillDescribeX = 0;
+    int m_skillDescribeY = 0;
+    int m_skillDescribeWidth = 0;
+    int m_skillDescribeHeight = 0;
+    QVariantMap m_skillDescribeData;
+    bool m_itemCollectionVisible = false;
+    int m_itemCollectionX = 0;
+    int m_itemCollectionY = 0;
+    int m_itemCollectionWidth = 0;
+    int m_itemCollectionHeight = 0;
+    QVariantMap m_itemCollectionData;
     bool m_optionVisible = false;
     int m_optionX = 0;
     int m_optionY = 0;

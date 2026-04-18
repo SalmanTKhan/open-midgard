@@ -993,6 +993,31 @@ void UIItemWnd::OnLBtnUp(int x, int y)
     UIFrameWnd::OnLBtnUp(x, y);
 }
 
+void UIItemWnd::OnRBtnDown(int x, int y)
+{
+    if (m_show == 0 || m_h <= kMiniHeight) {
+        return;
+    }
+
+    RefreshVisibleItemsForInteractionState();
+    UpdateHoveredItem(x, y);
+    if (m_hoveredItemIndex < 0) {
+        return;
+    }
+
+    const std::vector<const ITEM_INFO*> filteredItems = GetFilteredItems();
+    if (m_hoveredItemIndex >= static_cast<int>(filteredItems.size())) {
+        return;
+    }
+
+    const ITEM_INFO* const item = filteredItems[m_hoveredItemIndex];
+    if (!item) {
+        return;
+    }
+
+    g_windowMgr.ShowItemInfoWindow(*item, x + 12, y + 12);
+}
+
 void UIItemWnd::OnMouseMove(int x, int y)
 {
     UIFrameWnd::OnMouseMove(x, y);

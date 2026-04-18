@@ -28,6 +28,8 @@ struct ITEM_INFO {
     std::string GetEquipDisplayName() const;
     std::string GetDescription() const;
     std::string GetResourceName() const;
+    int GetSlotCount() const;
+    std::string GetCardIllustName() const;
 };
 
 struct ItemMetadata {
@@ -36,6 +38,8 @@ struct ItemMetadata {
     std::string unidentifiedResourceName;
     std::string identifiedResourceName;
     std::string description;
+    int slotCount = 0;
+    std::string cardIllustName;
 };
 
 class CItemMgr
@@ -50,6 +54,8 @@ public:
     std::string GetEquipDisplayName(const ITEM_INFO& item);
     std::string GetDescription(unsigned int itemId);
     std::string GetResourceName(unsigned int itemId, bool identified);
+    int GetSlotCount(unsigned int itemId);
+    std::string GetCardIllustName(unsigned int itemId);
     int GetVisibleHeadgearViewId(unsigned int itemId);
     std::string GetVisibleHeadgearResourceNameByViewId(int viewId);
     std::string GetCardPrefixName(unsigned int itemId);
@@ -60,10 +66,13 @@ private:
     bool LoadDisplayTable();
     bool LoadResourceTable();
     bool LoadDescriptionTable();
+    bool LoadSlotCountTable();
+    bool LoadCardIllustTable();
     bool LoadCardPrefixTable();
     bool LoadCardPostfixTable();
     bool LoadCardItemTable();
     bool ParsePairTable(const char* fileName, void (*assignValue)(ItemMetadata&, std::string&&));
+    bool ParseIntegerPairTable(const char* fileName, void (*assignValue)(ItemMetadata&, int));
     bool ParseDescriptionBlocks(const char* fileName);
     bool ParseIdSetTable(const char* fileName, std::unordered_set<unsigned int>& outSet);
 
