@@ -25,9 +25,16 @@ constexpr int kMenuHeight = 164;
 constexpr int kBorder = 1;
 constexpr int kPadding = 10;
 constexpr int kOptionHeight = 18;
+constexpr int kOptionsToButtonsGap = 14;
 constexpr int kButtonWidth = 68;
 constexpr int kButtonHeight = 22;
 constexpr int kCornerRadius = 10;
+
+int GetNpcMenuHeightForOptionCount(int optionCount)
+{
+    const int safeOptionCount = (std::max)(0, optionCount);
+    return kPadding + safeOptionCount * kOptionHeight + kOptionsToButtonsGap + kButtonHeight + kPadding;
+}
 
 HFONT GetNpcMenuFont()
 {
@@ -324,6 +331,8 @@ void UINpcMenuWnd::SetMenu(u32 npcId, const std::vector<std::string>& options)
     m_selectedIndex = m_options.empty() ? -1 : 0;
     m_hoverIndex = -1;
     m_pressedTarget = ClickTarget::None;
+    Resize(kMenuWidth, GetNpcMenuHeightForOptionCount(static_cast<int>(m_options.size())));
+    Move(m_x, m_y);
     SetShow(1);
     Invalidate();
 }
