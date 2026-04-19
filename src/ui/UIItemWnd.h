@@ -93,6 +93,7 @@ private:
     void LayoutChildren();
     void LoadAssets();
     void ReleaseAssets();
+    void TryActivateItemAtPoint(int x, int y);
     void SetMiniMode(bool miniMode);
     void SetCurrentTab(int tabIndex);
     void RefreshVisibleItemsForInteractionState();
@@ -130,6 +131,8 @@ private:
     unsigned int m_dragItemIndex;
     int m_dragItemCount;
     int m_dragItemEquipLocation;
+    DWORD m_lastClickTick;
+    unsigned int m_lastClickItemIndex;
     unsigned long long m_lastVisualStateToken;
     bool m_hasVisualStateToken;
 };

@@ -582,7 +582,23 @@ inline bool TryLoadCardIllustPixels(const ITEM_INFO& item, BitmapPixels* outBitm
 
 inline std::string GetItemDisplayName(const ITEM_INFO& item)
 {
-    const std::string displayName = item.GetDisplayName();
+    std::string displayName;
+    switch (item.m_itemType) {
+    case 4:
+    case 5:
+    case 8:
+    case 9:
+    case 11:
+    case 12:
+    case 13:
+    case 14:
+    case 15:
+        displayName = item.m_isIdentified != 0 ? item.GetEquipDisplayName() : item.GetDisplayName();
+        break;
+    default:
+        displayName = item.GetDisplayName();
+        break;
+    }
     if (!displayName.empty()) {
         return displayName;
     }
@@ -592,14 +608,14 @@ inline std::string GetItemDisplayName(const ITEM_INFO& item)
     return "Unknown Item";
 }
 
+inline std::string BuildItemHoverNameText(const ITEM_INFO& item)
+{
+    return GetItemDisplayName(item);
+}
+
 inline std::string BuildItemHoverText(const ITEM_INFO& item)
 {
-    std::string text;
-    if (item.m_refiningLevel > 0) {
-        text = "+" + std::to_string(item.m_refiningLevel) + " ";
-    }
-
-    text += GetItemDisplayName(item);
+    std::string text = BuildItemHoverNameText(item);
     text += ": ";
     text += std::to_string((std::max)(1, item.m_num));
     text += " ea";

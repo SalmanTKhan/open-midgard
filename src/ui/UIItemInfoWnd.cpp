@@ -213,6 +213,15 @@ void DrawSlotTooltip(HDC hdc, const RECT& bounds, const RECT& anchorRect, const 
                                RGB(255, 255, 255),
                                DT_LEFT | DT_VCENTER | DT_SINGLELINE);
 }
+
+ITEM_INFO BuildSlottedCardInfo(unsigned int itemId)
+{
+    ITEM_INFO item{};
+    item.SetItemId(itemId);
+    item.m_num = 1;
+    item.m_isIdentified = 1;
+    return item;
+}
 }
 
 UIItemInfoWnd::UIItemInfoWnd()
@@ -307,11 +316,8 @@ void UIItemInfoWnd::OnDraw()
         }
 
         if (m_hoveredSlotIndex >= 0 && m_hoveredSlotIndex < 4 && m_slotItemIds[static_cast<size_t>(m_hoveredSlotIndex)] != 0) {
-            ITEM_INFO slotItem{};
-            slotItem.SetItemId(m_slotItemIds[static_cast<size_t>(m_hoveredSlotIndex)]);
-            slotItem.m_num = 1;
-            slotItem.m_isIdentified = 1;
-            DrawSlotTooltip(hdc, bounds, GetSlotRect(m_hoveredSlotIndex), shopui::BuildItemHoverText(slotItem));
+            const ITEM_INFO slotItem = BuildSlottedCardInfo(m_slotItemIds[static_cast<size_t>(m_hoveredSlotIndex)]);
+            DrawSlotTooltip(hdc, bounds, GetSlotRect(m_hoveredSlotIndex), SanitizeRoText(shopui::BuildItemHoverNameText(slotItem)));
         }
     }
 
@@ -359,6 +365,26 @@ void UIItemInfoWnd::OnLBtnUp(int x, int y)
     if (activateGraphics && m_hasItem) {
         g_windowMgr.ShowItemCollectionWindow(m_item, m_x + m_w + 8, m_y + 24);
     }
+}
+
+void UIItemInfoWnd::OnRBtnDown(int x, int y)
+{
+    if (m_show == 0 || !ShouldShowSlots()) {
+        return;
+    }
+
+    UpdateInteraction(x, y);
+    if (m_hoveredSlotIndex < 0 || m_hoveredSlotIndex >= 4) {
+        return;
+    }
+
+    const unsigned int itemId = m_slotItemIds[static_cast<size_t>(m_hoveredSlotIndex)];
+    if (itemId == 0) {
+        return;
+    }
+
+    const ITEM_INFO slotItem = BuildSlottedCardInfo(itemId);
+    g_windowMgr.ShowItemInfoWindow(slotItem, x + 12, y + 12);
 }
 
 void UIItemInfoWnd::OnMouseMove(int x, int y)
@@ -429,11 +455,8 @@ bool UIItemInfoWnd::GetDisplayDataForQt(DisplayData* outData) const
             slot.occupied = slot.itemId != 0;
             slot.hovered = slotIndex == m_hoveredSlotIndex;
             if (slot.occupied) {
-                ITEM_INFO hoverItem{};
-                hoverItem.SetItemId(slot.itemId);
-                hoverItem.m_num = 1;
-                hoverItem.m_isIdentified = 1;
-                slot.tooltip = shopui::BuildItemHoverText(hoverItem);
+                const ITEM_INFO hoverItem = BuildSlottedCardInfo(slot.itemId);
+                slot.tooltip = SanitizeRoText(shopui::BuildItemHoverNameText(hoverItem));
             }
             outData->slotEntries.push_back(std::move(slot));
         }

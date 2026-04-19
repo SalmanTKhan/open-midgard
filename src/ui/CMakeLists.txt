@@ -37,6 +37,8 @@ add_library(ro_ui STATIC
     UIItemInfoWnd.cpp
     UIItemCollectionWnd.h
     UIItemCollectionWnd.cpp
+    UIItemCompositionWnd.h
+    UIItemCompositionWnd.cpp
     UIItemIdentifyWnd.h
     UIItemIdentifyWnd.cpp
     UIShortCutWnd.h

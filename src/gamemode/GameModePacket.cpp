@@ -24,7 +24,9 @@
 #include <cmath>
 #include "ui/UIChooseSellBuyWnd.h"
 #include "ui/UIEquipWnd.h"
+#include "ui/UIItemCompositionWnd.h"
 #include "ui/UIItemIdentifyWnd.h"
+#include "ui/UIItemInfoWnd.h"
 #include "ui/UIItemWnd.h"
 #include "ui/UIItemPurchaseWnd.h"
 #include "ui/UIItemSellWnd.h"
@@ -835,6 +837,7 @@ void HandleUseItemAck2(CGameMode&, const PacketView& packet)
     if (IsLocalActorId(actorId)) {
         if (CGameMode* gameMode = g_modeMgr.GetCurrentGameMode()) {
             gameMode->m_waitingUseItemAck = 0;
+            gameMode->m_lastCardItemIndex = ok && g_ttemmgr.IsCardItem(itemId) ? static_cast<int>(itemIndex) : 0;
         }
 
         if (ok) {
@@ -872,11 +875,13 @@ void HandleUseItemAck(CGameMode& mode, const PacketView& packet)
     const unsigned int itemIndex = static_cast<unsigned int>(ReadLE16(packet.data + 2));
     const int remainingAmount = static_cast<int>(ReadLE16(packet.data + 4));
     const bool ok = packet.data[6] != 0;
+    const ITEM_INFO* item = g_session.GetInventoryItemByIndex(itemIndex);
 
     mode.m_waitingUseItemAck = 0;
+    mode.m_lastCardItemIndex = ok && item && g_ttemmgr.IsCardItem(item->GetItemId()) ? static_cast<int>(itemIndex) : 0;
 
     if (ok) {
-        if (const ITEM_INFO* existing = g_session.GetInventoryItemByIndex(itemIndex)) {
+        if (const ITEM_INFO* existing = item) {
             const int currentAmount = (std::max)(0, existing->m_num);
             const int consumedAmount = currentAmount - (std::max)(0, remainingAmount);
             if (consumedAmount > 0) {
@@ -891,8 +896,11 @@ void HandleUseItemAck(CGameMode& mode, const PacketView& packet)
         ok ? 1 : 0);
 }
 
-void RefreshIdentifyDependentWindows()
+void RefreshInventoryDependentWindows()
 {
+    if (g_windowMgr.m_itemInfoWnd) {
+        g_windowMgr.m_itemInfoWnd->Invalidate();
+    }
     if (g_windowMgr.m_itemWnd) {
         g_windowMgr.m_itemWnd->Invalidate();
     }
@@ -902,6 +910,21 @@ void RefreshIdentifyDependentWindows()
     if (g_windowMgr.m_shortCutWnd) {
         g_windowMgr.m_shortCutWnd->Invalidate();
     }
+}
+
+void ShowItemCompositionWindow(const std::vector<unsigned int>& itemIndices)
+{
+    UIItemCompositionWnd* const window = dynamic_cast<UIItemCompositionWnd*>(g_windowMgr.MakeWindow(UIWindowMgr::WID_ITEMCOMPOSITIONWND));
+    if (!window) {
+        return;
+    }
+
+    unsigned int cardItemIndex = 0;
+    if (const CGameMode* gameMode = g_modeMgr.GetCurrentGameMode()) {
+        cardItemIndex = static_cast<unsigned int>((std::max)(0, gameMode->m_lastCardItemIndex));
+    }
+    window->SetCardItemIndex(cardItemIndex);
+    window->SetEquipmentItemIndices(itemIndices);
 }
 
 void ShowIdentifyWindow(const std::vector<unsigned int>& itemIndices)
@@ -984,13 +1007,76 @@ void HandleItemIdentifyAck(CGameMode&, const PacketView& packet)
             updated.m_isIdentified = 1;
             g_session.SetInventoryItem(updated);
         }
-        RefreshIdentifyDependentWindows();
+        RefreshInventoryDependentWindows();
         g_windowMgr.PushChatEvent("Item has been identified.", kSystemNoticeColor, 6);
     } else {
         g_windowMgr.PushChatEvent("Item identification failed.", 0x00FF4040u, 6);
     }
 
     DbgLog("[GameMode] item identify ack index=%u result=%u\n", itemIndex, result);
+}
+
+void HandleItemCompositionList(CGameMode&, const PacketView& packet)
+{
+    if (!packet.data || packet.packetLength < 4 || ((packet.packetLength - 4) % 2) != 0) {
+        return;
+    }
+
+    std::vector<unsigned int> itemIndices;
+    const int count = (packet.packetLength - 4) / 2;
+    itemIndices.reserve(static_cast<size_t>(count));
+    for (int index = 0; index < count; ++index) {
+        const unsigned int itemIndex = static_cast<unsigned int>(ReadLE16(packet.data + 4 + index * 2));
+        if (itemIndex == 0) {
+            continue;
+        }
+        itemIndices.push_back(itemIndex);
+    }
+
+    ShowItemCompositionWindow(itemIndices);
+    DbgLog("[GameMode] item composition list count=%d cardIndex=%d\n",
+        static_cast<int>(itemIndices.size()),
+        g_modeMgr.GetCurrentGameMode() ? g_modeMgr.GetCurrentGameMode()->m_lastCardItemIndex : 0);
+}
+
+void HandleItemCompositionAck(CGameMode&, const PacketView& packet)
+{
+    if (!packet.data || packet.packetLength < 7) {
+        return;
+    }
+
+    const unsigned int equipItemIndex = static_cast<unsigned int>(ReadLE16(packet.data + 2));
+    const unsigned int cardItemIndex = static_cast<unsigned int>(ReadLE16(packet.data + 4));
+    const unsigned int result = static_cast<unsigned int>(packet.data[6]);
+
+    if (CGameMode* gameMode = g_modeMgr.GetCurrentGameMode()) {
+        gameMode->m_lastCardItemIndex = 0;
+    }
+
+    if (result == 0) {
+        const ITEM_INFO* cardItem = g_session.GetInventoryItemByIndex(cardItemIndex);
+        const ITEM_INFO* equipItem = g_session.GetInventoryItemByIndex(equipItemIndex);
+        if (cardItem && equipItem && cardItem->m_itemIndex != 0 && equipItem->m_itemIndex != 0) {
+            ITEM_INFO updatedEquipItem = *equipItem;
+            for (int slotIndex = 0; slotIndex < 4; ++slotIndex) {
+                if (updatedEquipItem.m_slot[slotIndex] == 0) {
+                    updatedEquipItem.m_slot[slotIndex] = static_cast<int>(cardItem->GetItemId());
+                    break;
+                }
+            }
+            g_session.RemoveInventoryItem(cardItemIndex, 1);
+            g_session.SetInventoryItem(updatedEquipItem);
+        }
+        RefreshInventoryDependentWindows();
+        g_windowMgr.PushChatEvent("Item compounding succeeded.", kSystemNoticeColor, 6);
+    } else if (result == 1) {
+        g_windowMgr.PushChatEvent("Item compounding failed.", 0x00FF4040u, 6);
+    }
+
+    DbgLog("[GameMode] item composition ack equipIndex=%u cardIndex=%u result=%u\n",
+        equipItemIndex,
+        cardItemIndex,
+        result);
 }
 
 void HandleRecovery(CGameMode& mode, const PacketView& packet)
@@ -7671,7 +7757,9 @@ void RegisterDefaultGameModePacketHandlers(CGameModePacketRouter& router)
     router.Register(0x00AC, HandleUnequipItemAck);
     router.Register(0x00A8, HandleUseItemAck);
     router.Register(0x0147, HandleAutoRunSkill);
+    router.Register(0x017B, HandleItemCompositionList);
     router.Register(0x0177, HandleItemIdentifyList);
+    router.Register(0x017D, HandleItemCompositionAck);
     router.Register(0x0179, HandleItemIdentifyAck);
     router.Register(0x00F2, HandleStorageStatus);
     router.Register(0x00F4, HandleStorageItemAdded);

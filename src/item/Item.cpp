@@ -21,6 +21,66 @@ constexpr const char* kAccessoryNameTableScript = "lua files\\datainfo\\accname.
 constexpr const char* kAccessoryNameTableName = "AccNameTable";
 constexpr int kMaxAccessoryViewId = 8192;
 
+struct AggregatedCardLabel {
+	std::string label;
+	int count = 0;
+};
+
+const char* GetRepeatedCardPrefixWord(int count)
+{
+	switch (count) {
+	case 2:
+		return "Double";
+	case 3:
+		return "Triple";
+	case 4:
+		return "Quadruple";
+	default:
+		return nullptr;
+	}
+}
+
+void AppendCardPrefixLabel(std::vector<AggregatedCardLabel>& labels, std::string&& label)
+{
+	if (label.empty()) {
+		return;
+	}
+
+	for (AggregatedCardLabel& existing : labels) {
+		if (existing.label == label) {
+			++existing.count;
+			return;
+		}
+	}
+
+	AggregatedCardLabel entry;
+	entry.label = std::move(label);
+	entry.count = 1;
+	labels.push_back(std::move(entry));
+}
+
+std::string BuildAggregatedCardPrefixText(const std::vector<AggregatedCardLabel>& labels)
+{
+	std::string text;
+	for (const AggregatedCardLabel& entry : labels) {
+		if (entry.label.empty() || entry.count <= 0) {
+			continue;
+		}
+
+		if (!text.empty()) {
+			text += " ";
+		}
+
+		if (const char* repeatWord = GetRepeatedCardPrefixWord(entry.count)) {
+			text += repeatWord;
+			text += " ";
+		}
+
+		text += entry.label;
+	}
+	return text;
+}
+
 std::string TrimLine(std::string value)
 {
 	while (!value.empty() && (value.back() == '\r' || value.back() == '\n')) {
@@ -298,7 +358,7 @@ std::string CItemMgr::GetEquipDisplayName(const ITEM_INFO& item)
 		text += " ";
 	}
 
-	bool hasPrefix = false;
+	std::vector<AggregatedCardLabel> prefixLabels;
 	for (int slotIndex = 0; slotIndex < 4; ++slotIndex) {
 		const unsigned int cardId = static_cast<unsigned int>(item.m_slot[slotIndex]);
 		if (cardId == 0 || !IsCardItem(cardId) || IsPostfixCard(cardId)) {
@@ -313,14 +373,12 @@ std::string CItemMgr::GetEquipDisplayName(const ITEM_INFO& item)
 			continue;
 		}
 
-		if (hasPrefix) {
-			text += " ";
-		}
-		text += prefix;
-		hasPrefix = true;
+		AppendCardPrefixLabel(prefixLabels, std::move(prefix));
 	}
 
-	if (hasPrefix) {
+	const std::string prefixText = BuildAggregatedCardPrefixText(prefixLabels);
+	if (!prefixText.empty()) {
+		text += prefixText;
 		text += " ";
 	}
 

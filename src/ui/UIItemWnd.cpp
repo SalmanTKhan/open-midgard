@@ -433,6 +433,12 @@ bool ItemBelongsToTab(const ITEM_INFO& item, int tabIndex)
     }
 }
 
+bool CanUseInventoryItemOnDoubleClick(const ITEM_INFO& item)
+{
+    return IsUsableTabType(item.m_itemType)
+        || g_ttemmgr.IsCardItem(item.GetItemId());
+}
+
 std::string BuildShortItemLabel(const ITEM_INFO& item)
 {
     std::string shortName = item.GetDisplayName();
@@ -613,8 +619,10 @@ UIItemWnd::UIItemWnd()
       m_dragStartPoint{},
       m_dragItemId(0),
       m_dragItemIndex(0),
-    m_dragItemCount(0),
+            m_dragItemCount(0),
       m_dragItemEquipLocation(0),
+            m_lastClickTick(0),
+            m_lastClickItemIndex(0),
       m_lastVisualStateToken(0ull),
       m_hasVisualStateToken(false)
 {
@@ -872,7 +880,7 @@ void UIItemWnd::OnLBtnDblClk(int x, int y)
                         0) != 0) {
                     return;
                 }
-            } else if (item && IsUsableTabType(item->m_itemType)) {
+            } else if (item && CanUseInventoryItemOnDoubleClick(*item)) {
                 if (g_modeMgr.SendMsg(
                         CGameMode::GameMsg_RequestUseInventoryItem,
                         static_cast<int>(item->m_itemIndex),
@@ -903,6 +911,58 @@ void UIItemWnd::OnLBtnDblClk(int x, int y)
     }
 
     UIFrameWnd::OnLBtnDblClk(x, y);
+}
+
+void UIItemWnd::TryActivateItemAtPoint(int x, int y)
+{
+    UpdateHoveredItem(x, y);
+    if (m_hoveredItemIndex < 0) {
+        return;
+    }
+
+    const std::vector<const ITEM_INFO*> filteredItems = GetFilteredItems();
+    if (m_hoveredItemIndex >= static_cast<int>(filteredItems.size())) {
+        return;
+    }
+
+    const ITEM_INFO* item = filteredItems[m_hoveredItemIndex];
+    if (!item) {
+        return;
+    }
+
+    if (g_session.IsStorageOpen()) {
+        g_modeMgr.SendMsg(
+            CGameMode::GameMsg_RequestStorageStoreItem,
+            static_cast<int>(item->m_itemIndex),
+            (std::max)(1, item->m_num),
+            0);
+        return;
+    }
+
+    if (CanUseInventoryItemOnDoubleClick(*item)) {
+        g_modeMgr.SendMsg(
+            CGameMode::GameMsg_RequestUseInventoryItem,
+            static_cast<int>(item->m_itemIndex),
+            0,
+            0);
+        return;
+    }
+
+    if (IsEquipTabType(item->m_itemType)) {
+        if (item->m_wearLocation != 0) {
+            g_modeMgr.SendMsg(
+                CGameMode::GameMsg_RequestUnequipInventoryItem,
+                static_cast<int>(item->m_itemIndex),
+                0,
+                0);
+        } else if (item->m_location != 0) {
+            g_modeMgr.SendMsg(
+                CGameMode::GameMsg_RequestEquipInventoryItem,
+                static_cast<int>(item->m_itemIndex),
+                item->m_location,
+                0);
+        }
+    }
 }
 
 void UIItemWnd::OnLBtnDown(int x, int y)
@@ -954,6 +1014,22 @@ void UIItemWnd::OnLBtnDown(int x, int y)
         if (m_hoveredItemIndex < static_cast<int>(filteredItems.size())) {
             const ITEM_INFO* item = filteredItems[m_hoveredItemIndex];
             if (item) {
+                const DWORD now = GetTickCount();
+                const bool sameItem = m_lastClickItemIndex == item->m_itemIndex;
+                const bool withinDoubleClickTime = m_lastClickTick != 0
+                    && (now - m_lastClickTick) <= GetDoubleClickTime();
+                m_lastClickTick = now;
+                m_lastClickItemIndex = item->m_itemIndex;
+                if (sameItem && withinDoubleClickTime) {
+                    TryActivateItemAtPoint(x, y);
+                    m_dragArmed = false;
+                    m_dragItemId = 0;
+                    m_dragItemIndex = 0;
+                    m_dragItemCount = 0;
+                    m_dragItemEquipLocation = 0;
+                    return;
+                }
+
                 m_dragArmed = true;
                 m_dragStartPoint = POINT{ x, y };
                 m_dragItemId = item->GetItemId();
@@ -962,6 +1038,8 @@ void UIItemWnd::OnLBtnDown(int x, int y)
                 m_dragItemEquipLocation = item->m_location;
             }
         }
+    } else {
+        m_lastClickItemIndex = 0;
     }
 }
 

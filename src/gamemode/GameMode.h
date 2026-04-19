@@ -105,6 +105,7 @@ public:
             GameMsg_RequestStorageWithdrawItem = 20029,
             GameMsg_RequestStorageClose = 20030,
             GameMsg_RequestIdentifyInventoryItem = 20031,
+                GameMsg_RequestComposeCardIntoEquipment = 20032,
     };
 
     CGameMode();

@@ -1130,6 +1130,12 @@ public:
                 m_menuPointerCaptureTarget = MenuPointerCaptureTarget::None;
                 return true;
             }
+            if (!HasFrontMenuUiVisible()) {
+                g_windowMgr.OnLBtnDblClk(
+                    GetUiLogicalX(lParam),
+                    GetUiLogicalY(lParam));
+                return true;
+            }
             [[fallthrough]];
 
         case WM_LBUTTONDOWN:

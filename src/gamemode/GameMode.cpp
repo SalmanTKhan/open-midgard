@@ -5440,6 +5440,28 @@ bool RequestUseInventoryItem(u16 itemIndex)
         return false;
     }
 
+    if (g_ttemmgr.IsCardItem(item->GetItemId())) {
+        PACKET_CZ_ITEM_COMPOSITION_LIST packet{};
+        packet.PacketType = PacketProfile::ActiveMapServerSend::kItemCompositionList;
+        packet.CardItemIndex = static_cast<u16>(item->m_itemIndex);
+
+        const bool sent = CRagConnection::instance()->SendPacket(
+            reinterpret_cast<const char*>(&packet),
+            static_cast<int>(sizeof(packet)));
+        if (sent) {
+            if (CGameMode* gameMode = g_modeMgr.GetCurrentGameMode()) {
+                gameMode->m_waitingUseItemAck = 0;
+                gameMode->m_lastCardItemIndex = static_cast<int>(item->m_itemIndex);
+            }
+        }
+
+        DbgLog("[GameMode] item composition list request itemId=%u index=%u sent=%d\n",
+            static_cast<unsigned int>(item->GetItemId()),
+            static_cast<unsigned int>(item->m_itemIndex),
+            sent ? 1 : 0);
+        return sent;
+    }
+
     PACKET_CZ_USEITEM2 packet{};
     packet.PacketType = PacketProfile::ActiveMapServerSend::kUseItem;
     packet.ItemIndex = static_cast<u16>(item->m_itemIndex);
@@ -5451,6 +5473,7 @@ bool RequestUseInventoryItem(u16 itemIndex)
     if (sent) {
         if (CGameMode* gameMode = g_modeMgr.GetCurrentGameMode()) {
             gameMode->m_waitingUseItemAck = static_cast<int>(item->m_itemIndex);
+            gameMode->m_lastCardItemIndex = 0;
         }
     }
 
@@ -5479,6 +5502,39 @@ bool RequestIdentifyInventoryItem(s16 itemIndex)
         static_cast<int>(sizeof(packet)));
     DbgLog("[GameMode] item identify request index=%d sent=%d\n",
         static_cast<int>(itemIndex),
+        sent ? 1 : 0);
+    return sent;
+}
+
+bool RequestComposeCardIntoEquipment(s16 cardItemIndex, s16 equipItemIndex)
+{
+    if (cardItemIndex < 0 || equipItemIndex < 0) {
+        if (CGameMode* gameMode = g_modeMgr.GetCurrentGameMode()) {
+            gameMode->m_lastCardItemIndex = 0;
+        }
+        return false;
+    }
+
+    const ITEM_INFO* cardItem = g_session.GetInventoryItemByIndex(static_cast<unsigned int>(cardItemIndex));
+    const ITEM_INFO* equipItem = g_session.GetInventoryItemByIndex(static_cast<unsigned int>(equipItemIndex));
+    if (!cardItem || !equipItem || cardItem->m_itemIndex == 0 || equipItem->m_itemIndex == 0) {
+        return false;
+    }
+    if (!g_ttemmgr.IsCardItem(cardItem->GetItemId())) {
+        return false;
+    }
+
+    PACKET_CZ_ITEM_COMPOSITION packet{};
+    packet.PacketType = PacketProfile::ActiveMapServerSend::kItemComposition;
+    packet.CardItemIndex = static_cast<u16>(cardItemIndex);
+    packet.EquipItemIndex = static_cast<u16>(equipItemIndex);
+
+    const bool sent = CRagConnection::instance()->SendPacket(
+        reinterpret_cast<const char*>(&packet),
+        static_cast<int>(sizeof(packet)));
+    DbgLog("[GameMode] item composition request cardIndex=%d equipIndex=%d sent=%d\n",
+        static_cast<int>(cardItemIndex),
+        static_cast<int>(equipItemIndex),
         sent ? 1 : 0);
     return sent;
 }
@@ -9481,6 +9537,9 @@ msgresult_t CGameMode::SendMsg(int msg, msgparam_t wparam, msgparam_t lparam, ms
 
     case GameMsg_RequestIdentifyInventoryItem:
         return RequestIdentifyInventoryItem(static_cast<s16>(wparam)) ? 1 : 0;
+
+    case GameMsg_RequestComposeCardIntoEquipment:
+        return RequestComposeCardIntoEquipment(static_cast<s16>(wparam), static_cast<s16>(lparam)) ? 1 : 0;
 
     case GameMsg_RButtonUp:
         m_canRotateView = 0;

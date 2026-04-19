@@ -49,6 +49,8 @@ namespace PacketVer23MapServerSend {
 constexpr u16 kWantToConnection = 0x0436;
 constexpr u16 kActionRequest = 0x0437;
 constexpr u16 kUseSkillToId = 0x0438;
+constexpr u16 kItemCompositionList = 0x017A;
+constexpr u16 kItemComposition = 0x017C;
 constexpr u16 kItemIdentify = 0x0178;
 // Ground skill (CZ_USE_SKILL_TOGROUND): from packet_ver 22 onward this lives at 0x0113 with
 // padding; 0x0116 is repurposed (e.g. dropitem). See Ref/RunningServer/packet_db.txt.
@@ -74,6 +76,8 @@ namespace ActiveMapServerSend {
 constexpr u16 kWantToConnection = PacketVer23MapServerSend::kWantToConnection;
 constexpr u16 kActionRequest = PacketVer23MapServerSend::kActionRequest;
 constexpr u16 kUseSkillToId = PacketVer23MapServerSend::kUseSkillToId;
+constexpr u16 kItemCompositionList = PacketVer23MapServerSend::kItemCompositionList;
+constexpr u16 kItemComposition = PacketVer23MapServerSend::kItemComposition;
 constexpr u16 kItemIdentify = PacketVer23MapServerSend::kItemIdentify;
 constexpr u16 kUseSkillToPos = PacketVer23MapServerSend::kUseSkillToPos;
 constexpr u16 kDropItem = PacketVer23MapServerSend::kDropItem;
@@ -282,9 +286,20 @@ struct PACKET_CZ_USEITEM2 {
     u32 TargetAID;
 };
 
+struct PACKET_CZ_ITEM_COMPOSITION_LIST {
+    u16 PacketType;    // 0x017A
+    u16 CardItemIndex;
+};
+
 struct PACKET_CZ_ITEM_IDENTIFY {
     u16 PacketType;    // 0x0178
     s16 ItemIndex;     // inventory index, or -1 to cancel
+};
+
+struct PACKET_CZ_ITEM_COMPOSITION {
+    u16 PacketType;       // 0x017C
+    u16 CardItemIndex;
+    u16 EquipItemIndex;
 };
 
 struct PACKET_CZ_SKILLUP {
@@ -460,7 +475,9 @@ static_assert(sizeof(PACKET_CZ_USESKILLTOPOSINFO) == 90, "PACKET_CZ_USESKILLTOPO
 static_assert(sizeof(PACKET_CZ_ITEM_THROW) == 10, "PACKET_CZ_ITEM_THROW size mismatch");
 static_assert(sizeof(PACKET_CZ_USESKILLMAP) == 20, "PACKET_CZ_USESKILLMAP size mismatch");
 static_assert(sizeof(PACKET_CZ_USEITEM2) == 8, "PACKET_CZ_USEITEM2 size mismatch");
+static_assert(sizeof(PACKET_CZ_ITEM_COMPOSITION_LIST) == 4, "PACKET_CZ_ITEM_COMPOSITION_LIST size mismatch");
 static_assert(sizeof(PACKET_CZ_ITEM_IDENTIFY) == 4, "PACKET_CZ_ITEM_IDENTIFY size mismatch");
+static_assert(sizeof(PACKET_CZ_ITEM_COMPOSITION) == 6, "PACKET_CZ_ITEM_COMPOSITION size mismatch");
 static_assert(sizeof(PACKET_CZ_SKILLUP) == 4, "PACKET_CZ_SKILLUP size mismatch");
 static_assert(sizeof(PACKET_CZ_TAKE_ITEM2) == 8, "PACKET_CZ_TAKE_ITEM2 size mismatch");
 static_assert(sizeof(PACKET_CZ_REQ_WEAR_EQUIP) == 6, "PACKET_CZ_REQ_WEAR_EQUIP size mismatch");

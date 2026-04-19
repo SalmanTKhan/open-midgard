@@ -3771,6 +3771,192 @@ Item {
     }
 
     Rectangle {
+        x: uiState.itemCompositionX
+        y: uiState.itemCompositionY
+        width: uiState.itemCompositionWidth
+        height: uiState.itemCompositionHeight
+        radius: 4
+        color: "#ede9df"
+        border.width: 1
+        border.color: "#6b675f"
+        visible: uiState.itemCompositionVisible
+        z: 43
+
+        Rectangle {
+            x: 1
+            y: 1
+            width: parent.width - 2
+            height: 16
+            radius: 3
+            color: "#6e8194"
+            border.width: 1
+            border.color: "#4e5d6c"
+        }
+
+        Text {
+            x: 8
+            y: 3
+            text: uiState.itemCompositionData.title || "Compound Item"
+            color: "#ffffff"
+            font.pixelSize: 12
+            font.bold: true
+        }
+
+        Rectangle {
+            x: (uiState.itemCompositionData.closeButton.x || 0) - uiState.itemCompositionX
+            y: (uiState.itemCompositionData.closeButton.y || 0) - uiState.itemCompositionY
+            width: uiState.itemCompositionData.closeButton.width || 0
+            height: uiState.itemCompositionData.closeButton.height || 0
+            radius: 2
+            color: (uiState.itemCompositionData.closeButton.pressed || false) ? "#b9c7de" : ((uiState.itemCompositionData.closeButton.hovered || false) ? "#d7dff0" : "#e7e2d6")
+            border.width: 1
+            border.color: "#7f7a70"
+
+            Text {
+                anchors.centerIn: parent
+                text: uiState.itemCompositionData.closeButton.label || "X"
+                color: "#000000"
+                font.pixelSize: 8
+                font.bold: true
+            }
+        }
+
+        Rectangle {
+            id: itemCompositionList
+            x: 8
+            y: 27
+            width: Math.max(0, parent.width - 30)
+            height: 128
+            color: "#ffffff"
+            border.width: 1
+            border.color: "#c4c0b5"
+            clip: true
+
+            Text {
+                anchors.centerIn: parent
+                visible: (uiState.itemCompositionData.rows || []).length === 0
+                text: uiState.itemCompositionData.emptyText || "No equipment can accept this card."
+                color: "#505050"
+                font.pixelSize: 10
+            }
+
+            Repeater {
+                model: uiState.itemCompositionData.rows || []
+
+                delegate: Rectangle {
+                    required property var modelData
+                    x: (modelData.x || 0) - uiState.itemCompositionX - itemCompositionList.x
+                    y: (modelData.y || 0) - uiState.itemCompositionY - itemCompositionList.y
+                    width: modelData.width || 0
+                    height: modelData.height || 0
+                    color: (modelData.selected || false) ? "#d7dff0" : ((modelData.hovered || false) ? "#ece8de" : "#f9f7f3")
+                    border.width: 1
+                    border.color: (modelData.selected || false) ? "#7e95bf" : "#bcb4a7"
+
+                    Rectangle {
+                        x: 4
+                        y: 4
+                        width: 24
+                        height: 24
+                        color: "#f5f2ea"
+                        border.width: 1
+                        border.color: "#a69f91"
+
+                        Image {
+                            anchors.fill: parent
+                            anchors.margins: 1
+                            fillMode: Image.PreserveAspectFit
+                            smooth: false
+                            cache: false
+                            source: root.itemIconSource(modelData.itemId || 0, modelData.identified)
+                        }
+                    }
+
+                    Text {
+                        x: 34
+                        y: 5
+                        width: parent.width - 70
+                        text: modelData.label || ""
+                        color: "#000000"
+                        font.pixelSize: 11
+                        font.bold: modelData.selected || false
+                        elide: Text.ElideRight
+                    }
+
+                    Text {
+                        anchors.right: parent.right
+                        anchors.rightMargin: 8
+                        y: 5
+                        visible: (modelData.count || 0) > 1
+                        text: modelData.count || 0
+                        color: "#5a4020"
+                        font.pixelSize: 10
+                    }
+                }
+            }
+        }
+
+        Rectangle {
+            x: (uiState.itemCompositionData.scrollBar.trackX || 0) - uiState.itemCompositionX
+            y: (uiState.itemCompositionData.scrollBar.trackY || 0) - uiState.itemCompositionY
+            width: uiState.itemCompositionData.scrollBar.trackWidth || 0
+            height: uiState.itemCompositionData.scrollBar.trackHeight || 0
+            visible: uiState.itemCompositionData.scrollBar.visible || false
+            color: "#e3e7ee"
+            border.width: 1
+            border.color: "#a4adbd"
+
+            Rectangle {
+                x: (uiState.itemCompositionData.scrollBar.thumbX || 0) - (uiState.itemCompositionData.scrollBar.trackX || 0)
+                y: (uiState.itemCompositionData.scrollBar.thumbY || 0) - (uiState.itemCompositionData.scrollBar.trackY || 0)
+                width: uiState.itemCompositionData.scrollBar.thumbWidth || 0
+                height: uiState.itemCompositionData.scrollBar.thumbHeight || 0
+                color: "#b4bccd"
+                border.width: 1
+                border.color: "#788296"
+            }
+        }
+
+        Rectangle {
+            x: (uiState.itemCompositionData.okButton.x || 0) - uiState.itemCompositionX
+            y: (uiState.itemCompositionData.okButton.y || 0) - uiState.itemCompositionY
+            width: uiState.itemCompositionData.okButton.width || 0
+            height: uiState.itemCompositionData.okButton.height || 0
+            radius: 3
+            color: !(uiState.itemCompositionData.okButton.enabled || false)
+                ? "#d0d0d0"
+                : ((uiState.itemCompositionData.okButton.pressed || false) ? "#b9c7de" : ((uiState.itemCompositionData.okButton.hovered || false) ? "#d7dff0" : "#e9e4d8"))
+            border.width: 1
+            border.color: "#8c8578"
+
+            Text {
+                anchors.centerIn: parent
+                text: uiState.itemCompositionData.okButton.label || "OK"
+                color: "#000000"
+                font.pixelSize: 10
+            }
+        }
+
+        Rectangle {
+            x: (uiState.itemCompositionData.cancelButton.x || 0) - uiState.itemCompositionX
+            y: (uiState.itemCompositionData.cancelButton.y || 0) - uiState.itemCompositionY
+            width: uiState.itemCompositionData.cancelButton.width || 0
+            height: uiState.itemCompositionData.cancelButton.height || 0
+            radius: 3
+            color: (uiState.itemCompositionData.cancelButton.pressed || false) ? "#b9c7de" : ((uiState.itemCompositionData.cancelButton.hovered || false) ? "#d7dff0" : "#e9e4d8")
+            border.width: 1
+            border.color: "#8c8578"
+
+            Text {
+                anchors.centerIn: parent
+                text: uiState.itemCompositionData.cancelButton.label || "Cancel"
+                color: "#000000"
+                font.pixelSize: 10
+            }
+        }
+    }
+
+    Rectangle {
         x: uiState.optionX
         y: uiState.optionY
         width: uiState.optionWidth

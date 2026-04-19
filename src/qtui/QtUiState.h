@@ -229,6 +229,12 @@ class QtUiState : public QObject {
     Q_PROPERTY(int itemIdentifyWidth READ itemIdentifyWidth NOTIFY itemIdentifyGeometryChanged)
     Q_PROPERTY(int itemIdentifyHeight READ itemIdentifyHeight NOTIFY itemIdentifyGeometryChanged)
     Q_PROPERTY(QVariantMap itemIdentifyData READ itemIdentifyData NOTIFY itemIdentifyDataChanged)
+    Q_PROPERTY(bool itemCompositionVisible READ itemCompositionVisible NOTIFY itemCompositionVisibleChanged)
+    Q_PROPERTY(int itemCompositionX READ itemCompositionX NOTIFY itemCompositionGeometryChanged)
+    Q_PROPERTY(int itemCompositionY READ itemCompositionY NOTIFY itemCompositionGeometryChanged)
+    Q_PROPERTY(int itemCompositionWidth READ itemCompositionWidth NOTIFY itemCompositionGeometryChanged)
+    Q_PROPERTY(int itemCompositionHeight READ itemCompositionHeight NOTIFY itemCompositionGeometryChanged)
+    Q_PROPERTY(QVariantMap itemCompositionData READ itemCompositionData NOTIFY itemCompositionDataChanged)
     Q_PROPERTY(bool optionVisible READ optionVisible NOTIFY optionVisibleChanged)
     Q_PROPERTY(int optionX READ optionX NOTIFY optionGeometryChanged)
     Q_PROPERTY(int optionY READ optionY NOTIFY optionGeometryChanged)
@@ -480,6 +486,12 @@ public:
     int itemIdentifyWidth() const { return m_itemIdentifyWidth; }
     int itemIdentifyHeight() const { return m_itemIdentifyHeight; }
     const QVariantMap& itemIdentifyData() const { return m_itemIdentifyData; }
+    bool itemCompositionVisible() const { return m_itemCompositionVisible; }
+    int itemCompositionX() const { return m_itemCompositionX; }
+    int itemCompositionY() const { return m_itemCompositionY; }
+    int itemCompositionWidth() const { return m_itemCompositionWidth; }
+    int itemCompositionHeight() const { return m_itemCompositionHeight; }
+    const QVariantMap& itemCompositionData() const { return m_itemCompositionData; }
     bool optionVisible() const { return m_optionVisible; }
     int optionX() const { return m_optionX; }
     int optionY() const { return m_optionY; }
@@ -1661,6 +1673,34 @@ public:
         emit itemIdentifyDataChanged();
     }
 
+    void setItemCompositionVisible(bool value) {
+        if (m_itemCompositionVisible == value) {
+            return;
+        }
+        m_itemCompositionVisible = value;
+        emit itemCompositionVisibleChanged();
+    }
+
+    void setItemCompositionGeometry(int x, int y, int width, int height) {
+        if (m_itemCompositionX == x && m_itemCompositionY == y
+            && m_itemCompositionWidth == width && m_itemCompositionHeight == height) {
+            return;
+        }
+        m_itemCompositionX = x;
+        m_itemCompositionY = y;
+        m_itemCompositionWidth = width;
+        m_itemCompositionHeight = height;
+        emit itemCompositionGeometryChanged();
+    }
+
+    void setItemCompositionData(const QVariantMap& value) {
+        if (m_itemCompositionData == value) {
+            return;
+        }
+        m_itemCompositionData = value;
+        emit itemCompositionDataChanged();
+    }
+
     void setOptionVisible(bool value) {
         if (m_optionVisible == value) {
             return;
@@ -1890,6 +1930,9 @@ signals:
     void itemIdentifyVisibleChanged();
     void itemIdentifyGeometryChanged();
     void itemIdentifyDataChanged();
+    void itemCompositionVisibleChanged();
+    void itemCompositionGeometryChanged();
+    void itemCompositionDataChanged();
     void optionVisibleChanged();
     void optionGeometryChanged();
     void optionDataChanged();
@@ -2126,6 +2169,12 @@ private:
     int m_itemIdentifyWidth = 0;
     int m_itemIdentifyHeight = 0;
     QVariantMap m_itemIdentifyData;
+    bool m_itemCompositionVisible = false;
+    int m_itemCompositionX = 0;
+    int m_itemCompositionY = 0;
+    int m_itemCompositionWidth = 0;
+    int m_itemCompositionHeight = 0;
+    QVariantMap m_itemCompositionData;
     bool m_optionVisible = false;
     int m_optionX = 0;
     int m_optionY = 0;
