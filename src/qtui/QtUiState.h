@@ -223,6 +223,12 @@ class QtUiState : public QObject {
     Q_PROPERTY(int itemCollectionWidth READ itemCollectionWidth NOTIFY itemCollectionGeometryChanged)
     Q_PROPERTY(int itemCollectionHeight READ itemCollectionHeight NOTIFY itemCollectionGeometryChanged)
     Q_PROPERTY(QVariantMap itemCollectionData READ itemCollectionData NOTIFY itemCollectionDataChanged)
+    Q_PROPERTY(bool itemIdentifyVisible READ itemIdentifyVisible NOTIFY itemIdentifyVisibleChanged)
+    Q_PROPERTY(int itemIdentifyX READ itemIdentifyX NOTIFY itemIdentifyGeometryChanged)
+    Q_PROPERTY(int itemIdentifyY READ itemIdentifyY NOTIFY itemIdentifyGeometryChanged)
+    Q_PROPERTY(int itemIdentifyWidth READ itemIdentifyWidth NOTIFY itemIdentifyGeometryChanged)
+    Q_PROPERTY(int itemIdentifyHeight READ itemIdentifyHeight NOTIFY itemIdentifyGeometryChanged)
+    Q_PROPERTY(QVariantMap itemIdentifyData READ itemIdentifyData NOTIFY itemIdentifyDataChanged)
     Q_PROPERTY(bool optionVisible READ optionVisible NOTIFY optionVisibleChanged)
     Q_PROPERTY(int optionX READ optionX NOTIFY optionGeometryChanged)
     Q_PROPERTY(int optionY READ optionY NOTIFY optionGeometryChanged)
@@ -468,6 +474,12 @@ public:
     int itemCollectionWidth() const { return m_itemCollectionWidth; }
     int itemCollectionHeight() const { return m_itemCollectionHeight; }
     const QVariantMap& itemCollectionData() const { return m_itemCollectionData; }
+    bool itemIdentifyVisible() const { return m_itemIdentifyVisible; }
+    int itemIdentifyX() const { return m_itemIdentifyX; }
+    int itemIdentifyY() const { return m_itemIdentifyY; }
+    int itemIdentifyWidth() const { return m_itemIdentifyWidth; }
+    int itemIdentifyHeight() const { return m_itemIdentifyHeight; }
+    const QVariantMap& itemIdentifyData() const { return m_itemIdentifyData; }
     bool optionVisible() const { return m_optionVisible; }
     int optionX() const { return m_optionX; }
     int optionY() const { return m_optionY; }
@@ -1621,6 +1633,34 @@ public:
         emit itemCollectionDataChanged();
     }
 
+    void setItemIdentifyVisible(bool value) {
+        if (m_itemIdentifyVisible == value) {
+            return;
+        }
+        m_itemIdentifyVisible = value;
+        emit itemIdentifyVisibleChanged();
+    }
+
+    void setItemIdentifyGeometry(int x, int y, int width, int height) {
+        if (m_itemIdentifyX == x && m_itemIdentifyY == y
+            && m_itemIdentifyWidth == width && m_itemIdentifyHeight == height) {
+            return;
+        }
+        m_itemIdentifyX = x;
+        m_itemIdentifyY = y;
+        m_itemIdentifyWidth = width;
+        m_itemIdentifyHeight = height;
+        emit itemIdentifyGeometryChanged();
+    }
+
+    void setItemIdentifyData(const QVariantMap& value) {
+        if (m_itemIdentifyData == value) {
+            return;
+        }
+        m_itemIdentifyData = value;
+        emit itemIdentifyDataChanged();
+    }
+
     void setOptionVisible(bool value) {
         if (m_optionVisible == value) {
             return;
@@ -1847,6 +1887,9 @@ signals:
     void itemCollectionVisibleChanged();
     void itemCollectionGeometryChanged();
     void itemCollectionDataChanged();
+    void itemIdentifyVisibleChanged();
+    void itemIdentifyGeometryChanged();
+    void itemIdentifyDataChanged();
     void optionVisibleChanged();
     void optionGeometryChanged();
     void optionDataChanged();
@@ -2077,6 +2120,12 @@ private:
     int m_itemCollectionWidth = 0;
     int m_itemCollectionHeight = 0;
     QVariantMap m_itemCollectionData;
+    bool m_itemIdentifyVisible = false;
+    int m_itemIdentifyX = 0;
+    int m_itemIdentifyY = 0;
+    int m_itemIdentifyWidth = 0;
+    int m_itemIdentifyHeight = 0;
+    QVariantMap m_itemIdentifyData;
     bool m_optionVisible = false;
     int m_optionX = 0;
     int m_optionY = 0;

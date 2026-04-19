@@ -5461,6 +5461,28 @@ bool RequestUseInventoryItem(u16 itemIndex)
     return sent;
 }
 
+bool RequestIdentifyInventoryItem(s16 itemIndex)
+{
+    if (itemIndex >= 0) {
+        const ITEM_INFO* item = g_session.GetInventoryItemByIndex(static_cast<unsigned int>(itemIndex));
+        if (!item || item->m_itemIndex == 0 || item->m_isIdentified != 0) {
+            return false;
+        }
+    }
+
+    PACKET_CZ_ITEM_IDENTIFY packet{};
+    packet.PacketType = PacketProfile::ActiveMapServerSend::kItemIdentify;
+    packet.ItemIndex = itemIndex;
+
+    const bool sent = CRagConnection::instance()->SendPacket(
+        reinterpret_cast<const char*>(&packet),
+        static_cast<int>(sizeof(packet)));
+    DbgLog("[GameMode] item identify request index=%d sent=%d\n",
+        static_cast<int>(itemIndex),
+        sent ? 1 : 0);
+    return sent;
+}
+
 bool RequestDropInventoryItem(u16 itemIndex, u16 amount)
 {
     if (itemIndex == 0 || amount == 0) {
@@ -9456,6 +9478,9 @@ msgresult_t CGameMode::SendMsg(int msg, msgparam_t wparam, msgparam_t lparam, ms
 
     case GameMsg_RequestShortcutUse:
         return RequestShortcutSlotUse(static_cast<int>(wparam)) ? 1 : 0;
+
+    case GameMsg_RequestIdentifyInventoryItem:
+        return RequestIdentifyInventoryItem(static_cast<s16>(wparam)) ? 1 : 0;
 
     case GameMsg_RButtonUp:
         m_canRotateView = 0;

@@ -23,6 +23,7 @@
 #include "ui/UIBasicInfoWnd.h"
 #include "ui/UIEquipWnd.h"
 #include "ui/UIItemCollectionWnd.h"
+#include "ui/UIItemIdentifyWnd.h"
 #include "ui/UIItemInfoWnd.h"
 #include "ui/UIItemWnd.h"
 #include "ui/UIStorageWnd.h"
@@ -203,6 +204,10 @@ void ClearGameplayUiState(QtUiState* state)
     state->setItemCollectionVisible(false);
     state->setItemCollectionGeometry(0, 0, 0, 0);
     state->setItemCollectionData(QVariantMap{});
+
+    state->setItemIdentifyVisible(false);
+    state->setItemIdentifyGeometry(0, 0, 0, 0);
+    state->setItemIdentifyData(QVariantMap{});
 
     state->setOptionVisible(false);
     state->setOptionGeometry(0, 0, 0, 0);
@@ -2395,6 +2400,94 @@ void PopulateItemCollectionState(QtUiState* state)
     state->setItemCollectionData(data);
 }
 
+void PopulateItemIdentifyState(QtUiState* state)
+{
+    if (!state) {
+        return;
+    }
+
+    const UIItemIdentifyWnd* const itemIdentifyWnd = g_windowMgr.m_itemIdentifyWnd;
+    const bool visible = IsGameplayWindowVisible(state, itemIdentifyWnd);
+    state->setItemIdentifyVisible(visible);
+    if (!visible) {
+        state->setItemIdentifyGeometry(0, 0, 0, 0);
+        state->setItemIdentifyData(QVariantMap{});
+        return;
+    }
+
+    state->setItemIdentifyGeometry(itemIdentifyWnd->m_x, itemIdentifyWnd->m_y, itemIdentifyWnd->m_w, itemIdentifyWnd->m_h);
+
+    UIItemIdentifyWnd::DisplayData display{};
+    QVariantMap data;
+    if (itemIdentifyWnd->GetDisplayDataForQt(&display)) {
+        data.insert(QStringLiteral("title"), ToQString(display.title));
+        data.insert(QStringLiteral("emptyText"), ToQString(display.emptyText));
+
+        QVariantMap closeButton;
+        closeButton.insert(QStringLiteral("x"), display.closeButton.x);
+        closeButton.insert(QStringLiteral("y"), display.closeButton.y);
+        closeButton.insert(QStringLiteral("width"), display.closeButton.width);
+        closeButton.insert(QStringLiteral("height"), display.closeButton.height);
+        closeButton.insert(QStringLiteral("hovered"), display.closeButton.hovered);
+        closeButton.insert(QStringLiteral("pressed"), display.closeButton.pressed);
+        closeButton.insert(QStringLiteral("label"), ToQString(display.closeButton.label));
+        data.insert(QStringLiteral("closeButton"), closeButton);
+
+        QVariantMap okButton;
+        okButton.insert(QStringLiteral("x"), display.okButton.x);
+        okButton.insert(QStringLiteral("y"), display.okButton.y);
+        okButton.insert(QStringLiteral("width"), display.okButton.width);
+        okButton.insert(QStringLiteral("height"), display.okButton.height);
+        okButton.insert(QStringLiteral("hovered"), display.okButton.hovered);
+        okButton.insert(QStringLiteral("pressed"), display.okButton.pressed);
+        okButton.insert(QStringLiteral("enabled"), display.okButton.enabled);
+        okButton.insert(QStringLiteral("label"), ToQString(display.okButton.label));
+        data.insert(QStringLiteral("okButton"), okButton);
+
+        QVariantMap cancelButton;
+        cancelButton.insert(QStringLiteral("x"), display.cancelButton.x);
+        cancelButton.insert(QStringLiteral("y"), display.cancelButton.y);
+        cancelButton.insert(QStringLiteral("width"), display.cancelButton.width);
+        cancelButton.insert(QStringLiteral("height"), display.cancelButton.height);
+        cancelButton.insert(QStringLiteral("hovered"), display.cancelButton.hovered);
+        cancelButton.insert(QStringLiteral("pressed"), display.cancelButton.pressed);
+        cancelButton.insert(QStringLiteral("label"), ToQString(display.cancelButton.label));
+        data.insert(QStringLiteral("cancelButton"), cancelButton);
+
+        QVariantList rows;
+        rows.reserve(static_cast<qsizetype>(display.rows.size()));
+        for (const UIItemIdentifyWnd::DisplayRow& row : display.rows) {
+            QVariantMap entry;
+            entry.insert(QStringLiteral("itemIndex"), static_cast<uint>(row.itemIndex));
+            entry.insert(QStringLiteral("itemId"), static_cast<uint>(row.itemId));
+            entry.insert(QStringLiteral("identified"), row.identified);
+            entry.insert(QStringLiteral("x"), row.x);
+            entry.insert(QStringLiteral("y"), row.y);
+            entry.insert(QStringLiteral("width"), row.width);
+            entry.insert(QStringLiteral("height"), row.height);
+            entry.insert(QStringLiteral("hovered"), row.hovered);
+            entry.insert(QStringLiteral("selected"), row.selected);
+            entry.insert(QStringLiteral("count"), row.count);
+            entry.insert(QStringLiteral("label"), ToQString(row.label));
+            rows.push_back(entry);
+        }
+        data.insert(QStringLiteral("rows"), rows);
+
+        QVariantMap scrollBar;
+        scrollBar.insert(QStringLiteral("visible"), display.scrollBar.visible);
+        scrollBar.insert(QStringLiteral("trackX"), display.scrollBar.trackX);
+        scrollBar.insert(QStringLiteral("trackY"), display.scrollBar.trackY);
+        scrollBar.insert(QStringLiteral("trackWidth"), display.scrollBar.trackWidth);
+        scrollBar.insert(QStringLiteral("trackHeight"), display.scrollBar.trackHeight);
+        scrollBar.insert(QStringLiteral("thumbX"), display.scrollBar.thumbX);
+        scrollBar.insert(QStringLiteral("thumbY"), display.scrollBar.thumbY);
+        scrollBar.insert(QStringLiteral("thumbWidth"), display.scrollBar.thumbWidth);
+        scrollBar.insert(QStringLiteral("thumbHeight"), display.scrollBar.thumbHeight);
+        data.insert(QStringLiteral("scrollBar"), scrollBar);
+    }
+    state->setItemIdentifyData(data);
+}
+
 void PopulateOptionState(QtUiState* state)
 {
     if (!state) {
@@ -2990,6 +3083,7 @@ bool QtUiStateAdapter::syncGameplay(CGameMode& mode,
     PopulateItemInfoState(m_state);
     PopulateSkillDescribeState(m_state);
     PopulateItemCollectionState(m_state);
+    PopulateItemIdentifyState(m_state);
     PopulateOptionState(m_state);
     PopulateMinimapState(m_state);
     const int uiMouseX = UiScaleRawToLogicalCoordinate(mouseX);

@@ -168,6 +168,7 @@ void FillPacketSizeTable()
     SetPacketSize(0x011F, 16);
     SetPacketSize(0x0120, 6);
     SetPacketSize(0x012F, kVariablePacketSize);
+    SetPacketSize(0x0147, 39);              // ZC_AUTORUN_SKILL (e.g. Magnifier -> MC_IDENTIFY)
     SetPacketSize(0x0130, 6);
     SetPacketSize(0x0131, 86);
     SetPacketSize(0x0132, 6);
@@ -194,6 +195,9 @@ void FillPacketSizeTable()
     SetPacketSize(0x0173, 3);
     SetPacketSize(0x0174, kVariablePacketSize);
     SetPacketSize(0x0175, 6);
+    SetPacketSize(0x0177, kVariablePacketSize);
+    SetPacketSize(0x0178, 4);
+    SetPacketSize(0x0179, 5);
     SetPacketSize(0x0193, 2);
     SetPacketSize(0x0194, 30);
     SetPacketSize(0x0195, 102);

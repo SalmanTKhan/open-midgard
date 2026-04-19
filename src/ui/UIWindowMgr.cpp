@@ -10,6 +10,7 @@
 #include "UIChooseSellBuyWnd.h"
 #include "UIEquipWnd.h"
 #include "UIItemCollectionWnd.h"
+#include "UIItemIdentifyWnd.h"
 #include "UIItemInfoWnd.h"
 #include "UIItemWnd.h"
 #include "UIStorageWnd.h"
@@ -587,7 +588,7 @@ UIWindowMgr::UIWindowMgr()
       m_isDragAll(0), m_conversionMode(0),
       m_captureWindow(nullptr), m_editWindow(nullptr), m_modalWindow(nullptr), m_lastHitWindow(nullptr),
             m_loadingWnd(nullptr), m_roMapWnd(nullptr), m_minimapZoomWnd(nullptr), m_statusWnd(nullptr), m_sayDialogWnd(nullptr), m_npcMenuWnd(nullptr), m_npcInputWnd(nullptr), m_chooseSellBuyWnd(nullptr), m_itemShopWnd(nullptr), m_itemPurchaseWnd(nullptr), m_itemSellWnd(nullptr), m_storageWnd(nullptr), m_shortCutWnd(nullptr), m_chatWnd(nullptr),
-        m_loginWnd(nullptr), m_selectServerWnd(nullptr), m_selectCharWnd(nullptr), m_makeCharWnd(nullptr), m_waitWnd(nullptr), m_chooseWnd(nullptr), m_optionWnd(nullptr), m_itemWnd(nullptr), m_itemInfoWnd(nullptr), m_itemCollectionWnd(nullptr), m_questWnd(nullptr), m_basicInfoWnd(nullptr), m_notifyLevelUpWnd(nullptr), m_notifyJobLevelUpWnd(nullptr), m_equipWnd(nullptr), m_skillDescribeWnd(nullptr), m_skillListWnd(nullptr),
+                m_loginWnd(nullptr), m_selectServerWnd(nullptr), m_selectCharWnd(nullptr), m_makeCharWnd(nullptr), m_waitWnd(nullptr), m_chooseWnd(nullptr), m_optionWnd(nullptr), m_itemWnd(nullptr), m_itemInfoWnd(nullptr), m_itemCollectionWnd(nullptr), m_itemIdentifyWnd(nullptr), m_questWnd(nullptr), m_basicInfoWnd(nullptr), m_notifyLevelUpWnd(nullptr), m_notifyJobLevelUpWnd(nullptr), m_equipWnd(nullptr), m_skillDescribeWnd(nullptr), m_skillListWnd(nullptr),
                         m_wallpaperSurface(nullptr), m_uiComposeSurface(), m_chatActiveInputField(0), m_chatScrollLineOffset(0)
 {
     m_loginStatus = "Login: idle";
@@ -936,6 +937,16 @@ UIWindow* UIWindowMgr::MakeWindow(int windowId)
         m_itemCollectionWnd->SetShow(1);
         return m_itemCollectionWnd;
 
+    case WID_ITEMIDENTIFYWND:
+        if (!m_itemIdentifyWnd) {
+            m_itemIdentifyWnd = new UIItemIdentifyWnd();
+            m_children.push_back(m_itemIdentifyWnd);
+        }
+        m_children.remove(m_itemIdentifyWnd);
+        m_children.push_back(m_itemIdentifyWnd);
+        m_itemIdentifyWnd->SetShow(1);
+        return m_itemIdentifyWnd;
+
     case WID_EQUIPWND:
         if (!m_equipWnd) {
             m_equipWnd = new UIEquipWnd();
@@ -1233,6 +1244,9 @@ void UIWindowMgr::DeleteWindow(UIWindow* window)
     if (window == m_itemCollectionWnd) {
         m_itemCollectionWnd = nullptr;
     }
+    if (window == m_itemIdentifyWnd) {
+        m_itemIdentifyWnd = nullptr;
+    }
     if (window == m_equipWnd) {
         m_equipWnd = nullptr;
     }
@@ -1298,6 +1312,7 @@ void UIWindowMgr::RemoveAllWindows()
     m_itemWnd = nullptr;
     m_itemInfoWnd = nullptr;
     m_itemCollectionWnd = nullptr;
+    m_itemIdentifyWnd = nullptr;
     m_questWnd = nullptr;
     m_basicInfoWnd = nullptr;
     m_equipWnd = nullptr;

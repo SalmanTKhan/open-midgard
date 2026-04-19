@@ -104,6 +104,7 @@ public:
             GameMsg_RequestStorageStoreItem = 20028,
             GameMsg_RequestStorageWithdrawItem = 20029,
             GameMsg_RequestStorageClose = 20030,
+            GameMsg_RequestIdentifyInventoryItem = 20031,
     };
 
     CGameMode();

@@ -18,6 +18,7 @@ class UIItemWnd;
 class UIStorageWnd;
 class UIItemInfoWnd;
 class UIItemCollectionWnd;
+class UIItemIdentifyWnd;
 class UIQuestWnd;
 class UIBasicInfoWnd;
 class UINotifyLevelUpWnd;
@@ -70,6 +71,7 @@ public:
         WID_ITEMINFOWND       = 24,
         WID_ITEMCOLLECTIONWND = 25,
         WID_SKILLDESCRIBEWND  = 26,
+        WID_ITEMIDENTIFYWND   = 0x49,
         WID_SAYDIALOGWND      = 9,
         WID_LOADINGWND        = 10,
         WID_STATUSWND         = 11,
@@ -199,6 +201,7 @@ public:
     UIItemWnd* m_itemWnd;
     UIItemInfoWnd* m_itemInfoWnd;
     UIItemCollectionWnd* m_itemCollectionWnd;
+    UIItemIdentifyWnd* m_itemIdentifyWnd;
     UIQuestWnd* m_questWnd;
     UIBasicInfoWnd* m_basicInfoWnd;
     UINotifyLevelUpWnd* m_notifyLevelUpWnd;

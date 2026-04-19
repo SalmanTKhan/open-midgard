@@ -49,6 +49,7 @@ namespace PacketVer23MapServerSend {
 constexpr u16 kWantToConnection = 0x0436;
 constexpr u16 kActionRequest = 0x0437;
 constexpr u16 kUseSkillToId = 0x0438;
+constexpr u16 kItemIdentify = 0x0178;
 // Ground skill (CZ_USE_SKILL_TOGROUND): from packet_ver 22 onward this lives at 0x0113 with
 // padding; 0x0116 is repurposed (e.g. dropitem). See Ref/RunningServer/packet_db.txt.
 constexpr u16 kUseSkillToPos = 0x0113;
@@ -73,6 +74,7 @@ namespace ActiveMapServerSend {
 constexpr u16 kWantToConnection = PacketVer23MapServerSend::kWantToConnection;
 constexpr u16 kActionRequest = PacketVer23MapServerSend::kActionRequest;
 constexpr u16 kUseSkillToId = PacketVer23MapServerSend::kUseSkillToId;
+constexpr u16 kItemIdentify = PacketVer23MapServerSend::kItemIdentify;
 constexpr u16 kUseSkillToPos = PacketVer23MapServerSend::kUseSkillToPos;
 constexpr u16 kDropItem = PacketVer23MapServerSend::kDropItem;
 constexpr u16 kUseSkillToPosInfo = PacketVer23MapServerSend::kUseSkillToPosInfo;
@@ -280,6 +282,11 @@ struct PACKET_CZ_USEITEM2 {
     u32 TargetAID;
 };
 
+struct PACKET_CZ_ITEM_IDENTIFY {
+    u16 PacketType;    // 0x0178
+    s16 ItemIndex;     // inventory index, or -1 to cancel
+};
+
 struct PACKET_CZ_SKILLUP {
     u16 PacketType;    // 0x0112
     u16 SkillId;
@@ -453,6 +460,7 @@ static_assert(sizeof(PACKET_CZ_USESKILLTOPOSINFO) == 90, "PACKET_CZ_USESKILLTOPO
 static_assert(sizeof(PACKET_CZ_ITEM_THROW) == 10, "PACKET_CZ_ITEM_THROW size mismatch");
 static_assert(sizeof(PACKET_CZ_USESKILLMAP) == 20, "PACKET_CZ_USESKILLMAP size mismatch");
 static_assert(sizeof(PACKET_CZ_USEITEM2) == 8, "PACKET_CZ_USEITEM2 size mismatch");
+static_assert(sizeof(PACKET_CZ_ITEM_IDENTIFY) == 4, "PACKET_CZ_ITEM_IDENTIFY size mismatch");
 static_assert(sizeof(PACKET_CZ_SKILLUP) == 4, "PACKET_CZ_SKILLUP size mismatch");
 static_assert(sizeof(PACKET_CZ_TAKE_ITEM2) == 8, "PACKET_CZ_TAKE_ITEM2 size mismatch");
 static_assert(sizeof(PACKET_CZ_REQ_WEAR_EQUIP) == 6, "PACKET_CZ_REQ_WEAR_EQUIP size mismatch");

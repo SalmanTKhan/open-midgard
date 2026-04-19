@@ -23,9 +23,13 @@
 
 #include <cmath>
 #include "ui/UIChooseSellBuyWnd.h"
+#include "ui/UIEquipWnd.h"
+#include "ui/UIItemIdentifyWnd.h"
+#include "ui/UIItemWnd.h"
 #include "ui/UIItemPurchaseWnd.h"
 #include "ui/UIItemSellWnd.h"
 #include "ui/UIItemShopWnd.h"
+#include "ui/UIShortCutWnd.h"
 #include "ui/UIStatusWnd.h"
 #include "ui/UIWindowMgr.h"
 #include "world/GameActor.h"
@@ -112,6 +116,7 @@ constexpr u32 kStatusAspd = 53;
 constexpr u32 kStatusPlusAspd = 54;
 constexpr u32 kStatusJobLevel = 55;
 constexpr u32 kNotifyEffectBaseLevelUp = 0;
+constexpr u16 kSkillMerchantIdentify = 40;
 constexpr int kEffectStateSightMask = 0x0001;
 constexpr int kEffectStateRuwachMask = 0x2000;
 constexpr int kEffectStateHidingMask = 0x0004;
@@ -884,6 +889,108 @@ void HandleUseItemAck(CGameMode& mode, const PacketView& packet)
         itemIndex,
         remainingAmount,
         ok ? 1 : 0);
+}
+
+void RefreshIdentifyDependentWindows()
+{
+    if (g_windowMgr.m_itemWnd) {
+        g_windowMgr.m_itemWnd->Invalidate();
+    }
+    if (g_windowMgr.m_equipWnd) {
+        g_windowMgr.m_equipWnd->Invalidate();
+    }
+    if (g_windowMgr.m_shortCutWnd) {
+        g_windowMgr.m_shortCutWnd->Invalidate();
+    }
+}
+
+void ShowIdentifyWindow(const std::vector<unsigned int>& itemIndices)
+{
+    UIItemIdentifyWnd* const window = dynamic_cast<UIItemIdentifyWnd*>(g_windowMgr.MakeWindow(UIWindowMgr::WID_ITEMIDENTIFYWND));
+    if (!window) {
+        return;
+    }
+    window->SetIdentifyItemIndices(itemIndices);
+}
+
+bool SendIdentifySkillUseRequest()
+{
+    const u32 targetGid = g_session.m_gid != 0 ? g_session.m_gid : g_session.m_aid;
+    if (targetGid == 0) {
+        return false;
+    }
+
+    PACKET_CZ_USESKILLTOID2 packet{};
+    packet.PacketType = PacketProfile::ActiveMapServerSend::kUseSkillToId;
+    packet.SkillLevel = 1;
+    packet.SkillId = kSkillMerchantIdentify;
+    packet.TargetGID = targetGid;
+
+    const bool sent = CRagConnection::instance()->SendPacket(
+        reinterpret_cast<const char*>(&packet),
+        static_cast<int>(sizeof(packet)));
+    DbgLog("[GameMode] autorun skill MC_IDENTIFY request target=%u sent=%d\n",
+        static_cast<unsigned int>(targetGid),
+        sent ? 1 : 0);
+    return sent;
+}
+
+void HandleAutoRunSkill(CGameMode&, const PacketView& packet)
+{
+    if (!packet.data || packet.packetLength < 39) {
+        return;
+    }
+
+    const unsigned int skillId = static_cast<unsigned int>(ReadLE16(packet.data + 2));
+    if (skillId != kSkillMerchantIdentify) {
+        return;
+    }
+
+    SendIdentifySkillUseRequest();
+}
+
+void HandleItemIdentifyList(CGameMode&, const PacketView& packet)
+{
+    if (!packet.data || packet.packetLength < 4 || ((packet.packetLength - 4) % 2) != 0) {
+        return;
+    }
+
+    std::vector<unsigned int> itemIndices;
+    const int count = (packet.packetLength - 4) / 2;
+    itemIndices.reserve(static_cast<size_t>(count));
+    for (int index = 0; index < count; ++index) {
+        const unsigned int itemIndex = static_cast<unsigned int>(ReadLE16(packet.data + 4 + index * 2));
+        if (itemIndex == 0) {
+            continue;
+        }
+        itemIndices.push_back(itemIndex);
+    }
+
+    ShowIdentifyWindow(itemIndices);
+    DbgLog("[GameMode] item identify list count=%d\n", static_cast<int>(itemIndices.size()));
+}
+
+void HandleItemIdentifyAck(CGameMode&, const PacketView& packet)
+{
+    if (!packet.data || packet.packetLength < 5) {
+        return;
+    }
+
+    const unsigned int itemIndex = static_cast<unsigned int>(ReadLE16(packet.data + 2));
+    const unsigned int result = static_cast<unsigned int>(packet.data[4]);
+    if (result == 0) {
+        if (const ITEM_INFO* existing = g_session.GetInventoryItemByIndex(itemIndex)) {
+            ITEM_INFO updated = *existing;
+            updated.m_isIdentified = 1;
+            g_session.SetInventoryItem(updated);
+        }
+        RefreshIdentifyDependentWindows();
+        g_windowMgr.PushChatEvent("Item has been identified.", kSystemNoticeColor, 6);
+    } else {
+        g_windowMgr.PushChatEvent("Item identification failed.", 0x00FF4040u, 6);
+    }
+
+    DbgLog("[GameMode] item identify ack index=%u result=%u\n", itemIndex, result);
 }
 
 void HandleRecovery(CGameMode& mode, const PacketView& packet)
@@ -7563,6 +7670,9 @@ void RegisterDefaultGameModePacketHandlers(CGameModePacketRouter& router)
     router.Register(0x00AF, HandleItemRemove);
     router.Register(0x00AC, HandleUnequipItemAck);
     router.Register(0x00A8, HandleUseItemAck);
+    router.Register(0x0147, HandleAutoRunSkill);
+    router.Register(0x0177, HandleItemIdentifyList);
+    router.Register(0x0179, HandleItemIdentifyAck);
     router.Register(0x00F2, HandleStorageStatus);
     router.Register(0x00F4, HandleStorageItemAdded);
     router.Register(0x00F6, HandleStorageItemRemoved);
