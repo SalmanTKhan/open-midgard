@@ -37,6 +37,7 @@ public:
     struct DisplayData {
         std::string title;
         unsigned int itemId = 0;
+        bool identified = false;
         std::string name;
         bool previewUsesCollection = false;
         std::vector<std::string> detailLines;
@@ -71,6 +72,7 @@ private:
     int GetDesiredWindowHeight() const;
     bool HasViewButton() const;
     int GetDeclaredSlotCount() const;
+    bool ShouldShowSlots() const;
     std::string BuildTitle() const;
     std::string BuildDisplayName() const;
     std::vector<std::string> BuildDetailLines() const;

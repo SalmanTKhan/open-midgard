@@ -25,6 +25,7 @@ constexpr int kDetailLineAdvance = 13;
 constexpr int kDescriptionTopGap = 4;
 constexpr int kDescriptionBottomPadding = 20;
 constexpr int kSlotDescriptionGap = 24;
+constexpr char kUnknownItemDescription[] = "Unknown item, can be identified by using a ^0000FFMagnifier^000000.";
 
 std::string BuildMeasurementText(const std::string& text);
 
@@ -288,7 +289,7 @@ void UIItemInfoWnd::OnDraw()
     DrawNpcSayDialogColoredText(hdc, descriptionRect, BuildDescriptionText());
     SelectObject(hdc, oldDescriptionFont);
 
-    if (IsEquipInfoType(m_item.m_itemType)) {
+    if (ShouldShowSlots()) {
         const int declaredSlots = GetDeclaredSlotCount();
         for (int slotIndex = 0; slotIndex < 4; ++slotIndex) {
             const RECT slotRect = GetSlotRect(slotIndex);
@@ -406,13 +407,14 @@ bool UIItemInfoWnd::GetDisplayDataForQt(DisplayData* outData) const
 
     outData->title = BuildTitle();
     outData->itemId = m_item.GetItemId();
+    outData->identified = m_item.m_isIdentified != 0;
     outData->name = BuildDisplayName();
     outData->previewUsesCollection = m_previewUsesCollection;
     outData->detailLines = BuildDetailLines();
     outData->description = BuildDescriptionText();
     outData->closeButton = { GetCloseButtonRect().left, GetCloseButtonRect().top, kCloseButtonSize, kCloseButtonSize, m_closeHovered, m_closePressed, true, true, "X" };
     outData->graphicsButton = { GetGraphicsButtonRect().left, GetGraphicsButtonRect().top, kGraphicsButtonWidth, kGraphicsButtonHeight, m_graphicsHovered, m_graphicsPressed, true, HasViewButton(), "View" };
-    if (IsEquipInfoType(m_item.m_itemType)) {
+    if (ShouldShowSlots()) {
         outData->slotEntries.reserve(4);
         const int declaredSlots = GetDeclaredSlotCount();
         for (int slotIndex = 0; slotIndex < 4; ++slotIndex) {
@@ -470,7 +472,7 @@ RECT UIItemInfoWnd::GetDescriptionRect() const
 {
     const RECT nameRect = GetNameRect();
     const int detailY = nameRect.bottom + 2 + static_cast<int>(BuildDetailLines().size()) * kDetailLineAdvance;
-    const int bottomPadding = IsEquipInfoType(m_item.m_itemType) ? (kSlotSize + kPadding + kSlotDescriptionGap) : kDescriptionBottomPadding;
+    const int bottomPadding = ShouldShowSlots() ? (kSlotSize + kPadding + kSlotDescriptionGap) : kDescriptionBottomPadding;
     return RECT{ nameRect.left, detailY + kDescriptionTopGap, m_x + m_w - kPadding, m_y + m_h - bottomPadding };
 }
 
@@ -486,7 +488,7 @@ void UIItemInfoWnd::UpdateInteraction(int x, int y)
     const bool nextCloseHovered = IsInsideRect(GetCloseButtonRect(), x, y);
     const bool nextGraphicsHovered = HasViewButton() && IsInsideRect(GetGraphicsButtonRect(), x, y);
     int nextHoveredSlot = -1;
-    if (IsEquipInfoType(m_item.m_itemType)) {
+    if (ShouldShowSlots()) {
         for (int slotIndex = 0; slotIndex < 4; ++slotIndex) {
             if (m_slotItemIds[static_cast<size_t>(slotIndex)] == 0) {
                 continue;
@@ -525,6 +527,10 @@ void UIItemInfoWnd::RefreshPreviewAndSlots()
         shopui::TryLoadItemIconPixels(m_item, &m_previewBitmap);
     }
 
+    if (!ShouldShowSlots()) {
+        return;
+    }
+
     for (int slotIndex = 0; slotIndex < 4; ++slotIndex) {
         const unsigned int cardId = static_cast<unsigned int>(m_item.m_slot[slotIndex]);
         if (cardId == 0) {
@@ -543,13 +549,21 @@ void UIItemInfoWnd::RefreshPreviewAndSlots()
 
 bool UIItemInfoWnd::HasViewButton() const
 {
-    return m_hasItem && g_ttemmgr.IsCardItem(m_item.GetItemId()) && !m_item.GetCardIllustName().empty();
+    return m_hasItem
+        && m_item.m_isIdentified != 0
+        && g_ttemmgr.IsCardItem(m_item.GetItemId())
+        && !m_item.GetCardIllustName().empty();
 }
 
 int UIItemInfoWnd::GetDeclaredSlotCount() const
 {
     const int slotCount = m_item.GetSlotCount();
     return (std::max)(0, (std::min)(4, slotCount));
+}
+
+bool UIItemInfoWnd::ShouldShowSlots() const
+{
+    return m_hasItem && m_item.m_isIdentified != 0 && IsEquipInfoType(m_item.m_itemType);
 }
 
 std::string UIItemInfoWnd::BuildTitle() const
@@ -559,12 +573,18 @@ std::string UIItemInfoWnd::BuildTitle() const
 
 std::string UIItemInfoWnd::BuildDisplayName() const
 {
+    if (m_item.m_isIdentified == 0) {
+        return SanitizeRoText(m_item.GetDisplayName());
+    }
     return SanitizeRoText(m_item.GetEquipDisplayName());
 }
 
 std::vector<std::string> UIItemInfoWnd::BuildDetailLines() const
 {
     std::vector<std::string> out;
+    if (m_item.m_isIdentified == 0) {
+        return out;
+    }
     if (m_item.m_num > 1 && !g_ttemmgr.IsCardItem(m_item.GetItemId())) {
         out.push_back("Quantity: " + std::to_string(m_item.m_num));
     }
@@ -581,6 +601,10 @@ std::vector<std::string> UIItemInfoWnd::BuildDetailLines() const
 
 std::string UIItemInfoWnd::BuildDescriptionText() const
 {
+    if (m_item.m_isIdentified == 0) {
+        return kUnknownItemDescription;
+    }
+
     const std::string description = NormalizeDescriptionText(m_item.GetDescription());
     if (!description.empty()) {
         return description;
@@ -590,7 +614,7 @@ std::string UIItemInfoWnd::BuildDescriptionText() const
 
 int UIItemInfoWnd::GetDesiredWindowHeight() const
 {
-    const int minHeight = IsEquipInfoType(m_item.m_itemType)
+    const int minHeight = ShouldShowSlots()
         ? kTitleBarHeight + kPadding + kPreviewBoxSize + kSlotDescriptionGap + kSlotSize + kPadding
         : kWindowMinHeight;
 
@@ -598,7 +622,7 @@ int UIItemInfoWnd::GetDesiredWindowHeight() const
     const int descriptionTop = (nameRect.bottom - m_y) + 2 + static_cast<int>(BuildDetailLines().size()) * kDetailLineAdvance + kDescriptionTopGap;
     const int descriptionWidth = (m_x + m_w - kPadding) - nameRect.left;
     const int descriptionHeight = MeasureWrappedTextHeight(GetItemInfoDescriptionFont(), descriptionWidth, BuildDescriptionText());
-    const int descriptionBottomPadding = IsEquipInfoType(m_item.m_itemType)
+    const int descriptionBottomPadding = ShouldShowSlots()
         ? (kSlotSize + kPadding + kSlotDescriptionGap)
         : kDescriptionBottomPadding;
     const int desiredHeight = descriptionTop + descriptionHeight + descriptionBottomPadding;

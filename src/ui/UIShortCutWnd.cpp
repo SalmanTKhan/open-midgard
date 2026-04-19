@@ -505,6 +505,7 @@ bool UIShortCutWnd::GetHoveredItemForQt(shopui::ItemHoverInfo* outData) const
     outData->anchorRect = GetSlotRect(m_hoverSlot);
     outData->text = shopui::BuildItemHoverText(hoverItem);
     outData->itemId = hoverItem.GetItemId();
+    outData->identified = hoverItem.m_isIdentified != 0;
     return outData->IsValid();
 }
 

@@ -345,29 +345,31 @@ void RecordQtUiOverlayPerf(bool gameplay, bool nativePath, double updateMs, doub
     MaybeLogQtUiPerfStats();
 }
 
-bool TryBuildItemIconImage(unsigned int itemId, QImage* outImage)
+bool TryBuildItemIconImage(unsigned int itemId, bool identified, QImage* outImage)
 {
     if (!outImage || itemId == 0) {
         return false;
     }
 
-    static std::unordered_map<unsigned int, QImage> s_itemIconCache;
-    const auto cached = s_itemIconCache.find(itemId);
+    static std::unordered_map<std::uint64_t, QImage> s_itemIconCache;
+    const std::uint64_t cacheKey = (static_cast<std::uint64_t>(itemId) << 1) | (identified ? 1ull : 0ull);
+    const auto cached = s_itemIconCache.find(cacheKey);
     if (cached != s_itemIconCache.end()) {
         *outImage = cached->second;
         return !outImage->isNull();
     }
 
     const ITEM_INFO* item = g_session.GetInventoryItemByItemId(itemId);
-    ITEM_INFO fallbackItem;
-    if (!item) {
-        fallbackItem.SetItemId(itemId);
-        fallbackItem.m_isIdentified = 1;
-        item = &fallbackItem;
+    ITEM_INFO requestedItem;
+    if (item) {
+        requestedItem = *item;
+    } else {
+        requestedItem.SetItemId(itemId);
     }
+    requestedItem.m_isIdentified = identified ? 1 : 0;
 
     shopui::BitmapPixels bitmap;
-    if (!shopui::TryLoadItemIconPixels(*item, &bitmap) || !bitmap.IsValid()) {
+    if (!shopui::TryLoadItemIconPixels(requestedItem, &bitmap) || !bitmap.IsValid()) {
         return false;
     }
 
@@ -379,34 +381,36 @@ bool TryBuildItemIconImage(unsigned int itemId, QImage* outImage)
         QImage::Format_ARGB32);
     *outImage = source.copy();
     if (!outImage->isNull()) {
-        s_itemIconCache[itemId] = *outImage;
+        s_itemIconCache[cacheKey] = *outImage;
     }
     return !outImage->isNull();
 }
 
-bool TryBuildItemCollectionImage(unsigned int itemId, QImage* outImage)
+bool TryBuildItemCollectionImage(unsigned int itemId, bool identified, QImage* outImage)
 {
     if (!outImage || itemId == 0) {
         return false;
     }
 
-    static std::unordered_map<unsigned int, QImage> s_itemCollectionCache;
-    const auto cached = s_itemCollectionCache.find(itemId);
+    static std::unordered_map<std::uint64_t, QImage> s_itemCollectionCache;
+    const std::uint64_t cacheKey = (static_cast<std::uint64_t>(itemId) << 1) | (identified ? 1ull : 0ull);
+    const auto cached = s_itemCollectionCache.find(cacheKey);
     if (cached != s_itemCollectionCache.end()) {
         *outImage = cached->second;
         return !outImage->isNull();
     }
 
     const ITEM_INFO* item = g_session.GetInventoryItemByItemId(itemId);
-    ITEM_INFO fallbackItem;
-    if (!item) {
-        fallbackItem.SetItemId(itemId);
-        fallbackItem.m_isIdentified = 1;
-        item = &fallbackItem;
+    ITEM_INFO requestedItem;
+    if (item) {
+        requestedItem = *item;
+    } else {
+        requestedItem.SetItemId(itemId);
     }
+    requestedItem.m_isIdentified = identified ? 1 : 0;
 
     shopui::BitmapPixels bitmap;
-    if (!shopui::TryLoadItemCollectionPixels(*item, &bitmap) || !bitmap.IsValid()) {
+    if (!shopui::TryLoadItemCollectionPixels(requestedItem, &bitmap) || !bitmap.IsValid()) {
         return false;
     }
 
@@ -418,7 +422,7 @@ bool TryBuildItemCollectionImage(unsigned int itemId, QImage* outImage)
         QImage::Format_ARGB32);
     *outImage = source.copy();
     if (!outImage->isNull()) {
-        s_itemCollectionCache[itemId] = *outImage;
+        s_itemCollectionCache[cacheKey] = *outImage;
     }
     return !outImage->isNull();
 }
@@ -845,13 +849,15 @@ public:
             bool ok = false;
             const unsigned int itemId = baseId.mid(QStringLiteral("item/").size()).toUInt(&ok);
             if (ok) {
-                TryBuildItemIconImage(itemId, &image);
+                const bool identified = !id.contains(QStringLiteral("identified=0"));
+                TryBuildItemIconImage(itemId, identified, &image);
             }
         } else if (baseId.startsWith(QStringLiteral("collection/"))) {
             bool ok = false;
             const unsigned int itemId = baseId.mid(QStringLiteral("collection/").size()).toUInt(&ok);
             if (ok) {
-                TryBuildItemCollectionImage(itemId, &image);
+                const bool identified = !id.contains(QStringLiteral("identified=0"));
+                TryBuildItemCollectionImage(itemId, identified, &image);
             }
         } else if (baseId.startsWith(QStringLiteral("illust/"))) {
             bool ok = false;

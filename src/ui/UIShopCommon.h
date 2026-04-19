@@ -51,6 +51,7 @@ struct ItemHoverInfo {
     RECT anchorRect{ 0, 0, 0, 0 };
     std::string text;
     unsigned int itemId = 0;
+    bool identified = true;
 
     bool IsValid() const
     {

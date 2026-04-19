@@ -9,4 +9,5 @@ int GetConfiguredUiScalePercent();
 float GetConfiguredUiScaleFactor();
 void SetRuntimeUiScalePercent(int percent);
 void SaveConfiguredUiScalePercent(int percent);
+int UiScaleLogicalToRawCoordinate(int logicalValue);
 int UiScaleRawToLogicalCoordinate(int rawValue);

@@ -15,12 +15,41 @@ Item {
         return Math.max(0.2, Math.min(1.0, ((chatUi && chatUi.windowOpacityPercent) || 84) / 100.0))
     }
 
-    function itemIconSource(itemId) {
-        return itemId > 0 ? "image://openmidgard/item/" + itemId : ""
+    function clampValue(value, minValue, maxValue) {
+        if (maxValue < minValue) {
+            return minValue
+        }
+        return Math.max(minValue, Math.min(maxValue, value))
     }
 
-    function collectionImageSource(itemId) {
-        return itemId > 0 ? "image://openmidgard/collection/" + itemId : ""
+    function clampOverlayX(x, overlayWidth) {
+        return clampValue(x, 0, root.width - overlayWidth)
+    }
+
+    function clampOverlayY(y, overlayHeight) {
+        return clampValue(y, 0, root.height - overlayHeight)
+    }
+
+    function itemIconSource(itemId, identified) {
+        if (!(itemId > 0)) {
+            return ""
+        }
+        let source = "image://openmidgard/item/" + itemId
+        if (identified !== undefined) {
+            source += "?identified=" + (identified ? "1" : "0")
+        }
+        return source
+    }
+
+    function collectionImageSource(itemId, identified) {
+        if (!(itemId > 0)) {
+            return ""
+        }
+        let source = "image://openmidgard/collection/" + itemId
+        if (identified !== undefined) {
+            source += "?identified=" + (identified ? "1" : "0")
+        }
+        return source
     }
 
     function illustImageSource(itemId) {
@@ -177,12 +206,14 @@ Item {
                 const measured = Math.max(1, Math.ceil(label.contentWidth || label.implicitWidth || 1))
                 return maxTextWidth > 0 ? Math.min(maxTextWidth, measured) : measured
             }
-            x: modelData.centerX !== undefined
+            property int anchorX: modelData.centerX !== undefined
                 ? Math.round((modelData.centerX || 0) - width / 2)
                 : (modelData.x || 0)
-            y: modelData.bottomY !== undefined
+            property int anchorY: modelData.bottomY !== undefined
                 ? Math.round((modelData.bottomY || 0) - height)
                 : (modelData.y || 0)
+            x: root.clampOverlayX(anchorX, width)
+            y: root.clampOverlayY(anchorY, height)
             z: modelData.z || 2000
             width: textWidth + bubblePaddingX
             height: Math.max(1, Math.ceil(label.implicitHeight)) + bubblePaddingY
@@ -3218,8 +3249,8 @@ Item {
                 smooth: false
                 cache: false
                 source: (uiState.itemInfoData.previewUsesCollection || false)
-                    ? root.collectionImageSource(uiState.itemInfoData.itemId || 0)
-                    : root.itemIconSource(uiState.itemInfoData.itemId || 0)
+                    ? root.collectionImageSource(uiState.itemInfoData.itemId || 0, uiState.itemInfoData.identified)
+                    : root.itemIconSource(uiState.itemInfoData.itemId || 0, uiState.itemInfoData.identified)
             }
 
             Rectangle {

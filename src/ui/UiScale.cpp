@@ -49,6 +49,16 @@ void SaveConfiguredUiScalePercent(int percent)
     SaveSettingsIniInt(kUiScaleSection, kUiScalePercentValue, clampedPercent);
 }
 
+int UiScaleLogicalToRawCoordinate(int logicalValue)
+{
+    const float factor = GetConfiguredUiScaleFactor();
+    if (factor <= 0.0f || std::abs(factor - 1.0f) < 0.0001f) {
+        return logicalValue;
+    }
+
+    return static_cast<int>(std::lround(static_cast<double>(logicalValue) * static_cast<double>(factor)));
+}
+
 int UiScaleRawToLogicalCoordinate(int rawValue)
 {
     const float factor = GetConfiguredUiScaleFactor();

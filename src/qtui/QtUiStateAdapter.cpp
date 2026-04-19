@@ -499,8 +499,8 @@ bool TryAppendHoveredStatusIconAnchor(const QtUiState* state, int mouseX, int mo
     }
 
     const QVariantMap icon = icons[hoveredIndex].toMap();
-    const int centerX = state->minimapX() + (std::max)(0, state->minimapWidth() - kQtStatusIconSize) + (kQtStatusIconSize / 2);
-    const int bottomY = state->minimapY()
+    const int logicalCenterX = state->minimapX() + (std::max)(0, state->minimapWidth() - kQtStatusIconSize) + (kQtStatusIconSize / 2);
+    const int logicalBottomY = state->minimapY()
         + state->minimapHeight()
         + kQtStatusIconTopMargin
         + (hoveredIndex * (kQtStatusIconSize + kQtStatusIconSpacing))
@@ -508,8 +508,8 @@ bool TryAppendHoveredStatusIconAnchor(const QtUiState* state, int mouseX, int mo
 
     QVariantMap anchor;
     anchor.insert(QStringLiteral("text"), BuildStatusIconTooltipText(icon));
-    anchor.insert(QStringLiteral("centerX"), centerX);
-    anchor.insert(QStringLiteral("bottomY"), bottomY);
+    anchor.insert(QStringLiteral("centerX"), UiScaleLogicalToRawCoordinate(logicalCenterX));
+    anchor.insert(QStringLiteral("bottomY"), UiScaleLogicalToRawCoordinate(logicalBottomY));
     anchor.insert(QStringLiteral("background"), QStringLiteral("#ea1d232c"));
     anchor.insert(QStringLiteral("foreground"), QStringLiteral("#f3f4f6"));
     anchor.insert(QStringLiteral("showBubble"), true);
@@ -2238,6 +2238,7 @@ void PopulateItemInfoState(QtUiState* state)
     if (itemInfoWnd->GetDisplayDataForQt(&display)) {
         data.insert(QStringLiteral("title"), ToQString(display.title));
         data.insert(QStringLiteral("itemId"), static_cast<uint>(display.itemId));
+        data.insert(QStringLiteral("identified"), display.identified);
         data.insert(QStringLiteral("name"), ToQString(display.name));
         data.insert(QStringLiteral("previewUsesCollection"), display.previewUsesCollection);
         data.insert(QStringLiteral("description"), ToQString(display.description));
@@ -2807,11 +2808,13 @@ QVariantMap MakeSpeechBubbleAnchor(const QString& text,
 
 QVariantMap MakeUiItemAnchor(const shopui::ItemHoverInfo& hoverInfo)
 {
-    const int centerX = hoverInfo.anchorRect.left + ((hoverInfo.anchorRect.right - hoverInfo.anchorRect.left) / 2);
+    const int logicalCenterX = hoverInfo.anchorRect.left + ((hoverInfo.anchorRect.right - hoverInfo.anchorRect.left) / 2);
+    const int logicalTopY = hoverInfo.anchorRect.top - 26;
     return MakeCenteredAnchor(ToQString(hoverInfo.text),
-        centerX,
-        hoverInfo.anchorRect.top - 26,
-        QStringLiteral("#c0087f5b"));
+        UiScaleLogicalToRawCoordinate(logicalCenterX),
+        UiScaleLogicalToRawCoordinate(logicalTopY),
+    QStringLiteral("#c0087f5b"),
+    hoverInfo.identified ? QStringLiteral("#ffffff") : QStringLiteral("#b8b8b8"));
 }
 
 bool TryAppendHoveredUiItemAnchor(QVariantList* anchors)
@@ -3050,7 +3053,8 @@ bool QtUiStateAdapter::syncGameplay(CGameMode& mode,
                 anchors.push_back(MakeAnchor(ToQString(ResolveGroundItemLabel(hoveredItem)),
                     labelX,
                     labelY,
-                    QStringLiteral("#c0087f5b")));
+                    QStringLiteral("#c0087f5b"),
+                    (hoveredItem && hoveredItem->m_identified != 0) ? QStringLiteral("#ffffff") : QStringLiteral("#b8b8b8")));
             }
         }
 

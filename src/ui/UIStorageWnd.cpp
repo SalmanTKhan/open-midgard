@@ -1220,6 +1220,7 @@ bool UIStorageWnd::GetHoveredItemForQt(shopui::ItemHoverInfo* outData) const
     };
     outData->text = shopui::BuildItemHoverText(*item);
     outData->itemId = item->GetItemId();
+    outData->identified = item->m_isIdentified != 0;
     return outData->IsValid();
 }
 
