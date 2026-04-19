@@ -3313,6 +3313,30 @@ Item {
             }
         }
 
+        Repeater {
+            model: uiState.partySetupData.helpIcons || []
+
+            delegate: Rectangle {
+                required property var modelData
+                x: (modelData.x || 0) - uiState.partySetupX
+                y: (modelData.y || 0) - uiState.partySetupY
+                width: modelData.width || 0
+                height: modelData.height || 0
+                radius: width / 2
+                color: (modelData.hovered || false) ? "#d4e2ef" : "#ebe5d6"
+                border.width: 1
+                border.color: "#796a4f"
+
+                Text {
+                    anchors.centerIn: parent
+                    text: "?"
+                    color: "#1c1c1c"
+                    font.pixelSize: 10
+                    font.bold: true
+                }
+            }
+        }
+
         Rectangle {
             x: (uiState.partySetupData.nameFieldX || 0) - uiState.partySetupX
             y: (uiState.partySetupData.nameFieldY || 0) - uiState.partySetupY
@@ -3320,13 +3344,13 @@ Item {
             height: uiState.partySetupData.nameFieldHeight || 0
             color: (uiState.partySetupData.showNameEdit || false)
                 ? ((uiState.partySetupData.nameFocused || false) ? "#ffffc8" : "#f2f2f2")
-                : "#fcf9f2"
-            border.width: 1
-            border.color: (uiState.partySetupData.showNameEdit || false) ? "#000000" : "#9e937c"
+                : "transparent"
+            border.width: (uiState.partySetupData.showNameEdit || false) ? 1 : 0
+            border.color: "#000000"
 
             Text {
-                x: 6
-                width: parent.width - 12
+                x: (uiState.partySetupData.showNameEdit || false) ? 6 : 0
+                width: parent.width - ((uiState.partySetupData.showNameEdit || false) ? 12 : 0)
                 anchors.verticalCenter: parent.verticalCenter
                 text: uiState.partySetupData.nameValue || ""
                 color: "#202020"
@@ -3398,6 +3422,29 @@ Item {
                     font.pixelSize: 10
                     font.bold: true
                 }
+            }
+        }
+
+        Rectangle {
+            visible: !!(uiState.partySetupData.tooltipText || "")
+            x: Math.max(4, Math.min(parent.width - width - 4, ((uiState.partySetupData.tooltipX || 0) - uiState.partySetupX) - Math.floor(width / 2)))
+            y: Math.max(4, Math.min(parent.height - height - 4, ((uiState.partySetupData.tooltipY || 0) - uiState.partySetupY) - height - 14))
+            width: 248
+            height: tooltipText.paintedHeight + 12
+            color: "#303030"
+            border.width: 1
+            border.color: "#606060"
+            z: 10
+
+            Text {
+                id: tooltipText
+                x: 8
+                y: 6
+                width: parent.width - 16
+                text: uiState.partySetupData.tooltipText || ""
+                color: "#ffffff"
+                font.pixelSize: 10
+                wrapMode: Text.WordWrap
             }
         }
     }

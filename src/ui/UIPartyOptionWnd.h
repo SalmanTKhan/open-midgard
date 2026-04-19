@@ -52,6 +52,15 @@ public:
         bool selected = false;
     };
 
+    struct DisplayHelpIcon {
+        int groupId = 0;
+        int x = 0;
+        int y = 0;
+        int width = 0;
+        int height = 0;
+        bool hovered = false;
+    };
+
     struct DisplayData {
         std::string title;
         bool showNameEdit = false;
@@ -62,8 +71,12 @@ public:
         int nameFieldY = 0;
         int nameFieldWidth = 0;
         int nameFieldHeight = 0;
+        std::string tooltipText;
+        int tooltipX = 0;
+        int tooltipY = 0;
         std::vector<DisplayLabel> labels;
         std::vector<DisplayChoice> choices;
+        std::vector<DisplayHelpIcon> helpIcons;
         std::vector<QtButtonDisplay> buttons;
     };
 
@@ -80,6 +93,7 @@ public:
     void OnLBtnUp(int x, int y) override;
     void OnLBtnDblClk(int x, int y) override;
     void OnMouseMove(int x, int y) override;
+    void OnMouseHover(int x, int y) override;
     void OnKeyDown(int virtualKey) override;
     void StoreInfo() override;
 
@@ -99,6 +113,12 @@ private:
     void ClearEditFocus();
     unsigned int BuildOptionBits() const;
     bool Submit();
+    std::string GetTooltipText(int groupId) const;
+    int GetTooltipGroupAtPoint(int x, int y) const;
+    void UpdateTooltipHover(int x, int y);
+    RECT GetGroupHeaderRect(int groupId) const;
+    RECT GetHelpIconRect(int groupId) const;
+    RECT GetGroupTooltipAnchorRect(int groupId) const;
     void SetSelectedChoice(int groupId, int optionId);
     int GetSelectedChoice(int groupId) const;
     int HitTestButton(int x, int y) const;
@@ -116,6 +136,9 @@ private:
     int m_expShareOption;
     int m_itemShareOption;
     int m_itemSharingTypeOption;
+    int m_hoverTooltipGroup;
+    int m_lastTooltipMouseX;
+    int m_lastTooltipMouseY;
     unsigned long long m_lastVisualStateToken;
     bool m_hasVisualStateToken;
 };

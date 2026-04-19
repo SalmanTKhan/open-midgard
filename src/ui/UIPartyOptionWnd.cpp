@@ -11,8 +11,80 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <cstring>
 
 namespace {
+
+constexpr int kTooltipMaxWidth = 248;
+constexpr int kTooltipPaddingX = 8;
+constexpr int kTooltipPaddingY = 6;
+constexpr int kHelpIconSize = 13;
+
+void FillRectColor(HDC hdc, const RECT& rect, COLORREF color);
+void FrameRectColor(HDC hdc, const RECT& rect, COLORREF color);
+void DrawTextLine(HDC hdc, const RECT& rect, const char* text, COLORREF color, UINT format);
+
+RECT MakeRect(int left, int top, int width, int height)
+{
+    return RECT{ left, top, left + width, top + height };
+}
+
+void DrawFilledEllipse(HDC hdc, const RECT& rect, COLORREF fillColor, COLORREF borderColor)
+{
+    HBRUSH brush = CreateSolidBrush(fillColor);
+    HPEN pen = CreatePen(PS_SOLID, 1, borderColor);
+    HGDIOBJ oldBrush = SelectObject(hdc, brush);
+    HGDIOBJ oldPen = SelectObject(hdc, pen);
+    Ellipse(hdc, rect.left, rect.top, rect.right, rect.bottom);
+    SelectObject(hdc, oldPen);
+    SelectObject(hdc, oldBrush);
+    DeleteObject(pen);
+    DeleteObject(brush);
+}
+
+void DrawTooltipBox(HDC hdc, const RECT& windowRect, const RECT& anchorRect, const std::string& text)
+{
+    if (!hdc || text.empty()) {
+        return;
+    }
+
+    RECT measureRect{ 0, 0, kTooltipMaxWidth, 0 };
+    DrawTextA(hdc,
+        text.c_str(),
+        -1,
+        &measureRect,
+        DT_LEFT | DT_WORDBREAK | DT_NOPREFIX | DT_CALCRECT);
+
+    const int tooltipWidth = (measureRect.right - measureRect.left) + kTooltipPaddingX * 2;
+    const int tooltipHeight = (measureRect.bottom - measureRect.top) + kTooltipPaddingY * 2;
+    const int anchorCenterX = (anchorRect.left + anchorRect.right) / 2;
+    int tooltipLeft = anchorCenterX - (tooltipWidth / 2);
+    int tooltipTop = anchorRect.top - tooltipHeight - 14;
+
+    if (tooltipLeft < windowRect.left + 4) {
+        tooltipLeft = windowRect.left + 4;
+    }
+    if (tooltipLeft + tooltipWidth > windowRect.right - 4) {
+        tooltipLeft = windowRect.right - tooltipWidth - 4;
+    }
+    if (tooltipTop + tooltipHeight > windowRect.bottom - 4) {
+        tooltipTop = windowRect.bottom - tooltipHeight - 4;
+    }
+    if (tooltipTop < windowRect.top + 4) {
+        tooltipTop = anchorRect.bottom + 12;
+    }
+    if (tooltipTop + tooltipHeight > windowRect.bottom - 4) {
+        tooltipTop = windowRect.bottom - tooltipHeight - 4;
+    }
+
+    const RECT tooltipRect{ tooltipLeft, tooltipTop, tooltipLeft + tooltipWidth, tooltipTop + tooltipHeight };
+    FillRectColor(hdc, tooltipRect, RGB(48, 48, 48));
+    FrameRectColor(hdc, tooltipRect, RGB(96, 96, 96));
+
+    RECT textRect{ tooltipRect.left + kTooltipPaddingX, tooltipRect.top + kTooltipPaddingY,
+        tooltipRect.right - kTooltipPaddingX, tooltipRect.bottom - kTooltipPaddingY };
+    DrawTextLine(hdc, textRect, text.c_str(), RGB(255, 255, 255), DT_LEFT | DT_WORDBREAK | DT_NOPREFIX);
+}
 
 constexpr int kWindowWidth = 332;
 constexpr int kWindowHeight = 236;
@@ -105,6 +177,23 @@ const char* GetGroupHeaderLabel(int groupId)
     }
 }
 
+int MeasureUiLabelWidth(const char* text)
+{
+    if (!text) {
+        return 0;
+    }
+
+    HDC hdc = AcquireMainWindowDrawTarget();
+    if (!hdc) {
+        return static_cast<int>(std::strlen(text)) * 6 + 2;
+    }
+
+    RECT measureRect{ 0, 0, 0, 0 };
+    DrawTextA(hdc, text, -1, &measureRect, DT_LEFT | DT_SINGLELINE | DT_NOPREFIX | DT_CALCRECT);
+    ReleaseMainWindowDrawTarget(hdc);
+    return measureRect.right - measureRect.left;
+}
+
 } // namespace
 
 UIPartyOptionWnd::UIPartyOptionWnd()
@@ -115,6 +204,9 @@ UIPartyOptionWnd::UIPartyOptionWnd()
       m_expShareOption(0),
       m_itemShareOption(0),
       m_itemSharingTypeOption(0),
+            m_hoverTooltipGroup(-1),
+            m_lastTooltipMouseX(-1),
+            m_lastTooltipMouseY(-1),
       m_lastVisualStateToken(0),
       m_hasVisualStateToken(false)
 {
@@ -143,6 +235,9 @@ void UIPartyOptionWnd::SetShow(int show)
     if (show == 0) {
         ClearEditFocus();
         m_pressedButtonId = 0;
+        m_hoverTooltipGroup = -1;
+        m_lastTooltipMouseX = -1;
+        m_lastTooltipMouseY = -1;
     } else if (m_mode == ModeCreate && m_nameEditCtrl) {
         g_windowMgr.m_editWindow = m_nameEditCtrl;
         m_nameEditCtrl->m_hasFocus = true;
@@ -230,11 +325,15 @@ void UIPartyOptionWnd::OnDraw()
             DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
     }
 
+    for (const DisplayHelpIcon& icon : display.helpIcons) {
+        const RECT rect{ icon.x, icon.y, icon.x + icon.width, icon.y + icon.height };
+        DrawFilledEllipse(hdc, rect, icon.hovered ? RGB(212, 226, 239) : RGB(235, 229, 214), RGB(121, 106, 79));
+        DrawTextLine(hdc, rect, "?", RGB(28, 28, 28), DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+    }
+
     if (!display.showNameEdit) {
         const RECT nameFieldRect{ display.nameFieldX, display.nameFieldY, display.nameFieldX + display.nameFieldWidth, display.nameFieldY + display.nameFieldHeight };
-        FillRectColor(hdc, nameFieldRect, RGB(252, 249, 242));
-        FrameRectColor(hdc, nameFieldRect, RGB(158, 147, 124));
-        const RECT textRect{ nameFieldRect.left + 6, nameFieldRect.top, nameFieldRect.right - 6, nameFieldRect.bottom };
+        const RECT textRect{ nameFieldRect.left, nameFieldRect.top, nameFieldRect.right, nameFieldRect.bottom };
         DrawTextLine(hdc, textRect, display.nameValue.c_str(), RGB(32, 32, 32), DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
     }
 
@@ -259,6 +358,10 @@ void UIPartyOptionWnd::OnDraw()
         FillRectColor(hdc, rect, button.active ? RGB(212, 226, 239) : RGB(235, 229, 214));
         FrameRectColor(hdc, rect, RGB(121, 106, 79));
         DrawTextLine(hdc, rect, button.label.c_str(), RGB(28, 28, 28), DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+    }
+
+    if (!display.tooltipText.empty()) {
+        DrawTooltipBox(hdc, outer, GetGroupTooltipAnchorRect(m_hoverTooltipGroup), display.tooltipText);
     }
 
     DrawChildrenToHdc(hdc);
@@ -326,7 +429,13 @@ void UIPartyOptionWnd::OnLBtnDblClk(int x, int y)
 
 void UIPartyOptionWnd::OnMouseMove(int x, int y)
 {
+    UpdateTooltipHover(x, y);
     UIFrameWnd::OnMouseMove(x, y);
+}
+
+void UIPartyOptionWnd::OnMouseHover(int x, int y)
+{
+    UpdateTooltipHover(x, y);
 }
 
 void UIPartyOptionWnd::OnKeyDown(int virtualKey)
@@ -391,6 +500,11 @@ bool UIPartyOptionWnd::GetDisplayDataForQt(DisplayData* outData) const
     outData->nameFieldY = nameRect.top;
     outData->nameFieldWidth = nameRect.right - nameRect.left;
     outData->nameFieldHeight = nameRect.bottom - nameRect.top;
+    outData->tooltipText = GetTooltipText(m_hoverTooltipGroup);
+
+    const RECT tooltipAnchorRect = GetGroupTooltipAnchorRect(m_hoverTooltipGroup);
+    outData->tooltipX = tooltipAnchorRect.left;
+    outData->tooltipY = tooltipAnchorRect.top;
 
     DisplayLabel nameLabel{};
     nameLabel.x = m_x + 16;
@@ -402,14 +516,25 @@ bool UIPartyOptionWnd::GetDisplayDataForQt(DisplayData* outData) const
     outData->labels.push_back(nameLabel);
 
     for (int groupId = GroupExpShare; groupId <= GroupItemSharingType; ++groupId) {
+        const int headerWidth = MeasureUiLabelWidth(GetGroupHeaderLabel(groupId));
         DisplayLabel header{};
         header.x = m_x + 16;
         header.y = m_y + 68 + groupId * 44;
-        header.width = 150;
+        header.width = headerWidth;
         header.height = 18;
         header.text = GetGroupHeaderLabel(groupId);
         header.header = true;
         outData->labels.push_back(header);
+
+        const RECT helpIconRect = GetHelpIconRect(groupId);
+        DisplayHelpIcon helpIcon{};
+        helpIcon.groupId = groupId;
+        helpIcon.x = helpIconRect.left;
+        helpIcon.y = helpIconRect.top;
+        helpIcon.width = helpIconRect.right - helpIconRect.left;
+        helpIcon.height = helpIconRect.bottom - helpIconRect.top;
+        helpIcon.hovered = m_hoverTooltipGroup == groupId;
+        outData->helpIcons.push_back(helpIcon);
 
         for (int optionId = 0; optionId < 2; ++optionId) {
             const RECT choiceRect = GetChoiceRect(groupId, optionId);
@@ -515,6 +640,75 @@ bool UIPartyOptionWnd::Submit()
     return true;
 }
 
+std::string UIPartyOptionWnd::GetTooltipText(int groupId) const
+{
+    switch (groupId) {
+    case GroupExpShare:
+        return "Each take - Party members only gain EXP for monsters they damage.\n\nEven Share - Monsters' EXP is shared evenly among members in range.";
+    case GroupItemShare:
+        return "Each take - Only the player who killed the monster can pick up the item.\n\nParty share - Any party member can pick up items dropped by monsters, regardless of who killed it.";
+    case GroupItemSharingType:
+        return "Individual - Items picked up are kept by the player that picked it up.\n\nShared - Items are automatically distributed to members randomly when picked up.";
+    default:
+        return std::string();
+    }
+}
+
+int UIPartyOptionWnd::GetTooltipGroupAtPoint(int x, int y) const
+{
+    if (x < 0 || y < 0) {
+        return -1;
+    }
+
+    for (int groupId = GroupExpShare; groupId <= GroupItemSharingType; ++groupId) {
+        if (IsPointInRect(GetHelpIconRect(groupId), x, y)) {
+            return groupId;
+        }
+    }
+
+    return -1;
+}
+
+void UIPartyOptionWnd::UpdateTooltipHover(int x, int y)
+{
+    const int hoveredGroup = GetTooltipGroupAtPoint(x, y);
+    const bool positionChanged = m_lastTooltipMouseX != x || m_lastTooltipMouseY != y;
+    if (m_hoverTooltipGroup == hoveredGroup && (!positionChanged || hoveredGroup < 0)) {
+        return;
+    }
+
+    m_hoverTooltipGroup = hoveredGroup;
+    m_lastTooltipMouseX = hoveredGroup >= 0 ? x : -1;
+    m_lastTooltipMouseY = hoveredGroup >= 0 ? y : -1;
+    Invalidate();
+}
+
+RECT UIPartyOptionWnd::GetGroupHeaderRect(int groupId) const
+{
+    return RECT{ m_x + 16, m_y + 68 + groupId * 44, m_x + 180, m_y + 68 + groupId * 44 + 18 };
+}
+
+RECT UIPartyOptionWnd::GetHelpIconRect(int groupId) const
+{
+    const RECT secondChoiceRect = GetChoiceRect(groupId, 1);
+    const int iconLeft = secondChoiceRect.right + 4;
+    const int iconTop = secondChoiceRect.top + ((secondChoiceRect.bottom - secondChoiceRect.top - kHelpIconSize) / 2);
+    return MakeRect(iconLeft, iconTop, kHelpIconSize, kHelpIconSize);
+}
+
+RECT UIPartyOptionWnd::GetGroupTooltipAnchorRect(int groupId) const
+{
+    if (groupId < GroupExpShare || groupId > GroupItemSharingType) {
+        return GetNameFieldRect();
+    }
+
+    if (m_lastTooltipMouseX >= 0 && m_lastTooltipMouseY >= 0) {
+        return MakeRect(m_lastTooltipMouseX, m_lastTooltipMouseY, 1, 1);
+    }
+
+    return GetHelpIconRect(groupId);
+}
+
 void UIPartyOptionWnd::SetSelectedChoice(int groupId, int optionId)
 {
     switch (groupId) {
@@ -613,6 +807,9 @@ unsigned long long UIPartyOptionWnd::BuildVisualStateToken() const
     HashTokenValue(&hash, static_cast<unsigned long long>(m_expShareOption));
     HashTokenValue(&hash, static_cast<unsigned long long>(m_itemShareOption));
     HashTokenValue(&hash, static_cast<unsigned long long>(m_itemSharingTypeOption));
+    HashTokenValue(&hash, static_cast<unsigned long long>(m_hoverTooltipGroup + 1));
+    HashTokenValue(&hash, static_cast<unsigned long long>(m_lastTooltipMouseX + 1));
+    HashTokenValue(&hash, static_cast<unsigned long long>(m_lastTooltipMouseY + 1));
     HashTokenValue(&hash, static_cast<unsigned long long>(m_pressedButtonId));
     HashTokenValue(&hash, static_cast<unsigned long long>(m_x));
     HashTokenValue(&hash, static_cast<unsigned long long>(m_y));

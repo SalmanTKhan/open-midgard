@@ -2243,6 +2243,9 @@ void PopulatePartySetupState(QtUiState* state)
         data.insert(QStringLiteral("nameFieldY"), display.nameFieldY);
         data.insert(QStringLiteral("nameFieldWidth"), display.nameFieldWidth);
         data.insert(QStringLiteral("nameFieldHeight"), display.nameFieldHeight);
+        data.insert(QStringLiteral("tooltipText"), ToQString(display.tooltipText));
+        data.insert(QStringLiteral("tooltipX"), display.tooltipX);
+        data.insert(QStringLiteral("tooltipY"), display.tooltipY);
 
         QVariantList labels;
         labels.reserve(static_cast<qsizetype>(display.labels.size()));
@@ -2273,6 +2276,20 @@ void PopulatePartySetupState(QtUiState* state)
             choices.push_back(entry);
         }
         data.insert(QStringLiteral("choices"), choices);
+
+        QVariantList helpIcons;
+        helpIcons.reserve(static_cast<qsizetype>(display.helpIcons.size()));
+        for (const UIPartyOptionWnd::DisplayHelpIcon& helpIcon : display.helpIcons) {
+            QVariantMap entry;
+            entry.insert(QStringLiteral("groupId"), helpIcon.groupId);
+            entry.insert(QStringLiteral("x"), helpIcon.x);
+            entry.insert(QStringLiteral("y"), helpIcon.y);
+            entry.insert(QStringLiteral("width"), helpIcon.width);
+            entry.insert(QStringLiteral("height"), helpIcon.height);
+            entry.insert(QStringLiteral("hovered"), helpIcon.hovered);
+            helpIcons.push_back(entry);
+        }
+        data.insert(QStringLiteral("helpIcons"), helpIcons);
 
         QVariantList buttons;
         buttons.reserve(static_cast<qsizetype>(display.buttons.size()));
