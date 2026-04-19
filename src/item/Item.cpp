@@ -26,6 +26,18 @@ struct AggregatedCardLabel {
 	int count = 0;
 };
 
+std::string AppendSlotSuffix(std::string baseName, int slotCount)
+{
+	if (baseName.empty() || slotCount <= 0) {
+		return baseName;
+	}
+
+	baseName += " [";
+	baseName += std::to_string(slotCount);
+	baseName += "]";
+	return baseName;
+}
+
 const char* GetRepeatedCardPrefixWord(int count)
 {
 	switch (count) {
@@ -329,14 +341,14 @@ std::string CItemMgr::GetDisplayName(unsigned int itemId, bool identified)
 			? metadata->identifiedDisplayName
 			: metadata->unidentifiedDisplayName;
 		if (!preferredName.empty()) {
-			return preferredName;
+			return AppendSlotSuffix(preferredName, metadata->slotCount);
 		}
 
 		const std::string& fallbackName = identified
 			? metadata->unidentifiedDisplayName
 			: metadata->identifiedDisplayName;
 		if (!fallbackName.empty()) {
-			return fallbackName;
+			return AppendSlotSuffix(fallbackName, metadata->slotCount);
 		}
 	}
 	return itemId != 0 ? std::to_string(itemId) : std::string();
