@@ -628,8 +628,10 @@ UIStorageWnd::UIStorageWnd()
       m_dragStartPoint{},
       m_dragItemId(0),
       m_dragItemIndex(0),
-    m_dragItemCount(0),
+            m_dragItemCount(0),
       m_dragItemEquipLocation(0),
+            m_isDraggingScrollThumb(false),
+            m_scrollDragOffsetY(0),
       m_lastVisualStateToken(0ull),
       m_hasVisualStateToken(false)
 {
@@ -892,6 +894,8 @@ void UIStorageWnd::OnLBtnDblClk(int x, int y)
 void UIStorageWnd::OnLBtnDown(int x, int y)
 {
     m_dragArmed = false;
+    m_isDraggingScrollThumb = false;
+    m_scrollDragOffsetY = 0;
     m_dragItemId = 0;
     m_dragItemIndex = 0;
     m_dragItemCount = 0;
@@ -917,18 +921,29 @@ void UIStorageWnd::OnLBtnDown(int x, int y)
         return;
     }
 
+    const int filteredItemCount = static_cast<int>(GetFilteredItems().size());
+    if (IsScrollBarVisible(filteredItemCount)) {
+        const RECT scrollThumbRect = GetScrollThumbRect(filteredItemCount);
+        const RECT scrollTrackRect = GetScrollTrackRect();
+        if (IsPointInRect(scrollThumbRect, x, y)) {
+            m_isDraggingScrollThumb = true;
+            m_scrollDragOffsetY = y - scrollThumbRect.top;
+            return;
+        }
+        if (IsPointInRect(scrollTrackRect, x, y)) {
+            UpdateScrollFromThumbPosition(y - ((scrollThumbRect.bottom - scrollThumbRect.top) / 2), filteredItemCount);
+            RefreshVisibleItemsForInteractionState();
+            UpdateHoveredItem(x, y);
+            Invalidate();
+            return;
+        }
+    }
+
     if (m_h > kMiniHeight
         && x >= m_x + m_w - 14
         && x < m_x + m_w - 4
         && y >= m_y + kGridTop + kListHeaderHeight
         && y < m_y + m_h - kGridBottomMargin) {
-        const int maxOffset = GetMaxViewOffset(static_cast<int>(GetFilteredItems().size()));
-        if (maxOffset > 0) {
-            const int trackTop = m_y + kGridTop + kListHeaderHeight + 4;
-            const int trackHeight = (m_y + m_h - kGridBottomMargin) - (m_y + kGridTop + kListHeaderHeight) - 8;
-            const int relative = std::max(0, std::min(y - trackTop, trackHeight));
-            m_viewOffset = std::min(maxOffset, (relative * (maxOffset + 1)) / std::max(1, trackHeight));
-        }
         return;
     }
 
@@ -951,6 +966,14 @@ void UIStorageWnd::OnLBtnDown(int x, int y)
 
 void UIStorageWnd::OnLBtnUp(int x, int y)
 {
+    if (m_isDraggingScrollThumb) {
+        m_isDraggingScrollThumb = false;
+        RefreshVisibleItemsForInteractionState();
+        UpdateHoveredItem(x, y);
+        Invalidate();
+        return;
+    }
+
     m_dragArmed = false;
     m_dragItemId = 0;
     m_dragItemIndex = 0;
@@ -1014,6 +1037,14 @@ void UIStorageWnd::OnRBtnDown(int x, int y)
 
 void UIStorageWnd::OnMouseMove(int x, int y)
 {
+    if (m_isDraggingScrollThumb) {
+        UpdateScrollFromThumbPosition(y - m_scrollDragOffsetY, static_cast<int>(GetFilteredItems().size()));
+        RefreshVisibleItemsForInteractionState();
+        UpdateHoveredItem(x, y);
+        Invalidate();
+        return;
+    }
+
     UIFrameWnd::OnMouseMove(x, y);
     if (m_dragArmed) {
         const int dx = x - m_dragStartPoint.x;
@@ -1050,6 +1081,23 @@ void UIStorageWnd::OnMouseHover(int x, int y)
     RefreshVisibleItemsForInteractionState();
     UpdateHoveredItem(x, y);
     if (m_hoveredItemIndex != oldHoveredItemIndex) {
+        Invalidate();
+    }
+}
+
+void UIStorageWnd::OnWheel(int delta)
+{
+    const int itemCount = static_cast<int>(GetFilteredItems().size());
+    const int maxOffset = GetMaxViewOffset(itemCount);
+    const int oldViewOffset = m_viewOffset;
+    if (delta > 0) {
+        m_viewOffset = std::max(0, m_viewOffset - 1);
+    } else if (delta < 0) {
+        m_viewOffset = std::min(maxOffset, m_viewOffset + 1);
+    }
+
+    if (m_viewOffset != oldViewOffset) {
+        RefreshVisibleItemsForInteractionState();
         Invalidate();
     }
 }
@@ -1466,6 +1514,50 @@ int UIStorageWnd::GetMaxViewOffset(int itemCount) const
 
     const int usedRows = (itemCount + columns - 1) / columns;
     return std::max(0, usedRows - rows);
+}
+
+RECT UIStorageWnd::GetScrollTrackRect() const
+{
+    return RECT{
+        m_x + m_w - 14,
+        m_y + kGridTop + kListHeaderHeight,
+        m_x + m_w - 4,
+        m_y + m_h - kGridBottomMargin
+    };
+}
+
+RECT UIStorageWnd::GetScrollThumbRect(int itemCount) const
+{
+    RECT trackRect = GetScrollTrackRect();
+    const int maxOffset = GetMaxViewOffset(itemCount);
+    const int offsetRange = std::max(1, maxOffset + 1);
+    const int trackHeight = std::max(0, static_cast<int>(trackRect.bottom - trackRect.top - 8));
+    const int thumbHeight = std::max(14, trackHeight / offsetRange);
+    const int thumbTop = trackRect.top + 4 + ((trackHeight - thumbHeight) * m_viewOffset) / offsetRange;
+    return RECT{ trackRect.left + 2, thumbTop, trackRect.right - 2, thumbTop + thumbHeight };
+}
+
+bool UIStorageWnd::IsScrollBarVisible(int itemCount) const
+{
+    return m_h > kMiniHeight && GetMaxViewOffset(itemCount) > 0;
+}
+
+void UIStorageWnd::UpdateScrollFromThumbPosition(int globalY, int itemCount)
+{
+    const int maxOffset = GetMaxViewOffset(itemCount);
+    if (maxOffset <= 0) {
+        m_viewOffset = 0;
+        return;
+    }
+
+    const RECT trackRect = GetScrollTrackRect();
+    const RECT thumbRect = GetScrollThumbRect(itemCount);
+    const int thumbHeight = static_cast<int>(thumbRect.bottom - thumbRect.top);
+    const int minTop = trackRect.top + 4;
+    const int maxTop = trackRect.bottom - 4 - thumbHeight;
+    const int clampedTop = std::max(minTop, std::min(globalY, maxTop));
+    const int denominator = std::max(1, maxTop - minTop);
+    m_viewOffset = ((clampedTop - minTop) * maxOffset) / denominator;
 }
 
 std::vector<const ITEM_INFO*> UIStorageWnd::GetFilteredItems() const

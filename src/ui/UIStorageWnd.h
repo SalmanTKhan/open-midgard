@@ -72,6 +72,7 @@ public:
     void OnRBtnDown(int x, int y) override;
     void OnMouseMove(int x, int y) override;
     void OnMouseHover(int x, int y) override;
+    void OnWheel(int delta) override;
     void DragAndDrop(int x, int y, const DRAG_INFO* const info) override;
     void StoreInfo() override;
     void DrawHoverOverlay(HDC hdc, const RECT& clientRect) const;
@@ -103,6 +104,10 @@ private:
     int GetInventoryItemCount() const;
     int GetInventorySlotCapacity() const;
     int GetMaxViewOffset(int itemCount) const;
+    RECT GetScrollTrackRect() const;
+    RECT GetScrollThumbRect(int itemCount) const;
+    bool IsScrollBarVisible(int itemCount) const;
+    void UpdateScrollFromThumbPosition(int globalY, int itemCount);
     std::vector<const ITEM_INFO*> GetFilteredItems() const;
     const shopui::BitmapPixels* GetItemIcon(const ITEM_INFO& item);
     std::string GetTitleText() const;
@@ -130,6 +135,8 @@ private:
     unsigned int m_dragItemIndex;
     int m_dragItemCount;
     int m_dragItemEquipLocation;
+    bool m_isDraggingScrollThumb;
+    int m_scrollDragOffsetY;
     unsigned long long m_lastVisualStateToken;
     bool m_hasVisualStateToken;
 };
