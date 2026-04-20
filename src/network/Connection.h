@@ -43,6 +43,7 @@ public:
 
     bool Connect(const char* ip, int port);
     void Disconnect();
+    bool IsOpen() const { return m_socket != INVALID_SOCKET; }
     
     int  Send(const char* buf, int len);
     int  Recv(char* buf, int len, bool peek = false);

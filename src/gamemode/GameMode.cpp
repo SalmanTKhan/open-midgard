@@ -1,8 +1,10 @@
 #include "network/Connection.h"
 #include "network/Packet.h"
 #include "network/GronPacket.h"
+#include "network/MapSendProfile.h"
 #include "CursorRenderer.h"
 #include "GameMode.h"
+#include "PacketPadding.h"
 #include "View.h"
 #include "qtui/QtUiRuntime.h"
 #include "audio/Audio.h"
@@ -2853,10 +2855,25 @@ void SendActorNameRequest(CGameMode& mode, u32 gid)
         return;
     }
 
-    PACKET_CZ_REQNAME2 packet{};
-    packet.PacketType = PacketProfile::ActiveMapServerSend::kGetCharNameRequest;
-    packet.GID = gid;
-    if (CRagConnection::instance()->SendPacket(reinterpret_cast<const char*>(&packet), static_cast<int>(sizeof(packet)))) {
+    const ro::net::MapGameplaySendProfile& profile = ro::net::GetActiveMapGameplaySendProfile();
+    bool sent = false;
+    if (ro::net::IsLegacyMapGameplaySendProfile()) {
+        PACKET_CZ_REQNAME_LEGACY packet{};
+        packet.PacketType = profile.getCharNameRequest;
+        packet.GID = gid;
+        sent = CRagConnection::instance()->SendPacket(reinterpret_cast<const char*>(&packet), static_cast<int>(sizeof(packet)));
+    } else {
+        PACKET_CZ_REQNAME2 packet{};
+        packet.PacketType = profile.getCharNameRequest;
+        FillPacketPadding(packet.padding, static_cast<int>(sizeof(packet.padding)));
+        packet.GID = gid;
+        sent = CRagConnection::instance()->SendPacket(reinterpret_cast<const char*>(&packet), static_cast<int>(sizeof(packet)));
+    }
+    DbgLog("[GameMode] hover actor name request opcode=0x%04X gid=%u sent=%d\n",
+        profile.getCharNameRequest,
+        gid,
+        sent ? 1 : 0);
+    if (sent) {
         mode.m_actorNameByGIDReqTimer[gid] = now;
     }
 }
@@ -3889,6 +3906,7 @@ void DrawPlayerVitalsOverlay(CGameMode& mode, HDC hdc)
 bool SendLoadEndAckPacket();
 ULONG_PTR EnsureGdiplusStarted();
 void SyncBootstrapSelfActorWorldPos(CGameMode& mode);
+void SyncBootstrapRuntimeActorWorldPos(CGameMode& mode);
 void EnsureRealView(CGameMode& mode);
 void EnsureBootstrapWorldAssets(const CGameMode& mode);
 struct BootstrapWorldCache;
@@ -3974,6 +3992,7 @@ void UpdateMapLoadingUi(CGameMode& mode, const char* message, float progress)
 
 void FinishMapLoading(CGameMode& mode)
 {
+    SyncBootstrapRuntimeActorWorldPos(mode);
     g_windowMgr.HideLoadingScreen();
     g_windowMgr.EnsureChatWindowVisible();
     g_windowMgr.MakeWindow(UIWindowMgr::WID_BASICINFOWND);
@@ -4035,12 +4054,13 @@ void AdvanceMapLoading(CGameMode& mode)
         const u32 sinceAck = now - mode.m_mapLoadingAckTick;
         const u32 sinceActor = now - mode.m_lastActorBootstrapPacketTick;
 
-        if (mode.m_sentLoadEndAck == 1 && sinceAck >= kLoadingAckRetryDelayMs && mode.m_runtimeActors.size() <= 4) {
+        if (mode.m_sentLoadEndAck == 1 && sinceAck >= kLoadingAckRetryDelayMs && mode.m_receiveSyneRequestTime == 0) {
             const bool resent = SendLoadEndAckPacket();
-            DbgLog("[GameMode] retry load end ack sent=%d runtime=%zu pos=%zu\n",
+            DbgLog("[GameMode] retry load end ack sent=%d runtime=%zu pos=%zu waitingForSync=%d\n",
                 resent ? 1 : 0,
                 mode.m_runtimeActors.size(),
-                mode.m_actorPosList.size());
+                mode.m_actorPosList.size(),
+                mode.m_receiveSyneRequestTime == 0 ? 1 : 0);
             mode.m_sentLoadEndAck = resent ? 2 : 1;
             if (resent) {
                 mode.m_mapLoadingAckTick = now;
@@ -4111,10 +4131,6 @@ void LogFirstSeenUnhandledGamePacket(u16 packetId, int packetLength)
     }
 }
 
-constexpr u16 kPacketCzRequestMove = PacketProfile::ActiveMapServerSend::kWalkToXY;
-constexpr u16 kPacketCzChangeDir = PacketProfile::ActiveMapServerSend::kChangeDir;
-constexpr u16 kPacketCzRequestTime = PacketProfile::ActiveMapServerSend::kTickSend;
-constexpr u16 kPacketCzNotifyActorInit = PacketProfile::ActiveMapServerSend::kNotifyActorInit;
 constexpr u32 kHeldMoveRequestIntervalMs = 75;
 constexpr int kHeldMoveRetargetThresholdCells = 2;
 constexpr int kHeldMoveDirectionalExtensionCells = 4;
@@ -4123,16 +4139,18 @@ constexpr u32 kMoveAckTimeoutMs = 1000;
 constexpr u32 kAttackChaseRequestIntervalMs = 1200;
 constexpr u32 kAttackRetryIntervalMs = 1200;
 constexpr u32 kTimeSyncIntervalMs = 12000;
+constexpr u32 kTimeSyncReplyRetryMs = 3000;
 
 bool SendLoadEndAckPacket()
 {
+    const ro::net::MapGameplaySendProfile& profile = ro::net::GetActiveMapGameplaySendProfile();
     u8 packet[2]{};
-    packet[0] = static_cast<u8>(kPacketCzNotifyActorInit & 0xFF);
-    packet[1] = static_cast<u8>((kPacketCzNotifyActorInit >> 8) & 0xFF);
+    packet[0] = static_cast<u8>(profile.notifyActorInit & 0xFF);
+    packet[1] = static_cast<u8>((profile.notifyActorInit >> 8) & 0xFF);
 
     const bool sent = CRagConnection::instance()->SendPacket(reinterpret_cast<const char*>(packet), sizeof(packet));
     DbgLog("[GameMode] load end ack opcode=0x%04X sent=%d\n",
-        kPacketCzNotifyActorInit,
+        profile.notifyActorInit,
         sent ? 1 : 0);
     return sent;
 }
@@ -4140,21 +4158,31 @@ bool SendLoadEndAckPacket()
 bool SendTimeSyncRequest(CGameMode& mode, bool syncNow)
 {
     const u32 now = timeGetTime();
-    if (!syncNow && mode.m_syncRequestTime != 0 && now <= mode.m_syncRequestTime + kTimeSyncIntervalMs) {
+    const bool waitingForReply = mode.m_syncRequestTime != 0 && mode.m_receiveSyneRequestTime == 0;
+    const u32 intervalMs = waitingForReply ? kTimeSyncReplyRetryMs : kTimeSyncIntervalMs;
+    if (!syncNow && mode.m_syncRequestTime != 0 && now <= mode.m_syncRequestTime + intervalMs) {
         return false;
     }
 
-    PACKET_CZ_TICKSEND2 packet{};
-    packet.PacketType = kPacketCzRequestTime;
-    packet.padding = 0;
-    packet.ClientTick = now;
+    const ro::net::MapGameplaySendProfile& profile = ro::net::GetActiveMapGameplaySendProfile();
+    bool sent = false;
+    if (ro::net::IsLegacyMapGameplaySendProfile()) {
+        PACKET_CZ_TICKSEND_LEGACY packet{};
+        packet.PacketType = profile.tickSend;
+        packet.ClientTick = now;
+        sent = CRagConnection::instance()->SendPacket(reinterpret_cast<const char*>(&packet), sizeof(packet));
+    } else {
+        PACKET_CZ_TICKSEND2 packet{};
+        packet.PacketType = profile.tickSend;
+        FillPacketPadding(&packet.padding, 2);
+        packet.ClientTick = now;
+        sent = CRagConnection::instance()->SendPacket(reinterpret_cast<const char*>(&packet), sizeof(packet));
+    }
 
     mode.m_receiveSyneRequestTime = 0;
     mode.m_syncRequestTime = now;
-
-    const bool sent = CRagConnection::instance()->SendPacket(reinterpret_cast<const char*>(&packet), sizeof(packet));
     DbgLog("[GameMode] time sync request opcode=0x%04X tick=%u sent=%d\n",
-        kPacketCzRequestTime,
+        profile.tickSend,
         now,
         sent ? 1 : 0);
     return sent;
@@ -4453,14 +4481,31 @@ bool IsValidMoveCell(const CGameMode& mode,
 
 bool SendMoveRequestPacket(int dstX, int dstY)
 {
-    PACKET_CZ_REQUEST_MOVE2 packet{};
-    packet.PacketType = kPacketCzRequestMove;
-    if (!EncodeMoveDestination(dstX, dstY, packet.Dest)) {
-        DbgLog("[GameMode] move request encode failed dst=%d,%d\n", dstX, dstY);
-        return false;
+    const ro::net::MapGameplaySendProfile& profile = ro::net::GetActiveMapGameplaySendProfile();
+    bool sent = false;
+    if (ro::net::IsLegacyMapGameplaySendProfile()) {
+        PACKET_CZ_REQUEST_MOVE_LEGACY packet{};
+        packet.PacketType = profile.walkToXY;
+        if (!EncodeMoveDestination(dstX, dstY, packet.Dest)) {
+            DbgLog("[GameMode] move request encode failed dst=%d,%d\n", dstX, dstY);
+            return false;
+        }
+        sent = CRagConnection::instance()->SendPacket(reinterpret_cast<const char*>(&packet), sizeof(packet));
+    } else {
+        PACKET_CZ_REQUEST_MOVE2 packet{};
+        packet.PacketType = profile.walkToXY;
+        FillPacketPadding(packet.padding, static_cast<int>(sizeof(packet.padding)));
+        if (!EncodeMoveDestination(dstX, dstY, packet.Dest)) {
+            DbgLog("[GameMode] move request encode failed dst=%d,%d\n", dstX, dstY);
+            return false;
+        }
+        sent = CRagConnection::instance()->SendPacket(reinterpret_cast<const char*>(&packet), sizeof(packet));
     }
-
-    const bool sent = CRagConnection::instance()->SendPacket(reinterpret_cast<const char*>(&packet), sizeof(packet));
+    DbgLog("[GameMode] move request opcode=0x%04X dst=%d,%d sent=%d\n",
+        profile.walkToXY,
+        dstX,
+        dstY,
+        sent ? 1 : 0);
     if (sent) {
         if (CGameMode* gameMode = g_modeMgr.GetCurrentGameMode()) {
             if (gameMode->m_world && gameMode->m_world->m_player) {
@@ -4474,23 +4519,29 @@ bool SendMoveRequestPacket(int dstX, int dstY)
 
 bool SendChangeDirRequestPacket(u8 headDir, u8 dir)
 {
-    PACKET_CZ_CHANGE_DIRECTION2 packet{};
-    packet.PacketType = kPacketCzChangeDir;
-    packet.padding0[0] = 0;
-    packet.padding0[1] = 0;
-    packet.padding0[2] = 0;
-    packet.padding0[3] = 0;
-    packet.padding0[4] = 0;
-    packet.HeadDir = headDir;
-    packet.padding1[0] = 0;
-    packet.padding1[1] = 0;
-    packet.Dir = static_cast<u8>(dir & 7);
-
-    const bool sent = CRagConnection::instance()->SendPacket(
-        reinterpret_cast<const char*>(&packet),
-        static_cast<int>(sizeof(packet)));
+    const ro::net::MapGameplaySendProfile& profile = ro::net::GetActiveMapGameplaySendProfile();
+    bool sent = false;
+    if (ro::net::IsLegacyMapGameplaySendProfile()) {
+        PACKET_CZ_CHANGE_DIRECTION_LEGACY packet{};
+        packet.PacketType = profile.changeDir;
+        packet.HeadDir = static_cast<u16>(headDir);
+        packet.Dir = static_cast<u8>(dir & 7);
+        sent = CRagConnection::instance()->SendPacket(
+            reinterpret_cast<const char*>(&packet),
+            static_cast<int>(sizeof(packet)));
+    } else {
+        PACKET_CZ_CHANGE_DIRECTION2 packet{};
+        packet.PacketType = profile.changeDir;
+        FillPacketPadding(packet.padding0, static_cast<int>(sizeof(packet.padding0)));
+        packet.HeadDir = static_cast<u16>(headDir);
+        FillPacketPadding(&packet.padding1, 1);
+        packet.Dir = static_cast<u8>(dir & 7);
+        sent = CRagConnection::instance()->SendPacket(
+            reinterpret_cast<const char*>(&packet),
+            static_cast<int>(sizeof(packet)));
+    }
     DbgLog("[GameMode] change dir request opcode=0x%04X headdir=%u dir=%u sent=%d\n",
-        kPacketCzChangeDir,
+        profile.changeDir,
         static_cast<unsigned int>(headDir),
         static_cast<unsigned int>(dir & 7),
         sent ? 1 : 0);
@@ -4581,9 +4632,10 @@ bool SendGlobalChatMessage(const char* playerName, const std::string& message)
         return false;
     }
 
+    const ro::net::MapGameplaySendProfile& profile = ro::net::GetActiveMapGameplaySendProfile();
     std::vector<u8> packet(packetSize, 0);
-    packet[0] = static_cast<u8>(PacketProfile::ActiveMapServerSend::kGlobalMessage & 0xFFu);
-    packet[1] = static_cast<u8>((PacketProfile::ActiveMapServerSend::kGlobalMessage >> 8) & 0xFFu);
+    packet[0] = static_cast<u8>(profile.globalMessage & 0xFFu);
+    packet[1] = static_cast<u8>((profile.globalMessage >> 8) & 0xFFu);
     packet[2] = static_cast<u8>(packetSize & 0xFFu);
     packet[3] = static_cast<u8>((packetSize >> 8) & 0xFFu);
     std::memcpy(packet.data() + 4, payload.c_str(), payload.size());
@@ -4591,7 +4643,7 @@ bool SendGlobalChatMessage(const char* playerName, const std::string& message)
     const bool sent = CRagConnection::instance()->SendPacket(
         reinterpret_cast<const char*>(packet.data()), static_cast<int>(packet.size()));
     DbgLog("[GameMode] chat send opcode=0x%04X name='%s' text='%s' sent=%d\n",
-        PacketProfile::ActiveMapServerSend::kGlobalMessage,
+        profile.globalMessage,
         playerName,
         message.c_str(),
         sent ? 1 : 0);
@@ -4609,9 +4661,10 @@ bool SendWhisperChatMessage(const std::string& targetName, const std::string& me
         return false;
     }
 
+    const ro::net::MapGameplaySendProfile& profile = ro::net::GetActiveMapGameplaySendProfile();
     std::vector<u8> packet(packetSize, 0);
-    packet[0] = static_cast<u8>(PacketProfile::ActiveMapServerSend::kWhisper & 0xFFu);
-    packet[1] = static_cast<u8>((PacketProfile::ActiveMapServerSend::kWhisper >> 8) & 0xFFu);
+    packet[0] = static_cast<u8>(profile.whisper & 0xFFu);
+    packet[1] = static_cast<u8>((profile.whisper >> 8) & 0xFFu);
     packet[2] = static_cast<u8>(packetSize & 0xFFu);
     packet[3] = static_cast<u8>((packetSize >> 8) & 0xFFu);
     std::memcpy(packet.data() + 4, targetName.data(), targetName.size());
@@ -4620,7 +4673,7 @@ bool SendWhisperChatMessage(const std::string& targetName, const std::string& me
     const bool sent = CRagConnection::instance()->SendPacket(
         reinterpret_cast<const char*>(packet.data()), static_cast<int>(packet.size()));
     DbgLog("[GameMode] whisper send opcode=0x%04X target='%s' text='%s' sent=%d\n",
-        PacketProfile::ActiveMapServerSend::kWhisper,
+        profile.whisper,
         targetName.c_str(),
         message.c_str(),
         sent ? 1 : 0);
@@ -5069,17 +5122,25 @@ bool SendActionRequestPacket(u32 targetGid, u8 action)
         return false;
     }
 
-    PACKET_CZ_ACTION_REQUEST2 packet{};
-    packet.PacketType = PacketProfile::ActiveMapServerSend::kActionRequest;
-    packet.TargetGID = targetGid;
-    packet.Action = action;
+    const ro::net::MapGameplaySendProfile& profile = ro::net::GetActiveMapGameplaySendProfile();
+    std::array<u8, sizeof(PACKET_CZ_ACTION_REQUEST_PACKETVER22)> packetBuffer{};
+    int packetLength = 0;
+    if (!ro::net::BuildActiveActionRequestPacket(
+            targetGid,
+            action,
+            packetBuffer.data(),
+            static_cast<int>(packetBuffer.size()),
+            &packetLength)) {
+        return false;
+    }
+
     const bool sent = CRagConnection::instance()->SendPacket(
-        reinterpret_cast<const char*>(&packet),
-        static_cast<int>(sizeof(packet)));
+        reinterpret_cast<const char*>(packetBuffer.data()),
+        packetLength);
     DbgLog("[GameMode] action request gid=%u action=%u opcode=0x%04X sent=%d\n",
         targetGid,
         static_cast<unsigned int>(action),
-        PacketProfile::ActiveMapServerSend::kActionRequest,
+        profile.actionRequest,
         sent ? 1 : 0);
     return sent;
 }
@@ -5115,16 +5176,23 @@ bool SendTakeItemRequestPacket(u32 objectAid)
         return false;
     }
 
-    PACKET_CZ_TAKE_ITEM2 packet{};
-    packet.PacketType = PacketProfile::ActiveMapServerSend::kTakeItem;
-    packet.padding = 0;
-    packet.ObjectAID = objectAid;
+    const ro::net::MapGameplaySendProfile& profile = ro::net::GetActiveMapGameplaySendProfile();
+    std::array<u8, sizeof(PACKET_CZ_TAKE_ITEM2)> packetBuffer{};
+    int packetLength = 0;
+    if (!ro::net::BuildActiveTakeItemPacket(
+            objectAid,
+            packetBuffer.data(),
+            static_cast<int>(packetBuffer.size()),
+            &packetLength)) {
+        return false;
+    }
+
     const bool sent = CRagConnection::instance()->SendPacket(
-        reinterpret_cast<const char*>(&packet),
-        static_cast<int>(sizeof(packet)));
+        reinterpret_cast<const char*>(packetBuffer.data()),
+        packetLength);
     DbgLog("[GameMode] take item aid=%u opcode=0x%04X sent=%d\n",
         objectAid,
-        PacketProfile::ActiveMapServerSend::kTakeItem,
+        profile.takeItem,
         sent ? 1 : 0);
     return sent;
 }
@@ -5247,8 +5315,9 @@ bool RequestEquipInventoryItem(u16 itemIndex, u16 equipLocation)
         return false;
     }
 
+    const ro::net::MapGameplaySendProfile& profile = ro::net::GetActiveMapGameplaySendProfile();
     PACKET_CZ_REQ_WEAR_EQUIP packet{};
-    packet.PacketType = PacketProfile::ActiveMapServerSend::kEquipItem;
+    packet.PacketType = profile.equipItem;
     packet.ItemIndex = itemIndex;
     packet.WearLocation = equipLocation;
 
@@ -5274,8 +5343,9 @@ bool RequestUnequipInventoryItem(u16 itemIndex)
         return false;
     }
 
+    const ro::net::MapGameplaySendProfile& profile = ro::net::GetActiveMapGameplaySendProfile();
     PACKET_CZ_REQ_TAKEOFF_EQUIP packet{};
-    packet.PacketType = PacketProfile::ActiveMapServerSend::kUnequipItem;
+    packet.PacketType = profile.unequipItem;
     packet.ItemIndex = itemIndex;
 
     const bool sent = CRagConnection::instance()->SendPacket(
@@ -5299,8 +5369,9 @@ bool RequestUpgradeSkillLevel(u16 skillId)
         return false;
     }
 
+    const ro::net::MapGameplaySendProfile& profile = ro::net::GetActiveMapGameplaySendProfile();
     PACKET_CZ_SKILLUP packet{};
-    packet.PacketType = PacketProfile::ActiveMapServerSend::kSkillUp;
+    packet.PacketType = profile.skillUp;
     packet.SkillId = skillId;
 
     const bool sent = CRagConnection::instance()->SendPacket(
@@ -5335,15 +5406,21 @@ bool SendUseSkillToIdPacket(u16 skillId, u16 skillLevel, u32 targetGid)
         return false;
     }
 
-    PACKET_CZ_USESKILLTOID2 packet{};
-    packet.PacketType = PacketProfile::ActiveMapServerSend::kUseSkillToId;
-    packet.SkillId = skillId;
-    packet.SkillLevel = skillLevel;
-    packet.TargetGID = targetGid;
+    std::array<u8, sizeof(PACKET_CZ_USESKILLTOID_PACKETVER22)> packetBuffer{};
+    int packetLength = 0;
+    if (!ro::net::BuildActiveUseSkillToIdPacket(
+            skillId,
+            skillLevel,
+            targetGid,
+            packetBuffer.data(),
+            static_cast<int>(packetBuffer.size()),
+            &packetLength)) {
+        return false;
+    }
 
     const bool sent = CRagConnection::instance()->SendPacket(
-        reinterpret_cast<const char*>(&packet),
-        static_cast<int>(sizeof(packet)));
+        reinterpret_cast<const char*>(packetBuffer.data()),
+        packetLength);
     if (sent) {
         NoteLocalHideSkillRequest(skillId, targetGid);
     }
@@ -5364,8 +5441,9 @@ bool SendUseSkillToPosPacket(u16 skillId, u16 skillLevel, int cellX, int cellY)
         return false;
     }
 
+    const ro::net::MapGameplaySendProfile& profile = ro::net::GetActiveMapGameplaySendProfile();
     PACKET_CZ_USESKILLTOPOS packet{};
-    packet.PacketType = PacketProfile::ActiveMapServerSend::kUseSkillToPos;
+    packet.PacketType = profile.useSkillToPos;
     packet.SkillId = skillId;
     packet.SkillLevel = skillLevel;
     packet.X = static_cast<u16>(cellX);
@@ -5389,17 +5467,24 @@ bool SendUseSkillMapPacket(u16 skillId, const char* mapName)
         return false;
     }
 
-    PACKET_CZ_USESKILLMAP packet{};
-    packet.PacketType = PacketProfile::ActiveMapServerSend::kUseSkillMap;
-    packet.SkillId = skillId;
-    std::strncpy(packet.MapName, mapName, sizeof(packet.MapName) - 1);
+    std::array<u8, sizeof(PACKET_CZ_USESKILLMAP)> packetBuffer{};
+    int packetLength = 0;
+    if (!ro::net::BuildActiveUseSkillMapPacket(
+            skillId,
+            mapName,
+            packetBuffer.data(),
+            static_cast<int>(packetBuffer.size()),
+            &packetLength)) {
+        return false;
+    }
 
     const bool sent = CRagConnection::instance()->SendPacket(
-        reinterpret_cast<const char*>(&packet),
-        static_cast<int>(sizeof(packet)));
+        reinterpret_cast<const char*>(packetBuffer.data()),
+        packetLength);
+    const PACKET_CZ_USESKILLMAP* packet = reinterpret_cast<const PACKET_CZ_USESKILLMAP*>(packetBuffer.data());
     DbgLog("[GameMode] useskillmap skillId=%u map='%s' sent=%d\n",
         static_cast<unsigned int>(skillId),
-        packet.MapName,
+        packet->MapName,
         sent ? 1 : 0);
     return sent;
 }
@@ -5539,8 +5624,9 @@ bool RequestUseInventoryItem(u16 itemIndex)
     }
 
     if (g_ttemmgr.IsCardItem(item->GetItemId())) {
+        const ro::net::MapGameplaySendProfile& profile = ro::net::GetActiveMapGameplaySendProfile();
         PACKET_CZ_ITEM_COMPOSITION_LIST packet{};
-        packet.PacketType = PacketProfile::ActiveMapServerSend::kItemCompositionList;
+        packet.PacketType = profile.itemCompositionList;
         packet.CardItemIndex = static_cast<u16>(item->m_itemIndex);
 
         const bool sent = CRagConnection::instance()->SendPacket(
@@ -5560,14 +5646,20 @@ bool RequestUseInventoryItem(u16 itemIndex)
         return sent;
     }
 
-    PACKET_CZ_USEITEM2 packet{};
-    packet.PacketType = PacketProfile::ActiveMapServerSend::kUseItem;
-    packet.ItemIndex = static_cast<u16>(item->m_itemIndex);
-    packet.TargetAID = g_session.m_aid;
+    std::array<u8, sizeof(PACKET_CZ_USEITEM_PACKETVER22)> packetBuffer{};
+    int packetLength = 0;
+    if (!ro::net::BuildActiveUseItemPacket(
+            static_cast<u16>(item->m_itemIndex),
+            g_session.m_aid,
+            packetBuffer.data(),
+            static_cast<int>(packetBuffer.size()),
+            &packetLength)) {
+        return false;
+    }
 
     const bool sent = CRagConnection::instance()->SendPacket(
-        reinterpret_cast<const char*>(&packet),
-        static_cast<int>(sizeof(packet)));
+        reinterpret_cast<const char*>(packetBuffer.data()),
+        packetLength);
     if (sent) {
         if (CGameMode* gameMode = g_modeMgr.GetCurrentGameMode()) {
             gameMode->m_waitingUseItemAck = static_cast<int>(item->m_itemIndex);
@@ -5591,8 +5683,9 @@ bool RequestIdentifyInventoryItem(s16 itemIndex)
         }
     }
 
+    const ro::net::MapGameplaySendProfile& profile = ro::net::GetActiveMapGameplaySendProfile();
     PACKET_CZ_ITEM_IDENTIFY packet{};
-    packet.PacketType = PacketProfile::ActiveMapServerSend::kItemIdentify;
+    packet.PacketType = profile.itemIdentify;
     packet.ItemIndex = itemIndex;
 
     const bool sent = CRagConnection::instance()->SendPacket(
@@ -5622,8 +5715,9 @@ bool RequestComposeCardIntoEquipment(s16 cardItemIndex, s16 equipItemIndex)
         return false;
     }
 
+    const ro::net::MapGameplaySendProfile& profile = ro::net::GetActiveMapGameplaySendProfile();
     PACKET_CZ_ITEM_COMPOSITION packet{};
-    packet.PacketType = PacketProfile::ActiveMapServerSend::kItemComposition;
+    packet.PacketType = profile.itemComposition;
     packet.CardItemIndex = static_cast<u16>(cardItemIndex);
     packet.EquipItemIndex = static_cast<u16>(equipItemIndex);
 
@@ -5659,8 +5753,9 @@ bool RequestDropInventoryItem(u16 itemIndex, u16 amount)
     const int clampedCount = (std::max)(1, (std::min)(requestedCount, availableCount));
     const u16 dropAmount = static_cast<u16>(clampedCount);
 
+    const ro::net::MapGameplaySendProfile& profile = ro::net::GetActiveMapGameplaySendProfile();
     PACKET_CZ_ITEM_THROW packet{};
-    packet.PacketType = PacketProfile::ActiveMapServerSend::kDropItem;
+    packet.PacketType = profile.dropItem;
     packet.padding0[0] = 0;
     packet.padding0[1] = 0;
     packet.padding0[2] = 0;
@@ -5681,7 +5776,7 @@ bool RequestDropInventoryItem(u16 itemIndex, u16 amount)
         static_cast<unsigned int>(item->GetItemId()),
         static_cast<unsigned int>(itemIndex),
         static_cast<unsigned int>(dropAmount),
-        static_cast<unsigned int>(PacketProfile::ActiveMapServerSend::kDropItem),
+        static_cast<unsigned int>(profile.dropItem),
         sent ? 1 : 0);
     return sent;
 }
@@ -6961,6 +7056,86 @@ void SyncBootstrapSelfActorWorldPos(CGameMode& mode)
     player->m_pos.x = TileToWorldCoordX(mode.m_world, g_session.m_playerPosX);
     player->m_pos.z = TileToWorldCoordZ(mode.m_world, g_session.m_playerPosY);
     player->m_pos.y = mode.m_world->m_attr ? mode.m_world->m_attr->GetHeight(player->m_pos.x, player->m_pos.z) : 0.0f;
+}
+
+void SyncBootstrapRuntimeActorWorldPos(CGameMode& mode)
+{
+    if (!mode.m_world || !mode.m_world->m_attr) {
+        return;
+    }
+
+    size_t resyncedActors = 0;
+    const u32 serverNow = g_session.GetServerTime();
+
+    for (const auto& entry : mode.m_runtimeActors) {
+        const u32 gid = entry.first;
+        CGameActor* actor = entry.second;
+        if (!actor || actor == mode.m_world->m_player || gid == g_session.m_gid || gid == g_session.m_aid) {
+            continue;
+        }
+
+        const auto posIt = mode.m_actorPosList.find(gid);
+        const bool hasTrackedCell = posIt != mode.m_actorPosList.end();
+        if (!hasTrackedCell && actor->m_moveDestX == 0 && actor->m_moveDestY == 0) {
+            continue;
+        }
+
+        const int destX = hasTrackedCell ? posIt->second.x : actor->m_moveDestX;
+        const int destY = hasTrackedCell ? posIt->second.y : actor->m_moveDestY;
+        const bool hasTrackedSrc = actor->m_isMoving && (actor->m_moveSrcX != 0 || actor->m_moveSrcY != 0);
+        const int srcX = hasTrackedSrc ? actor->m_moveSrcX : destX;
+        const int srcY = hasTrackedSrc ? actor->m_moveSrcY : destY;
+
+        const vector3d srcPos{
+            TileToWorldCoordX(mode.m_world, srcX),
+            0.0f,
+            TileToWorldCoordZ(mode.m_world, srcY)
+        };
+        const vector3d dstPos{
+            TileToWorldCoordX(mode.m_world, destX),
+            0.0f,
+            TileToWorldCoordZ(mode.m_world, destY)
+        };
+
+        vector3d resolvedSrcPos = srcPos;
+        vector3d resolvedDstPos = dstPos;
+        resolvedSrcPos.y = mode.m_world->m_attr->GetHeight(resolvedSrcPos.x, resolvedSrcPos.z);
+        resolvedDstPos.y = mode.m_world->m_attr->GetHeight(resolvedDstPos.x, resolvedDstPos.z);
+
+        actor->UnRegisterPos();
+        actor->m_lastTlvertX = destX;
+        actor->m_lastTlvertY = destY;
+        actor->m_moveSrcX = srcX;
+        actor->m_moveSrcY = srcY;
+        actor->m_moveDestX = destX;
+        actor->m_moveDestY = destY;
+        actor->m_moveStartPos = resolvedSrcPos;
+        actor->m_moveEndPos = resolvedDstPos;
+
+        if (actor->m_isMoving && actor->m_moveEndTime > actor->m_moveStartTime) {
+            const float duration = static_cast<float>(actor->m_moveEndTime - actor->m_moveStartTime);
+            const float elapsed = static_cast<float>(serverNow - actor->m_moveStartTime);
+            const float ratio = duration > 0.0f
+                ? (std::max)(0.0f, (std::min)(1.0f, elapsed / duration))
+                : 1.0f;
+            actor->m_pos.x = resolvedSrcPos.x + (resolvedDstPos.x - resolvedSrcPos.x) * ratio;
+            actor->m_pos.y = resolvedSrcPos.y + (resolvedDstPos.y - resolvedSrcPos.y) * ratio;
+            actor->m_pos.z = resolvedSrcPos.z + (resolvedDstPos.z - resolvedSrcPos.z) * ratio;
+        } else {
+            actor->m_pos = resolvedDstPos;
+        }
+
+        actor->RegisterPos();
+        if (CPc* pcActor = dynamic_cast<CPc*>(actor)) {
+            pcActor->InvalidateBillboard();
+        }
+        ++resyncedActors;
+    }
+
+    if (resyncedActors > 0) {
+        DbgLog("[GameMode] resynced runtime actor world positions after bootstrap count=%zu\n",
+            resyncedActors);
+    }
 }
 
 void EnsureRealView(CGameMode& mode)
@@ -9030,6 +9205,9 @@ void CGameMode::OnInit(const char* worldName) {
         g_session.m_playerPosY,
         g_session.m_playerDir);
 
+    m_sentLoadEndAck = SendLoadEndAckPacket() ? 1 : 0;
+    m_mapLoadingAckTick = GetTickCount();
+    m_lastActorBootstrapPacketTick = m_mapLoadingAckTick;
     SendTimeSyncRequest(*this, true);
 
     CAudio* audio = CAudio::GetInstance();

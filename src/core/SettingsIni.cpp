@@ -54,6 +54,8 @@ constexpr DefaultIniValue kDefaultIniValues[] = {
     { "OptionWnd", "Tab", "0" },
     { "Login", "RememberUserIdEnabled", "0" },
     { "Login", "RememberUserId", "" },
+    { "Packets", "CharListReceiveLayout", "auto" },
+    { "Packets", "MapSendProfile", "packetver23" },
     { "SelectChar", "CurrentSlot", "0" },
 };
 

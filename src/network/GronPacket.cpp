@@ -1,24 +1,35 @@
 #include "GronPacket.h"
 
+#include "MapSendProfile.h"
+
 #include <array>
 #include <mutex>
 
 namespace ro::net {
 namespace {
 
-std::array<s16, 0x10000> g_packetSize{};
+using PacketSizeTable = std::array<s16, 0x10000>;
+
+PacketSizeTable g_packetSizePacketVer23{};
+PacketSizeTable g_packetSizePacketVer22{};
+PacketSizeTable* g_buildPacketSizeTable = nullptr;
 std::once_flag g_initOnce;
 
 void SetPacketSize(u16 packetId, s16 size)
 {
-    g_packetSize[packetId] = size;
+    if (g_buildPacketSizeTable) {
+        (*g_buildPacketSizeTable)[packetId] = size;
+    }
 }
 
-void FillPacketSizeTable()
+void FillPacketSizeTable(PacketSizeTable& packetSizeTable)
 {
-    g_packetSize.fill(0);
+    g_buildPacketSizeTable = &packetSizeTable;
+    packetSizeTable.fill(0);
 
-    // Table aligned to Ref/RunningServer/packet_db.txt (packet_db_ver 23).
+    // Table aligned to the observed pre-Renewal receive family used by the active
+    // server chain, starting from the packet_ver 23 reference set and keeping the
+    // older actor-stream packet family that the live server still emits.
     SetPacketSize(0x0064, 55);              // CA_LOGIN  (client sends)
     SetPacketSize(0x0065, 17);              // CA_ENTER  (client sends)
     SetPacketSize(0x0066, 3);               // CZ_SELECT_CHAR (classic client)
@@ -39,9 +50,14 @@ void FillPacketSizeTable()
     SetPacketSize(0x007A, 58);
     SetPacketSize(0x007B, 60);
     SetPacketSize(0x007C, 42);
+    SetPacketSize(0x01DB, 2);
+    SetPacketSize(0x01DC, kVariablePacketSize);
+    SetPacketSize(0x01DD, 47);
     SetPacketSize(0x01D8, 54);
     SetPacketSize(0x01D9, 53);
     SetPacketSize(0x01DA, 60);
+    SetPacketSize(0x01F1, kVariablePacketSize);
+    SetPacketSize(0x0204, 18);
     SetPacketSize(0x007E, 6);
     SetPacketSize(0x007F, 6);
     SetPacketSize(0x0080, 7);
@@ -146,6 +162,9 @@ void FillPacketSizeTable()
     SetPacketSize(0x00FD, 27);
     SetPacketSize(0x00FE, 30);
     SetPacketSize(0x00FF, 10);
+    SetPacketSize(0x02B0, 85);
+    SetPacketSize(0x02B1, kVariablePacketSize);
+    SetPacketSize(0x02B2, kVariablePacketSize);
     SetPacketSize(0x02C5, 30);
     SetPacketSize(0x02C6, 30);
     SetPacketSize(0x0100, 2);
@@ -242,6 +261,7 @@ void FillPacketSizeTable()
     SetPacketSize(0x01C9, 97);
     SetPacketSize(0x01CF, 28);
     SetPacketSize(0x01D0, 8);
+    SetPacketSize(0x01D6, 4);
     SetPacketSize(0x01D4, 6);
     SetPacketSize(0x01D7, 11);
     SetPacketSize(0x01DE, 33);
@@ -301,6 +321,8 @@ void FillPacketSizeTable()
     SetPacketSize(0x0477, 8);
     SetPacketSize(0x0569, 8);
     SetPacketSize(0x02E1, 33);
+    SetPacketSize(0x02E7, kVariablePacketSize);
+    SetPacketSize(0x02E9, kVariablePacketSize);
     SetPacketSize(0x02E8, kVariablePacketSize);
     SetPacketSize(0x0459, 8);
     SetPacketSize(0x045A, 10);
@@ -333,19 +355,35 @@ void FillPacketSizeTable()
     SetPacketSize(0x06CE, 10);
     SetPacketSize(0x07FA, 8);
     SetPacketSize(0x02DC, kVariablePacketSize);
+
+    g_buildPacketSizeTable = nullptr;
+}
+
+const PacketSizeTable& GetActivePacketSizeTable()
+{
+    switch (GetActiveMapReceiveProfile().id) {
+    case PacketVersionId::PacketVer22:
+        return g_packetSizePacketVer22;
+    case PacketVersionId::PacketVer23:
+    default:
+        return g_packetSizePacketVer23;
+    }
 }
 
 } // namespace
 
 void InitializePacketSize()
 {
-    std::call_once(g_initOnce, FillPacketSizeTable);
+    std::call_once(g_initOnce, []() {
+        FillPacketSizeTable(g_packetSizePacketVer23);
+        FillPacketSizeTable(g_packetSizePacketVer22);
+    });
 }
 
 s16 GetPacketSize(u16 packetId)
 {
     InitializePacketSize();
-    return g_packetSize[packetId];
+    return GetActivePacketSizeTable()[packetId];
 }
 
 bool IsVariableLengthPacket(u16 packetId)

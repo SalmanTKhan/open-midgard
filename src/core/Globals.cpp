@@ -8,6 +8,8 @@ ServerType  g_serverType  = ServerNormal;
 int         g_languageType = 0;
 int         g_codePage     = 0;
 int         g_version      = 0;
+int         g_passwordEncrypt = 0;
+int         g_passwordEncrypt2 = 0;
 
 std::string g_accountAddr = "";
 std::string g_accountPort = "";

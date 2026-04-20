@@ -7,12 +7,19 @@ enum PacketId {
     // Sent to account server
     PACKETID_CA_LOGIN         = 0x0064,
     PACKETID_CA_ENTER         = 0x0065,  // also sent to char server
+    PACKETID_CA_REQ_HASH      = 0x01DB,
+    PACKETID_CA_LOGIN_HASH    = 0x01DD,
+    PACKETID_CA_CONNECT_INFO_CHANGED = 0x0200,
+    PACKETID_CA_EXE_HASHCHECK = 0x0204,
     PACKETID_CZ_RESTART       = 0x00B2,
     PACKETID_CH_MAKE_CHAR     = 0x0067,
     PACKETID_CH_DELETE_CHAR   = 0x0068,
     PACKETID_CZ_QUITGAME      = 0x018A,
     PACKETID_CA_LOGIN_PCBANG  = 0x0277,
+    PACKETID_CA_LOGIN4        = 0x027C,
+    PACKETID_CA_LOGIN_CHANNEL = 0x02B0,
     // Received from account server
+    PACKETID_AC_ACK_HASH      = 0x01DC,
     PACKETID_AC_ACCEPT_LOGIN  = 0x0069,
     PACKETID_AC_REFUSE_LOGIN  = 0x006A,
     // Received from char server
@@ -29,10 +36,44 @@ enum PacketId {
     PACKETID_ZC_ACCEPT_ENTER  = 0x0073,
     // Misc
     PACKETID_SC_NOTIFY_BAN    = 0x0081,
+    PACKETID_AC_NOTIFY_ERROR  = 0x01F1,
 };
 
 namespace PacketProfile {
 constexpr int kMapServerClientPacketVersion = 23;
+
+namespace PacketVer23LoginChain {
+// 2008-09-10aSakexe keeps the classic account/char opcodes, but the account login
+// version/date should still identify the 2008-era client profile when clientinfo.xml
+// does not override it.
+constexpr u32 kClientDate = 20080910;
+constexpr u16 kAccountLogin = PACKETID_CA_LOGIN;
+constexpr u16 kAccountLoginChannel = PACKETID_CA_LOGIN_CHANNEL;
+constexpr u16 kExeHashCheck = PACKETID_CA_EXE_HASHCHECK;
+constexpr u16 kRequestPasswordHash = PACKETID_CA_REQ_HASH;
+constexpr u16 kPasswordHashChallenge = PACKETID_AC_ACK_HASH;
+constexpr u16 kPasswordHashLogin = PACKETID_CA_LOGIN_HASH;
+constexpr u16 kCharServerEnter = PACKETID_CA_ENTER;
+constexpr u16 kSelectCharacter = 0x0066;
+constexpr u16 kMakeCharacter = PACKETID_CH_MAKE_CHAR;
+constexpr u16 kDeleteCharacter = PACKETID_CH_DELETE_CHAR;
+constexpr u16 kNotifyError = PACKETID_AC_NOTIFY_ERROR;
+}
+
+namespace ActiveLoginChain {
+constexpr u32 kClientDate = PacketVer23LoginChain::kClientDate;
+constexpr u16 kAccountLogin = PacketVer23LoginChain::kAccountLogin;
+constexpr u16 kAccountLoginChannel = PacketVer23LoginChain::kAccountLoginChannel;
+constexpr u16 kExeHashCheck = PacketVer23LoginChain::kExeHashCheck;
+constexpr u16 kRequestPasswordHash = PacketVer23LoginChain::kRequestPasswordHash;
+constexpr u16 kPasswordHashChallenge = PacketVer23LoginChain::kPasswordHashChallenge;
+constexpr u16 kPasswordHashLogin = PacketVer23LoginChain::kPasswordHashLogin;
+constexpr u16 kCharServerEnter = PacketVer23LoginChain::kCharServerEnter;
+constexpr u16 kSelectCharacter = PacketVer23LoginChain::kSelectCharacter;
+constexpr u16 kMakeCharacter = PacketVer23LoginChain::kMakeCharacter;
+constexpr u16 kDeleteCharacter = PacketVer23LoginChain::kDeleteCharacter;
+constexpr u16 kNotifyError = PacketVer23LoginChain::kNotifyError;
+}
 
 namespace LegacyMapServerSend {
 constexpr u16 kWantToConnection = 0x0072;
@@ -43,6 +84,30 @@ constexpr u16 kGetCharNameRequest = 0x0094;
 constexpr u16 kWhisper = 0x0096;
 constexpr u16 kGlobalMessage = 0x008C;
 constexpr u16 kSkillUp = 0x0112;
+}
+
+namespace PacketVer22MapServerSend {
+constexpr u16 kWantToConnection = 0x009B;
+constexpr u16 kActionRequest = 0x0190;
+constexpr u16 kUseSkillToId = 0x0072;
+constexpr u16 kItemCompositionList = 0x017A;
+constexpr u16 kItemComposition = 0x017C;
+constexpr u16 kItemIdentify = 0x0178;
+constexpr u16 kUseSkillToPos = 0x0113;
+constexpr u16 kDropItem = 0x0116;
+constexpr u16 kUseSkillMap = 0x011B;
+constexpr u16 kUseItem = 0x009F;
+constexpr u16 kSkillUp = 0x0112;
+constexpr u16 kTakeItem = 0x00F5;
+constexpr u16 kEquipItem = 0x00A9;
+constexpr u16 kUnequipItem = 0x00AB;
+constexpr u16 kWalkToXY = 0x00A7;
+constexpr u16 kChangeDir = 0x0085;
+constexpr u16 kTickSend = 0x0089;
+constexpr u16 kGetCharNameRequest = 0x008C;
+constexpr u16 kWhisper = 0x0096;
+constexpr u16 kGlobalMessage = 0x00F3;
+constexpr u16 kNotifyActorInit = 0x007D;
 }
 
 namespace PacketVer23MapServerSend {
@@ -157,6 +222,39 @@ struct PACKET_CA_LOGIN {
     u8   clienttype;   // 0 = normal
 };
 
+struct PACKET_CA_REQ_HASH {
+    u16 PacketType;    // 0x01DB
+};
+
+struct PACKET_CA_LOGIN_HASH {
+    u16 PacketType;    // 0x01DD
+    u32 Version;       // client version
+    char ID[24];       // username
+    u8  PasswdMD5[16]; // MD5(challenge + password) on the normal service path
+    u8  clienttype;    // GetAccountType()
+};
+
+struct PACKET_CA_CONNECT_INFO_CHANGED {
+    u16 PacketType;    // 0x0200
+    char ID[24];
+};
+
+struct PACKET_CA_EXE_HASHCHECK {
+    u16 PacketType;    // 0x0204
+    u8  HashValue[16];
+};
+
+struct PACKET_CA_LOGIN_CHANNEL {
+    u16  PacketType;   // 0x02B0
+    u32  Version;
+    char ID[24];
+    char Passwd[24];
+    u8   clienttype;
+    char IP[16];
+    char Mac[13];
+    u8   IsGravity;
+};
+
 // CA_ENTER: sent to char server  [17 bytes]
 struct PACKET_CA_ENTER {
     u16 PacketType;    // 0x0065
@@ -223,9 +321,36 @@ struct PACKET_CZ_ENTER2 {
     u8  Sex;           // sex (0=M, 1=F)
 };
 
+struct PACKET_CZ_ENTER_PACKETVER22 {
+    u16 PacketType;    // 0x009B for packet_ver 22
+    u8  padding0[2];
+    u32 AID;
+    u8  padding1;
+    u32 GID;
+    u8  padding2[4];
+    u32 AuthCode;
+    u32 ClientTick;
+    u8  Sex;
+};
+
+struct PACKET_CZ_ENTER_PADDED22 {
+    u16 PacketType;    // 0x0072 with 2004-era padded layout
+    u8  padding[3];
+    u32 AID;
+    u32 GID;
+    u32 AuthCode;
+    u32 ClientTick;
+    u8  Sex;
+};
+
 struct PACKET_CZ_TICKSEND2 {
     u16 PacketType;    // 0x0089 for packet_ver 23
     u16 padding;
+    u32 ClientTick;
+};
+
+struct PACKET_CZ_TICKSEND_LEGACY {
+    u16 PacketType;    // 0x007E for legacy packet_ver 5 family
     u32 ClientTick;
 };
 
@@ -235,12 +360,23 @@ struct PACKET_CZ_REQUEST_MOVE2 {
     u8   Dest[3];
 };
 
+struct PACKET_CZ_REQUEST_MOVE_LEGACY {
+    u16 PacketType;    // 0x0085 for legacy packet_ver 5 family
+    u8   Dest[3];
+};
+
 struct PACKET_CZ_CHANGE_DIRECTION2 {
     u16 PacketType;    // 0x0085 for packet_ver 23
     u8   padding0[5];
-    u8   HeadDir;
-    u8   padding1[2];
+    u16  HeadDir;
+    u8   padding1;
     u8   Dir;
+};
+
+struct PACKET_CZ_CHANGE_DIRECTION_LEGACY {
+    u16 PacketType;    // 0x009B for legacy packet_ver 5 family
+    u16 HeadDir;
+    u8  Dir;
 };
 
 struct PACKET_CZ_REQNAME2 {
@@ -249,10 +385,34 @@ struct PACKET_CZ_REQNAME2 {
     u32  GID;
 };
 
+struct PACKET_CZ_REQNAME_LEGACY {
+    u16 PacketType;    // 0x0094 for legacy packet_ver 5 family
+    u32 GID;
+};
+
+struct PACKET_CZ_ACTION_REQUEST_PACKETVER22 {
+    u16 PacketType;    // 0x0190 for packet_ver 22
+    u8  padding0[3];
+    u32 TargetGID;
+    u8  padding1[9];
+    u8  Action;
+};
+
 struct PACKET_CZ_ACTION_REQUEST2 {
     u16 PacketType;    // 0x0437 for packet_ver 23
     u32 TargetGID;
     u8  Action;
+};
+
+struct PACKET_CZ_USESKILLTOID_PACKETVER22 {
+    u16 PacketType;    // 0x0072 for packet_ver 22
+    u8  padding0[3];
+    u16 SkillLevel;
+    u8  padding1[2];
+    u16 SkillId;
+    u8  padding2[9];
+    u32 TargetGID;
+    u8  padding3;
 };
 
 struct PACKET_CZ_USESKILLTOID2 {
@@ -304,6 +464,14 @@ struct PACKET_CZ_USEITEM2 {
     u32 TargetAID;
 };
 
+struct PACKET_CZ_USEITEM_PACKETVER22 {
+    u16 PacketType;    // 0x009F for packet_ver 22
+    u8  padding0[2];
+    u16 ItemIndex;
+    u8  padding1[4];
+    u32 TargetAID;
+};
+
 struct PACKET_CZ_ITEM_COMPOSITION_LIST {
     u16 PacketType;    // 0x017A
     u16 CardItemIndex;
@@ -334,6 +502,11 @@ struct PACKET_CZ_STATUS_CHANGE {
 struct PACKET_CZ_TAKE_ITEM2 {
     u16 PacketType;    // 0x00F5 for packet_ver 23 profile
     u16 padding;
+    u32 ObjectAID;
+};
+
+struct PACKET_CZ_TAKE_ITEM_LEGACY {
+    u16 PacketType;    // 0x009F for legacy profile
     u32 ObjectAID;
 };
 
@@ -468,8 +641,17 @@ struct PACKET_CA_LOGIN_PCBANG {
     char ID[24];
     char Passwd[24];
     unsigned char clienttype;
-    char MacAdress[17];
-    char IP[15];
+    char IP[16];
+    char Mac[13];
+};
+
+struct PACKET_CA_LOGIN4 {
+    short PacketType;
+    unsigned long Version;
+    char ID[24];
+    unsigned char PasswdMD5[16];
+    unsigned char clienttype;
+    char Mac[13];
 };
 
 // AC_ACCEPT_LOGIN: header portion  [47 bytes + variable server list]
@@ -505,6 +687,11 @@ struct PACKET_HC_REFUSE_MAKECHAR {
 };
 
 static_assert(sizeof(PACKET_CA_LOGIN) == 55, "PACKET_CA_LOGIN size mismatch");
+static_assert(sizeof(PACKET_CA_LOGIN_PCBANG) == 84, "PACKET_CA_LOGIN_PCBANG size mismatch");
+static_assert(sizeof(PACKET_CA_LOGIN4) == 60, "PACKET_CA_LOGIN4 size mismatch");
+static_assert(sizeof(PACKET_CA_REQ_HASH) == 2, "PACKET_CA_REQ_HASH size mismatch");
+static_assert(sizeof(PACKET_CA_LOGIN_HASH) == 47, "PACKET_CA_LOGIN_HASH size mismatch");
+static_assert(sizeof(PACKET_CA_CONNECT_INFO_CHANGED) == 26, "PACKET_CA_CONNECT_INFO_CHANGED size mismatch");
 static_assert(sizeof(PACKET_CA_ENTER) == 17, "PACKET_CA_ENTER size mismatch");
 static_assert(sizeof(PACKET_CZ_SELECT_CHAR) == 3, "PACKET_CZ_SELECT_CHAR size mismatch");
 static_assert(sizeof(PACKET_CZ_STATUS_CHANGE) == 5, "PACKET_CZ_STATUS_CHANGE size mismatch");
@@ -514,22 +701,32 @@ static_assert(sizeof(PACKET_CZ_MAKE_CHAR) == 37, "PACKET_CZ_MAKE_CHAR size misma
 static_assert(sizeof(PACKET_CH_DELETE_CHAR) == 46, "PACKET_CH_DELETE_CHAR size mismatch");
 static_assert(sizeof(PACKET_CZ_ENTER) == 19, "PACKET_CZ_ENTER size mismatch");
 static_assert(sizeof(PACKET_CZ_ENTER2) == 19, "PACKET_CZ_ENTER2 size mismatch");
+static_assert(sizeof(PACKET_CZ_ENTER_PACKETVER22) == 26, "PACKET_CZ_ENTER_PACKETVER22 size mismatch");
+static_assert(sizeof(PACKET_CZ_ENTER_PADDED22) == 22, "PACKET_CZ_ENTER_PADDED22 size mismatch");
 static_assert(sizeof(PACKET_CZ_TICKSEND2) == 8, "PACKET_CZ_TICKSEND2 size mismatch");
+static_assert(sizeof(PACKET_CZ_TICKSEND_LEGACY) == 6, "PACKET_CZ_TICKSEND_LEGACY size mismatch");
 static_assert(sizeof(PACKET_CZ_REQUEST_MOVE2) == 8, "PACKET_CZ_REQUEST_MOVE2 size mismatch");
+static_assert(sizeof(PACKET_CZ_REQUEST_MOVE_LEGACY) == 5, "PACKET_CZ_REQUEST_MOVE_LEGACY size mismatch");
 static_assert(sizeof(PACKET_CZ_CHANGE_DIRECTION2) == 11, "PACKET_CZ_CHANGE_DIRECTION2 size mismatch");
+static_assert(sizeof(PACKET_CZ_CHANGE_DIRECTION_LEGACY) == 5, "PACKET_CZ_CHANGE_DIRECTION_LEGACY size mismatch");
 static_assert(sizeof(PACKET_CZ_REQNAME2) == 11, "PACKET_CZ_REQNAME2 size mismatch");
+static_assert(sizeof(PACKET_CZ_REQNAME_LEGACY) == 6, "PACKET_CZ_REQNAME_LEGACY size mismatch");
+static_assert(sizeof(PACKET_CZ_ACTION_REQUEST_PACKETVER22) == 19, "PACKET_CZ_ACTION_REQUEST_PACKETVER22 size mismatch");
 static_assert(sizeof(PACKET_CZ_ACTION_REQUEST2) == 7, "PACKET_CZ_ACTION_REQUEST2 size mismatch");
+static_assert(sizeof(PACKET_CZ_USESKILLTOID_PACKETVER22) == 25, "PACKET_CZ_USESKILLTOID_PACKETVER22 size mismatch");
 static_assert(sizeof(PACKET_CZ_USESKILLTOID2) == 10, "PACKET_CZ_USESKILLTOID2 size mismatch");
 static_assert(sizeof(PACKET_CZ_USESKILLTOPOS) == 22, "PACKET_CZ_USESKILLTOPOS size mismatch");
 static_assert(sizeof(PACKET_CZ_USESKILLTOPOSINFO) == 90, "PACKET_CZ_USESKILLTOPOSINFO size mismatch");
 static_assert(sizeof(PACKET_CZ_ITEM_THROW) == 10, "PACKET_CZ_ITEM_THROW size mismatch");
 static_assert(sizeof(PACKET_CZ_USESKILLMAP) == 20, "PACKET_CZ_USESKILLMAP size mismatch");
 static_assert(sizeof(PACKET_CZ_USEITEM2) == 8, "PACKET_CZ_USEITEM2 size mismatch");
+static_assert(sizeof(PACKET_CZ_USEITEM_PACKETVER22) == 14, "PACKET_CZ_USEITEM_PACKETVER22 size mismatch");
 static_assert(sizeof(PACKET_CZ_ITEM_COMPOSITION_LIST) == 4, "PACKET_CZ_ITEM_COMPOSITION_LIST size mismatch");
 static_assert(sizeof(PACKET_CZ_ITEM_IDENTIFY) == 4, "PACKET_CZ_ITEM_IDENTIFY size mismatch");
 static_assert(sizeof(PACKET_CZ_ITEM_COMPOSITION) == 6, "PACKET_CZ_ITEM_COMPOSITION size mismatch");
 static_assert(sizeof(PACKET_CZ_SKILLUP) == 4, "PACKET_CZ_SKILLUP size mismatch");
 static_assert(sizeof(PACKET_CZ_TAKE_ITEM2) == 8, "PACKET_CZ_TAKE_ITEM2 size mismatch");
+static_assert(sizeof(PACKET_CZ_TAKE_ITEM_LEGACY) == 6, "PACKET_CZ_TAKE_ITEM_LEGACY size mismatch");
 static_assert(sizeof(PACKET_CZ_REQ_WEAR_EQUIP) == 6, "PACKET_CZ_REQ_WEAR_EQUIP size mismatch");
 static_assert(sizeof(PACKET_CZ_REQ_TAKEOFF_EQUIP) == 4, "PACKET_CZ_REQ_TAKEOFF_EQUIP size mismatch");
 static_assert(sizeof(PACKET_CZ_CONTACTNPC) == 7, "PACKET_CZ_CONTACTNPC size mismatch");

@@ -355,6 +355,15 @@ static void SetOption(XMLElement* element) {
     else if (EqualsIgnoreCase(serverType, "local")) g_serverType = ServerLocal;
     else if (EqualsIgnoreCase(serverType, "pk")) g_serverType = ServerPK;
 
+    if (element->FindChild("passwordencrypt")) {
+        g_passwordEncrypt = 1;
+    }
+
+    if (element->FindChild("passwordencrypt2")) {
+        g_passwordEncrypt = 1;
+        g_passwordEncrypt2 = 1;
+    }
+
     if (element->FindChild("readfolder")) {
         g_readFolderFirst = 1;
     }
@@ -383,9 +392,14 @@ bool InitClientInfo(const char* fileName) {
 
     ParseClientInfoConnections(clientInfo);
     DbgLog("[ClientInfo] Parsed %d connection entries from %s\n", static_cast<int>(g_clientInfoConnections.size()), fileName ? fileName : "(null)");
+    g_passwordEncrypt = 0;
+    g_passwordEncrypt2 = 0;
     SetOption(clientInfo);
     g_selectedClientInfoIndex = 0;
     SelectClientInfo(0);
+    DbgLog("[ClientInfo] Auth flags: passwordencrypt=%d passwordencrypt2=%d\n",
+           g_passwordEncrypt,
+           g_passwordEncrypt2);
     return true;
 }
 

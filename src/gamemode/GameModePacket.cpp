@@ -1,8 +1,10 @@
 #include "GameModePacket.h"
 
 #include "network/GronPacket.h"
+#include "network/MapSendProfile.h"
 #include "network/Packet.h"
 #include "GameMode.h"
+#include "PacketPadding.h"
 #include "core/Globals.h"
 #include "Types.h"
 #include "core/File.h"
@@ -69,12 +71,65 @@ constexpr u32 kActorChatBubbleBaseLifetimeMs = 3200;
 constexpr u32 kActorChatBubblePerCharLifetimeMs = 90;
 constexpr u32 kActorChatBubbleMinLifetimeMs = 4500;
 constexpr u32 kActorChatBubbleMaxLifetimeMs = 12000;
+constexpr u32 kActorNameRequestCooldownMs = 1000;
 
 PendingDisconnectAction g_pendingDisconnectAction = PendingDisconnectAction::None;
 u32 g_lastLocalLevelUpEffectId = 0;
 u32 g_lastLocalLevelUpEffectTick = 0;
 u32 g_lastSelfLevelUpStatusTick = 0;
 u32 g_lastSelfLevelUpStatusType = 0;
+bool g_loggedPacketVer22NameRequestDefer = false;
+
+void RegisterHandlerIfValid(CGameModePacketRouter& router, u16 packetId, CGameModePacketRouter::Handler handler)
+{
+    if (packetId != 0) {
+        router.Register(packetId, std::move(handler));
+    }
+}
+
+void SendActorNameRequestIfNeeded(CGameMode& mode, u32 gid)
+{
+    if (gid == 0 || gid == g_session.m_gid) {
+        return;
+    }
+
+    const ro::net::MapGameplaySendProfile& profile = ro::net::GetActiveMapGameplaySendProfile();
+    if (!ro::net::IsLegacyMapGameplaySendProfile() && ro::net::GetActiveMapReceiveProfile().deferProactiveNameRequests) {
+        if (!g_loggedPacketVer22NameRequestDefer) {
+            DbgLog("[GameMode] deferring proactive actor name requests for packetver22 profile\n");
+            g_loggedPacketVer22NameRequestDefer = true;
+        }
+        return;
+    }
+
+    const u32 now = GetTickCount();
+    const auto timerIt = mode.m_actorNameByGIDReqTimer.find(gid);
+    if (timerIt != mode.m_actorNameByGIDReqTimer.end()
+        && now - timerIt->second < kActorNameRequestCooldownMs) {
+        return;
+    }
+
+    bool sent = false;
+    if (ro::net::IsLegacyMapGameplaySendProfile()) {
+        PACKET_CZ_REQNAME_LEGACY packet{};
+        packet.PacketType = profile.getCharNameRequest;
+        packet.GID = gid;
+        sent = CRagConnection::instance()->SendPacket(reinterpret_cast<const char*>(&packet), static_cast<int>(sizeof(packet)));
+    } else {
+        PACKET_CZ_REQNAME2 packet{};
+        packet.PacketType = profile.getCharNameRequest;
+        FillPacketPadding(packet.padding, static_cast<int>(sizeof(packet.padding)));
+        packet.GID = gid;
+        sent = CRagConnection::instance()->SendPacket(reinterpret_cast<const char*>(&packet), static_cast<int>(sizeof(packet)));
+    }
+    DbgLog("[GameMode] actor name request opcode=0x%04X gid=%u sent=%d\n",
+        profile.getCharNameRequest,
+        gid,
+        sent ? 1 : 0);
+    if (sent) {
+        mode.m_actorNameByGIDReqTimer[gid] = now;
+    }
+}
 
 void StartLocalPickupAnimation(CGameMode& mode, u32 objectAid);
 
@@ -543,6 +598,10 @@ void HandleNotifyEffect(CGameMode& mode, const PacketView& packet)
         return;
     }
 
+    if (packet.packetId != ro::net::GetActiveMapReceiveProfile().notifyEffectBasic) {
+        return;
+    }
+
     const u32 actorId = ReadLE32(packet.data + 2);
     const u32 effectType = ReadLE32(packet.data + 6);
     CGameActor* actor = ResolveNotifyEffectActor(mode, actorId);
@@ -601,6 +660,10 @@ void HandleNotifyEffect(CGameMode& mode, const PacketView& packet)
 void HandleNotifyEffect2(CGameMode& mode, const PacketView& packet)
 {
     if (!packet.data || packet.packetLength < 10) {
+        return;
+    }
+
+    if (packet.packetId != ro::net::GetActiveMapReceiveProfile().notifyEffectDirect) {
         return;
     }
 
@@ -829,6 +892,10 @@ void HandleUseItemAck2(CGameMode&, const PacketView& packet)
         return;
     }
 
+    if (!ro::net::IsActiveExtendedUseItemAckPacket(packet.packetId)) {
+        return;
+    }
+
     const unsigned int itemIndex = static_cast<unsigned int>(ReadLE16(packet.data + 2));
     const unsigned int itemId = static_cast<unsigned int>(ReadLE16(packet.data + 4));
     const unsigned int actorId = ReadLE32(packet.data + 6);
@@ -870,6 +937,10 @@ void HandleUseItemAck2(CGameMode&, const PacketView& packet)
 void HandleUseItemAck(CGameMode& mode, const PacketView& packet)
 {
     if (!packet.data || packet.packetLength < 7) {
+        return;
+    }
+
+    if (packet.packetId != ro::net::GetActiveMapReceiveProfile().useItemAckBasic) {
         return;
     }
 
@@ -944,15 +1015,27 @@ bool SendIdentifySkillUseRequest()
         return false;
     }
 
-    PACKET_CZ_USESKILLTOID2 packet{};
-    packet.PacketType = PacketProfile::ActiveMapServerSend::kUseSkillToId;
-    packet.SkillLevel = 1;
-    packet.SkillId = kSkillMerchantIdentify;
-    packet.TargetGID = targetGid;
-
-    const bool sent = CRagConnection::instance()->SendPacket(
-        reinterpret_cast<const char*>(&packet),
-        static_cast<int>(sizeof(packet)));
+    const ro::net::MapGameplaySendProfile& profile = ro::net::GetActiveMapGameplaySendProfile();
+    bool sent = false;
+    if (profile.id == ro::net::MapGameplaySendProfileId::PacketVer22) {
+        PACKET_CZ_USESKILLTOID_PACKETVER22 packet{};
+        packet.PacketType = profile.useSkillToId;
+        packet.SkillLevel = 1;
+        packet.SkillId = kSkillMerchantIdentify;
+        packet.TargetGID = targetGid;
+        sent = CRagConnection::instance()->SendPacket(
+            reinterpret_cast<const char*>(&packet),
+            static_cast<int>(sizeof(packet)));
+    } else {
+        PACKET_CZ_USESKILLTOID2 packet{};
+        packet.PacketType = profile.useSkillToId;
+        packet.SkillLevel = 1;
+        packet.SkillId = kSkillMerchantIdentify;
+        packet.TargetGID = targetGid;
+        sent = CRagConnection::instance()->SendPacket(
+            reinterpret_cast<const char*>(&packet),
+            static_cast<int>(sizeof(packet)));
+    }
     DbgLog("[GameMode] autorun skill MC_IDENTIFY request target=%u sent=%d\n",
         static_cast<unsigned int>(targetGid),
         sent ? 1 : 0);
@@ -1394,23 +1477,11 @@ bool BuildNormalInventoryItem(const PacketView& packet, const u8* entry, ITEM_IN
     outItem.m_num = ReadLE16(entry + 6);
     outItem.m_wearLocation = ReadLE16(entry + 8);
 
-    size_t entrySize = 0;
-    switch (packet.packetId) {
-    case 0x00A3:
-    case 0x00A5:
-        entrySize = 10;
-        break;
-    case 0x01EE:
-    case 0x01F0:
-        entrySize = 18;
-        break;
-    case 0x02E8:
-    case 0x02EA:
-        entrySize = 22;
-        break;
-    default:
+    const int entrySizeValue = ro::net::GetActiveStackableItemListEntrySize(packet.packetId);
+    if (entrySizeValue <= 0) {
         return false;
     }
+    const size_t entrySize = static_cast<size_t>(entrySizeValue);
 
     if (entrySize >= 18) {
         outItem.m_slot[0] = ReadLE16(entry + 10);
@@ -1446,22 +1517,11 @@ bool BuildEquipInventoryItem(const PacketView& packet, const u8* entry, ITEM_INF
     outItem.m_slot[3] = ReadLE16(entry + 18);
     outItem.m_num = 1;
 
-    size_t entrySize = 0;
-    switch (packet.packetId) {
-    case 0x00A4:
-    case 0x00A6:
-        entrySize = 20;
-        break;
-    case 0x01EF:
-        entrySize = 24;
-        break;
-    case 0x02D0:
-    case 0x02D1:
-        entrySize = 26;
-        break;
-    default:
+    const int entrySizeValue = ro::net::GetActiveEquipmentItemListEntrySize(packet.packetId);
+    if (entrySizeValue <= 0) {
         return false;
     }
+    const size_t entrySize = static_cast<size_t>(entrySizeValue);
 
     if (entrySize >= 24) {
         outItem.m_deleteTime = static_cast<int>(ReadLE32(entry + 20));
@@ -1790,20 +1850,15 @@ void HandleNormalInventoryList(CGameMode&, const PacketView& packet)
         return;
     }
 
-    size_t entrySize = 0;
-    switch (packet.packetId) {
-    case 0x00A3:
-        entrySize = 10;
-        break;
-    case 0x01EE:
-        entrySize = 18;
-        break;
-    case 0x02E8:
-        entrySize = 22;
-        break;
-    default:
+    if (!ro::net::IsActiveNormalInventoryListPacket(packet.packetId)) {
         return;
     }
+
+    const int entrySizeValue = ro::net::GetActiveStackableItemListEntrySize(packet.packetId);
+    if (entrySizeValue <= 0) {
+        return;
+    }
+    const size_t entrySize = static_cast<size_t>(entrySizeValue);
 
     const size_t payloadSize = static_cast<size_t>(packet.packetLength - 4);
     if (entrySize == 0 || payloadSize < entrySize) {
@@ -1825,20 +1880,15 @@ void HandleEquipInventoryList(CGameMode& mode, const PacketView& packet)
         return;
     }
 
-    size_t entrySize = 0;
-    switch (packet.packetId) {
-    case 0x00A4:
-        entrySize = 20;
-        break;
-    case 0x01EF:
-        entrySize = 24;
-        break;
-    case 0x02D0:
-        entrySize = 26;
-        break;
-    default:
+    if (!ro::net::IsActiveEquipInventoryListPacket(packet.packetId)) {
         return;
     }
+
+    const int entrySizeValue = ro::net::GetActiveEquipmentItemListEntrySize(packet.packetId);
+    if (entrySizeValue <= 0) {
+        return;
+    }
+    const size_t entrySize = static_cast<size_t>(entrySizeValue);
 
     g_session.ClearEquipmentInventoryItems();
     for (size_t offset = 4; offset + entrySize <= static_cast<size_t>(packet.packetLength); offset += entrySize) {
@@ -1863,7 +1913,7 @@ bool BuildStorageItemFromAddPacket(const PacketView& packet, ITEM_INFO& outItem)
     outItem.m_num = static_cast<int>(ReadLE32(packet.data + 4));
     outItem.SetItemId(ReadLE16(packet.data + 8));
 
-    if (packet.packetId == 0x00F4) {
+    if (packet.packetId == ro::net::GetActiveMapReceiveProfile().storageItemAddedBasic) {
         if (packet.packetLength < 21) {
             return false;
         }
@@ -1874,7 +1924,7 @@ bool BuildStorageItemFromAddPacket(const PacketView& packet, ITEM_INFO& outItem)
         outItem.m_slot[1] = ReadLE16(packet.data + 15);
         outItem.m_slot[2] = ReadLE16(packet.data + 17);
         outItem.m_slot[3] = ReadLE16(packet.data + 19);
-    } else if (packet.packetId == 0x01C4) {
+    } else if (ro::net::IsActiveStorageItemAddedTypedPacket(packet.packetId)) {
         if (packet.packetLength < 22) {
             return false;
         }
@@ -1918,20 +1968,15 @@ void HandleNormalStorageList(CGameMode&, const PacketView& packet)
         return;
     }
 
-    size_t entrySize = 0;
-    switch (packet.packetId) {
-    case 0x00A5:
-        entrySize = 10;
-        break;
-    case 0x01F0:
-        entrySize = 18;
-        break;
-    case 0x02EA:
-        entrySize = 22;
-        break;
-    default:
+    if (!ro::net::IsActiveNormalStorageListPacket(packet.packetId)) {
         return;
     }
+
+    const int entrySizeValue = ro::net::GetActiveStackableItemListEntrySize(packet.packetId);
+    if (entrySizeValue <= 0) {
+        return;
+    }
+    const size_t entrySize = static_cast<size_t>(entrySizeValue);
 
     for (size_t offset = 4; offset + entrySize <= static_cast<size_t>(packet.packetLength); offset += entrySize) {
         ITEM_INFO itemInfo;
@@ -1947,17 +1992,15 @@ void HandleEquipStorageList(CGameMode&, const PacketView& packet)
         return;
     }
 
-    size_t entrySize = 0;
-    switch (packet.packetId) {
-    case 0x00A6:
-        entrySize = 20;
-        break;
-    case 0x02D1:
-        entrySize = 26;
-        break;
-    default:
+    if (!ro::net::IsActiveEquipStorageListPacket(packet.packetId)) {
         return;
     }
+
+    const int entrySizeValue = ro::net::GetActiveEquipmentItemListEntrySize(packet.packetId);
+    if (entrySizeValue <= 0) {
+        return;
+    }
+    const size_t entrySize = static_cast<size_t>(entrySizeValue);
 
     for (size_t offset = 4; offset + entrySize <= static_cast<size_t>(packet.packetLength); offset += entrySize) {
         ITEM_INFO itemInfo;
@@ -2032,6 +2075,10 @@ void HandleStoragePasswordResult(CGameMode&, const PacketView& packet)
 void HandleItemPickupAck(CGameMode& mode, const PacketView& packet)
 {
     if (!packet.data || packet.packetLength < 23) {
+        return;
+    }
+
+    if (!ro::net::IsActiveItemPickupAckPacket(packet.packetId)) {
         return;
     }
 
@@ -2129,13 +2176,17 @@ void HandleGroundItemEntry(CGameMode& mode, const PacketView& packet)
         return;
     }
 
+    if (!ro::net::IsActiveGroundItemEntryPacket(packet.packetId)) {
+        return;
+    }
+
     const u32 objectId = ReadLE32(packet.data + 2);
     const u16 itemId = ReadLE16(packet.data + 6);
     const u8 identified = packet.data[8];
     const u16 tileX = ReadLE16(packet.data + 9);
     const u16 tileY = ReadLE16(packet.data + 11);
 
-    if (packet.packetId == 0x009D) {
+    if (!ro::net::IsActiveGroundItemDroppedPacket(packet.packetId)) {
         const u16 amount = ReadLE16(packet.data + 13);
         const u8 subX = packet.data[15];
         const u8 subY = packet.data[16];
@@ -2190,25 +2241,24 @@ void HandleItemRemove(CGameMode& mode, const PacketView& packet)
         return;
     }
 
+    if (!ro::net::IsActiveItemRemovePacket(packet.packetId)) {
+        return;
+    }
+
     unsigned int itemIndex = 0;
     int amount = 0;
-    switch (packet.packetId) {
-    case 0x00AF:
+    if (!ro::net::IsActiveExtendedItemRemovePacket(packet.packetId)) {
         if (packet.packetLength < 6) {
             return;
         }
         itemIndex = ReadLE16(packet.data + 2);
         amount = static_cast<int>(ReadLE16(packet.data + 4));
-        break;
-    case 0x07FA:
+    } else {
         if (packet.packetLength < 8) {
             return;
         }
         itemIndex = ReadLE16(packet.data + 4);
         amount = static_cast<int>(ReadLE16(packet.data + 6));
-        break;
-    default:
-        return;
     }
 
     if (mode.m_waitingItemThrowAck == static_cast<int>(itemIndex)) {
@@ -2717,6 +2767,9 @@ void HandleNotifyTime(CGameMode& mode, const PacketView& packet)
     }
     mode.m_receiveSyneRequestTime = static_cast<int>(timeGetTime());
     ++mode.m_numNotifyTime;
+    DbgLog("[GameMode] notify time tick=%u count=%u\n",
+        static_cast<unsigned int>(serverTick),
+        static_cast<unsigned int>(mode.m_numNotifyTime));
 }
 
 u16 ReadLE16(const u8* p)
@@ -3148,6 +3201,10 @@ bool ParseMapChangePacket(const PacketView& packet, MapChangeInfo& outInfo)
         return false;
     }
 
+    if (!ro::net::IsActiveMapChangePacket(packet.packetId)) {
+        return false;
+    }
+
     constexpr size_t kMapNameBytes = 16;
     const char* rawMapName = reinterpret_cast<const char*>(packet.data + 2);
     size_t mapNameLen = 0;
@@ -3159,7 +3216,7 @@ bool ParseMapChangePacket(const PacketView& packet, MapChangeInfo& outInfo)
     outInfo.y = static_cast<int>(ReadLE16(packet.data + 20));
     outInfo.hasPosition = true;
 
-    if (packet.packetId == 0x0092 && packet.packetLength >= 28) {
+    if (ro::net::IsActiveServerMoveMapChangePacket(packet.packetId) && packet.packetLength >= 28) {
         outInfo.ip = ReadLE32(packet.data + 22);
         outInfo.port = ReadLE16(packet.data + 26);
         outInfo.hasServerMove = outInfo.ip != 0 && outInfo.port != 0;
@@ -3170,7 +3227,7 @@ bool ParseMapChangePacket(const PacketView& packet, MapChangeInfo& outInfo)
 
 bool SendLoadEndAckPacket()
 {
-    const u16 opcode = PacketProfile::ActiveMapServerSend::kNotifyActorInit;
+    const u16 opcode = ro::net::GetActiveMapGameplaySendProfile().notifyActorInit;
     u8 packet[2] = {
         static_cast<u8>(opcode & 0xFFu),
         static_cast<u8>((opcode >> 8) & 0xFFu)
@@ -4117,7 +4174,7 @@ void HandleActorActionNotify(CGameMode& mode, const PacketView& packet)
         return;
     }
 
-    const bool isNotifyAct2 = packet.packetId == 0x02E1;
+    const bool isNotifyAct2 = ro::net::IsActiveActorActionNotifyExtendedPacket(packet.packetId);
     const size_t minLength = isNotifyAct2 ? 33u : 29u;
     if (packet.packetLength < minLength) {
         return;
@@ -4273,22 +4330,31 @@ bool ReconnectForServerMove(const MapChangeInfo& info)
         return false;
     }
 
-    PACKET_CZ_ENTER2 enterPacket{};
-    enterPacket.PacketType = PacketProfile::ActiveMapServerSend::kWantToConnection;
-    enterPacket.AID = g_session.m_aid;
-    enterPacket.GID = g_session.m_gid;
-    enterPacket.AuthCode = g_session.m_authCode;
-    enterPacket.ClientTick = GetTickCount();
-    enterPacket.Sex = g_session.m_sex;
+    std::array<u8, sizeof(PACKET_CZ_ENTER_PACKETVER22)> enterPacket{};
+    int enterPacketLength = 0;
+    if (!ro::net::BuildActiveWantToConnectionPacket(
+            g_session.m_aid,
+            g_session.m_gid,
+            g_session.m_authCode,
+            timeGetTime(),
+            g_session.m_sex,
+            enterPacket.data(),
+            static_cast<int>(enterPacket.size()),
+            &enterPacketLength)) {
+        DbgLog("[GameMode] map change reconnect failed to build wanttoconnection packet map='%s'\n",
+            info.mapName.c_str());
+        return false;
+    }
 
+    const u16 enterOpcode = static_cast<u16>(enterPacket[0]) | (static_cast<u16>(enterPacket[1]) << 8);
     const bool sent = CRagConnection::instance()->SendPacket(
-        reinterpret_cast<const char*>(&enterPacket),
-        static_cast<int>(sizeof(enterPacket)));
+        reinterpret_cast<const char*>(enterPacket.data()),
+        enterPacketLength);
     DbgLog("[GameMode] map change reconnect zone=%s:%u map='%s' opcode=0x%04X sentEnter=%d\n",
         serverHost,
         static_cast<unsigned int>(info.port),
         info.mapName.c_str(),
-        enterPacket.PacketType,
+        enterOpcode,
         sent ? 1 : 0);
     return sent;
 }
@@ -4302,7 +4368,11 @@ BroadcastPayload ParseBroadcastPayload(const PacketView& packet)
         return payload;
     }
 
-    if (packet.packetId == 0x01C3) {
+    if (!ro::net::IsActiveBroadcastPacket(packet.packetId)) {
+        return payload;
+    }
+
+    if (ro::net::IsActiveColoredBroadcastPacket(packet.packetId)) {
         if (packet.packetLength >= 16) {
             payload.color = static_cast<u32>(packet.data[4]) |
                             (static_cast<u32>(packet.data[5]) << 8) |
@@ -4694,7 +4764,6 @@ static void PlayGroundSkillImpactSound(u16 skillId, const vector3d& worldPos)
         if (TryPlayFirstMatchingEffectWave(worldPos, {
                 "effect\\wizard_meteor.wav",
                 "effect\\wizard_meteorstorm.wav",
-                "effect\\ef_meteorstorm.wav",
                 "effect\\ef_meteor.wav",
             })) {
             return;
@@ -4717,18 +4786,13 @@ static void PlayGroundSkillImpactSound(u16 skillId, const vector3d& worldPos)
         if (TryPlayFirstMatchingEffectWave(worldPos, {
                 "effect\\wizard_stormgust.wav",
                 "effect\\ef_stormgust.wav",
-                "effect\\ef_storm.wav",
-                "effect\\ef_wz_stormgust.wav",
             })) {
             return;
         }
         break;
-    default:
-        break;
     }
 
-    g_skillMgr.EnsureLoaded();
-    const SkillMetadata* md = g_skillMgr.GetSkillMetadata(static_cast<int>(skillId));
+    const SkillMetadata* md = g_skillMgr.GetSkillMetadata(skillId);
     if (!md || md->skillIdName.empty()) {
         return;
     }
@@ -4760,18 +4824,6 @@ static void PlayGroundSkillImpactSound(u16 skillId, const vector3d& worldPos)
         "pr_",
         "am_",
         "mo_",
-        "npc_",
-        "tk_",
-        "sl_",
-        "gs_",
-        "cr_",
-        "cg_",
-        "nj_",
-        "lk_",
-        "rms_",
-        "st_",
-        "sa_",
-        "pf_",
         "we_",
         "bs_",
         "mc_",
@@ -4942,11 +4994,13 @@ void HandleSkillCastAck(CGameMode& mode, const PacketView& packet)
 
 void HandleSkillDamageNotify(CGameMode& mode, const PacketView& packet)
 {
-    if (!packet.data || (packet.packetId == 0x0114 && packet.packetLength < 31) || (packet.packetId == 0x01DE && packet.packetLength < 33)) {
+    if (!packet.data
+        || (!ro::net::IsActiveSkillDamageNotifyExtendedPacket(packet.packetId) && packet.packetLength < 31)
+        || (ro::net::IsActiveSkillDamageNotifyExtendedPacket(packet.packetId) && packet.packetLength < 33)) {
         return;
     }
 
-    const bool isLongDamage = packet.packetId == 0x01DE;
+    const bool isLongDamage = ro::net::IsActiveSkillDamageNotifyExtendedPacket(packet.packetId);
     const u16 skillId = ReadLE16(packet.data + 2);
     const u32 srcGid = ReadLE32(packet.data + 4);
     const u32 dstGid = ReadLE32(packet.data + 8);
@@ -5022,6 +5076,10 @@ void HandleSkillDamagePositionNotify(CGameMode& mode, const PacketView& packet)
         return;
     }
 
+    if (packet.packetId != ro::net::GetActiveMapReceiveProfile().skillDamagePositionNotify) {
+        return;
+    }
+
     const u16 skillId = ReadLE16(packet.data + 2);
     const u32 srcGid = ReadLE32(packet.data + 4);
     const u32 dstGid = ReadLE32(packet.data + 8);
@@ -5091,6 +5149,10 @@ void HandleGroundSkillNotify(CGameMode& mode, const PacketView& packet)
         return;
     }
 
+    if (packet.packetId != ro::net::GetActiveMapReceiveProfile().groundSkillNotify) {
+        return;
+    }
+
     const u16 skillId = ReadLE16(packet.data + 2);
     const u32 srcGid = ReadLE32(packet.data + 4);
     const u16 level = ReadLE16(packet.data + 8);
@@ -5122,6 +5184,10 @@ void HandleGroundSkillNotify(CGameMode& mode, const PacketView& packet)
 void HandleSkillNoDamageNotify(CGameMode& mode, const PacketView& packet)
 {
     if (!packet.data || packet.packetLength < 15) {
+        return;
+    }
+
+    if (packet.packetId != ro::net::GetActiveMapReceiveProfile().skillNoDamageNotify) {
         return;
     }
 
@@ -5183,6 +5249,10 @@ void HandleSkillNoDamageNotify(CGameMode& mode, const PacketView& packet)
 void HandleSkillUnitSet(CGameMode& mode, const PacketView& packet)
 {
     if (!packet.data || packet.packetLength < 16 || !mode.m_world) {
+        return;
+    }
+
+    if (!ro::net::IsActiveSkillUnitSetPacket(packet.packetId)) {
         return;
     }
 
@@ -5709,6 +5779,7 @@ void ApplyRuntimeActorState(CGameMode& mode, const RuntimeActorState& state)
         return;
     }
 
+    const bool hadResolvedIdentity = actor->m_job != 0 || actor->m_objectType != 0 || actor->m_isPc != 0;
     const int oldEffectState = actor->m_effectState;
 
     actor->m_speed = state.speed;
@@ -5749,6 +5820,13 @@ void ApplyRuntimeActorState(CGameMode& mode, const RuntimeActorState& state)
         pcActor->m_accessory2 = isPc ? state.headTop : 0;
         pcActor->m_accessory3 = isPc ? state.headMid : 0;
         pcActor->m_bodyPalette = isPc ? state.clothColor : 0;
+    }
+
+    if (!hadResolvedIdentity && !isPc && actor->m_objectType == 6) {
+        const auto cachedNameIt = mode.m_actorNameListByGID.find(state.gid);
+        if (cachedNameIt == mode.m_actorNameListByGID.end() || cachedNameIt->second.name.empty()) {
+            SendActorNameRequestIfNeeded(mode, state.gid);
+        }
     }
 
     if (state.state == 1) {
@@ -5810,7 +5888,9 @@ bool DecodeActorIdleOrSpawnPacket(const PacketView& packet, RuntimeActorState& o
         return false;
     }
 
-    if (packet.packetId == 0x007C) {
+    const ro::net::MapReceiveProfile& receiveProfile = ro::net::GetActiveMapReceiveProfile();
+
+    if (packet.packetId == receiveProfile.actorSpawnLegacyNpc) {
         if (packet.packetLength < 42u) {
             LogActorPacketSample("short legacy non-player spawn packet", packet);
             return false;
@@ -5843,8 +5923,12 @@ bool DecodeActorIdleOrSpawnPacket(const PacketView& packet, RuntimeActorState& o
         return true;
     }
 
-    if (packet.packetId == 0x0078 || packet.packetId == 0x0079 || packet.packetId == 0x01D8 || packet.packetId == 0x01D9) {
-        const bool isIdle = packet.packetId == 0x0078 || packet.packetId == 0x01D8;
+    if (packet.packetId == receiveProfile.actorSpawnLegacyIdle
+        || packet.packetId == receiveProfile.actorSpawnLegacySpawn
+        || packet.packetId == receiveProfile.actorSpawnLegacyIdleShifted
+        || packet.packetId == receiveProfile.actorSpawnLegacySpawnShifted) {
+        const bool isIdle = packet.packetId == receiveProfile.actorSpawnLegacyIdle
+            || packet.packetId == receiveProfile.actorSpawnLegacyIdleShifted;
         const size_t minimumLength = isIdle ? 54u : 53u;
         if (packet.packetLength < minimumLength) {
             LogActorPacketSample("short legacy player idle/spawn packet", packet);
@@ -5894,7 +5978,7 @@ bool DecodeActorIdleOrSpawnPacket(const PacketView& packet, RuntimeActorState& o
         decodeLegacyCandidate(0, false, classicState);
 
         const bool canUseShiftedLegacyLayout =
-            (packet.packetId == 0x0078 || packet.packetId == 0x0079) &&
+            (packet.packetId == receiveProfile.actorSpawnLegacyIdle || packet.packetId == receiveProfile.actorSpawnLegacySpawn) &&
             packet.packetLength >= (minimumLength + 1u) &&
             IsKnownObjectType(packet.data[2]);
 
@@ -5914,9 +5998,14 @@ bool DecodeActorIdleOrSpawnPacket(const PacketView& packet, RuntimeActorState& o
         return true;
     }
 
-    if (packet.packetId == 0x07F8 || packet.packetId == 0x07F9 || packet.packetId == 0x0858 || packet.packetId == 0x0857) {
-        const bool hasRobe = packet.packetId == 0x0858 || packet.packetId == 0x0857;
-        const bool isIdle = packet.packetId == 0x07F9 || packet.packetId == 0x0857;
+    if (packet.packetId == receiveProfile.actorSpawnVariableSpawn
+        || packet.packetId == receiveProfile.actorSpawnVariableIdle
+        || packet.packetId == receiveProfile.actorSpawnVariableSpawnRobe
+        || packet.packetId == receiveProfile.actorSpawnVariableIdleRobe) {
+        const bool hasRobe = packet.packetId == receiveProfile.actorSpawnVariableSpawnRobe
+            || packet.packetId == receiveProfile.actorSpawnVariableIdleRobe;
+        const bool isIdle = packet.packetId == receiveProfile.actorSpawnVariableIdle
+            || packet.packetId == receiveProfile.actorSpawnVariableIdleRobe;
         const size_t minimumLength = hasRobe ? (isIdle ? 65u : 64u) : (isIdle ? 63u : 62u);
         if (packet.packetLength < minimumLength) {
             LogActorPacketSample("short variable player idle/spawn packet", packet);
@@ -5972,12 +6061,17 @@ bool DecodeActorIdleOrSpawnPacket(const PacketView& packet, RuntimeActorState& o
         return true;
     }
 
-    if (packet.packetId != 0x022A && packet.packetId != 0x022B && packet.packetId != 0x02ED && packet.packetId != 0x02EE) {
+    if (packet.packetId != receiveProfile.actorSpawnModernIdle
+        && packet.packetId != receiveProfile.actorSpawnModernSpawn
+        && packet.packetId != receiveProfile.actorSpawnModernSpawnFont
+        && packet.packetId != receiveProfile.actorSpawnModernIdleFont) {
         return false;
     }
 
-    const bool hasFont = packet.packetId == 0x02ED || packet.packetId == 0x02EE;
-    const bool isIdle = packet.packetId == 0x022A || packet.packetId == 0x02EE;
+    const bool hasFont = packet.packetId == receiveProfile.actorSpawnModernSpawnFont
+        || packet.packetId == receiveProfile.actorSpawnModernIdleFont;
+    const bool isIdle = packet.packetId == receiveProfile.actorSpawnModernIdle
+        || packet.packetId == receiveProfile.actorSpawnModernIdleFont;
     const size_t gidOffset = 2;
     const size_t speedOffset = 6;
     const size_t opt1Offset = 8;
@@ -6056,7 +6150,9 @@ bool DecodeActorWalkingPacket(const PacketView& packet, RuntimeActorState& outSt
         return false;
     }
 
-    if (packet.packetId == 0x007B || packet.packetId == 0x01DA) {
+    const ro::net::MapReceiveProfile& receiveProfile = ro::net::GetActiveMapReceiveProfile();
+
+    if (packet.packetId == receiveProfile.actorMoveLegacy || packet.packetId == receiveProfile.actorMoveLegacyShifted) {
         if (packet.packetLength < 60u) {
             LogActorPacketSample("short legacy player walking packet", packet);
             return false;
@@ -6111,7 +6207,7 @@ bool DecodeActorWalkingPacket(const PacketView& packet, RuntimeActorState& outSt
         decodeLegacyMoveCandidate(0, false, classicState);
 
         const bool canUseShiftedLegacyLayout =
-            packet.packetId == 0x007B &&
+            packet.packetId == receiveProfile.actorMoveLegacy &&
             packet.packetLength >= 61u &&
             IsKnownObjectType(packet.data[2]);
 
@@ -6130,8 +6226,8 @@ bool DecodeActorWalkingPacket(const PacketView& packet, RuntimeActorState& outSt
         return true;
     }
 
-    if (packet.packetId == 0x07F7 || packet.packetId == 0x0856) {
-        const bool hasRobe = packet.packetId == 0x0856;
+    if (packet.packetId == receiveProfile.actorMoveVariable || packet.packetId == receiveProfile.actorMoveVariableRobe) {
+        const bool hasRobe = packet.packetId == receiveProfile.actorMoveVariableRobe;
         const size_t minimumLength = hasRobe ? 71u : 69u;
         if (packet.packetLength < minimumLength) {
             LogActorPacketSample("short variable player walking packet", packet);
@@ -6195,14 +6291,14 @@ bool DecodeActorWalkingPacket(const PacketView& packet, RuntimeActorState& outSt
         return true;
     }
 
-    if (packet.packetId != 0x022C && packet.packetId != 0x02EC) {
+    if (packet.packetId != receiveProfile.actorMoveModern && packet.packetId != receiveProfile.actorMoveModernFont) {
         return false;
     }
 
-    const bool hasFont = packet.packetId == 0x02EC;
+    const bool hasFont = packet.packetId == receiveProfile.actorMoveModernFont;
     const size_t minimumLength = hasFont ? 67 : 65;
     if (packet.packetLength < minimumLength) {
-        if (packet.packetId == 0x022C || packet.packetId == 0x02EC) {
+        if (packet.packetId == receiveProfile.actorMoveModern || packet.packetId == receiveProfile.actorMoveModernFont) {
             LogActorPacketSample("short player walking packet", packet);
         }
         return false;
@@ -6311,7 +6407,7 @@ void HandleActorStateChange(CGameMode& mode, const PacketView& packet)
     int effectState = 0;
     int pkState = 0;
 
-    if (packet.packetId == 0x0119) {
+    if (!ro::net::IsActiveActorStateChangeExtendedPacket(packet.packetId)) {
         if (packet.packetLength < 13) {
             return;
         }
@@ -6321,7 +6417,7 @@ void HandleActorStateChange(CGameMode& mode, const PacketView& packet)
         healthState = ReadLE16(packet.data + 8);
         effectState = ReadLE16(packet.data + 10);
         pkState = packet.data[12];
-    } else if (packet.packetId == 0x0229) {
+    } else {
         if (packet.packetLength < 15) {
             return;
         }
@@ -6331,8 +6427,6 @@ void HandleActorStateChange(CGameMode& mode, const PacketView& packet)
         healthState = ReadLE16(packet.data + 8);
         effectState = static_cast<int>(ReadLE32(packet.data + 10));
         pkState = packet.data[14];
-    } else {
-        return;
     }
 
     mode.m_aidList[gid] = GetTickCount();
@@ -6983,8 +7077,12 @@ void HandlePartyInviteAck(CGameMode& mode, const PacketView& packet)
         return;
     }
 
+    if (!ro::net::IsActivePartyInviteAckPacket(packet.packetId)) {
+        return;
+    }
+
     const std::string nick = ExtractFixedPacketString(packet.data + 2, 24);
-    const int result = packet.packetLength >= 30
+    const int result = ro::net::IsActiveExtendedPartyInviteAckPacket(packet.packetId)
         ? static_cast<int>(ReadLE32(packet.data + 26))
         : static_cast<int>(packet.data[26]);
 
@@ -7030,6 +7128,10 @@ void HandlePartyInviteAck(CGameMode& mode, const PacketView& packet)
 void HandlePartyInviteRequest(CGameMode&, const PacketView& packet)
 {
     if (!packet.data || packet.packetLength < 30) {
+        return;
+    }
+
+    if (!ro::net::IsActivePartyInviteRequestPacket(packet.packetId)) {
         return;
     }
 
@@ -7089,7 +7191,7 @@ void HandlePartyList(CGameMode& mode, const PacketView& packet)
 
 void HandlePartyMemberAdded(CGameMode& mode, const PacketView& packet)
 {
-    if (!packet.data || packet.packetLength < 79) {
+    if (!packet.data || !ro::net::IsActivePartyMemberAddedPacket(packet.packetId) || packet.packetLength < 79) {
         return;
     }
 
@@ -7105,7 +7207,7 @@ void HandlePartyMemberAdded(CGameMode& mode, const PacketView& packet)
         info.partyHp = existing->partyHp;
         info.partyMaxHp = existing->partyMaxHp;
     }
-    if (packet.packetLength >= 81) {
+    if (ro::net::IsActivePartyMemberAddedExtendedPacket(packet.packetId) && packet.packetLength >= 81) {
         g_session.m_itemCollectType = packet.data[79] != 0;
         g_session.m_itemDivType = packet.data[80] != 0;
     }
@@ -7178,7 +7280,7 @@ void HandlePartyHpUpdate(CGameMode& mode, const PacketView& packet)
     const u32 aid = ReadLE32(packet.data + 2);
     int hp = 0;
     int maxHp = 0;
-    if (packet.packetId == 0x080E) {
+    if (ro::net::IsActivePartyHpUpdateExtendedPacket(packet.packetId)) {
         if (packet.packetLength < 14) {
             return;
         }
@@ -7503,7 +7605,7 @@ void HandleActorSpawnSkeleton(CGameMode& mode, const PacketView& packet)
         return;
     }
 
-    if (packet.packetId == 0x0078 || packet.packetId == 0x0079 || packet.packetId == 0x007A || packet.packetId == 0x007C || packet.packetId == 0x01D8 || packet.packetId == 0x01D9) {
+    if (ro::net::IsActiveLegacyActorSpawnPacket(packet.packetId)) {
         LogActorPacketSample("legacy actor spawn fallback", packet);
     }
 
@@ -7539,7 +7641,7 @@ void HandleActorMoveSkeleton(CGameMode& mode, const PacketView& packet)
         return;
     }
 
-    if (packet.packetId == 0x007B || packet.packetId == 0x01DA) {
+    if (ro::net::IsActiveLegacyActorMovePacket(packet.packetId)) {
         LogActorPacketSample("legacy actor move fallback", packet);
     }
 
@@ -7648,6 +7750,10 @@ void HandleActorSetPosition(CGameMode& mode, const PacketView& packet)
     LogActorPacketSeenOnce(packet);
     if (mode.m_mapLoadingStage != CGameMode::MapLoading_None) {
         mode.m_lastActorBootstrapPacketTick = GetTickCount();
+    }
+
+    if (!ro::net::IsActiveActorSetPositionPacket(packet.packetId)) {
+        return;
     }
 
     // Ref switch case 136 (0x88): direct actor position update with short x/y.
@@ -7996,7 +8102,7 @@ void HandleActorNameAck(CGameMode& mode, const PacketView& packet)
         entry.guildName.clear();
         entry.guildTitle.clear();
 
-        if (packet.packetId == 0x0195 && packet.packetLength >= 102) {
+        if (ro::net::IsActiveActorNameAckFullPacket(packet.packetId) && packet.packetLength >= 102) {
             entry.partyName = ExtractFixedPacketString(packet, 30, 24);
             entry.guildName = ExtractFixedPacketString(packet, 54, 24);
             entry.guildTitle = ExtractFixedPacketString(packet, 78, 24);
@@ -8108,35 +8214,36 @@ void CGameModePacketRouter::Clear()
 void RegisterDefaultGameModePacketHandlers(CGameModePacketRouter& router)
 {
     router.Clear();
+    const ro::net::MapReceiveProfile& receiveProfile = ro::net::GetActiveMapReceiveProfile();
 
     // Character enter/map-ready chain.
-    router.Register(0x0073, HandleAcceptEnter);
-    router.Register(0x007F, HandleNotifyTime);
-    router.Register(0x02EB, HandleAcceptEnter2);
+    RegisterHandlerIfValid(router, receiveProfile.acceptEnterLegacy, HandleAcceptEnter);
+    RegisterHandlerIfValid(router, receiveProfile.notifyTime, HandleNotifyTime);
+    RegisterHandlerIfValid(router, receiveProfile.acceptEnterModern, HandleAcceptEnter2);
 
     // Login/session bootstrap.
     router.Register(0x0069, HandleLoginAccept);
     router.Register(0x006A, HandleLoginRefuse);
 
     // Map-change skeleton hooks.
-    router.Register(0x0091, HandleMapChange);
-    router.Register(0x0092, HandleMapChange);
+    RegisterHandlerIfValid(router, receiveProfile.mapChangeBasic, HandleMapChange);
+    RegisterHandlerIfValid(router, receiveProfile.mapChangeServerMove, HandleMapChange);
 
     // Actor spawn/move skeleton hooks.
-    router.Register(0x0078, HandleActorSpawnSkeleton);
-    router.Register(0x0079, HandleActorSpawnSkeleton);
-    router.Register(0x007A, HandleActorSpawnSkeleton);
-    router.Register(0x007C, HandleActorSpawnSkeleton);
-    router.Register(0x01D8, HandleActorSpawnSkeleton);
-    router.Register(0x01D9, HandleActorSpawnSkeleton);
-    router.Register(0x01DA, HandleActorMoveSkeleton);
-    router.Register(0x007B, HandleActorMoveSkeleton);
+    RegisterHandlerIfValid(router, receiveProfile.actorSpawnLegacyIdle, HandleActorSpawnSkeleton);
+    RegisterHandlerIfValid(router, receiveProfile.actorSpawnLegacySpawn, HandleActorSpawnSkeleton);
+    RegisterHandlerIfValid(router, receiveProfile.actorSpawnLegacyAlt, HandleActorSpawnSkeleton);
+    RegisterHandlerIfValid(router, receiveProfile.actorSpawnLegacyNpc, HandleActorSpawnSkeleton);
+    RegisterHandlerIfValid(router, receiveProfile.actorSpawnLegacyIdleShifted, HandleActorSpawnSkeleton);
+    RegisterHandlerIfValid(router, receiveProfile.actorSpawnLegacySpawnShifted, HandleActorSpawnSkeleton);
+    RegisterHandlerIfValid(router, receiveProfile.actorMoveLegacyShifted, HandleActorMoveSkeleton);
+    RegisterHandlerIfValid(router, receiveProfile.actorMoveLegacy, HandleActorMoveSkeleton);
     router.Register(0x0080, HandleActorVanish);
     router.Register(0x0086, HandleActorMoveUpdate);
     router.Register(0x0087, HandleSelfMoveAck);
-    router.Register(0x008A, HandleActorActionNotify);
-    router.Register(0x0088, HandleActorSetPosition);
-    router.Register(0x01FF, HandleActorSetPosition); // ZC_HIGHJUMP: same id/x/y layout as 0x0088
+    RegisterHandlerIfValid(router, receiveProfile.actorActionNotifyBasic, HandleActorActionNotify);
+    RegisterHandlerIfValid(router, receiveProfile.actorSetPositionBasic, HandleActorSetPosition);
+    RegisterHandlerIfValid(router, receiveProfile.actorSetPositionHighJump, HandleActorSetPosition);
     router.Register(0x009C, HandleActorDirection);
     router.Register(0x010E, HandlePlayerSkillUpdate);
     router.Register(0x010F, HandlePlayerSkillList);
@@ -8146,14 +8253,14 @@ void RegisterDefaultGameModePacketHandlers(CGameModePacketRouter& router)
     router.Register(0x0239, HandleHomunSkillUpdate);
     router.Register(0x029D, HandleMercSkillList);
     router.Register(0x029E, HandleMercSkillUpdate);
-    router.Register(0x0114, HandleSkillDamageNotify);
-    router.Register(0x0115, HandleSkillDamagePositionNotify);
-    router.Register(0x0117, HandleGroundSkillNotify);
-    router.Register(0x0119, HandleActorStateChange);
-    router.Register(0x011A, HandleSkillNoDamageNotify);
+    RegisterHandlerIfValid(router, receiveProfile.skillDamageNotifyBasic, HandleSkillDamageNotify);
+    RegisterHandlerIfValid(router, receiveProfile.skillDamagePositionNotify, HandleSkillDamagePositionNotify);
+    RegisterHandlerIfValid(router, receiveProfile.groundSkillNotify, HandleGroundSkillNotify);
+    RegisterHandlerIfValid(router, receiveProfile.actorStateChangeBasic, HandleActorStateChange);
+    RegisterHandlerIfValid(router, receiveProfile.skillNoDamageNotify, HandleSkillNoDamageNotify);
     router.Register(0x0139, HandleAttackFailureForDistance);
     router.Register(0x013A, HandleAttackRange);
-    router.Register(0x0229, HandleActorStateChange);
+    RegisterHandlerIfValid(router, receiveProfile.actorStateChangeExtended, HandleActorStateChange);
 
     // Chat/system text pathways.
     router.Register(0x008D, HandleNotifyChat);
@@ -8161,7 +8268,7 @@ void RegisterDefaultGameModePacketHandlers(CGameModePacketRouter& router)
     router.Register(0x0109, HandleNotifyChatParty);
     router.Register(0x0097, HandleWhisper);
     router.Register(0x0098, HandleAckWhisper);
-    router.Register(0x009A, HandleBroadcast);
+    RegisterHandlerIfValid(router, receiveProfile.broadcastBasic, HandleBroadcast);
     router.Register(0x00B4, HandleNpcDialogText);
     router.Register(0x00B5, HandleNpcDialogNext);
     router.Register(0x00B6, HandleNpcDialogClose);
@@ -8173,50 +8280,51 @@ void RegisterDefaultGameModePacketHandlers(CGameModePacketRouter& router)
     router.Register(0x00CB, HandleNpcShopSellResult);
     router.Register(0x0142, HandleNpcDialogNumberInput);
     router.Register(0x01D4, HandleNpcDialogStringInput);
-    router.Register(0x01C3, HandleBroadcast);
+    RegisterHandlerIfValid(router, receiveProfile.broadcastColored, HandleBroadcast);
     router.Register(0x02DC, HandleBattlefieldChat);
-    router.Register(0x0095, HandleActorNameAck);
-    router.Register(0x0195, HandleActorNameAck);
+    RegisterHandlerIfValid(router, receiveProfile.actorNameAckBasic, HandleActorNameAck);
+    RegisterHandlerIfValid(router, receiveProfile.actorNameAckParty, HandleActorNameAck);
+    RegisterHandlerIfValid(router, receiveProfile.actorNameAckFull, HandleActorNameAck);
 
-    router.Register(0x009D, HandleGroundItemEntry);
-    router.Register(0x009E, HandleGroundItemEntry);
-    router.Register(0x00A0, HandleItemPickupAck);
-    router.Register(0x02D4, HandleItemPickupAck);
+    RegisterHandlerIfValid(router, receiveProfile.groundItemEntryExisting, HandleGroundItemEntry);
+    RegisterHandlerIfValid(router, receiveProfile.groundItemEntryDropped, HandleGroundItemEntry);
+    RegisterHandlerIfValid(router, receiveProfile.itemPickupAckBasic, HandleItemPickupAck);
+    RegisterHandlerIfValid(router, receiveProfile.itemPickupAckExtended, HandleItemPickupAck);
     router.Register(0x00A1, HandleGroundItemDisappear);
-    router.Register(0x00A3, HandleNormalInventoryList);
-    router.Register(0x00A4, HandleEquipInventoryList);
-    router.Register(0x00A5, HandleNormalStorageList);
-    router.Register(0x00A6, HandleEquipStorageList);
+    RegisterHandlerIfValid(router, receiveProfile.normalInventoryListBasic, HandleNormalInventoryList);
+    RegisterHandlerIfValid(router, receiveProfile.normalInventoryListCardSlots, HandleNormalInventoryList);
+    RegisterHandlerIfValid(router, receiveProfile.normalInventoryListTimed, HandleNormalInventoryList);
+    RegisterHandlerIfValid(router, receiveProfile.equipInventoryListBasic, HandleEquipInventoryList);
+    RegisterHandlerIfValid(router, receiveProfile.equipInventoryListTimed, HandleEquipInventoryList);
+    RegisterHandlerIfValid(router, receiveProfile.equipInventoryListTimedOwned, HandleEquipInventoryList);
+    RegisterHandlerIfValid(router, receiveProfile.normalStorageListBasic, HandleNormalStorageList);
+    RegisterHandlerIfValid(router, receiveProfile.normalStorageListCardSlots, HandleNormalStorageList);
+    RegisterHandlerIfValid(router, receiveProfile.normalStorageListTimed, HandleNormalStorageList);
+    RegisterHandlerIfValid(router, receiveProfile.equipStorageListBasic, HandleEquipStorageList);
+    RegisterHandlerIfValid(router, receiveProfile.equipStorageListTimedOwned, HandleEquipStorageList);
     router.Register(0x00AA, HandleEquipItemAck);
-    router.Register(0x00AF, HandleItemRemove);
+    RegisterHandlerIfValid(router, receiveProfile.itemRemoveBasic, HandleItemRemove);
     router.Register(0x00AC, HandleUnequipItemAck);
-    router.Register(0x00A8, HandleUseItemAck);
+    RegisterHandlerIfValid(router, receiveProfile.useItemAckBasic, HandleUseItemAck);
     router.Register(0x0147, HandleAutoRunSkill);
     router.Register(0x017B, HandleItemCompositionList);
     router.Register(0x0177, HandleItemIdentifyList);
     router.Register(0x017D, HandleItemCompositionAck);
     router.Register(0x0179, HandleItemIdentifyAck);
     router.Register(0x00F2, HandleStorageStatus);
-    router.Register(0x00F4, HandleStorageItemAdded);
+    RegisterHandlerIfValid(router, receiveProfile.storageItemAddedBasic, HandleStorageItemAdded);
     router.Register(0x00F6, HandleStorageItemRemoved);
     router.Register(0x00F8, HandleStorageClose);
-    router.Register(0x00FD, HandlePartyInviteAck);
-    router.Register(0x00FE, HandlePartyInviteRequest);
+    RegisterHandlerIfValid(router, receiveProfile.partyInviteAckBasic, HandlePartyInviteAck);
+    RegisterHandlerIfValid(router, receiveProfile.partyInviteRequestBasic, HandlePartyInviteRequest);
     router.Register(0x00FA, HandlePartyCreateAck);
     router.Register(0x00FB, HandlePartyList);
-    router.Register(0x01C8, HandleUseItemAck2);
-    router.Register(0x01C4, HandleStorageItemAdded);
-    router.Register(0x01EE, HandleNormalInventoryList);
-    router.Register(0x01EF, HandleEquipInventoryList);
-    router.Register(0x01F0, HandleNormalStorageList);
+    RegisterHandlerIfValid(router, receiveProfile.useItemAckExtended, HandleUseItemAck2);
+    RegisterHandlerIfValid(router, receiveProfile.storageItemAddedTyped, HandleStorageItemAdded);
     router.Register(0x01F8, HandleIgnorePacket);
-    router.Register(0x02D0, HandleEquipInventoryList);
-    router.Register(0x02D1, HandleEquipStorageList);
-    router.Register(0x02E8, HandleNormalInventoryList);
-    router.Register(0x02EA, HandleNormalStorageList);
     router.Register(0x023A, HandleStoragePasswordRequest);
     router.Register(0x023C, HandleStoragePasswordResult);
-    router.Register(0x07FA, HandleItemRemove);
+    RegisterHandlerIfValid(router, receiveProfile.itemRemoveExtended, HandleItemRemove);
     router.Register(0x0100, HandleIgnorePacket);
 
     // Quit/return-to-login transitions.
@@ -8235,65 +8343,70 @@ void RegisterDefaultGameModePacketHandlers(CGameModePacketRouter& router)
     router.Register(0x013D, HandleRecovery);
     router.Register(0x013E, HandleSkillCastAck);
     router.Register(0x01B0, HandleIgnorePacket);
-    router.Register(0x0106, HandlePartyHpUpdate);
+    RegisterHandlerIfValid(router, receiveProfile.partyHpUpdateBasic, HandlePartyHpUpdate);
     router.Register(0x0107, HandleIgnorePacket); // party minimap position (account id); framing only
-    router.Register(0x0104, HandlePartyMemberAdded);
+    RegisterHandlerIfValid(router, receiveProfile.partyMemberAddedBasic, HandlePartyMemberAdded);
     router.Register(0x0105, HandlePartyMemberRemoved);
-    router.Register(0x01E9, HandlePartyMemberAdded);
-    router.Register(0x011F, HandleSkillUnitSet);
+    RegisterHandlerIfValid(router, receiveProfile.partyMemberAddedExtended, HandlePartyMemberAdded);
+    RegisterHandlerIfValid(router, receiveProfile.skillUnitSetBasic, HandleSkillUnitSet);
     router.Register(0x0120, HandleIgnorePacket);
     router.Register(0x0131, HandleIgnorePacket);
     router.Register(0x0132, HandleIgnorePacket);
     router.Register(0x0141, HandleSelfStatInfo);
     router.Register(0x0148, HandleActorResurrection);
-    router.Register(0x019B, HandleNotifyEffect);
+    RegisterHandlerIfValid(router, receiveProfile.notifyEffectBasic, HandleNotifyEffect);
     router.Register(0x01B9, HandleSkillCastCancel);
     router.Register(0x0192, HandleIgnorePacket);
-    router.Register(0x01C9, HandleSkillUnitSet);
+    RegisterHandlerIfValid(router, receiveProfile.skillUnitSetExtended, HandleSkillUnitSet);
     router.Register(0x01CF, HandleIgnorePacket);
     router.Register(0x01D0, HandleIgnorePacket);
+    router.Register(0x01D6, HandleIgnorePacket); // map type / mapflags hint; framing only for now
     router.Register(0x01D7, HandleActorSpriteChange);
-    router.Register(0x01DE, HandleSkillDamageNotify);
+    RegisterHandlerIfValid(router, receiveProfile.skillDamageNotifyExtended, HandleSkillDamageNotify);
     router.Register(0x01E1, HandleIgnorePacket);
-    router.Register(0x01F3, HandleNotifyEffect2);
+    RegisterHandlerIfValid(router, receiveProfile.notifyEffectDirect, HandleNotifyEffect2);
     router.Register(0x0201, HandleFriendsList);
     router.Register(0x0206, HandleFriendState);
     router.Register(0x0207, HandleFriendRequest);
     router.Register(0x0209, HandleFriendAdd);
     router.Register(0x020A, HandleFriendDelete);
     router.Register(0x0214, HandleStatusSummary);
-    router.Register(0x02C5, HandlePartyInviteAck);
+    RegisterHandlerIfValid(router, receiveProfile.partyInviteAckExtended, HandlePartyInviteAck);
     router.Register(0x02DD, HandleIgnorePacket);
-    router.Register(0x080E, HandlePartyHpUpdate);
+    RegisterHandlerIfValid(router, receiveProfile.partyHpUpdateExtended, HandlePartyHpUpdate);
     router.Register(0x0283, HandleIgnorePacket);
-    router.Register(0x02C6, HandlePartyInviteRequest);
+    RegisterHandlerIfValid(router, receiveProfile.partyInviteRequestExtended, HandlePartyInviteRequest);
     router.Register(0x02C9, HandleIgnorePacket);
+    router.Register(0x02B1, HandleIgnorePacket);
+    router.Register(0x02B2, HandleIgnorePacket);
     router.Register(0x02B9, HandleShortcutKeyList);
     router.Register(0x02D2, HandleIgnorePacket);
     router.Register(0x02D3, HandleIgnorePacket);
     router.Register(0x02D5, HandleIgnorePacket);
     router.Register(0x02D7, HandleIgnorePacket);
     router.Register(0x02DA, HandleIgnorePacket);
-    router.Register(0x02E1, HandleActorActionNotify);
+    RegisterHandlerIfValid(router, receiveProfile.actorActionNotifyExtended, HandleActorActionNotify);
+    router.Register(0x02E7, HandleIgnorePacket);
+    router.Register(0x02E9, HandleIgnorePacket);
     router.Register(0x0196, HandlePacket0196);
     router.Register(0x043F, HandlePacket043F);
     router.Register(0x0814, HandleIgnorePacket);
     router.Register(0x0816, HandleIgnorePacket);
 
     // Newer actor entry packet family from Ref switch (v4 set).
-    router.Register(0x022A, HandleActorSpawnSkeleton);
-    router.Register(0x022B, HandleActorSpawnSkeleton);
-    router.Register(0x022C, HandleActorMoveSkeleton);
-    router.Register(0x02EC, HandleActorMoveSkeleton);
-    router.Register(0x02ED, HandleActorSpawnSkeleton);
-    router.Register(0x02EE, HandleActorSpawnSkeleton);
+    RegisterHandlerIfValid(router, receiveProfile.actorSpawnModernIdle, HandleActorSpawnSkeleton);
+    RegisterHandlerIfValid(router, receiveProfile.actorSpawnModernSpawn, HandleActorSpawnSkeleton);
+    RegisterHandlerIfValid(router, receiveProfile.actorMoveModern, HandleActorMoveSkeleton);
+    RegisterHandlerIfValid(router, receiveProfile.actorMoveModernFont, HandleActorMoveSkeleton);
+    RegisterHandlerIfValid(router, receiveProfile.actorSpawnModernSpawnFont, HandleActorSpawnSkeleton);
+    RegisterHandlerIfValid(router, receiveProfile.actorSpawnModernIdleFont, HandleActorSpawnSkeleton);
     router.Register(0x02EF, HandleActorFont);
-    router.Register(0x07F7, HandleActorMoveSkeleton);
-    router.Register(0x07F8, HandleActorSpawnSkeleton);
-    router.Register(0x07F9, HandleActorSpawnSkeleton);
-    router.Register(0x0856, HandleActorMoveSkeleton);
-    router.Register(0x0857, HandleActorSpawnSkeleton);
-    router.Register(0x0858, HandleActorSpawnSkeleton);
+    RegisterHandlerIfValid(router, receiveProfile.actorMoveVariable, HandleActorMoveSkeleton);
+    RegisterHandlerIfValid(router, receiveProfile.actorSpawnVariableSpawn, HandleActorSpawnSkeleton);
+    RegisterHandlerIfValid(router, receiveProfile.actorSpawnVariableIdle, HandleActorSpawnSkeleton);
+    RegisterHandlerIfValid(router, receiveProfile.actorMoveVariableRobe, HandleActorMoveSkeleton);
+    RegisterHandlerIfValid(router, receiveProfile.actorSpawnVariableIdleRobe, HandleActorSpawnSkeleton);
+    RegisterHandlerIfValid(router, receiveProfile.actorSpawnVariableSpawnRobe, HandleActorSpawnSkeleton);
 }
 
 void NoteLocalHideSkillRequest(u16 skillId, u32 targetGid)

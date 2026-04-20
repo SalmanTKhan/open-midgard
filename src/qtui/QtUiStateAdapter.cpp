@@ -5,9 +5,11 @@
 #include "QtUiStatusIconCatalog.h"
 
 #include "network/Connection.h"
+#include "network/MapSendProfile.h"
 #include "network/Packet.h"
 #include "core/ClientInfoLocale.h"
 #include "gamemode/GameMode.h"
+#include "gamemode/PacketPadding.h"
 #include "gamemode/View.h"
 #include "main/WinMain.h"
 #include "render3d/RenderBackend.h"
@@ -3218,10 +3220,20 @@ void SendActorNameRequest(CGameMode& mode, u32 gid)
         return;
     }
 
-    PACKET_CZ_REQNAME2 packet{};
-    packet.PacketType = PacketProfile::ActiveMapServerSend::kGetCharNameRequest;
-    packet.GID = gid;
-    if (CRagConnection::instance()->SendPacket(reinterpret_cast<const char*>(&packet), static_cast<int>(sizeof(packet)))) {
+    bool sent = false;
+    if (ro::net::IsLegacyMapGameplaySendProfile()) {
+        PACKET_CZ_REQNAME_LEGACY packet{};
+        packet.PacketType = ro::net::GetActiveMapGameplaySendProfile().getCharNameRequest;
+        packet.GID = gid;
+        sent = CRagConnection::instance()->SendPacket(reinterpret_cast<const char*>(&packet), static_cast<int>(sizeof(packet)));
+    } else {
+        PACKET_CZ_REQNAME2 packet{};
+        packet.PacketType = ro::net::GetActiveMapGameplaySendProfile().getCharNameRequest;
+        FillPacketPadding(packet.padding, static_cast<int>(sizeof(packet.padding)));
+        packet.GID = gid;
+        sent = CRagConnection::instance()->SendPacket(reinterpret_cast<const char*>(&packet), static_cast<int>(sizeof(packet)));
+    }
+    if (sent) {
         mode.m_actorNameByGIDReqTimer[gid] = now;
     }
 }

@@ -14,7 +14,7 @@ In scope for this migration:
 - `src/network/GronPacket.cpp` only where receive-side compatibility must be kept aligned with what the server actually sends
 
 Out of scope for the first migration pass:
-- account-server login packet `0x0064`
+- legacy plain account-server login packet `0x0064` as the only account-auth mechanism
 - char-server enter packet `0x0065`
 - char select packet `0x0066`
 - unrelated packet families not currently emitted by the rebuilt client
@@ -23,6 +23,12 @@ Receive-side rule:
 - do not force the receive table to a pure packet_ver 23 fantasy
 - keep receive parsing aligned with the actual server-outgoing family observed from `Ref/eAthena_src_2011`
 - current evidence still matches the older actor stream used with `PACKETVER <= 20081217`, including `0x0078=55`, `0x007C=42`, `0x022C=65`, `0x02EC=67`, `0x02ED=59`, `0x02EE=60`
+
+Runtime override rule:
+- `Packets.MapSendProfile` is now the runtime packet-profile selector for the active login/char/zone/map stack abstraction
+- current implementation switches zone-entry handoff as well, using a semantic builder that emits `0x0436 / 19`, `0x009B / 26`, `0x0072 / 19`, or `0x0072 / 22` depending on the resolved zone-connect profile
+- `Packets.MapGameplaySendProfile` can now override only the in-world client-send family; when left at `inherit`, a `legacy0072` compact zone handshake automatically selects the legacy packet_ver 5 gameplay send profile for time sync, walk, direction, and name-request packets
+- receive parsing is still only partially profile-aware; keep receive-table decisions grounded in observed server output rather than assuming the client-send profile fully determines them
 
 ## Why This Target
 
@@ -52,7 +58,8 @@ These are the client-originating packets currently emitted by the rebuilt client
 
 | Purpose | Current | Status |
 |---|---:|---|
-| account login | `0x0064 / 55` | keep as-is for this migration pass |
+| account login negotiation | `0x01DB / 2` | aligned to RunningServer encrypted auth challenge request |
+| account login response | `0x01DD / 47` | used when the server answers with `0x01DC`; fallback to `0x0064 / 55` retained for legacy servers |
 | char server enter | `0x0065 / 17` | keep as-is for this migration pass |
 | char select | `0x0066 / 3` | keep as-is for this migration pass |
 
@@ -86,6 +93,11 @@ Still missing or not yet implemented in the rebuilt client:
 - `actionrequest -> 0x0437 / 7`
 - `useskilltoid -> 0x0438 / 10`
 - `useitem -> 0x0439 / 8`
+
+Runtime send-profile support:
+- `Packets.MapSendProfile=packetver23` keeps the intended packet_ver 23 gameplay send path
+- `Packets.MapSendProfile=packetver22` now also switches the zone-entry handoff packet layout through the active packet-profile abstraction
+- version-sensitive gameplay packets are migrating behind semantic builders in `src/network/MapSendProfile.*` so `GameMode.cpp` no longer needs to branch on raw packet layouts inline
 
 Current validation aid:
 - `src/network/Connection.cpp` now logs the first 24 receive packets on each fresh connection so map-server handshake acceptance and returned packet family can be confirmed from `debug_hp_<pid>.log`

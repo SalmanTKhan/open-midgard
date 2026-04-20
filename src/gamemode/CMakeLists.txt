@@ -20,6 +20,7 @@ target_include_directories(ro_gamemode PUBLIC
 
 target_link_libraries(ro_gamemode PUBLIC
     ro_core
+    ro_cipher
     ro_network
     ro_world
     ro_audio

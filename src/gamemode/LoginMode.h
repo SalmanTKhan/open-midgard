@@ -103,6 +103,8 @@ public:
     std::string m_wallPaperBmpName;
     BILLING_INFO m_billingInfo;
     u32 m_syncRequestTime;
+    bool m_waitingForPasswordHash;
+    bool m_plainAccountLoginSent;
     UIWaitWnd* m_wndWait;
     std::vector<LoginAccountInfo> m_accountInfo;
     std::vector<LoginAccountInfo> m_accountInfo2;
@@ -117,8 +119,17 @@ private:
 
     // Network polling — called each frame while connected
     void PollNetwork();
+    void ResetAccountLoginHandshake();
+    void SendConnectInfoChanged();
+    void SendExeHashCheck();
+    void SendPasswordHashRequest();
+    void SendPlainAccountLogin();
+    void SendLoginPcBang();
+    void SendLogin4();
+    void SendLoginChannel();
 
     // Packet handlers (called from PollNetwork)
+    void OnAckHash(const std::vector<u8>& pkt);      // 0x01DC
     void OnAcceptLogin(const std::vector<u8>& pkt);   // 0x0069
     void OnRefuseLogin(const std::vector<u8>& pkt);   // 0x006A
     void OnAcceptChar(const std::vector<u8>& pkt);    // 0x006B
@@ -130,6 +141,7 @@ private:
     void OnNotifyZonesvr(const std::vector<u8>& pkt); // 0x0071
     void OnZcAcceptEnter(const std::vector<u8>& pkt); // 0x0073
     void OnDisconnectMsg(const std::vector<u8>& pkt); // 0x0081
+    void OnNotifyError(const std::vector<u8>& pkt); // 0x01F1
 
     // Zone server endpoint (populated from HC_NOTIFY_ZONESVR)
     char m_zoneAddr[64];

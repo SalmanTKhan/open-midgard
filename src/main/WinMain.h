@@ -24,6 +24,7 @@ void            RefreshMainWindowTitle(const char* status = nullptr);
 void            RecordMainWindowFrame();
 RenderBackendType GetActiveRenderBackend();
 bool            RelaunchCurrentApplication();
+void            ErrorMsg(const char* msg);
 
 // Patch-upgrade helpers
 bool            UpdatePatch(const char* patchExe, const char* patchUp);

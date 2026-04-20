@@ -13,8 +13,11 @@
 #include "core/ClientInfoLocale.h"
 #include "core/File.h"
 #include "core/Globals.h"
+#include "core/SettingsIni.h"
+#include "cipher/Md5.h"
 #include "main/WinMain.h"
 #include "network/Connection.h"
+#include "network/MapSendProfile.h"
 #include "network/Packet.h"
 #include "audio/Audio.h"
 #include "session/Session.h"
@@ -23,13 +26,125 @@
 #include "render/DC.h"
 #include "qtui/QtUiRuntime.h"
 #include "DebugLog.h"
+#include <algorithm>
+#include <array>
+#include <cctype>
 #include <vector>
 #include <cstdint>
 #include <cstring>
 #include <cstdlib>
 #include <cstdio>
+#include <string>
+#include <string_view>
 
 namespace {
+
+constexpr u32 kPasswordHashFallbackDelayMs = 1500;
+constexpr size_t kCompactCharListHeaderSize = 4;
+constexpr size_t kLegacyCharListHeaderSize = 24;
+constexpr size_t kExpandedCharListHeaderSize = 27;
+
+void FormatPacketBytes(const u8* data, int len, char* out, size_t outSize)
+{
+    if (!out || outSize == 0) {
+        return;
+    }
+
+    out[0] = 0;
+    if (!data || len <= 0) {
+        return;
+    }
+
+    int cursor = 0;
+    for (int i = 0; i < len; ++i) {
+        const size_t remaining = (cursor >= 0) ? (outSize - static_cast<size_t>(cursor)) : 0;
+        if (remaining <= 1) {
+            break;
+        }
+
+        cursor += std::snprintf(out + cursor, remaining, "%02X%s",
+            static_cast<unsigned int>(data[i]), (i + 1 < len) ? " " : "");
+        if (cursor < 0) {
+            out[0] = 0;
+            return;
+        }
+    }
+}
+
+static_assert(sizeof(CHARACTER_INFO) == 108, "CHARACTER_INFO size mismatch for classic char-list parsing");
+
+#pragma pack(push, 1)
+struct LEGACY_CHARACTER_INFO_106
+{
+    u32 GID;
+    int exp;
+    int money;
+    int jobexp;
+    int joblevel;
+    int bodystate;
+    int healthstate;
+    int effectstate;
+    int virtue;
+    int honor;
+    s16 jobpoint;
+    s16 hp;
+    s16 maxhp;
+    s16 sp;
+    s16 maxsp;
+    s16 speed;
+    s16 job;
+    s16 head;
+    s16 weapon;
+    s16 level;
+    s16 sppoint;
+    s16 accessory;
+    s16 shield;
+    s16 accessory2;
+    s16 accessory3;
+    s16 headpalette;
+    s16 bodypalette;
+    u8  name[24];
+    u8  Str;
+    u8  Agi;
+    u8  Vit;
+    u8  Int;
+    u8  Dex;
+    u8  Luk;
+    u16 CharNum;
+};
+#pragma pack(pop)
+
+static_assert(sizeof(LEGACY_CHARACTER_INFO_106) == 106, "Legacy 0x006B character record size mismatch");
+
+enum class CharListLayout
+{
+    CompactLegacy,
+    Legacy,
+    Expanded,
+};
+
+enum class CharListLayoutOverride
+{
+    Auto,
+    CompactLegacy,
+    Legacy,
+    Expanded,
+};
+
+constexpr u8 kStockMainHash[16] = {
+    0x65, 0xE3, 0x64, 0x31, 0x03, 0x1C, 0x03, 0x11,
+    0x1E, 0x50, 0x6D, 0x13, 0x39, 0x69, 0x2D, 0x7A,
+};
+
+constexpr u8 kStockSakrayHash[16] = {
+    0x82, 0xD1, 0x2C, 0x91, 0x4F, 0x5A, 0xD4, 0x8F,
+    0xD9, 0x6F, 0xCF, 0x7E, 0xF4, 0xCC, 0x49, 0x2D,
+};
+
+constexpr u8 kIndonesiaSakrayHash[16] = {
+    0xC7, 0x0A, 0x94, 0xC2, 0x7A, 0xCC, 0x38, 0x9A,
+    0x47, 0xF5, 0x54, 0x39, 0x7C, 0xA4, 0xD0, 0x39,
+};
 
 bool CanReturnToCharacterSelect()
 {
@@ -102,6 +217,543 @@ void CopyCString(char* dst, size_t dstSize, const char* src)
 
     std::strncpy(dst, src, dstSize - 1);
     dst[dstSize - 1] = '\0';
+}
+
+CHARACTER_INFO ExpandLegacyCharacterInfo(const LEGACY_CHARACTER_INFO_106& legacy)
+{
+    CHARACTER_INFO info{};
+    std::memcpy(&info, &legacy, sizeof(legacy));
+    info.CharNum = static_cast<u8>(legacy.CharNum & 0xFFu);
+    info.haircolor = static_cast<u8>(std::clamp<int>(legacy.headpalette, 0, 0xFF));
+    info.bIsChangedCharName = 1;
+    return info;
+}
+
+std::string NormalizeAsciiLower(std::string value)
+{
+    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char ch) {
+        return static_cast<char>(std::tolower(ch));
+    });
+    return value;
+}
+
+CharListLayoutOverride LoadCharListLayoutOverride()
+{
+    std::string value = NormalizeAsciiLower(LoadSettingsIniString("Packets", "CharListReceiveLayout", "auto"));
+    if (value == "legacy_4_106" || value == "compact_legacy" || value == "compact106") {
+        return CharListLayoutOverride::CompactLegacy;
+    }
+    if (value == "legacy_24_108" || value == "legacy108") {
+        return CharListLayoutOverride::Legacy;
+    }
+    if (value == "expanded_27_108" || value == "expanded108" || value == "2010") {
+        return CharListLayoutOverride::Expanded;
+    }
+    return CharListLayoutOverride::Auto;
+}
+
+bool TryResolveSpecificCharListLayout(size_t packetSize,
+                                      CharListLayout desiredLayout,
+                                      size_t* headerSize,
+                                      size_t* charInfoSize)
+{
+    if (!headerSize || !charInfoSize) {
+        return false;
+    }
+
+    switch (desiredLayout) {
+    case CharListLayout::Expanded:
+        if (packetSize >= kExpandedCharListHeaderSize
+            && ((packetSize - kExpandedCharListHeaderSize) % sizeof(CHARACTER_INFO)) == 0) {
+            *headerSize = kExpandedCharListHeaderSize;
+            *charInfoSize = sizeof(CHARACTER_INFO);
+            return true;
+        }
+        break;
+    case CharListLayout::Legacy:
+        if (packetSize >= kLegacyCharListHeaderSize
+            && ((packetSize - kLegacyCharListHeaderSize) % sizeof(CHARACTER_INFO)) == 0) {
+            *headerSize = kLegacyCharListHeaderSize;
+            *charInfoSize = sizeof(CHARACTER_INFO);
+            return true;
+        }
+        break;
+    case CharListLayout::CompactLegacy:
+        if (packetSize >= kCompactCharListHeaderSize
+            && ((packetSize - kCompactCharListHeaderSize) % sizeof(LEGACY_CHARACTER_INFO_106)) == 0) {
+            *headerSize = kCompactCharListHeaderSize;
+            *charInfoSize = sizeof(LEGACY_CHARACTER_INFO_106);
+            return true;
+        }
+        break;
+    }
+
+    return false;
+}
+
+bool TryResolveCharListLayout(u16 packetLength,
+                              CharListLayout* layout,
+                              size_t* headerSize,
+                              size_t* charInfoSize)
+{
+    if (!layout || !headerSize || !charInfoSize) {
+        return false;
+    }
+
+    const size_t packetSize = static_cast<size_t>(packetLength);
+    switch (LoadCharListLayoutOverride()) {
+    case CharListLayoutOverride::CompactLegacy:
+        *layout = CharListLayout::CompactLegacy;
+        return TryResolveSpecificCharListLayout(packetSize, *layout, headerSize, charInfoSize);
+    case CharListLayoutOverride::Legacy:
+        *layout = CharListLayout::Legacy;
+        return TryResolveSpecificCharListLayout(packetSize, *layout, headerSize, charInfoSize);
+    case CharListLayoutOverride::Expanded:
+        *layout = CharListLayout::Expanded;
+        return TryResolveSpecificCharListLayout(packetSize, *layout, headerSize, charInfoSize);
+    case CharListLayoutOverride::Auto:
+        break;
+    }
+
+    if (TryResolveSpecificCharListLayout(packetSize, CharListLayout::Expanded, headerSize, charInfoSize)) {
+        *layout = CharListLayout::Expanded;
+        return true;
+    }
+
+    if (TryResolveSpecificCharListLayout(packetSize, CharListLayout::Legacy, headerSize, charInfoSize)) {
+        *layout = CharListLayout::Legacy;
+        return true;
+    }
+
+    if (TryResolveSpecificCharListLayout(packetSize, CharListLayout::CompactLegacy, headerSize, charInfoSize)) {
+        *layout = CharListLayout::CompactLegacy;
+        return true;
+    }
+
+    return false;
+}
+
+std::string ExtractPacketText(const std::vector<u8>& raw, size_t offset)
+{
+    if (raw.size() <= offset) {
+        return {};
+    }
+
+    size_t end = raw.size();
+    while (end > offset && raw[end - 1] == '\0') {
+        --end;
+    }
+
+    return std::string(reinterpret_cast<const char*>(raw.data() + offset), end - offset);
+}
+
+std::string ExtractFixedText(const char* bytes, size_t size)
+{
+    if (!bytes || size == 0) {
+        return {};
+    }
+
+    size_t end = size;
+    while (end > 0 && bytes[end - 1] == '\0') {
+        --end;
+    }
+
+    return std::string(bytes, end);
+}
+
+void ShowLoginErrorDialog(const char* message)
+{
+    if (!message || !*message) {
+        return;
+    }
+
+    ErrorMsg(message);
+}
+
+u8 GetAccountType()
+{
+    if (g_serverType == ServerSakray) {
+        switch (g_serviceType) {
+        case ServiceAmerica: return 14;
+        case ServiceJapan: return 9;
+        case ServiceChina: return 4;
+        case ServiceTaiwan: return 5;
+        case ServiceThai: return 10;
+        case ServiceIndonesia: return 13;
+        case ServicePhilippine: return 18;
+        case ServiceMalaysia: return 16;
+        case ServiceSingapore: return 17;
+        case ServiceGermany: return 20;
+        case ServiceIndia: return 21;
+        case ServiceBrazil: return 22;
+        case ServiceAustralia: return 23;
+        case ServiceVietnam: return 33;
+        default: return 2;
+        }
+    }
+
+    if (g_serverType == ServerPK) {
+        switch (g_serviceType) {
+        case ServiceJapan: return 28;
+        case ServiceThai: return 29;
+        case ServiceIndonesia: return 34;
+        case ServicePhilippine: return 27;
+        case ServiceVietnam: return 32;
+        default: return 0;
+        }
+    }
+
+    switch (g_serviceType) {
+    case ServiceAmerica: return 1;
+    case ServiceJapan: return 3;
+    case ServiceChina: return 4;
+    case ServiceTaiwan: return 5;
+    case ServiceThai: return 7;
+    case ServiceIndonesia: return 12;
+    case ServicePhilippine: return 15;
+    case ServiceMalaysia: return 16;
+    case ServiceSingapore: return 17;
+    case ServiceGermany: return 20;
+    case ServiceIndia: return 21;
+    case ServiceBrazil: return 22;
+    case ServiceAustralia: return 23;
+    case ServiceRussia: return 25;
+    case ServiceVietnam: return 26;
+    case ServiceChile: return 30;
+    case ServiceFrance: return 31;
+    default: return 0;
+    }
+}
+
+u32 ResolveAccountLoginVersion()
+{
+    int configuredVersionOverride = 0;
+    if (TryLoadSettingsIniInt("Login", "ClientVersionOverride", &configuredVersionOverride)) {
+        if (configuredVersionOverride > 0) {
+            return static_cast<u32>(configuredVersionOverride);
+        }
+
+        DbgLog("[Login] Ignoring invalid ClientVersionOverride=%d; expected a positive integer\n",
+               configuredVersionOverride);
+    }
+
+    int configuredOverride = 0;
+    if (TryLoadSettingsIniInt("Login", "ClientDateOverride", &configuredOverride)) {
+        const u32 overrideVersion = configuredOverride > 0 ? static_cast<u32>(configuredOverride) : 0;
+        if (overrideVersion >= 20000000u) {
+            return overrideVersion;
+        }
+
+        DbgLog("[Login] Ignoring invalid ClientDateOverride=%d; expected yyyymmdd-style date\n",
+               configuredOverride);
+    }
+
+    const u32 configuredVersion = g_version > 0 ? static_cast<u32>(g_version) : 0;
+    int useRawClientInfoVersion = 0;
+    if (TryLoadSettingsIniInt("Login", "UseRawClientInfoVersion", &useRawClientInfoVersion)
+        && useRawClientInfoVersion != 0
+        && configuredVersion > 0) {
+        return configuredVersion;
+    }
+
+    if (configuredVersion >= 20000000u) {
+        return configuredVersion;
+    }
+
+    return ro::net::GetActiveAccountLoginPacketProfile().clientDate;
+}
+
+bool TryLoadLoginSettingInt(const char* key, int* value)
+{
+    return TryLoadSettingsIniInt("Login", key, value);
+}
+
+bool ShouldSendConnectInfoChangedOnLogin()
+{
+    int sendConnectInfoChanged = 0;
+    if (TryLoadLoginSettingInt("SendConnectInfoChanged", &sendConnectInfoChanged)) {
+        return sendConnectInfoChanged != 0;
+    }
+
+    return false;
+}
+
+bool UsesLoginChannelPacket();
+
+enum class AccountLoginPacketKind {
+    Legacy,
+    LoginChannel,
+    LoginPcBang,
+    Login4,
+};
+
+AccountLoginPacketKind ResolveAccountLoginPacketKind()
+{
+    std::string overrideValue = LoadSettingsIniString("Login", "AccountLoginPacket", "");
+    std::transform(overrideValue.begin(), overrideValue.end(), overrideValue.begin(), [](unsigned char ch) {
+        return static_cast<char>(std::tolower(ch));
+    });
+
+    if (!overrideValue.empty()) {
+        if (overrideValue == "64" || overrideValue == "0x64" || overrideValue == "plain" || overrideValue == "legacy") {
+            return AccountLoginPacketKind::Legacy;
+        }
+        if (overrideValue == "2b0" || overrideValue == "0x2b0" || overrideValue == "channel" || overrideValue == "login_channel") {
+            return AccountLoginPacketKind::LoginChannel;
+        }
+        if (overrideValue == "277" || overrideValue == "0x277" || overrideValue == "pcbang" || overrideValue == "login_pcbang") {
+            return AccountLoginPacketKind::LoginPcBang;
+        }
+        if (overrideValue == "27c" || overrideValue == "0x27c" || overrideValue == "login4") {
+            return AccountLoginPacketKind::Login4;
+        }
+
+        DbgLog("[Login] Ignoring invalid AccountLoginPacket override '%s'\n", overrideValue.c_str());
+    }
+
+    return UsesLoginChannelPacket() ? AccountLoginPacketKind::LoginChannel : AccountLoginPacketKind::Legacy;
+}
+
+u8 ResolveAccountClientType()
+{
+    int configuredClientType = -1;
+    if (TryLoadLoginSettingInt("ClientTypeOverride", &configuredClientType)
+        && configuredClientType >= 0
+        && configuredClientType <= 255) {
+        return static_cast<u8>(configuredClientType);
+    }
+
+    return GetAccountType();
+}
+
+bool UsesLoginChannelPacket()
+{
+    int forceLoginChannel = -1;
+    if (TryLoadLoginSettingInt("ForceLoginChannel", &forceLoginChannel)) {
+        return forceLoginChannel != 0;
+    }
+
+    return g_serviceType == ServiceKorea;
+}
+
+bool ShouldRequestPasswordHashOnConnect()
+{
+    int forcePasswordHash = 0;
+    if (TryLoadLoginSettingInt("ForcePasswordHashRequest", &forcePasswordHash)) {
+        return forcePasswordHash != 0;
+    }
+
+    return g_passwordEncrypt != 0;
+}
+
+bool HasConfiguredClientHashSetting()
+{
+    return !LoadSettingsIniString("Login", "ClientHashOverrideMd5", "").empty()
+        || !LoadSettingsIniString("Login", "ClientHashSourceExe", "").empty();
+}
+
+bool ShouldSendExeHash()
+{
+    return g_serviceType == ServiceKorea || g_serviceType == ServiceIndonesia || HasConfiguredClientHashSetting();
+}
+
+int HexNibbleValue(char ch)
+{
+    if (ch >= '0' && ch <= '9') {
+        return ch - '0';
+    }
+    if (ch >= 'A' && ch <= 'F') {
+        return 10 + (ch - 'A');
+    }
+    if (ch >= 'a' && ch <= 'f') {
+        return 10 + (ch - 'a');
+    }
+    return -1;
+}
+
+bool TryParseMd5HexString(const std::string& text, std::array<u8, 16>* digest)
+{
+    if (!digest) {
+        return false;
+    }
+
+    std::string compact;
+    compact.reserve(text.size());
+    for (char ch : text) {
+        if (HexNibbleValue(ch) >= 0) {
+            compact.push_back(ch);
+        }
+    }
+
+    if (compact.size() != 32) {
+        return false;
+    }
+
+    for (size_t index = 0; index < digest->size(); ++index) {
+        const int high = HexNibbleValue(compact[index * 2]);
+        const int low = HexNibbleValue(compact[index * 2 + 1]);
+        if (high < 0 || low < 0) {
+            return false;
+        }
+        (*digest)[index] = static_cast<u8>((high << 4) | low);
+    }
+    return true;
+}
+
+std::array<u8, 16> MakeDigestFromBytes(const u8 (&bytes)[16])
+{
+    std::array<u8, 16> digest{};
+    std::memcpy(digest.data(), bytes, sizeof(bytes));
+    return digest;
+}
+
+bool TryComputeFileMd5(const std::filesystem::path& filePath, std::array<u8, 16>* digest)
+{
+    if (!digest) {
+        return false;
+    }
+
+    const std::string nativePath = filePath.string();
+    if (nativePath.empty()) {
+        return false;
+    }
+
+    FILE* file = std::fopen(nativePath.c_str(), "rb");
+    if (!file) {
+        return false;
+    }
+
+    if (std::fseek(file, 0, SEEK_END) != 0) {
+        std::fclose(file);
+        return false;
+    }
+
+    const long fileSize = std::ftell(file);
+    if (fileSize <= 0 || std::fseek(file, 0, SEEK_SET) != 0) {
+        std::fclose(file);
+        return false;
+    }
+
+    std::vector<u8> fileBytes(static_cast<size_t>(fileSize));
+    const size_t bytesRead = std::fread(fileBytes.data(), 1, fileBytes.size(), file);
+    std::fclose(file);
+    if (bytesRead != fileBytes.size()) {
+        return false;
+    }
+
+    *digest = ro::cipher::ComputeMd5(fileBytes.data(), fileBytes.size());
+    return true;
+}
+
+bool TryResolveConfiguredClientHash(std::array<u8, 16>* digest)
+{
+    if (!digest) {
+        return false;
+    }
+
+    const std::string overrideMd5 = LoadSettingsIniString("Login", "ClientHashOverrideMd5", "");
+    if (!overrideMd5.empty() && TryParseMd5HexString(overrideMd5, digest)) {
+        DbgLog("[Login] Using configured ClientHashOverrideMd5 value\n");
+        return true;
+    }
+    if (!overrideMd5.empty()) {
+        DbgLog("[Login] Ignoring invalid ClientHashOverrideMd5 value: '%s'\n", overrideMd5.c_str());
+    }
+
+    const std::string overrideExe = LoadSettingsIniString("Login", "ClientHashSourceExe", "");
+    if (overrideExe.empty()) {
+        return false;
+    }
+
+    std::filesystem::path sourcePath(overrideExe);
+    if (sourcePath.is_relative()) {
+        sourcePath = GetOpenMidgardIniPath().parent_path() / sourcePath;
+    }
+    if (!TryComputeFileMd5(sourcePath, digest)) {
+        DbgLog("[Login] Failed to compute MD5 from ClientHashSourceExe='%s'\n", sourcePath.string().c_str());
+        return false;
+    }
+
+    DbgLog("[Login] Using configured ClientHashSourceExe='%s'\n", sourcePath.string().c_str());
+    return true;
+}
+
+bool TryResolveExecutableHashPayload(std::array<u8, 16>* digest)
+{
+    if (!digest) {
+        return false;
+    }
+
+    if (TryResolveConfiguredClientHash(digest)) {
+        return true;
+    }
+
+    if (g_serviceType == ServiceIndonesia || (g_serviceType == ServiceKorea && g_serverType == ServerSakray)) {
+        char exePath[260] = {};
+        if (GetModuleFileNameA(nullptr, exePath, static_cast<DWORD>(sizeof(exePath))) > 0
+            && TryComputeFileMd5(std::filesystem::path(exePath), digest)) {
+            return true;
+        }
+    }
+
+    if (g_serviceType == ServiceIndonesia && g_serverType == ServerSakray) {
+        *digest = MakeDigestFromBytes(kIndonesiaSakrayHash);
+        return true;
+    }
+    if (g_serverType == ServerSakray) {
+        *digest = MakeDigestFromBytes(kStockSakrayHash);
+        return true;
+    }
+    if (g_serverType == ServerNormal) {
+        *digest = MakeDigestFromBytes(kStockMainHash);
+        return true;
+    }
+
+    return false;
+}
+
+void FormatDigestHex(const std::array<u8, 16>& digest, char* buffer, size_t bufferSize)
+{
+    if (!buffer || bufferSize == 0) {
+        return;
+    }
+
+    buffer[0] = '\0';
+    size_t offset = 0;
+    for (u8 byte : digest) {
+        if (offset + 2 >= bufferSize) {
+            break;
+        }
+        const int written = std::snprintf(buffer + offset, bufferSize - offset, "%02X", static_cast<unsigned int>(byte));
+        if (written <= 0) {
+            break;
+        }
+        offset += static_cast<size_t>(written);
+    }
+}
+
+void FillLocalIpString(char* destination, size_t destinationSize)
+{
+    CopyCString(destination, destinationSize, "127.0.0.1");
+    char hostName[100] = {};
+    if (gethostname(hostName, sizeof(hostName)) != 0) {
+        return;
+    }
+
+    hostent* host = gethostbyname(hostName);
+    if (!host || !host->h_addr_list || !host->h_addr_list[0]) {
+        return;
+    }
+
+    const char* ip = inet_ntoa(*reinterpret_cast<in_addr*>(host->h_addr_list[0]));
+    if (ip && *ip) {
+        CopyCString(destination, destinationSize, ip);
+    }
+}
+
+void FillMacString(char* destination, size_t destinationSize)
+{
+    CopyCString(destination, destinationSize, "111111111111");
 }
 
 constexpr unsigned int kMenuOverlayTransparentKey = 0x00FF00FFu;
@@ -574,7 +1226,7 @@ bool QueueMenuCursorOverlayQuad(int cursorActNum, u32 mouseAnimStartTick)
 CLoginMode::CLoginMode() 
         : m_numServer(0), m_serverSelected(0), m_numChar(0),
             m_selectedCharIndex(0), m_selectedCharSlot(0), m_pendingDeleteCharGid(0), m_pendingDeleteCharSlot(-1), m_subModeStartTime(0),
-      m_syncRequestTime(0), m_wndWait(nullptr), m_multiLang(0), 
+    m_syncRequestTime(0), m_waitingForPasswordHash(false), m_plainAccountLoginSent(false), m_wndWait(nullptr), m_multiLang(0), 
       m_nSelectedAccountNo(0), m_nSelectedAccountNo2(0),
     m_zonePort(0)
 {
@@ -655,6 +1307,31 @@ void CLoginMode::OnUpdate() {
 
     if (m_isConnected) {
         PollNetwork();
+        if (m_isConnected && !CRagConnection::instance()->IsOpen()) {
+            const char* message = (m_subMode == LoginSubMode_ConnectAccount)
+                ? (m_waitingForPasswordHash
+                    ? "Login server closed the connection while waiting for the password-hash challenge response."
+                    : (m_plainAccountLoginSent
+                        ? "Login server closed the connection after the account login request. The server likely rejected the login packet shape, client type, or password mode without returning a RO error packet."
+                        : "Login server closed the connection before authentication completed."))
+                : (m_subMode == LoginSubMode_ConnectChar)
+                    ? "Char server closed the connection before returning the character list."
+                    : "Server closed the connection.";
+            DbgLog("[Login] connection dropped in submode %d\n", m_subMode);
+            SetLoginStatus(message);
+            ShowLoginErrorDialog(message);
+            m_isConnected = 0;
+            m_nextSubMode = LoginSubMode_Login;
+            return;
+        }
+        if (m_isConnected
+            && m_subMode == LoginSubMode_ConnectAccount
+            && m_waitingForPasswordHash
+            && !m_plainAccountLoginSent
+            && GetTickCount() - m_syncRequestTime >= kPasswordHashFallbackDelayMs) {
+            DbgLog("[Login] password hash challenge timed out, falling back to CA_LOGIN\n");
+            SendPlainAccountLogin();
+        }
     }
 
     g_windowMgr.OnProcess();
@@ -821,7 +1498,7 @@ msgresult_t CLoginMode::SendMsg(int msg, msgparam_t wparam, msgparam_t lparam, m
         }
 
         PACKET_CZ_MAKE_CHAR pkt{};
-        pkt.PacketType = PACKETID_CH_MAKE_CHAR;
+        pkt.PacketType = ro::net::GetActiveCharacterPacketProfile().makeCharacter;
         CopyCString(pkt.name, sizeof(pkt.name), m_makingCharName);
         pkt.Str = static_cast<u8>(m_charParam[0]);
         pkt.Agi = static_cast<u8>(m_charParam[1]);
@@ -861,6 +1538,7 @@ msgresult_t CLoginMode::SendMsg(int msg, msgparam_t wparam, msgparam_t lparam, m
 
 void CLoginMode::OnChangeState(int newState) {
     m_subModeStartTime = GetTickCount();
+    ResetAccountLoginHandshake();
     g_windowMgr.RemoveAllWindows();
     g_windowMgr.SetLoginWallpaper(m_wallPaperBmpName);
     m_wndWait = nullptr;
@@ -901,16 +1579,15 @@ void CLoginMode::OnChangeState(int newState) {
             break;
         }
 
-        // Send CA_LOGIN (0x0064) to account server
-        PACKET_CA_LOGIN pkt{};
-        pkt.PacketType = 0x0064;
-        pkt.Version    = static_cast<u32>(g_version > 0 ? g_version : 6);
-        std::strncpy(pkt.ID,     m_userId,       sizeof(pkt.ID)     - 1);
-        std::strncpy(pkt.Passwd, m_userPassword, sizeof(pkt.Passwd) - 1);
-        pkt.clienttype = 0;
-        CRagConnection::instance()->SendPacket(reinterpret_cast<const char*>(&pkt), static_cast<int>(sizeof(pkt)));
-        DbgLog("[Login] CA_LOGIN sent: user='%s' version=%u\n", pkt.ID, pkt.Version);
-        SetLoginStatus("Login: waiting for account server response...");
+        if (ShouldSendConnectInfoChangedOnLogin()) {
+            SendConnectInfoChanged();
+        }
+        SendExeHashCheck();
+        if (ShouldRequestPasswordHashOnConnect()) {
+            SendPasswordHashRequest();
+        } else {
+            SendPlainAccountLogin();
+        }
         break;
     }
 
@@ -962,7 +1639,7 @@ void CLoginMode::OnChangeState(int newState) {
 
         // Send CA_ENTER (0x0065) to char server
         PACKET_CA_ENTER ePkt{};
-        ePkt.PacketType = 0x0065;
+        ePkt.PacketType = ro::net::GetActiveCharacterPacketProfile().charServerEnter;
         ePkt.AID        = g_session.m_aid;
         ePkt.AuthCode   = g_session.m_authCode;
         ePkt.UserLevel  = g_session.m_userLevel;
@@ -1010,7 +1687,7 @@ void CLoginMode::OnChangeState(int newState) {
                (int)charNum, reinterpret_cast<const char*>(m_charInfo[m_selectedCharIndex].name));
 
         PACKET_CZ_SELECT_CHAR selPkt{};
-        selPkt.PacketType = 0x0066;
+        selPkt.PacketType = ro::net::GetActiveCharacterPacketProfile().selectCharacter;
         selPkt.CharNum    = charNum;
         CRagConnection::instance()->SendPacket(reinterpret_cast<const char*>(&selPkt), static_cast<int>(sizeof(selPkt)));
         SetLoginStatus("Login: selecting character...");
@@ -1037,7 +1714,7 @@ void CLoginMode::OnChangeState(int newState) {
         }
 
         PACKET_CH_DELETE_CHAR pkt{};
-        pkt.PacketType = PACKETID_CH_DELETE_CHAR;
+        pkt.PacketType = ro::net::GetActiveCharacterPacketProfile().deleteCharacter;
         pkt.GID = m_pendingDeleteCharGid;
         CopyCString(pkt.key, sizeof(pkt.key), m_emaiAddress);
 
@@ -1085,16 +1762,32 @@ void CLoginMode::OnChangeState(int newState) {
             break;
         }
 
-        // Send CZ_ENTER2 (0x0436) to zone/map server for packet_ver 23.
-        PACKET_CZ_ENTER2 zPkt{};
-        zPkt.PacketType  = PacketProfile::ActiveMapServerSend::kWantToConnection;
-        zPkt.AID         = g_session.m_aid;
-        zPkt.GID         = g_session.m_gid;
-        zPkt.AuthCode    = g_session.m_authCode;
-        zPkt.ClientTick  = GetTickCount();
-        zPkt.Sex         = g_session.m_sex;
-        CRagConnection::instance()->SendPacket(reinterpret_cast<const char*>(&zPkt), static_cast<int>(sizeof(zPkt)));
-        DbgLog("[Login] CZ_ENTER2 sent to zone: opcode=0x%04X aid=%u gid=%u\n", zPkt.PacketType, zPkt.AID, zPkt.GID);
+        std::array<u8, sizeof(PACKET_CZ_ENTER_PACKETVER22)> zonePacket{};
+        int zonePacketLength = 0;
+        if (!ro::net::BuildActiveWantToConnectionPacket(
+                g_session.m_aid,
+                g_session.m_gid,
+                g_session.m_authCode,
+                timeGetTime(),
+                g_session.m_sex,
+                zonePacket.data(),
+                static_cast<int>(zonePacket.size()),
+                &zonePacketLength)) {
+            SetLoginStatus("Login: failed to build zone-entry packet.");
+            m_nextSubMode = LoginSubMode_Login;
+            break;
+        }
+
+        const u16 zoneOpcode = static_cast<u16>(zonePacket[0]) | (static_cast<u16>(zonePacket[1]) << 8);
+        CRagConnection::instance()->SendPacket(reinterpret_cast<const char*>(zonePacket.data()), zonePacketLength);
+    char zoneHex[3 * sizeof(PACKET_CZ_ENTER_PACKETVER22) + 1] = {};
+     FormatPacketBytes(zonePacket.data(), zonePacketLength, zoneHex, sizeof(zoneHex));
+     DbgLog("[Login] wanttoconnection sent to zone: opcode=0x%04X aid=%u gid=%u len=%d bytes=%s\n",
+               zoneOpcode,
+               g_session.m_aid,
+               g_session.m_gid,
+         zonePacketLength,
+         zoneHex);
         SetLoginStatus("Login: waiting for zone server...");
         break;
     }
@@ -1164,9 +1857,23 @@ void CLoginMode::PollNetwork()
         if (pkt.size() < 2) continue;
 
         const u16 id = static_cast<u16>(pkt[0]) | (static_cast<u16>(pkt[1]) << 8);
+        const ro::net::AccountLoginPacketProfile& loginProfile = ro::net::GetActiveAccountLoginPacketProfile();
+        const ro::net::MapReceiveProfile& mapReceiveProfile = ro::net::GetActiveMapReceiveProfile();
         char status[96];
         std::snprintf(status, sizeof(status), "Login: received packet 0x%04X (%d bytes)", id, static_cast<int>(pkt.size()));
         SetLoginStatus(status);
+        if (id == loginProfile.passwordHashChallenge) {
+            OnAckHash(pkt);
+            continue;
+        }
+        if (id == mapReceiveProfile.acceptEnterLegacy || id == mapReceiveProfile.acceptEnterModern) {
+            OnZcAcceptEnter(pkt);
+            return;
+        }
+        if (id == loginProfile.notifyError) {
+            OnNotifyError(pkt);
+            continue;
+        }
         switch (id) {
         case 0x0069: OnAcceptLogin(pkt);    break;
         case 0x006A: OnRefuseLogin(pkt);    break;
@@ -1177,9 +1884,6 @@ void CLoginMode::PollNetwork()
         case 0x006F: OnAcceptDeleteChar(pkt); break;
         case 0x0070: OnRefuseDeleteChar(pkt); break;
         case 0x0071: OnNotifyZonesvr(pkt);  break;
-        case 0x0073:
-            OnZcAcceptEnter(pkt);
-            return;
         case 0x0081: OnDisconnectMsg(pkt);  break;
         case 0x0283: break;
         case 0x8482: break;
@@ -1191,6 +1895,249 @@ void CLoginMode::PollNetwork()
     }
 }
 
+void CLoginMode::ResetAccountLoginHandshake()
+{
+    m_syncRequestTime = 0;
+    m_waitingForPasswordHash = false;
+    m_plainAccountLoginSent = false;
+}
+
+void CLoginMode::SendExeHashCheck()
+{
+    if (!ShouldSendExeHash()) {
+        return;
+    }
+
+    PACKET_CA_EXE_HASHCHECK pkt{};
+    pkt.PacketType = ro::net::GetActiveAccountLoginPacketProfile().exeHashCheck;
+    std::array<u8, 16> digest{};
+    if (!TryResolveExecutableHashPayload(&digest)) {
+        DbgLog("[Login] CA_EXE_HASHCHECK skipped: no valid hash payload for serviceType=%d serverType=%d\n",
+               static_cast<int>(g_serviceType),
+               static_cast<int>(g_serverType));
+        return;
+    }
+    std::memcpy(pkt.HashValue, digest.data(), digest.size());
+
+    if (!CRagConnection::instance()->SendPacket(reinterpret_cast<const char*>(&pkt), static_cast<int>(sizeof(pkt)))) {
+        DbgLog("[Login] CA_EXE_HASHCHECK send failed\n");
+        return;
+    }
+
+    char hashText[33] = {};
+    FormatDigestHex(digest, hashText, sizeof(hashText));
+    DbgLog("[Login] CA_EXE_HASHCHECK sent: hash=%s serviceType=%d serverType=%d\n",
+           hashText,
+           static_cast<int>(g_serviceType),
+           static_cast<int>(g_serverType));
+}
+
+void CLoginMode::SendConnectInfoChanged()
+{
+    PACKET_CA_CONNECT_INFO_CHANGED pkt{};
+    pkt.PacketType = ro::net::GetActiveAccountLoginPacketProfile().connectInfoChanged;
+    CopyCString(pkt.ID, sizeof(pkt.ID), m_userId);
+
+    if (!CRagConnection::instance()->SendPacket(reinterpret_cast<const char*>(&pkt), static_cast<int>(sizeof(pkt)))) {
+        DbgLog("[Login] CA_CONNECT_INFO_CHANGED send failed: user='%s'\n", pkt.ID);
+        return;
+    }
+
+    DbgLog("[Login] CA_CONNECT_INFO_CHANGED sent: user='%s'\n", pkt.ID);
+}
+
+void CLoginMode::SendPasswordHashRequest()
+{
+    PACKET_CA_REQ_HASH pkt{};
+    pkt.PacketType = ro::net::GetActiveAccountLoginPacketProfile().requestPasswordHash;
+    if (!CRagConnection::instance()->SendPacket(reinterpret_cast<const char*>(&pkt), static_cast<int>(sizeof(pkt)))) {
+        DbgLog("[Login] CA_REQ_HASH send failed\n");
+        return;
+    }
+    m_syncRequestTime = GetTickCount();
+    m_waitingForPasswordHash = true;
+    m_plainAccountLoginSent = false;
+    DbgLog("[Login] CA_REQ_HASH sent\n");
+    SetLoginStatus("Login: waiting for account hash challenge...");
+}
+
+void CLoginMode::SendPlainAccountLogin()
+{
+    switch (ResolveAccountLoginPacketKind()) {
+    case AccountLoginPacketKind::LoginChannel:
+        SendLoginChannel();
+        return;
+    case AccountLoginPacketKind::LoginPcBang:
+        SendLoginPcBang();
+        return;
+    case AccountLoginPacketKind::Login4:
+        SendLogin4();
+        return;
+    case AccountLoginPacketKind::Legacy:
+    default:
+        break;
+    }
+
+    PACKET_CA_LOGIN pkt{};
+    pkt.PacketType = ro::net::GetActiveAccountLoginPacketProfile().accountLogin;
+    pkt.Version = ResolveAccountLoginVersion();
+    CopyCString(pkt.ID, sizeof(pkt.ID), m_userId);
+    CopyCString(pkt.Passwd, sizeof(pkt.Passwd), m_userPassword);
+    pkt.clienttype = ResolveAccountClientType();
+    if (!CRagConnection::instance()->SendPacket(reinterpret_cast<const char*>(&pkt), static_cast<int>(sizeof(pkt)))) {
+        DbgLog("[Login] CA_LOGIN send failed: user='%s' version=%u clienttype=%u (clientinfo=%d)\n",
+               pkt.ID,
+               pkt.Version,
+               static_cast<unsigned int>(pkt.clienttype),
+               g_version);
+        return;
+    }
+    m_plainAccountLoginSent = true;
+    DbgLog("[Login] CA_LOGIN sent: user='%s' version=%u clienttype=%u (clientinfo=%d)\n",
+           pkt.ID,
+           pkt.Version,
+           static_cast<unsigned int>(pkt.clienttype),
+           g_version);
+    SetLoginStatus("Login: waiting for account server response...");
+}
+
+void CLoginMode::SendLoginPcBang()
+{
+    PACKET_CA_LOGIN_PCBANG pkt{};
+    pkt.PacketType = PACKETID_CA_LOGIN_PCBANG;
+    pkt.Version = ResolveAccountLoginVersion();
+    CopyCString(pkt.ID, sizeof(pkt.ID), m_userId);
+    CopyCString(pkt.Passwd, sizeof(pkt.Passwd), m_userPassword);
+    pkt.clienttype = ResolveAccountClientType();
+    FillLocalIpString(pkt.IP, sizeof(pkt.IP));
+    FillMacString(pkt.Mac, sizeof(pkt.Mac));
+
+    if (!CRagConnection::instance()->SendPacket(reinterpret_cast<const char*>(&pkt), static_cast<int>(sizeof(pkt)))) {
+        DbgLog("[Login] CA_LOGIN_PCBANG send failed: user='%s' version=%u clienttype=%u ip=%s\n",
+               pkt.ID,
+               pkt.Version,
+               static_cast<unsigned int>(pkt.clienttype),
+               pkt.IP);
+        return;
+    }
+
+    m_plainAccountLoginSent = true;
+    DbgLog("[Login] CA_LOGIN_PCBANG sent: user='%s' version=%u clienttype=%u ip=%s\n",
+           pkt.ID,
+           pkt.Version,
+           static_cast<unsigned int>(pkt.clienttype),
+           pkt.IP);
+    SetLoginStatus("Login: waiting for account server response...");
+}
+
+void CLoginMode::SendLogin4()
+{
+    PACKET_CA_LOGIN4 pkt{};
+    pkt.PacketType = PACKETID_CA_LOGIN4;
+    pkt.Version = ResolveAccountLoginVersion();
+    CopyCString(pkt.ID, sizeof(pkt.ID), m_userId);
+    const std::array<u8, 16> digest = ro::cipher::ComputeMd5(m_userPassword, std::strlen(m_userPassword));
+    std::memcpy(pkt.PasswdMD5, digest.data(), digest.size());
+    pkt.clienttype = ResolveAccountClientType();
+    FillMacString(pkt.Mac, sizeof(pkt.Mac));
+
+    if (!CRagConnection::instance()->SendPacket(reinterpret_cast<const char*>(&pkt), static_cast<int>(sizeof(pkt)))) {
+        DbgLog("[Login] CA_LOGIN4 send failed: user='%s' version=%u clienttype=%u\n",
+               pkt.ID,
+               pkt.Version,
+               static_cast<unsigned int>(pkt.clienttype));
+        return;
+    }
+
+    m_plainAccountLoginSent = true;
+    DbgLog("[Login] CA_LOGIN4 sent: user='%s' version=%u clienttype=%u\n",
+           pkt.ID,
+           pkt.Version,
+           static_cast<unsigned int>(pkt.clienttype));
+    SetLoginStatus("Login: waiting for account server response...");
+}
+
+void CLoginMode::SendLoginChannel()
+{
+    PACKET_CA_LOGIN_CHANNEL pkt{};
+    pkt.PacketType = ro::net::GetActiveAccountLoginPacketProfile().accountLoginChannel;
+    pkt.Version = ResolveAccountLoginVersion();
+    CopyCString(pkt.ID, sizeof(pkt.ID), m_userId);
+    CopyCString(pkt.Passwd, sizeof(pkt.Passwd), m_userPassword);
+    pkt.clienttype = ResolveAccountClientType();
+    FillLocalIpString(pkt.IP, sizeof(pkt.IP));
+    FillMacString(pkt.Mac, sizeof(pkt.Mac));
+    pkt.IsGravity = 0;
+
+    if (!CRagConnection::instance()->SendPacket(reinterpret_cast<const char*>(&pkt), static_cast<int>(sizeof(pkt)))) {
+        DbgLog("[Login] CA_LOGIN_CHANNEL send failed: user='%s' version=%u clienttype=%u ip=%s\n",
+               pkt.ID,
+               pkt.Version,
+               static_cast<unsigned int>(pkt.clienttype),
+               pkt.IP);
+        return;
+    }
+
+    m_plainAccountLoginSent = true;
+    DbgLog("[Login] CA_LOGIN_CHANNEL sent: user='%s' version=%u clienttype=%u ip=%s\n",
+           pkt.ID,
+           pkt.Version,
+           static_cast<unsigned int>(pkt.clienttype),
+           pkt.IP);
+    SetLoginStatus("Login: waiting for account server response...");
+}
+
+void CLoginMode::OnAckHash(const std::vector<u8>& raw)
+{
+    if (raw.size() < 4) {
+        DbgLog("[Login] AC_ACK_HASH too short (%d bytes)\n", static_cast<int>(raw.size()));
+        if (!m_plainAccountLoginSent) {
+            SendPlainAccountLogin();
+        }
+        return;
+    }
+
+    const u16 packetLength = static_cast<u16>(raw[2]) | (static_cast<u16>(raw[3]) << 8);
+    const size_t payloadLength = packetLength >= 4 && packetLength <= raw.size()
+        ? static_cast<size_t>(packetLength - 4)
+        : raw.size() - 4;
+
+    std::vector<u8> digestInput;
+    digestInput.reserve(payloadLength + std::strlen(m_userPassword));
+    if (g_passwordEncrypt2 != 0) {
+        digestInput.insert(digestInput.end(), m_userPassword, m_userPassword + std::strlen(m_userPassword));
+        digestInput.insert(digestInput.end(), raw.begin() + 4, raw.begin() + 4 + payloadLength);
+    } else {
+        digestInput.insert(digestInput.end(), raw.begin() + 4, raw.begin() + 4 + payloadLength);
+        digestInput.insert(digestInput.end(), m_userPassword, m_userPassword + std::strlen(m_userPassword));
+    }
+    const std::array<u8, 16> digest = ro::cipher::ComputeMd5(digestInput.data(), digestInput.size());
+
+    PACKET_CA_LOGIN_HASH pkt{};
+    pkt.PacketType = ro::net::GetActiveAccountLoginPacketProfile().passwordHashLogin;
+    pkt.Version = ResolveAccountLoginVersion();
+    CopyCString(pkt.ID, sizeof(pkt.ID), m_userId);
+    std::memcpy(pkt.PasswdMD5, digest.data(), digest.size());
+    pkt.clienttype = ResolveAccountClientType();
+
+    if (!CRagConnection::instance()->SendPacket(reinterpret_cast<const char*>(&pkt), static_cast<int>(sizeof(pkt)))) {
+        DbgLog("[Login] CA_LOGIN_HASH send failed: user='%s' version=%u challengeBytes=%d clienttype=%u\n",
+               pkt.ID,
+               pkt.Version,
+               static_cast<int>(payloadLength),
+               static_cast<unsigned int>(pkt.clienttype));
+        return;
+    }
+    ResetAccountLoginHandshake();
+        DbgLog("[Login] CA_LOGIN_HASH sent: user='%s' version=%u challengeBytes=%d clienttype=%u mode=%s\n",
+           pkt.ID,
+           pkt.Version,
+           static_cast<int>(payloadLength),
+            static_cast<unsigned int>(pkt.clienttype),
+            g_passwordEncrypt2 != 0 ? "password+challenge" : "challenge+password");
+    SetLoginStatus("Login: waiting for account server response...");
+}
+
 // ---------------------------------------------------------------------------
 // 0x0069  AC_ACCEPT_LOGIN  – account server accepted credentials
 // Header: type(2)+len(2)+authCode(4)+AID(4)+userLevel(4)+lastIP(4)+lastTime(26)+sex(1) = 47 bytes
@@ -1198,6 +2145,7 @@ void CLoginMode::PollNetwork()
 // ---------------------------------------------------------------------------
 void CLoginMode::OnAcceptLogin(const std::vector<u8>& raw)
 {
+    ResetAccountLoginHandshake();
     if (raw.size() < 47) {
         SetLoginStatus("Login error: AC_ACCEPT_LOGIN too short.");
         m_nextSubMode = LoginSubMode_Login;
@@ -1247,18 +2195,31 @@ void CLoginMode::OnAcceptLogin(const std::vector<u8>& raw)
 // ---------------------------------------------------------------------------
 void CLoginMode::OnRefuseLogin(const std::vector<u8>& raw)
 {
+    ResetAccountLoginHandshake();
     const u8 code = (raw.size() > 2) ? raw[2] : 0;
-    char msg[80];
+    const std::string detail = raw.size() >= sizeof(PACKET_AC_REFUSE_LOGIN)
+        ? ExtractFixedText(reinterpret_cast<const char*>(raw.data() + 3), sizeof(PACKET_AC_REFUSE_LOGIN::BlockDate))
+        : std::string();
+    char msg[160];
     switch (code) {
     case 0:  std::snprintf(msg, sizeof(msg), "Login refused: account suspended."); break;
     case 1:  std::snprintf(msg, sizeof(msg), "Login refused: ID not found."); break;
     case 2:  std::snprintf(msg, sizeof(msg), "Login refused: wrong password."); break;
     case 3:  std::snprintf(msg, sizeof(msg), "Login refused: account already logged in."); break;
     case 4:  std::snprintf(msg, sizeof(msg), "Login refused: account not approved."); break;
+    case 5:  std::snprintf(msg, sizeof(msg), "Login refused: client version is not accepted by the server."); break;
+    case 6:
+        if (!detail.empty()) {
+            std::snprintf(msg, sizeof(msg), "Login refused: account blocked until %s.", detail.c_str());
+        } else {
+            std::snprintf(msg, sizeof(msg), "Login refused: account is temporarily blocked.");
+        }
+        break;
     default: std::snprintf(msg, sizeof(msg), "Login refused (code %d).", (int)code); break;
     }
     DbgLog("[Login] AC_REFUSE_LOGIN: code=%d\n", (int)code);
     SetLoginStatus(msg);
+    ShowLoginErrorDialog(msg);
     CRagConnection::instance()->Disconnect();
     m_isConnected = 0;
     m_nextSubMode = LoginSubMode_Login;
@@ -1266,8 +2227,9 @@ void CLoginMode::OnRefuseLogin(const std::vector<u8>& raw)
 
 // ---------------------------------------------------------------------------
 // 0x006B  HC_ACCEPT_ENTER  – char server returned character list
-// Header: type(2)+len(2)+billingInfo(12 bytes)+padding = 24 bytes before char data.
-// Each CHARACTER_INFO entry is 108 bytes.
+// Legacy header:  type(2)+len(2)+extension[20] = 24 bytes before char data.
+// 2010 header:    type(2)+len(2)+total(1)+premium_start(1)+premium_end(1)+extension[20] = 27 bytes.
+// CHARACTER_INFO stays 108 bytes for the 2010-06-23 client window we are targeting here.
 // ---------------------------------------------------------------------------
 void CLoginMode::OnAcceptChar(const std::vector<u8>& raw)
 {
@@ -1275,19 +2237,69 @@ void CLoginMode::OnAcceptChar(const std::vector<u8>& raw)
     const u8* p = raw.data();
     const u16 pktLen = static_cast<u16>(p[2]) | (static_cast<u16>(p[3]) << 8);
 
-    // The Ref uses: numChar = (pktLen - 24) / 108 and char data starts at offset 24.
-    const int charAreaLen = static_cast<int>(pktLen) - 24;
-    m_numChar = 0;
-    if (charAreaLen >= 108) {
-        const int count = charAreaLen / 108;
-        const int toRead = (count < 12) ? count : 12;
-        if (static_cast<int>(raw.size()) >= 24 + toRead * 108) {
-            std::memcpy(m_charInfo, p + 24, static_cast<size_t>(toRead) * 108);
-            m_numChar = toRead;
-        }
+    CharListLayout layout = CharListLayout::Legacy;
+    size_t headerSize = 0;
+    size_t charInfoSize = 0;
+    if (!TryResolveCharListLayout(pktLen, &layout, &headerSize, &charInfoSize)) {
+        DbgLog("[Login] HC_ACCEPT_ENTER: unsupported packet length=%u for CHARACTER_INFO sizes=%zu/%zu\n",
+               pktLen,
+               sizeof(CHARACTER_INFO),
+               sizeof(LEGACY_CHARACTER_INFO_106));
+        SetLoginStatus("Login error: unsupported char-list packet layout.");
+        m_numChar = 0;
+        m_nextSubMode = LoginSubMode_Login;
+        return;
     }
 
-    DbgLog("[Login] HC_ACCEPT_ENTER: numChar=%d (pktLen=%u)\n", m_numChar, pktLen);
+    const int charAreaLen = static_cast<int>(pktLen - static_cast<u16>(headerSize));
+    m_numChar = 0;
+    if (charAreaLen >= static_cast<int>(charInfoSize)) {
+        const int count = charAreaLen / static_cast<int>(charInfoSize);
+        const int toRead = (count < static_cast<int>(std::size(m_charInfo)))
+            ? count
+            : static_cast<int>(std::size(m_charInfo));
+        if (static_cast<size_t>(raw.size()) >= headerSize + static_cast<size_t>(toRead) * charInfoSize) {
+            std::memset(m_charInfo, 0, sizeof(m_charInfo));
+            if (layout == CharListLayout::CompactLegacy) {
+                for (int index = 0; index < toRead; ++index) {
+                    LEGACY_CHARACTER_INFO_106 legacy{};
+                    std::memcpy(&legacy,
+                                p + headerSize + static_cast<size_t>(index) * sizeof(legacy),
+                                sizeof(legacy));
+                    m_charInfo[index] = ExpandLegacyCharacterInfo(legacy);
+                }
+            } else {
+                std::memcpy(m_charInfo,
+                            p + headerSize,
+                            static_cast<size_t>(toRead) * sizeof(CHARACTER_INFO));
+            }
+            m_numChar = toRead;
+        }
+    } else if (charAreaLen == 0) {
+        m_numChar = 0;
+    }
+
+    if (layout == CharListLayout::Expanded) {
+        DbgLog("[Login] HC_ACCEPT_ENTER: numChar=%d (pktLen=%u header=%zu total=%u premium_start=%u premium_end=%u)\n",
+               m_numChar,
+               pktLen,
+               headerSize,
+               static_cast<unsigned int>(p[4]),
+               static_cast<unsigned int>(p[5]),
+               static_cast<unsigned int>(p[6]));
+        } else if (layout == CharListLayout::CompactLegacy) {
+         DbgLog("[Login] HC_ACCEPT_ENTER: numChar=%d (pktLen=%u header=%zu charSize=%zu layout=legacy_4_106)\n",
+             m_numChar,
+             pktLen,
+             headerSize,
+             charInfoSize);
+    } else {
+         DbgLog("[Login] HC_ACCEPT_ENTER: numChar=%d (pktLen=%u header=%zu charSize=%zu layout=legacy_24_108)\n",
+               m_numChar,
+               pktLen,
+             headerSize,
+             charInfoSize);
+    }
     SetLoginStatus("Login: character list received from char server.");
 
     if (m_numChar == 0) {
@@ -1336,6 +2348,7 @@ void CLoginMode::OnRefuseChar(const std::vector<u8>& raw)
     std::snprintf(msg, sizeof(msg), "Char server refused entry (code %d).", (int)code);
     DbgLog("[Login] HC_REFUSE_ENTER: code=%d\n", (int)code);
     SetLoginStatus(msg);
+    ShowLoginErrorDialog(msg);
     CRagConnection::instance()->Disconnect();
     m_isConnected = 0;
     m_nextSubMode = LoginSubMode_Login;
@@ -1399,6 +2412,7 @@ void CLoginMode::OnRefuseMakeChar(const std::vector<u8>& raw)
     std::snprintf(msg, sizeof(msg), "Login: character creation failed (%s, code %d).", reason, (int)code);
     DbgLog("[Login] HC_REFUSE_MAKECHAR: code=%d (%s)\n", (int)code, reason);
     SetLoginStatus(msg);
+    ShowLoginErrorDialog(msg);
     m_nextSubMode = LoginSubMode_CharSelect;
 }
 
@@ -1481,6 +2495,7 @@ void CLoginMode::OnRefuseDeleteChar(const std::vector<u8>& raw)
     m_pendingDeleteCharGid = 0;
     m_pendingDeleteCharSlot = -1;
     SetLoginStatus(msg);
+    ShowLoginErrorDialog(msg);
     m_nextSubMode = LoginSubMode_CharSelect;
 }
 
@@ -1525,13 +2540,14 @@ void CLoginMode::OnNotifyZonesvr(const std::vector<u8>& raw)
 }
 
 // ---------------------------------------------------------------------------
-// 0x0073  ZC_ACCEPT_ENTER  – zone/map server accepted, game begins
-// Layout: type(2)+serverTick(4)+posX_Y_dir(3 packed bytes)+font(1)+sex(1) = 11 bytes
+// 0x0073 / 0x02EB  ZC_ACCEPT_ENTER / ZC_ACCEPT_ENTER2
+// Shared core layout: type(2)+serverTick(4)+posX_Y_dir(3 packed bytes)
 // ---------------------------------------------------------------------------
 void CLoginMode::OnZcAcceptEnter(const std::vector<u8>& raw)
 {
-    if (raw.size() < 11) return;
+    if (raw.size() < 9) return;
     const u8* p = raw.data();
+    const u16 packetId = static_cast<u16>(p[0]) | (static_cast<u16>(p[1]) << 8);
 
     const u32 serverTick = u32(p[2])|(u32(p[3])<<8)|(u32(p[4])<<16)|(u32(p[5])<<24);
     g_session.SetServerTime(serverTick);
@@ -1545,8 +2561,8 @@ void CLoginMode::OnZcAcceptEnter(const std::vector<u8>& raw)
     char curMap[40];
     std::snprintf(curMap, sizeof(curMap), "%s.rsw", g_session.m_curMap);
 
-    DbgLog("[Login] ZC_ACCEPT_ENTER: map=%s x=%d y=%d dir=%d tick=%u → switching to GameMode\n",
-           curMap, startX, startY, startDir, serverTick);
+        DbgLog("[Login] ZC_ACCEPT_ENTER: opcode=0x%04X map=%s x=%d y=%d dir=%d tick=%u -> switching to GameMode\n",
+            packetId, curMap, startX, startY, startDir, serverTick);
 
     g_modeMgr.Switch(1, curMap);
 }
@@ -1556,11 +2572,30 @@ void CLoginMode::OnZcAcceptEnter(const std::vector<u8>& raw)
 // ---------------------------------------------------------------------------
 void CLoginMode::OnDisconnectMsg(const std::vector<u8>& raw)
 {
+    ResetAccountLoginHandshake();
     const u8 code = (raw.size() > 2) ? raw[2] : 0;
     char msg[64];
     std::snprintf(msg, sizeof(msg), "Disconnected by server (code %d).", (int)code);
     DbgLog("[Login] SC_NOTIFY_BAN: code=%d\n", (int)code);
     SetLoginStatus(msg);
+    ShowLoginErrorDialog(msg);
+    CRagConnection::instance()->Disconnect();
+    m_isConnected = 0;
+    m_nextSubMode = LoginSubMode_Login;
+}
+
+void CLoginMode::OnNotifyError(const std::vector<u8>& raw)
+{
+    ResetAccountLoginHandshake();
+    const std::string message = ExtractPacketText(raw, 4);
+    const char* dialogText = message.empty() ? "Login failed: server returned an empty error message." : message.c_str();
+
+    DbgLog("[Login] AC_NOTIFY_ERROR: len=%d message='%s'\n",
+           static_cast<int>(raw.size()),
+           dialogText);
+
+    SetLoginStatus(dialogText);
+    ShowLoginErrorDialog(dialogText);
     CRagConnection::instance()->Disconnect();
     m_isConnected = 0;
     m_nextSubMode = LoginSubMode_Login;

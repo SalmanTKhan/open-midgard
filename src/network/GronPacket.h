@@ -8,7 +8,7 @@ namespace ro::net {
 
 constexpr s16 kVariablePacketSize = -1;
 
-// Initialize known packet sizes from the HighPriest 2008 client table.
+// Initialize the known packet-size tables for the supported receive profiles.
 void InitializePacketSize();
 
 // Returns:

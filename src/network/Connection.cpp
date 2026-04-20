@@ -203,6 +203,11 @@ int CloseSocketHandle(SOCKET socketHandle)
 #endif
 }
 
+void LogSocketClosure(const char* phase, int errorCode)
+{
+    DbgLog("[Net] socket closed during %s error=%d\n", phase ? phase : "recv", errorCode);
+}
+
 int SelectForSocket(SOCKET socketHandle, fd_set* readSet, fd_set* writeSet, fd_set* errorSet, timeval* timeout)
 {
 #if RO_PLATFORM_WINDOWS
@@ -359,7 +364,9 @@ int CConnection::FlushSendQueue()
         }
 
         if (sent == 0) {
-            break;
+            LogSocketClosure("send", 0);
+            Disconnect();
+            return -1;
         }
 
         const int lastError = GetLastSocketErrorCode();
@@ -367,6 +374,7 @@ int CConnection::FlushSendQueue()
             break;
         }
 
+        LogSocketClosure("send", lastError);
         Disconnect();
         return -1;
     }
@@ -388,6 +396,10 @@ int CConnection::Send(const char* buf, int len)
 
 int CConnection::Recv(char* buf, int len, bool peek)
 {
+    if (m_socket == INVALID_SOCKET) {
+        return -1;
+    }
+
     FlushSendQueue();
 
     // Try to fill the queue first
@@ -395,6 +407,17 @@ int CConnection::Recv(char* buf, int len, bool peek)
     int n = recv(m_socket, tmp, sizeof(tmp), 0);
     if (n > 0) {
         m_recvQueue.Push(tmp, n);
+    } else if (n == 0) {
+        LogSocketClosure("recv", 0);
+        Disconnect();
+        return -1;
+    } else {
+        const int lastError = GetLastSocketErrorCode();
+        if (!IsSocketWouldBlockError(lastError)) {
+            LogSocketClosure("recv", lastError);
+            Disconnect();
+            return -1;
+        }
     }
 
     if (peek) return m_recvQueue.Peek(buf, len) ? len : 0;
@@ -423,6 +446,10 @@ bool CRagConnection::RecvPacket(std::vector<u8>& outPacket)
 {
     outPacket.clear();
 
+    if (m_socket == INVALID_SOCKET) {
+        return false;
+    }
+
     if (FlushSendQueue() < 0) {
         return false;
     }
@@ -432,6 +459,17 @@ bool CRagConnection::RecvPacket(std::vector<u8>& outPacket)
     int n = recv((SOCKET)m_socket, tmp, sizeof(tmp), 0);
     if (n > 0) {
         m_recvQueue.Push(tmp, n);
+    } else if (n == 0) {
+        LogSocketClosure("recv packet", 0);
+        Disconnect();
+        return false;
+    } else {
+        const int lastError = GetLastSocketErrorCode();
+        if (!IsSocketWouldBlockError(lastError)) {
+            LogSocketClosure("recv packet", lastError);
+            Disconnect();
+            return false;
+        }
     }
 
     while (true) {

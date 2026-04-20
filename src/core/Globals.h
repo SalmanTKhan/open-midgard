@@ -44,6 +44,8 @@ extern ServerType  g_serverType;
 extern int         g_languageType;
 extern int         g_codePage;
 extern int         g_version;
+extern int         g_passwordEncrypt;
+extern int         g_passwordEncrypt2;
 
 extern std::string g_accountAddr;
 extern std::string g_accountPort;
