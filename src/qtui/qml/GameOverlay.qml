@@ -5523,6 +5523,116 @@ Item {
     }
 
     Rectangle {
+        id: emotionPanel
+        x: uiState.emotionData.x || 0
+        y: uiState.emotionData.y || 0
+        width: uiState.emotionData.width || 0
+        height: uiState.emotionData.height || 0
+        radius: 10
+        color: Theme.background
+        border.width: 1
+        border.color: Theme.borderStrong
+        visible: uiState.emotionVisible
+        clip: true
+
+        readonly property var _buttons: uiState.emotionData.buttons || []
+        readonly property string _title: uiState.emotionData.title || "Emotion Picker"
+        readonly property string _footer: uiState.emotionData.footer || "/emotion N supports all 0-87 emotes"
+
+        Rectangle {
+            x: 0
+            y: 0
+            width: parent.width
+            height: 32
+            radius: 10
+            color: Theme.accent
+            z: 0
+        }
+        Rectangle {
+            x: 0
+            y: 20
+            width: parent.width
+            height: 14
+            color: Theme.accent
+            z: 0
+        }
+        Text {
+            x: 16
+            y: 8
+            width: parent.width - 32
+            text: emotionPanel._title
+            color: Theme.accentText
+            font.pixelSize: 14
+            font.bold: true
+            z: 1
+        }
+        Text {
+            anchors.right: parent.right
+            anchors.rightMargin: 16
+            y: 10
+            text: "Alt+E opens   •   Alt+1..0 sends"
+            color: Theme.accentText
+            font.pixelSize: 11
+            z: 1
+        }
+
+        Repeater {
+            model: emotionPanel._buttons
+
+            delegate: Rectangle {
+                required property var modelData
+                x: (modelData.x || 0) - emotionPanel.x
+                y: (modelData.y || 0) - emotionPanel.y
+                width: modelData.width || 0
+                height: modelData.height || 0
+                radius: 6
+                color: modelData.pressed
+                    ? Theme.accent
+                    : (modelData.hovered ? Theme.surfaceAlt : Theme.surface)
+                border.width: 1
+                border.color: modelData.pressed ? Theme.accentText : Theme.borderStrong
+                z: 2
+
+                Text {
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    y: 5
+                    text: modelData.label || ""
+                    color: modelData.pressed ? Theme.accentText : Theme.text
+                    font.pixelSize: 18
+                    font.bold: true
+                }
+
+                Text {
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    y: 24
+                    text: modelData.hotkey || ""
+                    color: modelData.pressed ? Theme.accentText : Theme.textMuted
+                    font.pixelSize: 10
+                }
+            }
+        }
+
+        Rectangle {
+            x: 0
+            y: parent.height - 28
+            width: parent.width
+            height: 28
+            color: Theme.surfaceAlt
+            border.width: 1
+            border.color: Theme.border
+            z: 2
+
+            Text {
+                anchors.verticalCenter: parent.verticalCenter
+                x: 16
+                text: emotionPanel._footer
+                color: Theme.textMuted
+                font.pixelSize: 10
+            }
+        }
+    }
+
+    Rectangle {
         x: uiState.serverPanelX
         y: uiState.serverPanelY
         width: uiState.serverPanelWidth

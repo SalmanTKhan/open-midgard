@@ -32,6 +32,7 @@
 #include "ui/UIItemInfoWnd.h"
 #include "ui/UIItemWnd.h"
 #include "ui/UIControllerWnd.h"
+#include "ui/UIEmotionWnd.h"
 #include "ui/UIMessengerGroupWnd.h"
 #include "ui/UIPartyOptionWnd.h"
 #include "ui/UIStorageWnd.h"
@@ -251,6 +252,9 @@ void ClearGameplayUiState(QtUiState* state)
     state->setControllerVisible(false);
     state->setControllerGeometry(0, 0, 0, 0);
     state->setControllerData(QVariantMap{});
+
+    state->setEmotionVisible(false);
+    state->setEmotionData(QVariantMap{});
 
     state->setMinimapVisible(false);
     state->setMinimapGeometry(0, 0, 0, 0);
@@ -3131,6 +3135,54 @@ void PopulateControllerState(QtUiState* state)
     state->setControllerData(data);
 }
 
+void PopulateEmotionState(QtUiState* state)
+{
+    if (!state) {
+        return;
+    }
+
+    const UIEmotionWnd* const emotionWnd = g_windowMgr.m_emotionWnd;
+    const bool visible = IsGameplayWindowVisible(state, emotionWnd);
+    state->setEmotionVisible(visible);
+    if (!visible) {
+        state->setEmotionData(QVariantMap{});
+        return;
+    }
+
+    UIEmotionWnd::DisplayData display{};
+    if (!emotionWnd->GetDisplayDataForQt(&display)) {
+        state->setEmotionData(QVariantMap{});
+        return;
+    }
+
+    QVariantMap data;
+    data.insert(QStringLiteral("x"), display.x);
+    data.insert(QStringLiteral("y"), display.y);
+    data.insert(QStringLiteral("width"), display.width);
+    data.insert(QStringLiteral("height"), display.height);
+    data.insert(QStringLiteral("title"), ToQString(display.title));
+    data.insert(QStringLiteral("footer"), ToQString(display.footer));
+
+    QVariantList buttons;
+    buttons.reserve(static_cast<qsizetype>(display.buttons.size()));
+    for (const UIEmotionWnd::EmotionButton& button : display.buttons) {
+        QVariantMap entry;
+        entry.insert(QStringLiteral("emotionType"), button.emotionType);
+        entry.insert(QStringLiteral("x"), button.x);
+        entry.insert(QStringLiteral("y"), button.y);
+        entry.insert(QStringLiteral("width"), button.width);
+        entry.insert(QStringLiteral("height"), button.height);
+        entry.insert(QStringLiteral("label"), ToQString(button.label));
+        entry.insert(QStringLiteral("hotkey"), ToQString(button.hotkey));
+        entry.insert(QStringLiteral("hovered"), button.hovered);
+        entry.insert(QStringLiteral("pressed"), button.pressed);
+        buttons.push_back(entry);
+    }
+    data.insert(QStringLiteral("buttons"), buttons);
+
+    state->setEmotionData(data);
+}
+
 void PopulateFeatureBackbonePanels(QtUiState* state)
 {
     if (!state) {
@@ -3999,6 +4051,7 @@ bool QtUiStateAdapter::syncGameplay(CGameMode& mode,
     PopulateItemCompositionState(m_state);
     PopulateOptionState(m_state);
     PopulateControllerState(m_state);
+    PopulateEmotionState(m_state);
     PopulateMinimapState(m_state);
     PopulateFeatureBackbonePanels(m_state);
     const int uiMouseX = UiScaleRawToLogicalCoordinate(mouseX);

@@ -38,6 +38,7 @@ class UIMessengerGroupWnd;
 class UIPartyOptionWnd;
 class UINpcInputWnd;
 class UIChooseWnd;
+class UIEmotionWnd;
 class UIVirtualKeyboardWnd;
 class UIControllerWnd;
 class UIChooseSellBuyWnd;
@@ -89,6 +90,7 @@ public:
         WID_PLAYERCONTEXTMENUWND = 0x94,
         WID_MESSENGERGROUPWND = 0x22,
         WID_PARTYOPTIONWND    = 0x95,
+        WID_EMOTIONWND        = 0x96,
         WID_OPTIONWND         = 13,
         WID_EQUIPWND          = 14,
         WID_SKILLLISTWND      = 15,
@@ -223,6 +225,7 @@ public:
     UIItemSellWnd* m_itemSellWnd;
     UIStorageWnd* m_storageWnd;
     UIShortCutWnd* m_shortCutWnd;
+    UIEmotionWnd* m_emotionWnd;
     UINewChatWnd* m_chatWnd;
     UILoginWnd* m_loginWnd;
     UISelectServerWnd* m_selectServerWnd;

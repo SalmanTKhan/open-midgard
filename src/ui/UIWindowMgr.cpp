@@ -11,6 +11,7 @@
 #include "UIPartyOptionWnd.h"
 #include "UINpcInputWnd.h"
 #include "UIChooseWnd.h"
+#include "UIEmotionWnd.h"
 #include "UISelectCartWnd.h"
 #include "UIVirtualKeyboardWnd.h"
 #include "UIControllerWnd.h"
@@ -605,7 +606,7 @@ UIWindowMgr::UIWindowMgr()
       m_miniMapZoomFactor(1.0f), m_miniMapArgb(0), m_isDrawCompass(0),
       m_isDragAll(0), m_conversionMode(0),
       m_captureWindow(nullptr), m_editWindow(nullptr), m_modalWindow(nullptr), m_lastHitWindow(nullptr),
-      m_loadingWnd(nullptr), m_roMapWnd(nullptr), m_minimapZoomWnd(nullptr), m_statusWnd(nullptr), m_sayDialogWnd(nullptr), m_npcMenuWnd(nullptr), m_playerContextMenuWnd(nullptr), m_joinPartyAcceptWnd(nullptr), m_messengerGroupWnd(nullptr), m_partyOptionWnd(nullptr), m_npcInputWnd(nullptr), m_chooseSellBuyWnd(nullptr), m_itemShopWnd(nullptr), m_itemPurchaseWnd(nullptr), m_itemSellWnd(nullptr), m_storageWnd(nullptr), m_shortCutWnd(nullptr), m_chatWnd(nullptr),
+      m_loadingWnd(nullptr), m_roMapWnd(nullptr), m_minimapZoomWnd(nullptr), m_statusWnd(nullptr), m_sayDialogWnd(nullptr), m_npcMenuWnd(nullptr), m_playerContextMenuWnd(nullptr), m_joinPartyAcceptWnd(nullptr), m_messengerGroupWnd(nullptr), m_partyOptionWnd(nullptr), m_npcInputWnd(nullptr), m_chooseSellBuyWnd(nullptr), m_itemShopWnd(nullptr), m_itemPurchaseWnd(nullptr), m_itemSellWnd(nullptr), m_storageWnd(nullptr), m_shortCutWnd(nullptr), m_emotionWnd(nullptr), m_chatWnd(nullptr),
       m_loginWnd(nullptr), m_selectServerWnd(nullptr), m_selectCharWnd(nullptr), m_makeCharWnd(nullptr), m_waitWnd(nullptr), m_chooseWnd(nullptr), m_selectCartWnd(nullptr), m_virtualKeyboardWnd(nullptr), m_controllerWnd(nullptr), m_optionWnd(nullptr), m_itemWnd(nullptr), m_itemInfoWnd(nullptr), m_itemCollectionWnd(nullptr), m_itemCompositionWnd(nullptr), m_itemIdentifyWnd(nullptr), m_questWnd(nullptr), m_basicInfoWnd(nullptr), m_notifyLevelUpWnd(nullptr), m_notifyJobLevelUpWnd(nullptr), m_equipWnd(nullptr), m_skillDescribeWnd(nullptr), m_skillListWnd(nullptr),
                         m_wallpaperSurface(nullptr), m_uiComposeSurface(), m_chatActiveInputField(0), m_chatScrollLineOffset(0)
 {
@@ -929,6 +930,16 @@ UIWindow* UIWindowMgr::MakeWindow(int windowId)
         m_children.push_back(m_partyOptionWnd);
         m_partyOptionWnd->SetShow(1);
         return m_partyOptionWnd;
+
+    case WID_EMOTIONWND:
+        if (!m_emotionWnd) {
+            m_emotionWnd = new UIEmotionWnd();
+            m_children.push_back(m_emotionWnd);
+        }
+        m_children.remove(m_emotionWnd);
+        m_children.push_back(m_emotionWnd);
+        m_emotionWnd->SetShow(1);
+        return m_emotionWnd;
 
     case WID_CHOOSESELLBUYWND:
         if (!m_chooseSellBuyWnd) {
@@ -1505,6 +1516,9 @@ void UIWindowMgr::DeleteWindow(UIWindow* window)
     if (window == m_shortCutWnd) {
         m_shortCutWnd = nullptr;
     }
+    if (window == m_emotionWnd) {
+        m_emotionWnd = nullptr;
+    }
     if (window == m_notifyLevelUpWnd) {
         m_notifyLevelUpWnd = nullptr;
     }
@@ -1588,6 +1602,7 @@ void UIWindowMgr::ReloadLegacySkinAssets(UIWindow* preserveWindow)
         { WID_SKILLLISTWND, m_skillListWnd },
         { WID_NOTIFYLEVELUPWND, m_notifyLevelUpWnd },
         { WID_NOTIFYJOBLEVELUPWND, m_notifyJobLevelUpWnd },
+        { WID_EMOTIONWND, m_emotionWnd },
         { WID_CHOOSEWND, m_chooseWnd },
     };
 
@@ -1661,6 +1676,7 @@ void UIWindowMgr::RemoveAllWindows()
     m_itemSellWnd = nullptr;
     m_storageWnd = nullptr;
     m_shortCutWnd = nullptr;
+    m_emotionWnd = nullptr;
     m_chatWnd = nullptr;
     m_basicInfoWnd = nullptr;
     m_notifyLevelUpWnd = nullptr;
@@ -1706,6 +1722,7 @@ void UIWindowMgr::Reset() {
     m_virtualKeyboardWnd = nullptr;
     m_controllerWnd = nullptr;
     m_optionWnd = nullptr;
+    m_emotionWnd = nullptr;
     m_chatWnd = nullptr;
     m_chatEvents.clear();
     m_chatInputHistory.clear();
@@ -2581,6 +2598,9 @@ bool UIWindowMgr::HandleHotkeyBeforeFocusedUi(int virtualKey, bool isAltDown, bo
         case 'Z':
             ToggleWindow(WID_MESSENGERGROUPWND);
             return true;
+        case 'E':
+            ToggleWindow(WID_EMOTIONWND);
+            return true;
         case 'W':
             ToggleWindow(WID_CARTWND);
             return true;
@@ -2702,7 +2722,8 @@ bool UIWindowMgr::HasBlockingUiForGameplayHotkeys() const
         || (m_chooseSellBuyWnd && m_chooseSellBuyWnd->m_show != 0)
         || (m_chooseWnd && m_chooseWnd->m_show != 0)
         || (m_controllerWnd && m_controllerWnd->m_show != 0)
-        || (m_optionWnd && m_optionWnd->m_show != 0);
+        || (m_optionWnd && m_optionWnd->m_show != 0)
+        || (m_emotionWnd && m_emotionWnd->m_show != 0);
 }
 
 bool UIWindowMgr::OnQtKeyDown(int virtualKey, bool isAltDown, bool isCtrlDown, bool isShiftDown)
@@ -2723,6 +2744,11 @@ bool UIWindowMgr::OnQtKeyDown(int virtualKey, bool isAltDown, bool isCtrlDown, b
 
     if (m_optionWnd && m_optionWnd->m_show != 0) {
         m_optionWnd->OnKeyDown(virtualKey);
+        return true;
+    }
+
+    if (m_emotionWnd && m_emotionWnd->m_show != 0) {
+        m_emotionWnd->OnKeyDown(virtualKey);
         return true;
     }
 
@@ -2833,6 +2859,11 @@ void UIWindowMgr::OnKeyDown(int virtualKey)
 
     if (m_optionWnd && m_optionWnd->m_show != 0) {
         m_optionWnd->OnKeyDown(virtualKey);
+        return;
+    }
+
+    if (m_emotionWnd && m_emotionWnd->m_show != 0) {
+        m_emotionWnd->OnKeyDown(virtualKey);
         return;
     }
 

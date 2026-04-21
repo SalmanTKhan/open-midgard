@@ -9,6 +9,7 @@
 
 #include <array>
 #include <algorithm>
+#include <cstdio>
 #include <cstring>
 
 extern UIWindowMgr g_windowMgr;
@@ -203,10 +204,15 @@ hotkeys::KeyboardAction UIControllerWnd::KeyboardActionAtRow(int row) const
 
 hotkeys::GamepadAction UIControllerWnd::GamepadActionAtRow(int row) const
 {
+#if RO_HAS_GAMEPAD
     if (row < 0 || row >= static_cast<int>(kGamepadActions.size())) {
         return hotkeys::GamepadAction::Invalid;
     }
     return kGamepadActions[static_cast<size_t>(row)];
+#else
+    (void)row;
+    return hotkeys::GamepadAction::Invalid;
+#endif
 }
 
 void UIControllerWnd::BeginKeyboardRebind(hotkeys::KeyboardAction action)
@@ -403,9 +409,9 @@ void UIControllerWnd::OnDraw()
     const gamepad::LiveState live = gamepad::g_gamepad.GetLiveState();
     char header[256];
     if (live.connected) {
-        wsprintfA(header, "Controller: %s (connected)", live.name ? live.name : "(unknown)");
+        snprintf(header, sizeof(header), "Controller: %s (connected)", live.name ? live.name : "(unknown)");
     } else {
-        wsprintfA(header, "Controller: no controller connected");
+        snprintf(header, sizeof(header), "Controller: no controller connected");
     }
 #else
     const char* header = "Controller: built without gamepad support";

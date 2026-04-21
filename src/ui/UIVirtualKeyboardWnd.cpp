@@ -7,6 +7,7 @@
 #include <windows.h>
 
 #include <algorithm>
+#include <cstdio>
 
 extern UIWindowMgr g_windowMgr;
 
@@ -178,7 +179,7 @@ void UIVirtualKeyboardWnd::OnDraw()
     // Header: page label + hint row
     const RECT headerRc = MakeRect(m_x + kMarginX, m_y + 6, m_w - kMarginX * 2, kMarginY - 10);
     char header[128];
-    wsprintfA(header,
+    snprintf(header, sizeof(header),
         "Keyboard [%s]    (A)type  (B)del  (X)space  (Y)shift  LB/RB=page  START=OK  BACK=cancel",
         PageLabel(m_page));
     DrawCenteredText(hdc, headerRc, header, RGB(30, 30, 60), 14, FW_NORMAL);

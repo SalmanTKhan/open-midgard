@@ -70,6 +70,8 @@ add_library(ro_ui STATIC
     UISkillListWnd.cpp
     UIChooseWnd.h
     UIChooseWnd.cpp
+    UIEmotionWnd.h
+    UIEmotionWnd.cpp
     UISelectCartWnd.h
     UISelectCartWnd.cpp
     UIVirtualKeyboardWnd.h

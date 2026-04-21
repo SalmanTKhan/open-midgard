@@ -275,6 +275,8 @@ class QtUiState : public QObject {
     Q_PROPERTY(int controllerWidth READ controllerWidth NOTIFY controllerGeometryChanged)
     Q_PROPERTY(int controllerHeight READ controllerHeight NOTIFY controllerGeometryChanged)
     Q_PROPERTY(QVariantMap controllerData READ controllerData NOTIFY controllerDataChanged)
+    Q_PROPERTY(bool emotionVisible READ emotionVisible NOTIFY emotionVisibleChanged)
+    Q_PROPERTY(QVariantMap emotionData READ emotionData NOTIFY emotionDataChanged)
     Q_PROPERTY(bool minimapVisible READ minimapVisible NOTIFY minimapVisibleChanged)
     Q_PROPERTY(int minimapX READ minimapX NOTIFY minimapGeometryChanged)
     Q_PROPERTY(int minimapY READ minimapY NOTIFY minimapGeometryChanged)
@@ -566,6 +568,8 @@ public:
     int controllerWidth() const { return m_controllerWidth; }
     int controllerHeight() const { return m_controllerHeight; }
     const QVariantMap& controllerData() const { return m_controllerData; }
+    bool emotionVisible() const { return m_emotionVisible; }
+    const QVariantMap& emotionData() const { return m_emotionData; }
     bool minimapVisible() const { return m_minimapVisible; }
     int minimapX() const { return m_minimapX; }
     int minimapY() const { return m_minimapY; }
@@ -1960,6 +1964,22 @@ public:
         emit controllerDataChanged();
     }
 
+    void setEmotionVisible(bool value) {
+        if (m_emotionVisible == value) {
+            return;
+        }
+        m_emotionVisible = value;
+        emit emotionVisibleChanged();
+    }
+
+    void setEmotionData(const QVariantMap& value) {
+        if (m_emotionData == value) {
+            return;
+        }
+        m_emotionData = value;
+        emit emotionDataChanged();
+    }
+
     void setMinimapVisible(bool value) {
         if (m_minimapVisible == value) {
             return;
@@ -2192,6 +2212,8 @@ signals:
     void controllerVisibleChanged();
     void controllerGeometryChanged();
     void controllerDataChanged();
+    void emotionVisibleChanged();
+    void emotionDataChanged();
     void minimapVisibleChanged();
     void minimapGeometryChanged();
     void minimapDataChanged();
@@ -2471,6 +2493,8 @@ private:
     int m_controllerWidth = 0;
     int m_controllerHeight = 0;
     QVariantMap m_controllerData;
+    bool m_emotionVisible = false;
+    QVariantMap m_emotionData;
     bool m_minimapVisible = false;
     int m_minimapX = 0;
     int m_minimapY = 0;
