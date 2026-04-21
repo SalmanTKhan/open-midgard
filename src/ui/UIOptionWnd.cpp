@@ -4,6 +4,7 @@
 #include "core/File.h"
 #include "core/SettingsIni.h"
 #include "main/WinMain.h"
+#include "qtui/QtPlatformWindow.h"
 #include "qtui/QtUiRuntime.h"
 #include "render/DC.h"
 #include "res/Bitmap.h"
@@ -17,6 +18,7 @@
 #include <cstdio>
 #include <cstring>
 #include <string>
+#include <utility>
 #include <vector>
 
 #if RO_ENABLE_QT6_UI
@@ -24,7 +26,9 @@
 #include <QFontMetrics>
 #include <QImage>
 #include <QPainter>
+#include <QScreen>
 #include <QString>
+#include <QWindow>
 #endif
 
 namespace {
@@ -92,6 +96,26 @@ constexpr std::array<RenderBackendType, 4> kRendererEntries = {
     RenderBackendType::Direct3D12,
     RenderBackendType::Vulkan,
 };
+
+constexpr std::array<std::pair<int, int>, 17> kFallbackResolutionEntries = {{
+    { 640, 480 },
+    { 800, 600 },
+    { 960, 540 },
+    { 1024, 768 },
+    { 1152, 648 },
+    { 1280, 720 },
+    { 1280, 800 },
+    { 1280, 960 },
+    { 1280, 1024 },
+    { 1366, 768 },
+    { 1440, 900 },
+    { 1600, 900 },
+    { 1680, 1050 },
+    { 1920, 1080 },
+    { 1920, 1200 },
+    { 2560, 1440 },
+    { 3840, 2160 },
+}};
 
 shopui::BitmapPixels LoadBitmapPixelsFromGameData(const char* path)
 {
@@ -568,23 +592,50 @@ void UIOptionWnd::RefreshResolutionEntries()
 {
     m_resolutionEntries.clear();
 
+    const auto appendResolutionEntry = [this](int width, int height) {
+        if (width < 640 || height < 480) {
+            return;
+        }
+
+        if (FindResolutionIndex(width, height) >= 0) {
+            return;
+        }
+
+        m_resolutionEntries.push_back(ResolutionEntry{ width, height });
+    };
+
     DEVMODEA displayMode{};
     displayMode.dmSize = sizeof(displayMode);
     for (DWORD modeIndex = 0; EnumDisplaySettingsA(nullptr, modeIndex, &displayMode); ++modeIndex) {
-        if (displayMode.dmPelsWidth < 640 || displayMode.dmPelsHeight < 480) {
-            continue;
+        appendResolutionEntry(static_cast<int>(displayMode.dmPelsWidth), static_cast<int>(displayMode.dmPelsHeight));
+    }
+
+    if (m_resolutionEntries.empty()) {
+        int maxWidth = m_graphicsSettings.width;
+        int maxHeight = m_graphicsSettings.height;
+
+        RECT clientRect{};
+        if (g_hMainWnd && GetClientRect(g_hMainWnd, &clientRect)) {
+            maxWidth = (std::max)(maxWidth, clientRect.right - clientRect.left);
+            maxHeight = (std::max)(maxHeight, clientRect.bottom - clientRect.top);
         }
 
-        bool exists = false;
-        for (const ResolutionEntry& entry : m_resolutionEntries) {
-            if (entry.width == static_cast<int>(displayMode.dmPelsWidth)
-                && entry.height == static_cast<int>(displayMode.dmPelsHeight)) {
-                exists = true;
-                break;
+#if RO_ENABLE_QT6_UI
+        if (QWindow* mainWindow = g_hMainWnd ? RoQtGetQWindow(g_hMainWnd) : nullptr) {
+            if (QScreen* screen = mainWindow->screen()) {
+                const QRect availableGeometry = screen->availableGeometry();
+                maxWidth = (std::max)(maxWidth, availableGeometry.width());
+                maxHeight = (std::max)(maxHeight, availableGeometry.height());
             }
         }
-        if (!exists) {
-            m_resolutionEntries.push_back(ResolutionEntry{ static_cast<int>(displayMode.dmPelsWidth), static_cast<int>(displayMode.dmPelsHeight) });
+#endif
+
+        for (const std::pair<int, int>& resolution : kFallbackResolutionEntries) {
+            if (resolution.first > maxWidth || resolution.second > maxHeight) {
+                continue;
+            }
+
+            appendResolutionEntry(resolution.first, resolution.second);
         }
     }
 
@@ -1183,18 +1234,26 @@ void UIOptionWnd::PromptForGraphicsRestart()
     // restarted client actually boots with the selected resolution/backend.
     SaveSettings();
 
+#if RO_PLATFORM_WINDOWS
     const int restartNow = MessageBoxA(
         g_hMainWnd,
         "Graphics changes require a client restart. If you are currently in-game, the client will disconnect from the map server before it relaunches. Restart now?",
         "Restart Required",
         MB_ICONQUESTION | MB_YESNO);
+#else
+    const int restartNow = IDYES;
+#endif
     if (restartNow == IDYES) {
         if (!RelaunchCurrentApplication()) {
+#if RO_PLATFORM_WINDOWS
             MessageBoxA(
                 g_hMainWnd,
                 "Failed to relaunch the client. The graphics settings were saved and will apply the next time you start the game.",
                 "Restart Failed",
                 MB_ICONERROR | MB_OK);
+#else
+            ErrorMsg("Failed to relaunch the client. The graphics settings were saved and will apply the next time you start the game.");
+#endif
         }
     }
 }

@@ -39,6 +39,10 @@
 #include <string>
 #include <vector>
 
+#if defined(__unix__) || defined(__APPLE__)
+#include <unistd.h>
+#endif
+
 namespace {
 
 constexpr unsigned int WM_MOUSEMOVE = 0x0200u;
@@ -61,6 +65,7 @@ std::string g_windowTitleStatusSuffix;
 int g_windowTitleFps = -1;
 DWORD g_windowTitleFpsTick = 0;
 unsigned int g_windowTitleFrameCount = 0;
+std::vector<std::string> g_launchArguments;
 
 int GetLParamX(LPARAM lParam)
 {
@@ -546,7 +551,42 @@ RenderBackendType GetActiveRenderBackend()
 
 bool RelaunchCurrentApplication()
 {
+#if defined(__unix__) || defined(__APPLE__)
+    char exePath[MAX_PATH] = {};
+    if (GetModuleFileNameA(nullptr, exePath, MAX_PATH) == 0 || exePath[0] == '\0') {
+        return false;
+    }
+
+    std::vector<std::string> launchArguments = g_launchArguments;
+    if (launchArguments.empty()) {
+        launchArguments.emplace_back(exePath);
+    } else {
+        launchArguments[0] = exePath;
+    }
+
+    std::vector<char*> argv;
+    argv.reserve(launchArguments.size() + 1);
+    for (std::string& argument : launchArguments) {
+        argv.push_back(argument.data());
+    }
+    argv.push_back(nullptr);
+
+    const pid_t childPid = ::fork();
+    if (childPid < 0) {
+        return false;
+    }
+
+    if (childPid == 0) {
+        ::execv(exePath, argv.data());
+        _exit(127);
+    }
+
+    CRagConnection::instance()->Disconnect();
+    g_modeMgr.Quit();
+    return true;
+#else
     return false;
+#endif
 }
 
 bool UpdatePatch(const char*, const char*)
@@ -569,8 +609,16 @@ bool SearchProcessInNT()
     return false;
 }
 
-int main(int, char**)
+int main(int argc, char** argv)
 {
+    g_launchArguments.clear();
+    if (argv) {
+        g_launchArguments.reserve((std::max)(0, argc));
+        for (int argumentIndex = 0; argumentIndex < argc; ++argumentIndex) {
+            g_launchArguments.emplace_back(argv[argumentIndex] ? argv[argumentIndex] : "");
+        }
+    }
+
     ApplyRuntimeRoot(ResolveRuntimeRoot());
 
     ResetTimer();
