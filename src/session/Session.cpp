@@ -786,13 +786,13 @@ bool TryBuildExistingPlayerBodyPath(const char* extension, const std::string& jo
     const char* sexToken = GetSexToken(sex);
     char candidate[260] = {};
 
-    std::sprintf(candidate, "%s%s\\%s\\%s_%s.%s", kHumanSpriteRoot, kBodyDir, sexToken, jobToken.c_str(), sexToken, extension);
+    std::snprintf(candidate, sizeof(candidate), "%s%s\\%s\\%s_%s.%s", kHumanSpriteRoot, kBodyDir, sexToken, jobToken.c_str(), sexToken, extension);
     if (ResourceExistsLocalFirst(candidate)) {
         std::strcpy(outPath, candidate);
         return true;
     }
 
-    std::sprintf(candidate, "%s%s\\%s_%s.%s", kHumanSpriteRoot, jobToken.c_str(), jobToken.c_str(), sexToken, extension);
+    std::snprintf(candidate, sizeof(candidate), "%s%s\\%s_%s.%s", kHumanSpriteRoot, jobToken.c_str(), jobToken.c_str(), sexToken, extension);
     if (ResourceExistsLocalFirst(candidate)) {
         std::strcpy(outPath, candidate);
         return true;
@@ -813,7 +813,7 @@ bool TryBuildExistingClassicEnglishPlayerBodyPath(const char* extension, int job
     }
 
     char candidate[260] = {};
-    std::sprintf(candidate, "%s%s_%c.%s", kHumanSpriteRoot, englishToken, GetClassicEnglishSexToken(sex), extension);
+    std::snprintf(candidate, sizeof(candidate), "%s%s_%c.%s", kHumanSpriteRoot, englishToken, GetClassicEnglishSexToken(sex), extension);
     if (!ResourceExistsLocalFirst(candidate)) {
         return false;
     }
@@ -832,37 +832,37 @@ bool TryBuildExistingHeadPath(const char* extension, int resolvedHead, int sex, 
     const char englishSexToken = GetClassicEnglishSexToken(sex);
     char candidate[260] = {};
 
-    std::sprintf(candidate, "%s%s\\%s\\%d_%s.%s", kHumanSpriteRoot, kHeadDir, sexToken, resolvedHead, sexToken, extension);
+    std::snprintf(candidate, sizeof(candidate), "%s%s\\%s\\%d_%s.%s", kHumanSpriteRoot, kHeadDir, sexToken, resolvedHead, sexToken, extension);
     if (ResourceExistsLocalFirst(candidate)) {
         std::strcpy(outPath, candidate);
         return true;
     }
 
-    std::sprintf(candidate, "%s%s\\%d_%s.%s", kHumanSpriteRoot, kHeadDir, resolvedHead, sexToken, extension);
+    std::snprintf(candidate, sizeof(candidate), "%s%s\\%d_%s.%s", kHumanSpriteRoot, kHeadDir, resolvedHead, sexToken, extension);
     if (ResourceExistsLocalFirst(candidate)) {
         std::strcpy(outPath, candidate);
         return true;
     }
 
-    std::sprintf(candidate, "%s%s\\%s\\%d_%s.%s", kHumanSpriteRoot, kLegacyHeadDir, sexToken, resolvedHead, sexToken, extension);
+    std::snprintf(candidate, sizeof(candidate), "%s%s\\%s\\%d_%s.%s", kHumanSpriteRoot, kLegacyHeadDir, sexToken, resolvedHead, sexToken, extension);
     if (ResourceExistsLocalFirst(candidate)) {
         std::strcpy(outPath, candidate);
         return true;
     }
 
-    std::sprintf(candidate, "%s%s\\%d_%s.%s", kHumanSpriteRoot, kLegacyHeadDir, resolvedHead, sexToken, extension);
+    std::snprintf(candidate, sizeof(candidate), "%s%s\\%d_%s.%s", kHumanSpriteRoot, kLegacyHeadDir, resolvedHead, sexToken, extension);
     if (ResourceExistsLocalFirst(candidate)) {
         std::strcpy(outPath, candidate);
         return true;
     }
 
-    std::sprintf(candidate, "%s%s\\%c\\%c%d.%s", kHumanSpriteRoot, kLegacyHeadDir, englishSexToken, englishSexToken, resolvedHead, extension);
+    std::snprintf(candidate, sizeof(candidate), "%s%s\\%c\\%c%d.%s", kHumanSpriteRoot, kLegacyHeadDir, englishSexToken, englishSexToken, resolvedHead, extension);
     if (ResourceExistsLocalFirst(candidate)) {
         std::strcpy(outPath, candidate);
         return true;
     }
 
-    std::sprintf(candidate, "%s%s\\%c%d.%s", kHumanSpriteRoot, kLegacyHeadDir, englishSexToken, resolvedHead, extension);
+    std::snprintf(candidate, sizeof(candidate), "%s%s\\%c%d.%s", kHumanSpriteRoot, kLegacyHeadDir, englishSexToken, resolvedHead, extension);
     if (ResourceExistsLocalFirst(candidate)) {
         std::strcpy(outPath, candidate);
         return true;
@@ -1306,7 +1306,7 @@ char* BuildPlayerBodyResourceName(const CSession& session,
     }
 
     char fallbackPath[260] = {};
-    std::sprintf(fallbackPath, "%s%s\\%s\\%s_%s.%s", kHumanSpriteRoot, kBodyDir, sexToken, fallbackToken.c_str(), sexToken, extension);
+    std::snprintf(fallbackPath, sizeof(fallbackPath), "%s%s\\%s\\%s_%s.%s", kHumanSpriteRoot, kBodyDir, sexToken, fallbackToken.c_str(), sexToken, extension);
 
     auto hasMatchingBodyResourcePair = [&](const char* candidatePath) {
         if (!candidatePath || !*candidatePath || !ResourceExistsLocalFirst(candidatePath)) {
@@ -1334,7 +1334,7 @@ char* BuildPlayerBodyResourceName(const CSession& session,
 
         if (weaponType > 0) {
             char candidate[260] = {};
-            std::sprintf(candidate, "%s%s\\%s\\%s_%s_%d.%s", kHumanSpriteRoot, kBodyDir, sexToken, jobToken.c_str(), sexToken, weaponType, extension);
+            std::snprintf(candidate, sizeof(candidate), "%s%s\\%s\\%s_%s_%d.%s", kHumanSpriteRoot, kBodyDir, sexToken, jobToken.c_str(), sexToken, weaponType, extension);
             if (hasMatchingBodyResourcePair(candidate)) {
                 std::strcpy(buf, candidate);
                 return buf;
@@ -1342,7 +1342,7 @@ char* BuildPlayerBodyResourceName(const CSession& session,
 
             const std::string weaponTokenFromLua = session.GetPlayerWeaponToken(weaponType);
             if (!weaponTokenFromLua.empty()) {
-                std::sprintf(candidate, "%s%s\\%s\\%s_%s_%s.%s", kHumanSpriteRoot, kBodyDir, sexToken, jobToken.c_str(), sexToken, weaponTokenFromLua.c_str(), extension);
+                std::snprintf(candidate, sizeof(candidate), "%s%s\\%s\\%s_%s_%s.%s", kHumanSpriteRoot, kBodyDir, sexToken, jobToken.c_str(), sexToken, weaponTokenFromLua.c_str(), extension);
                 if (hasMatchingBodyResourcePair(candidate)) {
                     std::strcpy(buf, candidate);
                     return buf;
@@ -1350,7 +1350,7 @@ char* BuildPlayerBodyResourceName(const CSession& session,
             }
 
             if (const char* weaponToken = GetPlayerBodyWeaponToken(weaponType)) {
-                std::sprintf(candidate, "%s%s\\%s\\%s_%s_%s.%s", kHumanSpriteRoot, kBodyDir, sexToken, jobToken.c_str(), sexToken, weaponToken, extension);
+                std::snprintf(candidate, sizeof(candidate), "%s%s\\%s\\%s_%s_%s.%s", kHumanSpriteRoot, kBodyDir, sexToken, jobToken.c_str(), sexToken, weaponToken, extension);
                 if (hasMatchingBodyResourcePair(candidate)) {
                     std::strcpy(buf, candidate);
                     return buf;
@@ -2930,7 +2930,7 @@ char* CSession::GetJobActName(int job, int sex, char* buf)
     if (!TryBuildExistingPlayerBodyPath("act", jobToken, sex, buf)
         && !TryBuildExistingClassicEnglishPlayerBodyPath("act", job, sex, buf)) {
         const char* sexToken = GetSexToken(sex);
-        std::sprintf(buf, "%s%s\\%s\\%s_%s.act", kHumanSpriteRoot, kBodyDir, sexToken, jobToken.c_str(), sexToken);
+        std::snprintf(buf, 260, "%s%s\\%s\\%s_%s.act", kHumanSpriteRoot, kBodyDir, sexToken, jobToken.c_str(), sexToken);
     }
     return buf;
 }
@@ -2941,7 +2941,7 @@ char* CSession::GetJobSprName(int job, int sex, char* buf)
     if (!TryBuildExistingPlayerBodyPath("spr", jobToken, sex, buf)
         && !TryBuildExistingClassicEnglishPlayerBodyPath("spr", job, sex, buf)) {
         const char* sexToken = GetSexToken(sex);
-        std::sprintf(buf, "%s%s\\%s\\%s_%s.spr", kHumanSpriteRoot, kBodyDir, sexToken, jobToken.c_str(), sexToken);
+        std::snprintf(buf, 260, "%s%s\\%s\\%s_%s.spr", kHumanSpriteRoot, kBodyDir, sexToken, jobToken.c_str(), sexToken);
     }
     return buf;
 }
@@ -2965,7 +2965,7 @@ char* CSession::GetHeadActName(int job, int* head, int sex, char* buf)
     }
     if (!TryBuildExistingHeadPath("act", resolvedHead, sex, buf)) {
         const char* sexToken = GetSexToken(sex);
-        std::sprintf(buf, "%s%s\\%s\\%d_%s.act", kHumanSpriteRoot, kHeadDir, sexToken, resolvedHead, sexToken);
+        std::snprintf(buf, 260, "%s%s\\%s\\%d_%s.act", kHumanSpriteRoot, kHeadDir, sexToken, resolvedHead, sexToken);
     }
     return buf;
 }
@@ -2979,7 +2979,7 @@ char* CSession::GetHeadSprName(int job, int* head, int sex, char* buf)
     }
     if (!TryBuildExistingHeadPath("spr", resolvedHead, sex, buf)) {
         const char* sexToken = GetSexToken(sex);
-        std::sprintf(buf, "%s%s\\%s\\%d_%s.spr", kHumanSpriteRoot, kHeadDir, sexToken, resolvedHead, sexToken);
+        std::snprintf(buf, 260, "%s%s\\%s\\%d_%s.spr", kHumanSpriteRoot, kHeadDir, sexToken, resolvedHead, sexToken);
     }
     return buf;
 }
@@ -3055,7 +3055,7 @@ char* CSession::GetAccessoryActName(int job, int* head, int sex, int accessory, 
 
     const char* sexToken = GetSexToken(sex);
     const char* separator = resourceName.front() == '_' ? "" : "_";
-    std::sprintf(buf, "%s%s\\%s%s%s.act", kAccessorySpriteRoot, sexToken, sexToken, separator, resourceName.c_str());
+    std::snprintf(buf, 260, "%s%s\\%s%s%s.act", kAccessorySpriteRoot, sexToken, sexToken, separator, resourceName.c_str());
     return buf;
 }
 
@@ -3086,7 +3086,7 @@ char* CSession::GetAccessorySprName(int job, int* head, int sex, int accessory, 
 
     const char* sexToken = GetSexToken(sex);
     const char* separator = resourceName.front() == '_' ? "" : "_";
-    std::sprintf(buf, "%s%s\\%s%s%s.spr", kAccessorySpriteRoot, sexToken, sexToken, separator, resourceName.c_str());
+    std::snprintf(buf, 260, "%s%s\\%s%s%s.spr", kAccessorySpriteRoot, sexToken, sexToken, separator, resourceName.c_str());
     return buf;
 }
 
@@ -3097,14 +3097,14 @@ char* CSession::GetImfName(int job, int head, int sex, char* buf)
 
     const std::string resolvedBodyToken = ResolveExistingPlayerBodyJobToken(job, sex);
     if (!resolvedBodyToken.empty()) {
-        std::sprintf(buf, "%s%s_%s.imf", kImfRoot, resolvedBodyToken.c_str(), sexToken);
+        std::snprintf(buf, 260, "%s%s_%s.imf", kImfRoot, resolvedBodyToken.c_str(), sexToken);
         if (ResourceExistsLocalFirst(buf)) {
             return buf;
         }
     }
 
     const std::string fallbackImfToken = ResolvePlayerImfJobToken(job);
-    std::sprintf(buf, "%s%s_%s.imf", kImfRoot, fallbackImfToken.c_str(), sexToken);
+    std::snprintf(buf, 260, "%s%s_%s.imf", kImfRoot, fallbackImfToken.c_str(), sexToken);
     if (ResourceExistsLocalFirst(buf)) {
         return buf;
     }
@@ -3114,13 +3114,13 @@ char* CSession::GetImfName(int job, int head, int sex, char* buf)
         if (imfToken == resolvedBodyToken || imfToken == fallbackImfToken) {
             continue;
         }
-        std::sprintf(buf, "%s%s_%s.imf", kImfRoot, imfToken.c_str(), sexToken);
+        std::snprintf(buf, 260, "%s%s_%s.imf", kImfRoot, imfToken.c_str(), sexToken);
         if (ResourceExistsLocalFirst(buf)) {
             return buf;
         }
     }
 
-    std::sprintf(buf, "%s%s_%s.imf", kImfRoot, fallbackImfToken.c_str(), sexToken);
+    std::snprintf(buf, 260, "%s%s_%s.imf", kImfRoot, fallbackImfToken.c_str(), sexToken);
     return buf;
 }
 
@@ -3128,7 +3128,7 @@ char* CSession::GetBodyPaletteName(int job, int sex, int palNum, char* buf)
 {
     const char* sexToken = GetSexToken(sex);
     const std::string jobToken = ResolvePlayerPaletteJobToken(job);
-    std::sprintf(buf, "%s%s_%s_%d.pal", kBodyPaletteRoot, jobToken.c_str(), sexToken, palNum);
+    std::snprintf(buf, 260, "%s%s_%s_%d.pal", kBodyPaletteRoot, jobToken.c_str(), sexToken, palNum);
     return buf;
 }
 
@@ -3137,7 +3137,7 @@ char* CSession::GetHeadPaletteName(int head, int job, int sex, int palNum, char*
     const int normalizedJob = NormalizeJob(job);
     const int resolvedHead = NormalizeHeadValue(head, normalizedJob);
     const char* sexToken = GetSexToken(sex);
-    std::sprintf(buf, "%s\xB8\xD3\xB8\xAE%d_%s_%d.pal", kHeadPaletteRoot, resolvedHead, sexToken, palNum);
+    std::snprintf(buf, 260, "%s\xB8\xD3\xB8\xAE%d_%s_%d.pal", kHeadPaletteRoot, resolvedHead, sexToken, palNum);
     return buf;
 }
 

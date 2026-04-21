@@ -208,8 +208,8 @@ bool TryResolveNonPcSpritePaths(const char* spriteRoot, const char* jobName, cha
         return false;
     }
 
-    std::sprintf(actPath, "%s%s.act", spriteRoot, jobName);
-    std::sprintf(sprPath, "%s%s.spr", spriteRoot, jobName);
+    std::snprintf(actPath, 260, "%s%s.act", spriteRoot, jobName);
+    std::snprintf(sprPath, 260, "%s%s.spr", spriteRoot, jobName);
     return g_resMgr.IsExist(actPath) && g_resMgr.IsExist(sprPath);
 }
 
@@ -2434,7 +2434,7 @@ bool BuildWeaponOverlayPath(const CGameActor& actor,
     auto buildNumericPath = [&](int numericWeapon) {
         char buffer[512] = {};
         if (secondLayer) {
-            std::sprintf(buffer,
+            std::snprintf(buffer, sizeof(buffer),
                 "%s%s_%s_%d_%s.%s",
                 humanOverlayRoot.c_str(),
                 jobStem.c_str(),
@@ -2443,7 +2443,7 @@ bool BuildWeaponOverlayPath(const CGameActor& actor,
                 kWeaponTokenLightSuffix,
                 extension);
         } else {
-            std::sprintf(buffer,
+            std::snprintf(buffer, sizeof(buffer),
                 "%s%s_%s_%d.%s",
                 humanOverlayRoot.c_str(),
                 jobStem.c_str(),
@@ -2479,7 +2479,7 @@ bool BuildWeaponOverlayPath(const CGameActor& actor,
     for (const std::string& token : tokenCandidates) {
         char buffer[512] = {};
         if (secondLayer) {
-            std::sprintf(buffer,
+            std::snprintf(buffer, sizeof(buffer),
                 "%s%s_%s_%s_%s.%s",
                 humanOverlayRoot.c_str(),
                 jobStem.c_str(),
@@ -2488,7 +2488,7 @@ bool BuildWeaponOverlayPath(const CGameActor& actor,
                 kWeaponTokenLightSuffix,
                 extension);
         } else {
-            std::sprintf(buffer,
+            std::snprintf(buffer, sizeof(buffer),
                 "%s%s_%s_%s.%s",
                 humanOverlayRoot.c_str(),
                 jobStem.c_str(),
@@ -2530,7 +2530,7 @@ bool BuildShieldOverlayPath(const std::string& bodyActName,
     }
 
     char buffer[512] = {};
-    std::sprintf(buffer,
+    std::snprintf(buffer, sizeof(buffer),
         "%s%s\\%s_%s_%s.%s",
         kShieldSpriteRoot,
         jobStem.c_str(),
@@ -2832,7 +2832,7 @@ bool DrawPlayerLayer(BillboardComposeSurface& bitmap,
     if (!motion || resolvedLayer >= static_cast<int>(motion->sprClips.size())) {
         static std::map<std::string, bool> loggedMotionFailures;
         char key[512] = {};
-        std::sprintf(key, "%s|layer=%d|action=%d|motion=%d|resolved=%d", actName.c_str(), layerIndex, curAction, curMotion, resolvedLayer);
+        std::snprintf(key, sizeof(key), "%s|layer=%d|action=%d|motion=%d|resolved=%d", actName.c_str(), layerIndex, curAction, curMotion, resolvedLayer);
         if (loggedMotionFailures.insert(std::make_pair(key, true)).second) {
             DbgLog("[Actor] player layer motion missing act='%s' layer=%d action=%d motion=%d resolvedLayer=%d clipCount=%d\n",
                 actName.c_str(),
@@ -3203,8 +3203,8 @@ bool ResolveNonPcSpritePaths(int job, char* actPath, char* sprPath)
             const char* const spriteRoot = (job >= 6017 && job <= 6046)
                 ? "data\\sprite\\mercenary\\"
                 : "data\\sprite\\homun\\";
-            std::sprintf(actPath, "%s%s.act", spriteRoot, spriteName);
-            std::sprintf(sprPath, "%s%s.spr", spriteRoot, spriteName);
+            std::snprintf(actPath, 260, "%s%s.act", spriteRoot, spriteName);
+            std::snprintf(sprPath, 260, "%s%s.spr", spriteRoot, spriteName);
             return true;
         }
 
@@ -3218,8 +3218,8 @@ bool ResolveNonPcSpritePaths(int job, char* actPath, char* sprPath)
             return true;
         }
 
-        std::sprintf(actPath, "%s%s.act", "data\\sprite\\monster\\", spriteName);
-        std::sprintf(sprPath, "%s%s.spr", "data\\sprite\\monster\\", spriteName);
+        std::snprintf(actPath, 260, "%s%s.act", "data\\sprite\\monster\\", spriteName);
+        std::snprintf(sprPath, 260, "%s%s.spr", "data\\sprite\\monster\\", spriteName);
         return true;
     }
 
@@ -3232,15 +3232,15 @@ bool ResolveNonPcSpritePaths(int job, char* actPath, char* sprPath)
     }
 
     char numericName[32] = {};
-    std::sprintf(numericName, "%d", job);
+    std::snprintf(numericName, sizeof(numericName), "%d", job);
     if (TryResolveNonPcSpritePaths("data\\sprite\\NPC\\", numericName, actPath, sprPath)
         || TryResolveNonPcSpritePaths("data\\sprite\\npc\\", numericName, actPath, sprPath)
         || TryResolveNonPcSpritePaths("data\\sprite\\", numericName, actPath, sprPath)) {
         return true;
     }
 
-    std::sprintf(actPath, "%s%s.act", "data\\sprite\\npc\\", numericName);
-    std::sprintf(sprPath, "%s%s.spr", "data\\sprite\\npc\\", numericName);
+    std::snprintf(actPath, 260, "%s%s.act", "data\\sprite\\npc\\", numericName);
+    std::snprintf(sprPath, 260, "%s%s.spr", "data\\sprite\\npc\\", numericName);
     return true;
 }
 

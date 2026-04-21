@@ -731,6 +731,11 @@ inline short GetKeyState(int)
     return 0;
 }
 
+inline short GetAsyncKeyState(int)
+{
+    return 0;
+}
+
 inline HWND GetCapture()
 {
     return nullptr;
