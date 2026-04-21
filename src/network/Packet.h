@@ -651,21 +651,21 @@ struct PACKET_CZ_SHORTCUT_KEY_CHANGE {
 
 // Legacy PCBANG login
 struct PACKET_CA_LOGIN_PCBANG {
-    short PacketType;
-    unsigned long Version;
+    u16 PacketType;
+    u32 Version;
     char ID[24];
     char Passwd[24];
-    unsigned char clienttype;
+    u8 clienttype;
     char IP[16];
     char Mac[13];
 };
 
 struct PACKET_CA_LOGIN4 {
-    short PacketType;
-    unsigned long Version;
+    u16 PacketType;
+    u32 Version;
     char ID[24];
-    unsigned char PasswdMD5[16];
-    unsigned char clienttype;
+    u8 PasswdMD5[16];
+    u8 clienttype;
     char Mac[13];
 };
 
