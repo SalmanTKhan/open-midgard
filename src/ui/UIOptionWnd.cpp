@@ -1836,6 +1836,15 @@ void UIOptionWnd::OnDraw()
                 case GraphicsRow_AnisotropicFiltering:
                     label = "Anisotropic";
                     break;
+                case GraphicsRow_Skin:
+                    label = "Skin";
+                    break;
+                case GraphicsRow_Theme:
+                    label = "Theme";
+                    break;
+                case GraphicsRow_ShopRowHeight:
+                    label = "Shop row height";
+                    break;
                 }
                 DrawSettingRow(hdc, static_cast<int>(index), label, GetGraphicsRowValue(rows[index]));
             }
