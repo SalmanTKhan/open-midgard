@@ -79,6 +79,8 @@ u32 g_lastLocalLevelUpEffectTick = 0;
 u32 g_lastSelfLevelUpStatusTick = 0;
 u32 g_lastSelfLevelUpStatusType = 0;
 bool g_loggedPacketVer22NameRequestDefer = false;
+bool g_localCartInfoKnown = false;
+int g_localCartEffectStateMask = 0;
 
 void RegisterHandlerIfValid(CGameModePacketRouter& router, u16 packetId, CGameModePacketRouter::Handler handler)
 {
@@ -146,6 +148,7 @@ constexpr u32 kStatusSkillPoint = 12;
 constexpr u32 kStatusZeny = 20;
 constexpr u32 kStatusNextBaseExp = 22;
 constexpr u32 kStatusNextJobExp = 23;
+constexpr u32 kStatusCartInfo = 99;
 constexpr u32 kStatusStr = 13;
 constexpr u32 kStatusAgi = 14;
 constexpr u32 kStatusVit = 15;
@@ -180,6 +183,7 @@ constexpr int kEffectStateRuwachMask = 0x2000;
 constexpr int kEffectStateHidingMask = 0x0004;
 constexpr int kEffectStateSpecialHidingMask = 0x0040;
 constexpr int kEffectStateBurrowMask = 0x0002;
+constexpr int kEffectStatePushCartMask = 0x0008 | 0x0080 | 0x0100 | 0x0200 | 0x0400;
 constexpr int kSightStateEffectId = 601;
 constexpr int kHideStartEffectId = 159;
 constexpr u32 kHideFadeDurationMs = 180;
@@ -228,6 +232,67 @@ bool IsPendingLocalHideSkillRequestActive(u32 now)
 }
 
 void RefreshActorEffectStatePresentation(CGameActor* actor, int oldEffectState);
+
+void InvalidateCartUi()
+{
+    if (g_windowMgr.m_equipWnd) {
+        g_windowMgr.m_equipWnd->Invalidate();
+    }
+}
+
+void UpdateKnownLocalCartState(bool active, int effectState = 0)
+{
+    g_localCartInfoKnown = true;
+    if (!active) {
+        g_localCartEffectStateMask = 0;
+        return;
+    }
+
+    const int resolvedMask = effectState & kEffectStatePushCartMask;
+    if (resolvedMask != 0) {
+        g_localCartEffectStateMask = resolvedMask;
+    } else if (g_localCartEffectStateMask == 0) {
+        g_localCartEffectStateMask = 0x0008;
+    }
+}
+
+void ApplyLocalCartStateToActor(CGameActor* actor)
+{
+    if (!actor || !g_localCartInfoKnown) {
+        return;
+    }
+
+    const int oldEffectState = actor->m_effectState;
+    int newEffectState = oldEffectState;
+    const bool localCartActive = (g_localCartEffectStateMask & kEffectStatePushCartMask) != 0;
+    bool needsPresentationRefresh = false;
+    if (localCartActive) {
+        newEffectState &= ~kEffectStatePushCartMask;
+        newEffectState |= g_localCartEffectStateMask;
+        needsPresentationRefresh = actor->m_cartEffect == nullptr;
+    } else {
+        newEffectState &= ~kEffectStatePushCartMask;
+        needsPresentationRefresh = actor->m_cartEffect != nullptr;
+    }
+
+    if (newEffectState == oldEffectState && !needsPresentationRefresh) {
+        return;
+    }
+
+    actor->m_effectState = newEffectState;
+    const int presentationOldEffectState = (newEffectState != oldEffectState || !needsPresentationRefresh)
+        ? oldEffectState
+        : (localCartActive
+            ? (oldEffectState & ~kEffectStatePushCartMask)
+            : (oldEffectState | kEffectStatePushCartMask));
+    RefreshActorEffectStatePresentation(actor, presentationOldEffectState);
+    InvalidateCartUi();
+    DbgLog("[GameMode] local cart fallback active=%d mask=0x%X old=0x%X new=0x%X\n",
+        localCartActive ? 1 : 0,
+        g_localCartEffectStateMask,
+        oldEffectState,
+        newEffectState);
+}
 
 void ClearPendingLocalHideSkillRequest()
 {
@@ -283,6 +348,48 @@ bool HasEffectStateFlag(int effectState, int mask)
     return (effectState & mask) != 0;
 }
 
+bool IsEffectStatePushCart(int effectState)
+{
+    return (effectState & kEffectStatePushCartMask) != 0;
+}
+
+bool IsEffectStatePushCartChanged(int effectState, int oldEffectState)
+{
+    return ((effectState ^ oldEffectState) & kEffectStatePushCartMask) != 0;
+}
+
+bool IsBabyCartJob(int job)
+{
+    return job == 4028 || job == 4033 || job == 4041;
+}
+
+int ResolvePushCartEffectType(const CGameActor& actor)
+{
+    const int effectState = actor.m_effectState;
+    if ((effectState & 0x0008) != 0) {
+        if (actor.m_job == 23) {
+            return 0x15;
+        }
+        if (actor.m_job == 4045) {
+            return 0x1E;
+        }
+        return IsBabyCartJob(actor.m_job) ? 0x19 : 1;
+    }
+    if ((effectState & 0x0080) != 0) {
+        return IsBabyCartJob(actor.m_job) ? 0x1A : 0x10;
+    }
+    if ((effectState & 0x0100) != 0) {
+        return IsBabyCartJob(actor.m_job) ? 0x1B : 0x11;
+    }
+    if ((effectState & 0x0200) != 0) {
+        return IsBabyCartJob(actor.m_job) ? 0x1C : 0x12;
+    }
+    if ((effectState & 0x0400) != 0) {
+        return IsBabyCartJob(actor.m_job) ? 0x1D : 0x13;
+    }
+    return 0;
+}
+
 void RecordLocalHideSkillRequest(u16 skillId, u32 targetGid)
 {
     const int mask = ResolveHideSkillEffectStateMask(skillId);
@@ -325,8 +432,11 @@ void RefreshActorEffectStatePresentation(CGameActor* actor, int oldEffectState)
     const bool hiding = HasEffectStateFlag(effectState, kEffectStateHidingMask);
     const bool specialHiding = HasEffectStateFlag(effectState, kEffectStateSpecialHidingMask);
     const bool burrow = HasEffectStateFlag(effectState, kEffectStateBurrowMask);
+    const bool pushCartChanged = IsEffectStatePushCartChanged(effectState, oldEffectState);
+    const bool hasPushCart = IsEffectStatePushCart(effectState);
     const bool bodyVisible = !(hiding || specialHiding || burrow);
     const bool fullyVisible = !(hiding || specialHiding);
+    const bool suppressPushCart = hiding || specialHiding || burrow;
     const bool enteredHidden = (!oldHiding && hiding) || (!oldSpecialHiding && specialHiding);
     const bool exitedHidden = (oldHiding && !hiding) || (oldSpecialHiding && !specialHiding);
 
@@ -347,6 +457,17 @@ void RefreshActorEffectStatePresentation(CGameActor* actor, int oldEffectState)
 
     if (HasEffectStateFlag(effectState, kEffectStateSightMask) && !ActorHasAttachedEffect(actor, kSightStateEffectId)) {
         actor->LaunchEffect(kSightStateEffectId, vector3d{}, 0.0f);
+    }
+
+    if ((pushCartChanged || suppressPushCart || !hasPushCart) && actor->m_cartEffect) {
+        actor->SendMsg(actor, 52, 0, 0, 0);
+    }
+
+    if (hasPushCart && !suppressPushCart && !actor->m_cartEffect) {
+        const int cartEffectType = ResolvePushCartEffectType(*actor);
+        if (cartEffectType != 0) {
+            actor->SendMsg(actor, 51, cartEffectType, 0, 0);
+        }
     }
 
     const bool hadRuwach = HasEffectStateFlag(oldEffectState, kEffectStateRuwachMask);
@@ -2332,6 +2453,12 @@ void HandleUnequipItemAck(CGameMode& mode, const PacketView& packet)
 bool ApplySelfStatusUpdate(CGameMode& mode, u32 statusType, u32 value)
 {
     const bool updatedSession = ApplySelfStatusUpdateToSession(statusType, value);
+    if (statusType == kStatusCartInfo) {
+        UpdateKnownLocalCartState(true);
+        ApplyPendingLocalCartState(mode);
+        return true;
+    }
+
     if (!mode.m_world || !mode.m_world->m_player) {
         return updatedSession;
     }
@@ -2854,20 +2981,27 @@ std::string ExtractFixedPacketString(const PacketView& packet, size_t offset, si
     return std::string(reinterpret_cast<const char*>(packet.data + offset), len);
 }
 
-std::vector<std::string> SplitNpcMenuOptions(const std::string& text)
+struct NpcMenuOption {
+    std::string text;
+    u8 choice = 0;
+};
+
+std::vector<NpcMenuOption> SplitNpcMenuOptions(const std::string& text)
 {
-    std::vector<std::string> options;
+    std::vector<NpcMenuOption> options;
     size_t start = 0;
+    int choice = 1;
     while (start <= text.size()) {
         const size_t separator = text.find(':', start);
         const size_t end = (separator == std::string::npos) ? text.size() : separator;
-        if (end > start) {
-            options.push_back(text.substr(start, end - start));
+        if (end > start && choice <= 0xFE) {
+            options.push_back(NpcMenuOption{ text.substr(start, end - start), static_cast<u8>(choice) });
         }
         if (separator == std::string::npos) {
             break;
         }
         start = separator + 1;
+        ++choice;
     }
     return options;
 }
@@ -2948,7 +3082,16 @@ void HandleNpcDialogMenu(CGameMode&, const PacketView& packet)
     }
 
     const u32 npcId = ReadLE32(packet.data + 4);
-    const std::vector<std::string> options = SplitNpcMenuOptions(ExtractPacketString(packet, 8));
+    const std::string menuText = ExtractPacketString(packet, 8);
+    const std::vector<NpcMenuOption> parsedOptions = SplitNpcMenuOptions(menuText);
+    std::vector<std::string> options;
+    std::vector<u8> optionChoices;
+    options.reserve(parsedOptions.size());
+    optionChoices.reserve(parsedOptions.size());
+    for (const NpcMenuOption& option : parsedOptions) {
+        options.push_back(option.text);
+        optionChoices.push_back(option.choice);
+    }
     if (g_windowMgr.m_sayDialogWnd) {
         g_windowMgr.m_sayDialogWnd->ClearAction();
     }
@@ -2956,9 +3099,14 @@ void HandleNpcDialogMenu(CGameMode&, const PacketView& packet)
         g_windowMgr.m_npcInputWnd->HideInput();
     }
 
+    DbgLog("[GameMode] npc menu recv npc=%u raw='%s' visible=%u\n",
+        static_cast<unsigned int>(npcId),
+        menuText.c_str(),
+        static_cast<unsigned int>(options.size()));
+
     auto* menuWnd = static_cast<UINpcMenuWnd*>(g_windowMgr.MakeWindow(UIWindowMgr::WID_NPCMENUWND));
     if (menuWnd) {
-        menuWnd->SetMenu(npcId, options);
+        menuWnd->SetMenu(npcId, options, optionChoices);
     }
 }
 
@@ -5422,6 +5570,7 @@ struct RuntimeActorState {
     int dir = 0;
     u8 objectType = 0;
     bool hasPosition = false;
+    bool positionIsFixed = false;
 };
 
 CGameActor* EnsureRuntimeActor(CGameMode& mode, u32 gid, bool preferPc = false);
@@ -5477,6 +5626,7 @@ int ScoreLegacyActorState(const RuntimeActorState& state, bool hasObjectType)
 }
 
 void UpdateRuntimeActorPosition(CGameMode& mode, u32 gid, int tileX, int tileY, int srcX = -1, int srcY = -1);
+void ApplyRuntimeActorFixPosition(CGameMode& mode, u32 gid, int tileX, int tileY);
 
     bool FindActivePathSegmentForPacketView(const CPathInfo& path, u32 now, size_t* outStartIndex)
     {
@@ -5800,7 +5950,29 @@ void ApplyRuntimeActorState(CGameMode& mode, const RuntimeActorState& state)
     actor->m_actorType = state.objectType;
     actor->m_isPc = isPc ? 1 : 0;
     actor->m_roty = PacketDirToRotationDegrees(state.dir);
+
+    if (state.hasPosition) {
+        mode.m_actorPosList[state.gid] = CellPos{state.tileX, state.tileY};
+        if (state.positionIsFixed) {
+            ApplyRuntimeActorFixPosition(mode, state.gid, state.tileX, state.tileY);
+        } else {
+            UpdateRuntimeActorPosition(mode, state.gid, state.tileX, state.tileY);
+        }
+    }
+
+    const bool localPlayer = IsLocalPlayerActor(mode, state.gid);
+
+    if (localPlayer && IsEffectStatePushCart(state.effectState)) {
+        UpdateKnownLocalCartState(true, state.effectState);
+    }
+
     RefreshActorEffectStatePresentation(actor, oldEffectState);
+    if (localPlayer && IsEffectStatePushCartChanged(actor->m_effectState, oldEffectState)) {
+        InvalidateCartUi();
+    }
+    if (localPlayer) {
+        ApplyPendingLocalCartState(mode);
+    }
 
     if (isPc) {
         mode.m_lastPcGid = state.gid;
@@ -5840,11 +6012,6 @@ void ApplyRuntimeActorState(CGameMode& mode, const RuntimeActorState& state)
         StartSitStandAnimation(actor, false);
     } else if (CPc* pcActor = dynamic_cast<CPc*>(actor)) {
         pcActor->InvalidateBillboard();
-    }
-
-    if (state.hasPosition) {
-        mode.m_actorPosList[state.gid] = CellPos{state.tileX, state.tileY};
-        UpdateRuntimeActorPosition(mode, state.gid, state.tileX, state.tileY);
     }
 }
 
@@ -5920,6 +6087,7 @@ bool DecodeActorIdleOrSpawnPacket(const PacketView& packet, RuntimeActorState& o
         outState.sex = packet.data[36];
         DecodePosDir(packet.data + 37, outState.tileX, outState.tileY, outState.dir);
         outState.hasPosition = true;
+        outState.positionIsFixed = true;
         return true;
     }
 
@@ -5972,6 +6140,7 @@ bool DecodeActorIdleOrSpawnPacket(const PacketView& packet, RuntimeActorState& o
             state.clevel = ReadLE16(packet.data + levelOffset);
             DecodePosDir(packet.data + 46 + shift, state.tileX, state.tileY, state.dir);
             state.hasPosition = true;
+            state.positionIsFixed = true;
         };
 
         RuntimeActorState classicState;
@@ -6058,6 +6227,7 @@ bool DecodeActorIdleOrSpawnPacket(const PacketView& packet, RuntimeActorState& o
         outState.ySize = packet.data[ySizeOffset];
         DecodePosDir(packet.data + posOffset, outState.tileX, outState.tileY, outState.dir);
         outState.hasPosition = true;
+        outState.positionIsFixed = true;
         return true;
     }
 
@@ -6141,6 +6311,7 @@ bool DecodeActorIdleOrSpawnPacket(const PacketView& packet, RuntimeActorState& o
     outState.ySize = packet.data[ySizeOffset];
     DecodePosDir(packet.data + posOffset, outState.tileX, outState.tileY, outState.dir);
     outState.hasPosition = true;
+    outState.positionIsFixed = true;
     return true;
 }
 
@@ -6391,6 +6562,37 @@ void HandleActorDirection(CGameMode& mode, const PacketView& packet)
     }
 }
 
+void HandleCartInfo(CGameMode& mode, const PacketView& packet)
+{
+    if (!packet.data || packet.packetLength < 14) {
+        return;
+    }
+
+    const u16 count = ReadLE16(packet.data + 2);
+    const u16 maxCount = ReadLE16(packet.data + 4);
+    const u32 weight = ReadLE32(packet.data + 6);
+    const u32 maxWeight = ReadLE32(packet.data + 10);
+    UpdateKnownLocalCartState(true);
+    ApplyPendingLocalCartState(mode);
+    DbgLog("[GameMode] cart info count=%u/%u weight=%u/%u\n",
+        static_cast<unsigned int>(count),
+        static_cast<unsigned int>(maxCount),
+        static_cast<unsigned int>(weight),
+        static_cast<unsigned int>(maxWeight));
+}
+
+void HandleCartOff(CGameMode& mode, const PacketView& packet)
+{
+    if (!packet.data || packet.packetLength < 2) {
+        return;
+    }
+
+    UpdateKnownLocalCartState(false);
+    ApplyPendingLocalCartState(mode);
+    InvalidateCartUi();
+    DbgLog("[GameMode] cart cleared\n");
+}
+
 void HandleActorStateChange(CGameMode& mode, const PacketView& packet)
 {
     if (!packet.data) {
@@ -6442,7 +6644,17 @@ void HandleActorStateChange(CGameMode& mode, const PacketView& packet)
     actor->m_healthState = healthState;
     actor->m_effectState = effectState;
     actor->m_pkState = pkState;
+    const bool localPlayer = IsLocalPlayerActor(mode, gid);
+    if (localPlayer) {
+        UpdateKnownLocalCartState(IsEffectStatePushCart(effectState), effectState);
+    }
     RefreshActorEffectStatePresentation(actor, oldEffectState);
+    if (localPlayer && IsEffectStatePushCartChanged(actor->m_effectState, oldEffectState)) {
+        InvalidateCartUi();
+    }
+    if (localPlayer) {
+        ApplyPendingLocalCartState(mode);
+    }
 
     if (IsLocalActorId(gid)
         && IsPendingLocalHideSkillRequestActive(timeGetTime())
@@ -6466,12 +6678,36 @@ CGameActor* EnsureRuntimeActor(CGameMode& mode, u32 gid, bool preferPc)
                 return existing;
             }
 
+            const std::list<CMsgEffect*> preservedMsgEffects = existing->m_msgEffectList;
+            CMsgEffect* const preservedBirdEffect = existing->m_birdEffect;
+            CMsgEffect* const preservedCartEffect = existing->m_cartEffect;
+            CMsgEffect* const preservedLastDamageNumber = existing->m_lastDamageNumberEffect;
             static_cast<CGameActor&>(*upgraded) = *existing;
-            upgraded->m_birdEffect = nullptr;
+            upgraded->m_birdEffect = preservedBirdEffect;
+            upgraded->m_cartEffect = preservedCartEffect;
+            upgraded->m_lastDamageNumberEffect = preservedLastDamageNumber;
             upgraded->m_effectList.clear();
             upgraded->m_beginSpellEffect = nullptr;
             upgraded->m_magicTargetEffect = nullptr;
-            upgraded->m_msgEffectList.clear();
+            upgraded->m_msgEffectList = preservedMsgEffects;
+            for (CMsgEffect* effect : upgraded->m_msgEffectList) {
+                if (!effect) {
+                    continue;
+                }
+
+                effect->m_masterActor = upgraded;
+                effect->m_removedFromOwner = 0;
+                if (effect == upgraded->m_cartEffect) {
+                    effect->m_followInitialized = 0;
+                    effect->m_followRenderInitialized = 0;
+                    effect->m_followLastRenderFrame = 0;
+                    effect->m_followRenderTick = 0;
+                }
+            }
+            existing->m_birdEffect = nullptr;
+            existing->m_cartEffect = nullptr;
+            existing->m_lastDamageNumberEffect = nullptr;
+            existing->m_msgEffectList.clear();
             existing->UnRegisterPos();
             delete existing;
 
@@ -7438,6 +7674,25 @@ void ReturnToLoginMode()
 
 } // namespace
 
+void ApplyPendingLocalCartState(CGameMode& mode)
+{
+    if (!mode.m_world || !mode.m_world->m_player) {
+        return;
+    }
+
+    ApplyLocalCartStateToActor(mode.m_world->m_player);
+}
+
+void PrimeLocalCartStateFromEffectState(int effectState)
+{
+    UpdateKnownLocalCartState(IsEffectStatePushCart(effectState), effectState);
+}
+
+bool IsKnownLocalCartActive()
+{
+    return g_localCartInfoKnown && (g_localCartEffectStateMask & kEffectStatePushCartMask) != 0;
+}
+
 void SetPendingDisconnectAction(PendingDisconnectAction action)
 {
     g_pendingDisconnectAction = action;
@@ -7622,7 +7877,7 @@ void HandleActorSpawnSkeleton(CGameMode& mode, const PacketView& packet)
         int sx = 0, sy = 0, dx = 0, dy = 0, sdir = 0, ddir = 0;
         DecodeSrcDst(packet.data + 6, sx, sy, dx, dy, sdir, ddir);
         mode.m_actorPosList[gid] = CellPos{dx, dy};
-        UpdateRuntimeActorPosition(mode, gid, dx, dy, sx, sy);
+        ApplyRuntimeActorFixPosition(mode, gid, dx, dy);
     }
 }
 
@@ -8261,6 +8516,8 @@ void RegisterDefaultGameModePacketHandlers(CGameModePacketRouter& router)
     router.Register(0x0139, HandleAttackFailureForDistance);
     router.Register(0x013A, HandleAttackRange);
     RegisterHandlerIfValid(router, receiveProfile.actorStateChangeExtended, HandleActorStateChange);
+    router.Register(0x0121, HandleCartInfo);
+    router.Register(0x012B, HandleCartOff);
 
     // Chat/system text pathways.
     router.Register(0x008D, HandleNotifyChat);

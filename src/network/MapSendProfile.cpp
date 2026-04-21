@@ -100,6 +100,8 @@ MapGameplaySendProfile MakePacketVer23Profile()
         "packetver23",
         PacketProfile::PacketVer23MapServerSend::kActionRequest,
         PacketProfile::PacketVer23MapServerSend::kUseSkillToId,
+        PacketProfile::PacketVer23MapServerSend::kCartOff,
+        PacketProfile::PacketVer23MapServerSend::kChangeCart,
         PacketProfile::PacketVer23MapServerSend::kUseSkillToPos,
         PacketProfile::PacketVer23MapServerSend::kUseSkillMap,
         PacketProfile::PacketVer23MapServerSend::kUseItem,
@@ -128,6 +130,8 @@ MapGameplaySendProfile MakePacketVer22Profile()
         "packetver22",
         PacketProfile::PacketVer22MapServerSend::kActionRequest,
         PacketProfile::PacketVer22MapServerSend::kUseSkillToId,
+        PacketProfile::PacketVer22MapServerSend::kCartOff,
+        PacketProfile::PacketVer22MapServerSend::kChangeCart,
         PacketProfile::PacketVer22MapServerSend::kUseSkillToPos,
         PacketProfile::PacketVer22MapServerSend::kUseSkillMap,
         PacketProfile::PacketVer22MapServerSend::kUseItem,
@@ -156,6 +160,8 @@ MapGameplaySendProfile MakeLegacyGameplayProfile()
         "legacy0072",
         0x0089,
         0x0113,
+        PacketProfile::PacketVer23MapServerSend::kCartOff,
+        PacketProfile::PacketVer23MapServerSend::kChangeCart,
         0x0116,
         0x011B,
         0x00A7,
@@ -871,6 +877,40 @@ bool BuildActiveUseSkillToIdPacket(u16 skillId,
     packet.SkillId = skillId;
     packet.SkillLevel = skillLevel;
     packet.TargetGID = targetGid;
+    std::memcpy(outBuffer, &packet, sizeof(packet));
+    *outPacketLength = static_cast<int>(sizeof(packet));
+    return true;
+}
+
+bool BuildActiveCartOffPacket(void* outBuffer,
+    int outBufferSize,
+    int* outPacketLength)
+{
+    if (!outBuffer || !outPacketLength || outBufferSize < static_cast<int>(sizeof(PACKET_CZ_REQ_CARTOFF))) {
+        return false;
+    }
+
+    const MapGameplaySendProfile& profile = GetActiveMapGameplaySendProfile();
+    PACKET_CZ_REQ_CARTOFF packet{};
+    packet.PacketType = profile.cartOff;
+    std::memcpy(outBuffer, &packet, sizeof(packet));
+    *outPacketLength = static_cast<int>(sizeof(packet));
+    return true;
+}
+
+bool BuildActiveChangeCartPacket(u16 type,
+    void* outBuffer,
+    int outBufferSize,
+    int* outPacketLength)
+{
+    if (!outBuffer || !outPacketLength || outBufferSize < static_cast<int>(sizeof(PACKET_CZ_REQ_CHANGECART))) {
+        return false;
+    }
+
+    const MapGameplaySendProfile& profile = GetActiveMapGameplaySendProfile();
+    PACKET_CZ_REQ_CHANGECART packet{};
+    packet.PacketType = profile.changeCart;
+    packet.Type = type;
     std::memcpy(outBuffer, &packet, sizeof(packet));
     *outPacketLength = static_cast<int>(sizeof(packet));
     return true;

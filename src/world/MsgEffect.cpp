@@ -11,6 +11,7 @@
 #include "res/ActRes.h"
 #include "res/Sprite.h"
 #include "res/Res.h"
+#include "session/Session.h"
 
 #include <algorithm>
 #include <array>
@@ -28,9 +29,31 @@ constexpr const char* kDamageNumberSpritePath = "data\\sprite\\\xC0\xCC\xC6\xD1\
 constexpr const char* kDamageNumberActPath = "data\\sprite\\\xC0\xCC\xC6\xD1\xC6\xAE\\\xBC\xFD\xC0\xDA.act";
 constexpr const char* kMissEffectSpritePath = "data\\sprite\\\xC0\xCC\xC6\xD1\xC6\xAE\\msg.spr";
 constexpr const char* kMissEffectActPath = "data\\sprite\\\xC0\xCC\xC6\xD1\xC6\xAE\\msg.act";
+constexpr int kAttachedActorSpriteMsgEffectType = 203;
 constexpr int kMissMsgEffectType = 13;
 constexpr int kCriticalMsgEffectType = 15;
 constexpr int kLuckyDodgeMsgEffectType = 17;
+constexpr float kAttachedActorSpriteDepthBias = 0.00015f;
+constexpr float kAttachedActorSpriteWorldWidthCells = 2.0f;
+constexpr float kAttachedActorDepthWorldBiasScale = 0.35f;
+constexpr float kAttachedActorDepthWorldBiasMin = 0.75f;
+constexpr float kAttachedActorDepthWorldBiasMax = 3.0f;
+constexpr float kAttachedActorDepthHeightBiasFactor = 0.45f;
+constexpr float kAttachedActorTopDepthForwardBiasScale = 0.85f;
+constexpr float kFallbackWorldTileSize = 5.0f;
+constexpr float kAttachedActorRenderLeashScale = 1.65f;
+constexpr float kAttachedActorRenderLagMs = 110.0f;
+constexpr float kAttachedActorRenderLagMinMs = 70.0f;
+constexpr float kAttachedActorRenderLagMaxMs = 220.0f;
+constexpr float kAttachedActorTrailSampleMs = 45.0f;
+
+bool ShouldTraceAttachedCartEffect(const CMsgEffect& effect)
+{
+    return effect.m_msgEffectType == kAttachedActorSpriteMsgEffectType
+        && effect.m_masterActor != nullptr
+        && effect.m_masterActor->m_gid != 0
+        && effect.m_masterActor->m_gid != g_session.m_gid;
+}
 
 struct QueuedMsgEffectDraw {
     int screenX = 0;
@@ -47,16 +70,46 @@ struct QueuedMsgSpriteEffectDraw {
     int screenY = 0;
     int actionIndex = 0;
     int motionIndex = 0;
+    std::string spritePath;
+    std::string actPath;
     u32 colorArgb = 0xFFFFFFFFu;
     int alpha = 255;
     float zoom = 1.0f;
     float alphaSortBase = 1.7f;
+    float projectedZ = 0.0f;
+    float projectedOow = 1.0f;
+    float pixelsPerTile = 0.0f;
+    float desiredWorldWidthCells = 0.0f;
+    bool useProjectedDepth = false;
+    bool usePerspectiveScale = false;
+    bool bypassZoomClamp = false;
 };
 
 std::vector<QueuedMsgEffectDraw> g_queuedMsgEffects;
 std::vector<QueuedMsgSpriteEffectDraw> g_queuedMsgSpriteEffects;
 
+CSprRes* GetMissEffectSprite();
 CActRes* GetMissEffectAct();
+
+bool ResolveMsgSpriteResources(const std::string& spritePath,
+    const std::string& actPath,
+    CSprRes** outSprite,
+    CActRes** outAct)
+{
+    if (!outSprite || !outAct) {
+        return false;
+    }
+
+    if (!spritePath.empty() && !actPath.empty()) {
+        *outSprite = g_resMgr.GetAs<CSprRes>(spritePath.c_str());
+        *outAct = g_resMgr.GetAs<CActRes>(actPath.c_str());
+    } else {
+        *outSprite = GetMissEffectSprite();
+        *outAct = GetMissEffectAct();
+    }
+
+    return *outSprite != nullptr && *outAct != nullptr;
+}
 
 bool ContainsAsciiCaseInsensitive(const char* text, const char* token)
 {
@@ -237,6 +290,176 @@ float ResolveDigitScale(float zoom)
 float ResolveMsgSpriteScale(float zoom)
 {
     return (std::max)(0.75f, (std::min)(2.0f, zoom));
+}
+
+float ResolveWorldTileSize(const CWorld* world)
+{
+    if (!world) {
+        return kFallbackWorldTileSize;
+    }
+
+    if (world->m_attr) {
+        return static_cast<float>(world->m_attr->m_zoom);
+    }
+    if (world->m_ground) {
+        return static_cast<float>(world->m_ground->m_zoom);
+    }
+    return kFallbackWorldTileSize;
+}
+
+float ResolveWorldGroundHeight(const CWorld* world, float x, float z)
+{
+    return (world && world->m_attr) ? world->m_attr->GetHeight(x, z) : 0.0f;
+}
+
+float TileToWorldCoordXForMsgEffect(const CWorld* world, int tileX)
+{
+    const int width = world && world->m_attr ? world->m_attr->m_width : (world && world->m_ground ? world->m_ground->m_width : 0);
+    const float zoom = ResolveWorldTileSize(world);
+    return (static_cast<float>(tileX) - static_cast<float>(width) * 0.5f) * zoom + zoom * 0.5f;
+}
+
+float TileToWorldCoordZForMsgEffect(const CWorld* world, int tileY)
+{
+    const int height = world && world->m_attr ? world->m_attr->m_height : (world && world->m_ground ? world->m_ground->m_height : 0);
+    const float zoom = ResolveWorldTileSize(world);
+    return (static_cast<float>(tileY) - static_cast<float>(height) * 0.5f) * zoom + zoom * 0.5f;
+}
+
+bool FindActivePathSegmentForMsgEffect(const CPathInfo& path, u32 now, size_t* outStartIndex)
+{
+    if (path.m_cells.size() < 2 || !outStartIndex) {
+        return false;
+    }
+
+    for (size_t index = 1; index < path.m_cells.size(); ++index) {
+        if (now < path.m_cells[index].arrivalTime) {
+            *outStartIndex = index - 1;
+            return true;
+        }
+    }
+
+    *outStartIndex = path.m_cells.size() - 2;
+    return true;
+}
+
+bool ResolveActorInterpolatedPositionForMsgEffect(const CGameActor& actor, u32 now, vector3d* outPos);
+float ResolveActorFacingRotationForMsgEffect(const CGameActor& actor, u32 now);
+
+bool ResolveAttachedActorTrailPosition(const CGameActor& actor, u32 now, vector3d* outPos)
+{
+    if (!outPos) {
+        return false;
+    }
+
+    const CWorld* world = &g_world;
+    const float followDistance = ResolveWorldTileSize(world);
+    if (followDistance <= 0.0f) {
+        return false;
+    }
+
+    float dirX = 0.0f;
+    float dirZ = 0.0f;
+    bool hasDirection = false;
+    size_t startIndex = 0;
+    if (actor.m_path.m_cells.size() >= 2
+        && FindActivePathSegmentForMsgEffect(actor.m_path, now, &startIndex)) {
+        const PathCell& startCell = actor.m_path.m_cells[startIndex];
+        const PathCell& endCell = actor.m_path.m_cells[startIndex + 1];
+        const float startX = startIndex == 0
+            ? actor.m_moveStartPos.x
+            : TileToWorldCoordXForMsgEffect(world, startCell.x);
+        const float startZ = startIndex == 0
+            ? actor.m_moveStartPos.z
+            : TileToWorldCoordZForMsgEffect(world, startCell.y);
+        const float endX = TileToWorldCoordXForMsgEffect(world, endCell.x);
+        const float endZ = TileToWorldCoordZForMsgEffect(world, endCell.y);
+        const float deltaX = endX - startX;
+        const float deltaZ = endZ - startZ;
+        const float length = std::sqrt(deltaX * deltaX + deltaZ * deltaZ);
+        if (length > 0.001f) {
+            dirX = deltaX / length;
+            dirZ = deltaZ / length;
+            hasDirection = true;
+        }
+    }
+
+    *outPos = actor.m_pos;
+    if (hasDirection) {
+        outPos->x -= dirX * followDistance;
+        outPos->z -= dirZ * followDistance;
+    } else {
+        const float radians = actor.m_roty * (3.14159265f / 180.0f);
+        outPos->x -= std::sin(radians) * followDistance;
+        outPos->z += std::cos(radians) * followDistance;
+    }
+    outPos->y = ResolveWorldGroundHeight(world, outPos->x, outPos->z);
+    return true;
+}
+
+void ResolveAttachedActorIdlePosition(const CGameActor& actor, u32 now, vector3d* outPos)
+{
+    if (!outPos) {
+        return;
+    }
+
+    (void)now;
+    *outPos = actor.m_pos;
+    const float radians = actor.m_roty * (3.14159265f / 180.0f);
+    const float followDistance = ResolveWorldTileSize(&g_world);
+    outPos->x -= std::sin(radians) * followDistance;
+    outPos->z += std::cos(radians) * followDistance;
+    outPos->y = ResolveWorldGroundHeight(&g_world, outPos->x, outPos->z);
+}
+
+const vector3d& ResolveAttachedActorDisplayPosition(const CMsgEffect& effect)
+{
+    return effect.m_followRenderInitialized ? effect.m_followRenderPos : effect.m_pos;
+}
+
+float ResolveProjectedTilePixels(const matrix& viewMatrix, const vector3d& origin)
+{
+    const float tileSize = ResolveWorldTileSize(&g_world);
+    if (tileSize <= 0.0f) {
+        return 0.0f;
+    }
+
+    tlvertex3d base{};
+    if (!ProjectMsgEffectPoint(viewMatrix, origin, &base)) {
+        return 0.0f;
+    }
+
+    float maxDistance = 0.0f;
+    const std::array<vector3d, 2> offsets = {
+        vector3d{ origin.x + tileSize, origin.y, origin.z },
+        vector3d{ origin.x, origin.y, origin.z + tileSize },
+    };
+    for (const vector3d& offset : offsets) {
+        tlvertex3d projected{};
+        if (!ProjectMsgEffectPoint(viewMatrix, offset, &projected)) {
+            continue;
+        }
+
+        const float dx = projected.x - base.x;
+        const float dy = projected.y - base.y;
+        maxDistance = (std::max)(maxDistance, std::hypot(dx, dy));
+    }
+
+    return maxDistance;
+}
+
+float ResolveQueuedMsgSpriteScale(const QueuedMsgSpriteEffectDraw& draw, int referenceWidth)
+{
+    if (draw.usePerspectiveScale && draw.pixelsPerTile > 0.0f && referenceWidth > 0) {
+        const float desiredWidthPixels = draw.pixelsPerTile * (std::max)(0.5f, draw.desiredWorldWidthCells);
+        return (std::max)(0.2f, desiredWidthPixels / static_cast<float>(referenceWidth));
+    }
+
+    if (draw.bypassZoomClamp) {
+        return (std::max)(0.2f, draw.zoom);
+    }
+
+    return ResolveMsgSpriteScale(draw.zoom);
 }
 
 int ResolveDigitShiftPixels(const QueuedMsgEffectDraw& draw)
@@ -675,6 +898,39 @@ bool ResolveMsgSpriteClipBox(CSprRes* sprite, CActRes* act, int actionIndex, int
     return true;
 }
 
+bool ResolveMsgSpriteReferenceClipBox(CSprRes* sprite, CActRes* act, RECT* outClipBox)
+{
+    if (!sprite || !act || !outClipBox) {
+        return false;
+    }
+
+    RECT referenceClipBox{};
+    bool hasReference = false;
+    for (int actionIndex = 0; actionIndex < 8; ++actionIndex) {
+        RECT currentClipBox{};
+        if (!ResolveMsgSpriteClipBox(sprite, act, actionIndex, 0, &currentClipBox)) {
+            continue;
+        }
+
+        if (!hasReference) {
+            referenceClipBox = currentClipBox;
+            hasReference = true;
+        } else {
+            referenceClipBox.left = (std::min)(referenceClipBox.left, currentClipBox.left);
+            referenceClipBox.top = (std::min)(referenceClipBox.top, currentClipBox.top);
+            referenceClipBox.right = (std::max)(referenceClipBox.right, currentClipBox.right);
+            referenceClipBox.bottom = (std::max)(referenceClipBox.bottom, currentClipBox.bottom);
+        }
+    }
+
+    if (!hasReference) {
+        return false;
+    }
+
+    *outClipBox = referenceClipBox;
+    return true;
+}
+
 u32 BuildMsgSpriteClipColor(const QueuedMsgSpriteEffectDraw& draw, const CSprClip& clip)
 {
     const unsigned int tintAlpha = (draw.colorArgb >> 24) & 0xFFu;
@@ -694,9 +950,9 @@ u32 BuildMsgSpriteClipColor(const QueuedMsgSpriteEffectDraw& draw, const CSprCli
 
 bool QueueMsgSpriteQuad(const QueuedMsgSpriteEffectDraw& draw)
 {
-    CSprRes* sprite = GetMissEffectSprite();
-    CActRes* act = GetMissEffectAct();
-    if (!sprite || !act) {
+    CSprRes* sprite = nullptr;
+    CActRes* act = nullptr;
+    if (!ResolveMsgSpriteResources(draw.spritePath, draw.actPath, &sprite, &act)) {
         return false;
     }
 
@@ -713,9 +969,15 @@ bool QueueMsgSpriteQuad(const QueuedMsgSpriteEffectDraw& draw)
         return false;
     }
 
-    const float scale = ResolveMsgSpriteScale(draw.zoom);
+    RECT referenceClipBox = clipBox;
+    if (draw.usePerspectiveScale) {
+        ResolveMsgSpriteReferenceClipBox(sprite, act, &referenceClipBox);
+    }
+
     const int nativeWidth = (std::max)(1, static_cast<int>(clipBox.right - clipBox.left));
     const int nativeHeight = (std::max)(1, static_cast<int>(clipBox.bottom - clipBox.top));
+    const int referenceWidth = (std::max)(1, static_cast<int>(referenceClipBox.right - referenceClipBox.left));
+    const float scale = ResolveQueuedMsgSpriteScale(draw, referenceWidth);
     const int outWidth = (std::max)(1, static_cast<int>(std::lround(static_cast<float>(nativeWidth) * scale)));
     const int outHeight = (std::max)(1, static_cast<int>(std::lround(static_cast<float>(nativeHeight) * scale)));
     const float originX = static_cast<float>(draw.screenX - outWidth / 2) - 0.5f;
@@ -769,13 +1031,15 @@ bool QueueMsgSpriteQuad(const QueuedMsgSpriteEffectDraw& draw)
         face->cullMode = D3DCULL_NONE;
         face->srcAlphaMode = D3DBLEND_SRCALPHA;
         face->destAlphaMode = D3DBLEND_INVSRCALPHA;
+        const float depth = draw.useProjectedDepth ? draw.projectedZ - kAttachedActorSpriteDepthBias : 0.0f;
+        const float oow = draw.useProjectedDepth ? draw.projectedOow : 1.0f;
         face->alphaSortKey = draw.alphaSortBase + clipSortOffset;
 
-        face->m_verts[0] = { drawLeft,  drawTop,    0.0f, 1.0f, color, 0xFF000000u, flipX ? maxU : 0.0f, 0.0f };
-        face->m_verts[1] = { drawRight, drawTop,    0.0f, 1.0f, color, 0xFF000000u, flipX ? 0.0f : maxU, 0.0f };
-        face->m_verts[2] = { drawLeft,  drawBottom, 0.0f, 1.0f, color, 0xFF000000u, flipX ? maxU : 0.0f, maxV };
-        face->m_verts[3] = { drawRight, drawBottom, 0.0f, 1.0f, color, 0xFF000000u, flipX ? 0.0f : maxU, maxV };
-        g_renderer.AddRP(face, 1 | 8);
+        face->m_verts[0] = { drawLeft,  drawTop,    depth, oow, color, 0xFF000000u, flipX ? maxU : 0.0f, 0.0f };
+        face->m_verts[1] = { drawRight, drawTop,    depth, oow, color, 0xFF000000u, flipX ? 0.0f : maxU, 0.0f };
+        face->m_verts[2] = { drawLeft,  drawBottom, depth, oow, color, 0xFF000000u, flipX ? maxU : 0.0f, maxV };
+        face->m_verts[3] = { drawRight, drawBottom, depth, oow, color, 0xFF000000u, flipX ? 0.0f : maxU, maxV };
+        g_renderer.AddRP(face, draw.useProjectedDepth ? 1 : (1 | 8));
         clipSortOffset += 0.0001f;
         queuedAny = true;
     }
@@ -789,16 +1053,25 @@ bool GetMsgSpriteDrawBounds(const QueuedMsgSpriteEffectDraw& draw, RECT* outRect
         return false;
     }
 
-    CSprRes* sprite = GetMissEffectSprite();
-    CActRes* act = GetMissEffectAct();
+    CSprRes* sprite = nullptr;
+    CActRes* act = nullptr;
+    if (!ResolveMsgSpriteResources(draw.spritePath, draw.actPath, &sprite, &act)) {
+        return false;
+    }
     RECT clipBox{};
     if (!ResolveMsgSpriteClipBox(sprite, act, draw.actionIndex, draw.motionIndex, &clipBox)) {
         return false;
     }
 
-    const float scale = ResolveMsgSpriteScale(draw.zoom);
+    RECT referenceClipBox = clipBox;
+    if (draw.usePerspectiveScale) {
+        ResolveMsgSpriteReferenceClipBox(sprite, act, &referenceClipBox);
+    }
+
     const int nativeWidth = (std::max)(1, static_cast<int>(clipBox.right - clipBox.left));
     const int nativeHeight = (std::max)(1, static_cast<int>(clipBox.bottom - clipBox.top));
+    const int referenceWidth = (std::max)(1, static_cast<int>(referenceClipBox.right - referenceClipBox.left));
+    const float scale = ResolveQueuedMsgSpriteScale(draw, referenceWidth);
     const int outWidth = (std::max)(1, static_cast<int>(std::lround(static_cast<float>(nativeWidth) * scale)));
     const int outHeight = (std::max)(1, static_cast<int>(std::lround(static_cast<float>(nativeHeight) * scale)));
     const int originX = draw.screenX - outWidth / 2;
@@ -872,6 +1145,687 @@ void ResolveLateralOffset(float rotationDegrees, float* outX, float* outZ)
     }
 }
 
+int ResolveMsgSpriteMotionCountForEffect(const CMsgEffect& effect, int actionIndex)
+{
+    CSprRes* sprite = nullptr;
+    CActRes* act = nullptr;
+    if (!ResolveMsgSpriteResources(effect.m_customSpritePath, effect.m_customActPath, &sprite, &act)) {
+        return 0;
+    }
+
+    int motionCount = 0;
+    while (act->GetMotion(actionIndex, motionCount)) {
+        ++motionCount;
+    }
+    return motionCount;
+}
+
+float LengthXZ(const vector3d& value)
+{
+    return std::sqrt(value.x * value.x + value.z * value.z);
+}
+
+vector3d NormalizeXZ(const vector3d& value)
+{
+    const float length = LengthXZ(value);
+    if (length <= 0.0001f) {
+        return { 0.0f, 0.0f, 0.0f };
+    }
+
+    return { value.x / length, 0.0f, value.z / length };
+}
+
+vector3d Normalize3D(const vector3d& value)
+{
+    const float length = std::sqrt(value.x * value.x + value.y * value.y + value.z * value.z);
+    if (length <= 0.0001f) {
+        return { 0.0f, 0.0f, 0.0f };
+    }
+
+    return { value.x / length, value.y / length, value.z / length };
+}
+
+vector3d ScaleVector(const vector3d& value, float scale)
+{
+    return { value.x * scale, value.y * scale, value.z * scale };
+}
+
+vector3d AddVector(const vector3d& lhs, const vector3d& rhs)
+{
+    return { lhs.x + rhs.x, lhs.y + rhs.y, lhs.z + rhs.z };
+}
+
+bool ResolveActorInterpolatedPositionForMsgEffect(const CGameActor& actor, u32 now, vector3d* outPos)
+{
+    if (!outPos) {
+        return false;
+    }
+
+    if (!actor.m_isMoving) {
+        *outPos = actor.m_pos;
+        return true;
+    }
+
+    const CWorld* world = &g_world;
+    if (actor.m_path.m_cells.size() >= 2) {
+        size_t startIndex = 0;
+        if (FindActivePathSegmentForMsgEffect(actor.m_path, now, &startIndex)) {
+            const PathCell& startCell = actor.m_path.m_cells[startIndex];
+            const PathCell& endCell = actor.m_path.m_cells[startIndex + 1];
+            const u32 startTime = startCell.arrivalTime;
+            const u32 endTime = endCell.arrivalTime;
+            const float duration = static_cast<float>((std::max)(1u, endTime - startTime));
+            const float ratio = static_cast<float>(now - startTime) / duration;
+            const float clamped = (std::max)(0.0f, (std::min)(1.0f, ratio));
+            const float startX = startIndex == 0
+                ? actor.m_moveStartPos.x
+                : TileToWorldCoordXForMsgEffect(world, startCell.x);
+            const float startZ = startIndex == 0
+                ? actor.m_moveStartPos.z
+                : TileToWorldCoordZForMsgEffect(world, startCell.y);
+            const float endX = TileToWorldCoordXForMsgEffect(world, endCell.x);
+            const float endZ = TileToWorldCoordZForMsgEffect(world, endCell.y);
+            outPos->x = startX + (endX - startX) * clamped;
+            outPos->z = startZ + (endZ - startZ) * clamped;
+            outPos->y = ResolveWorldGroundHeight(world, outPos->x, outPos->z);
+            return true;
+        }
+    }
+
+    if (actor.m_moveEndTime > actor.m_moveStartTime && now < actor.m_moveEndTime) {
+        const float duration = static_cast<float>(actor.m_moveEndTime - actor.m_moveStartTime);
+        const float ratio = static_cast<float>(now - actor.m_moveStartTime) / duration;
+        const float clamped = (std::max)(0.0f, (std::min)(1.0f, ratio));
+        outPos->x = actor.m_moveStartPos.x + (actor.m_moveEndPos.x - actor.m_moveStartPos.x) * clamped;
+        outPos->y = actor.m_moveStartPos.y + (actor.m_moveEndPos.y - actor.m_moveStartPos.y) * clamped;
+        outPos->z = actor.m_moveStartPos.z + (actor.m_moveEndPos.z - actor.m_moveStartPos.z) * clamped;
+        return true;
+    }
+
+    *outPos = actor.m_moveEndPos;
+    if (!std::isfinite(outPos->x) || !std::isfinite(outPos->z)) {
+        *outPos = actor.m_pos;
+    }
+    outPos->y = ResolveWorldGroundHeight(world, outPos->x, outPos->z);
+    return true;
+}
+
+float ResolveActorPlanarSpeedForMsgEffect(const CGameActor& actor, u32 now)
+{
+    const CWorld* world = &g_world;
+    size_t startIndex = 0;
+    if (actor.m_path.m_cells.size() >= 2
+        && FindActivePathSegmentForMsgEffect(actor.m_path, now, &startIndex)) {
+        const PathCell& startCell = actor.m_path.m_cells[startIndex];
+        const PathCell& endCell = actor.m_path.m_cells[startIndex + 1];
+        const float startX = startIndex == 0
+            ? actor.m_moveStartPos.x
+            : TileToWorldCoordXForMsgEffect(world, startCell.x);
+        const float startZ = startIndex == 0
+            ? actor.m_moveStartPos.z
+            : TileToWorldCoordZForMsgEffect(world, startCell.y);
+        const float endX = TileToWorldCoordXForMsgEffect(world, endCell.x);
+        const float endZ = TileToWorldCoordZForMsgEffect(world, endCell.y);
+        const float distance = std::hypot(endX - startX, endZ - startZ);
+        const float durationMs = static_cast<float>((std::max)(1u, endCell.arrivalTime - startCell.arrivalTime));
+        return durationMs > 0.0f ? distance * 1000.0f / durationMs : 0.0f;
+    }
+
+    if (actor.m_moveEndTime > actor.m_moveStartTime && now < actor.m_moveEndTime) {
+        const float distance = std::hypot(actor.m_moveEndPos.x - actor.m_moveStartPos.x,
+            actor.m_moveEndPos.z - actor.m_moveStartPos.z);
+        const float durationMs = static_cast<float>(actor.m_moveEndTime - actor.m_moveStartTime);
+        return durationMs > 0.0f ? distance * 1000.0f / durationMs : 0.0f;
+    }
+
+    return 0.0f;
+}
+
+bool ResolveActorTrailDirectionForMsgEffect(const CGameActor& actor, u32 now, vector3d* outDir)
+{
+    if (!outDir) {
+        return false;
+    }
+
+    vector3d currentPos{};
+    if (!ResolveActorInterpolatedPositionForMsgEffect(actor, now, &currentPos)) {
+        return false;
+    }
+
+    const u32 sampleWindowMs = static_cast<u32>(kAttachedActorTrailSampleMs);
+    const u32 previousNow = now > sampleWindowMs ? now - sampleWindowMs : 0u;
+    vector3d previousPos = currentPos;
+    if (!ResolveActorInterpolatedPositionForMsgEffect(actor, previousNow, &previousPos)) {
+        previousPos = currentPos;
+    }
+
+    const vector3d delta = {
+        currentPos.x - previousPos.x,
+        0.0f,
+        currentPos.z - previousPos.z,
+    };
+    const float length = LengthXZ(delta);
+    if (length > 0.001f) {
+        *outDir = { delta.x / length, 0.0f, delta.z / length };
+        return true;
+    }
+
+    const float radians = ResolveActorFacingRotationForMsgEffect(actor, now) * (3.14159265f / 180.0f);
+    *outDir = { std::sin(radians), 0.0f, -std::cos(radians) };
+    return true;
+}
+
+float ResolveActorFacingRotationForMsgEffect(const CGameActor& actor, u32 now)
+{
+    const CWorld* world = &g_world;
+    size_t startIndex = 0;
+    if (actor.m_path.m_cells.size() >= 2
+        && FindActivePathSegmentForMsgEffect(actor.m_path, now, &startIndex)) {
+        const PathCell& startCell = actor.m_path.m_cells[startIndex];
+        const PathCell& endCell = actor.m_path.m_cells[startIndex + 1];
+        const float startX = startIndex == 0
+            ? actor.m_moveStartPos.x
+            : TileToWorldCoordXForMsgEffect(world, startCell.x);
+        const float startZ = startIndex == 0
+            ? actor.m_moveStartPos.z
+            : TileToWorldCoordZForMsgEffect(world, startCell.y);
+        const float endX = TileToWorldCoordXForMsgEffect(world, endCell.x);
+        const float endZ = TileToWorldCoordZForMsgEffect(world, endCell.y);
+        const float deltaX = endX - startX;
+        const float deltaZ = endZ - startZ;
+        if (std::fabs(deltaX) > 0.0001f || std::fabs(deltaZ) > 0.0001f) {
+            return std::atan2(deltaX, -deltaZ) * (180.0f / 3.14159265f);
+        }
+    }
+
+    if (actor.m_moveEndTime > actor.m_moveStartTime && now < actor.m_moveEndTime) {
+        const float deltaX = actor.m_moveEndPos.x - actor.m_moveStartPos.x;
+        const float deltaZ = actor.m_moveEndPos.z - actor.m_moveStartPos.z;
+        if (std::fabs(deltaX) > 0.0001f || std::fabs(deltaZ) > 0.0001f) {
+            return std::atan2(deltaX, -deltaZ) * (180.0f / 3.14159265f);
+        }
+    }
+
+    return actor.m_roty;
+}
+
+int ResolveAttachedActorFacingAction(const CMsgEffect& effect,
+    const vector3d& effectPos,
+    const vector3d& targetPos,
+    float ownerRotationDegrees)
+{
+    if (!effect.m_masterActor) {
+        return 0;
+    }
+
+    const float deltaX = targetPos.x - effectPos.x;
+    const float deltaZ = targetPos.z - effectPos.z;
+    if (std::fabs(deltaX) <= 0.0001f && std::fabs(deltaZ) <= 0.0001f) {
+        return effect.m_masterActor->Get8Dir(ownerRotationDegrees);
+    }
+
+    const float radians = std::atan2(deltaX, -deltaZ);
+    const float degrees = radians * (180.0f / 3.14159265f);
+    return effect.m_masterActor->Get8Dir(degrees);
+}
+
+void InitializeAttachedActorTrailPosition(CMsgEffect& effect)
+{
+    if (!effect.m_masterActor) {
+        return;
+    }
+
+    const u32 now = timeGetTime();
+    if (!ResolveAttachedActorTrailPosition(*effect.m_masterActor, now, &effect.m_pos)) {
+        ResolveAttachedActorIdlePosition(*effect.m_masterActor, now, &effect.m_pos);
+    }
+    effect.m_orgPos = effect.m_pos;
+    effect.m_followRenderPos = effect.m_pos;
+    effect.m_followTravelDistance = 0.0f;
+    effect.m_followInitialized = 1;
+    effect.m_followRenderInitialized = 1;
+    effect.m_followRenderTick = now;
+}
+
+bool BuildMsgSpriteBillboardBasis(vector3d* outUp, vector3d* outRight)
+{
+    if (!outUp || !outRight) {
+        return false;
+    }
+
+    vector3d up = { -g_renderer.m_eyeUp.x, -g_renderer.m_eyeUp.y, -g_renderer.m_eyeUp.z };
+    vector3d right = { g_renderer.m_eyeRight.x, g_renderer.m_eyeRight.y, g_renderer.m_eyeRight.z };
+    const float upLength = std::sqrt(up.x * up.x + up.y * up.y + up.z * up.z);
+    const float rightLength = std::sqrt(right.x * right.x + right.y * right.y + right.z * right.z);
+    if (upLength <= 0.0001f || rightLength <= 0.0001f) {
+        return false;
+    }
+
+    *outUp = { up.x / upLength, up.y / upLength, up.z / upLength };
+    *outRight = { right.x / rightLength, right.y / rightLength, right.z / rightLength };
+    return true;
+}
+
+bool ProcessAttachedActorSpriteState(CMsgEffect& effect)
+{
+    if (!effect.m_masterActor) {
+        return false;
+    }
+
+    const CGameActor& actor = *effect.m_masterActor;
+    const u32 now = timeGetTime();
+    if (!effect.m_followInitialized) {
+        InitializeAttachedActorTrailPosition(effect);
+    }
+
+    const float followDistance = ResolveWorldTileSize(&g_world);
+    if (followDistance <= 0.0f) {
+        return false;
+    }
+
+    const vector3d previousPos = effect.m_pos;
+    vector3d offsetFromActor = {
+        effect.m_pos.x - actor.m_pos.x,
+        0.0f,
+        effect.m_pos.z - actor.m_pos.z,
+    };
+    const float currentDistance = LengthXZ(offsetFromActor);
+    bool moved = false;
+    if (currentDistance > followDistance) {
+        const vector3d direction = NormalizeXZ(offsetFromActor);
+        effect.m_pos.x = actor.m_pos.x + direction.x * followDistance;
+        effect.m_pos.z = actor.m_pos.z + direction.z * followDistance;
+        moved = true;
+    }
+    effect.m_pos.y = ResolveWorldGroundHeight(&g_world, effect.m_pos.x, effect.m_pos.z);
+
+    const float ownerRotationDegrees = ResolveActorFacingRotationForMsgEffect(actor, now);
+    int actionIndex = ResolveAttachedActorFacingAction(effect, effect.m_pos, actor.m_pos, ownerRotationDegrees);
+    int motionCount = ResolveMsgSpriteMotionCountForEffect(effect, actionIndex);
+    if (motionCount <= 0) {
+        for (int fallbackAction = 0; fallbackAction < 8; ++fallbackAction) {
+            motionCount = ResolveMsgSpriteMotionCountForEffect(effect, fallbackAction);
+            if (motionCount > 0) {
+                actionIndex = fallbackAction;
+                break;
+            }
+        }
+    }
+    if (motionCount <= 0) {
+        return false;
+    }
+
+    effect.m_spriteActionIndex = actionIndex;
+    if (moved) {
+        const float traveledX = effect.m_pos.x - previousPos.x;
+        const float traveledZ = effect.m_pos.z - previousPos.z;
+        effect.m_followTravelDistance += std::sqrt(traveledX * traveledX + traveledZ * traveledZ);
+        effect.m_spriteMotionIndex = static_cast<int>(effect.m_followTravelDistance * 0.92f) % motionCount;
+    } else if (effect.m_spriteMotionIndex >= motionCount) {
+        effect.m_spriteMotionIndex = 0;
+    }
+
+    if (!effect.m_followRenderInitialized) {
+        effect.m_followRenderPos = effect.m_pos;
+        effect.m_followRenderInitialized = 1;
+        effect.m_followRenderTick = now;
+    }
+    return true;
+}
+
+bool UpdateAttachedActorSpritePose(CMsgEffect& effect);
+
+bool RenderAttachedActorSpriteWorldBillboard(const CMsgEffect& effect,
+    const matrix& viewMatrix,
+    float alphaSortBase)
+{
+    CSprRes* sprite = nullptr;
+    CActRes* act = nullptr;
+    if (!ResolveMsgSpriteResources(effect.m_customSpritePath, effect.m_customActPath, &sprite, &act)) {
+        return false;
+    }
+
+    const CMotion* motion = act->GetMotion(effect.m_spriteActionIndex, effect.m_spriteMotionIndex);
+    if (!motion) {
+        motion = act->GetMotion(effect.m_spriteActionIndex, 0);
+    }
+    if (!motion) {
+        return false;
+    }
+
+    RECT referenceClipBox{};
+    if (!ResolveMsgSpriteReferenceClipBox(sprite, act, &referenceClipBox)) {
+        if (!ResolveMsgSpriteClipBox(sprite, act, effect.m_spriteActionIndex, effect.m_spriteMotionIndex, &referenceClipBox)) {
+            return false;
+        }
+    }
+
+    const int referenceWidth = (std::max)(1, static_cast<int>(referenceClipBox.right - referenceClipBox.left));
+    const int referenceHeight = (std::max)(1, static_cast<int>(referenceClipBox.bottom - referenceClipBox.top));
+    const float worldTileSize = ResolveWorldTileSize(&g_world);
+    const float actorZoom = effect.m_masterActor && effect.m_masterActor->m_zoom > 0.0f ? effect.m_masterActor->m_zoom : 1.0f;
+    const float desiredWorldWidth = worldTileSize * (std::max)(0.5f, kAttachedActorSpriteWorldWidthCells * actorZoom);
+    const float unitsPerPixel = desiredWorldWidth / static_cast<float>(referenceWidth);
+    if (unitsPerPixel <= 0.0f) {
+        return false;
+    }
+
+    const vector3d& renderPos = ResolveAttachedActorDisplayPosition(effect);
+
+    tlvertex3d projectedBase{};
+    if (!ProjectMsgEffectPoint(viewMatrix, renderPos, &projectedBase)) {
+        return false;
+    }
+
+    vector3d renderUp{};
+    vector3d renderRight{};
+    if (!BuildMsgSpriteBillboardBasis(&renderUp, &renderRight)) {
+        return false;
+    }
+
+    vector3d eyeForward = Normalize3D(g_renderer.m_eyeForward);
+    if (std::fabs(eyeForward.x) < 0.0001f && std::fabs(eyeForward.y) < 0.0001f && std::fabs(eyeForward.z) < 0.0001f) {
+        eyeForward = { 0.0f, 0.0f, 1.0f };
+    }
+    vector3d flatForward = NormalizeXZ({ eyeForward.x, 0.0f, eyeForward.z });
+    if (std::fabs(flatForward.x) < 0.0001f && std::fabs(flatForward.z) < 0.0001f) {
+        flatForward = { 0.0f, 0.0f, 1.0f };
+    }
+
+    const vector3d depthUp = { 0.0f, -1.0f, 0.0f };
+    const float worldHeight = static_cast<float>(referenceHeight) * unitsPerPixel;
+    const float fullTopUnits = static_cast<float>((std::max)(0L, -static_cast<long>(referenceClipBox.top))) * unitsPerPixel;
+    const float fullBottomUnits = static_cast<float>((std::max)(0L, static_cast<long>(referenceClipBox.bottom))) * unitsPerPixel;
+    const float depthBiasWorld = (std::max)(kAttachedActorDepthWorldBiasMin,
+        (std::min)(kAttachedActorDepthWorldBiasMax, worldHeight * kAttachedActorDepthWorldBiasScale));
+    const vector3d depthAnchorBase = AddVector(renderPos, ScaleVector(depthUp, fullTopUnits * kAttachedActorDepthHeightBiasFactor));
+    const float baseTopForwardBiasWorld = depthBiasWorld
+        * kAttachedActorTopDepthForwardBiasScale
+        * kAttachedActorDepthHeightBiasFactor;
+
+    tlvertex3d projectedDepthBase = projectedBase;
+    {
+        const vector3d depthBiasedBase = AddVector(
+            AddVector(depthAnchorBase, ScaleVector(flatForward, -depthBiasWorld)),
+            ScaleVector(eyeForward, -baseTopForwardBiasWorld));
+        ProjectMsgEffectPoint(viewMatrix, depthBiasedBase, &projectedDepthBase);
+    }
+
+    tlvertex3d projectedDepthTop = projectedDepthBase;
+    {
+        const vector3d fullDepthTopCenter = AddVector(renderPos, ScaleVector(depthUp, fullTopUnits));
+        const vector3d depthBiasedTop = AddVector(
+            AddVector(fullDepthTopCenter, ScaleVector(flatForward, -depthBiasWorld)),
+            ScaleVector(eyeForward, -(depthBiasWorld * kAttachedActorTopDepthForwardBiasScale)));
+        ProjectMsgEffectPoint(viewMatrix, depthBiasedTop, &projectedDepthTop);
+    }
+
+    tlvertex3d projectedDepthBottom = projectedBase;
+    {
+        const vector3d fullDepthBottomCenter = AddVector(renderPos, ScaleVector(depthUp, -fullBottomUnits));
+        const vector3d depthBiasedBottom = AddVector(fullDepthBottomCenter, ScaleVector(flatForward, -depthBiasWorld));
+        ProjectMsgEffectPoint(viewMatrix, depthBiasedBottom, &projectedDepthBottom);
+    }
+
+    bool renderedAny = false;
+    float clipSortOffset = 0.0f;
+    QueuedMsgSpriteEffectDraw colorSource{};
+    colorSource.colorArgb = effect.m_colorArgb;
+    colorSource.alpha = effect.m_alpha;
+    for (const CSprClip& clip : motion->sprClips) {
+        const SprImg* image = sprite->GetSprite(clip.clipType, clip.sprIndex);
+        if (!image || image->width <= 0 || image->height <= 0) {
+            continue;
+        }
+
+        CTexture* texture = GetOrCreateSpriteClipTexture(sprite, image);
+        if (!texture || texture == &CTexMgr::s_dummy_texture) {
+            continue;
+        }
+
+        const u32 color = BuildMsgSpriteClipColor(colorSource, clip);
+        if (((color >> 24) & 0xFFu) == 0u) {
+            continue;
+        }
+
+        const float localLeft = static_cast<float>(clip.x - image->width / 2);
+        const float localTop = static_cast<float>(clip.y - image->height / 2);
+        const float localRight = localLeft + static_cast<float>(image->width);
+        const float localBottom = localTop + static_cast<float>(image->height);
+
+        const float leftUnits = localLeft * unitsPerPixel;
+        const float rightUnits = localRight * unitsPerPixel;
+        const float topUnits = -localTop * unitsPerPixel;
+        const float bottomUnits = -localBottom * unitsPerPixel;
+
+        const vector3d topLeft = AddVector(AddVector(renderPos, ScaleVector(renderUp, topUnits)), ScaleVector(renderRight, leftUnits));
+        const vector3d topRight = AddVector(AddVector(renderPos, ScaleVector(renderUp, topUnits)), ScaleVector(renderRight, rightUnits));
+        const vector3d bottomLeft = AddVector(AddVector(renderPos, ScaleVector(renderUp, bottomUnits)), ScaleVector(renderRight, leftUnits));
+        const vector3d bottomRight = AddVector(AddVector(renderPos, ScaleVector(renderUp, bottomUnits)), ScaleVector(renderRight, rightUnits));
+
+        tlvertex3d projectedVerts[4] = {};
+        if (!ProjectMsgEffectPoint(viewMatrix, topLeft, &projectedVerts[0])
+            || !ProjectMsgEffectPoint(viewMatrix, topRight, &projectedVerts[1])
+            || !ProjectMsgEffectPoint(viewMatrix, bottomLeft, &projectedVerts[2])
+            || !ProjectMsgEffectPoint(viewMatrix, bottomRight, &projectedVerts[3])) {
+            continue;
+        }
+
+        const float maxU = texture->m_w != 0
+            ? static_cast<float>(texture->m_surfaceUpdateWidth > 0 ? texture->m_surfaceUpdateWidth : static_cast<unsigned int>(image->width))
+                / static_cast<float>(texture->m_w)
+            : 1.0f;
+        const float maxV = texture->m_h != 0
+            ? static_cast<float>(texture->m_surfaceUpdateHeight > 0 ? texture->m_surfaceUpdateHeight : static_cast<unsigned int>(image->height))
+                / static_cast<float>(texture->m_h)
+            : 1.0f;
+
+        RPFace* face = g_renderer.BorrowNullRP();
+        if (!face) {
+            continue;
+        }
+
+        const bool flipX = (clip.flags & 1) != 0;
+        face->primType = D3DPT_TRIANGLESTRIP;
+        face->verts = face->m_verts;
+        face->numVerts = 4;
+        face->indices = nullptr;
+        face->numIndices = 0;
+        face->tex = texture;
+        face->mtPreset = 0;
+        face->cullMode = D3DCULL_NONE;
+        face->srcAlphaMode = D3DBLEND_SRCALPHA;
+        face->destAlphaMode = D3DBLEND_INVSRCALPHA;
+
+        projectedVerts[0].z = (std::max)(0.0f, projectedDepthTop.z - kAttachedActorSpriteDepthBias);
+        projectedVerts[0].oow = projectedDepthTop.oow;
+        projectedVerts[1].z = (std::max)(0.0f, projectedDepthTop.z - kAttachedActorSpriteDepthBias);
+        projectedVerts[1].oow = projectedDepthTop.oow;
+        projectedVerts[2].z = (std::max)(0.0f, projectedDepthBottom.z - kAttachedActorSpriteDepthBias);
+        projectedVerts[2].oow = projectedDepthBottom.oow;
+        projectedVerts[3].z = (std::max)(0.0f, projectedDepthBottom.z - kAttachedActorSpriteDepthBias);
+        projectedVerts[3].oow = projectedDepthBottom.oow;
+        for (int index = 0; index < 4; ++index) {
+            projectedVerts[index].color = color;
+            projectedVerts[index].specular = 0xFF000000u;
+        }
+
+        projectedVerts[0].tu = flipX ? maxU : 0.0f;
+        projectedVerts[0].tv = 0.0f;
+        projectedVerts[1].tu = flipX ? 0.0f : maxU;
+        projectedVerts[1].tv = 0.0f;
+        projectedVerts[2].tu = flipX ? maxU : 0.0f;
+        projectedVerts[2].tv = maxV;
+        projectedVerts[3].tu = flipX ? 0.0f : maxU;
+        projectedVerts[3].tv = maxV;
+
+        face->m_verts[0] = projectedVerts[0];
+        face->m_verts[1] = projectedVerts[1];
+        face->m_verts[2] = projectedVerts[2];
+        face->m_verts[3] = projectedVerts[3];
+        face->alphaSortKey = alphaSortBase + clipSortOffset;
+        g_renderer.AddRP(face, 1);
+        clipSortOffset += 0.0001f;
+        renderedAny = true;
+    }
+
+    return renderedAny;
+}
+
+bool QueueAttachedActorSpriteProjectedFallback(const CMsgEffect& effect,
+    const matrix& viewMatrix,
+    float alphaSortBase)
+{
+    CSprRes* sprite = nullptr;
+    CActRes* act = nullptr;
+    if (!ResolveMsgSpriteResources(effect.m_customSpritePath, effect.m_customActPath, &sprite, &act)) {
+        return false;
+    }
+
+    const CMotion* motion = act->GetMotion(effect.m_spriteActionIndex, effect.m_spriteMotionIndex);
+    if (!motion) {
+        motion = act->GetMotion(effect.m_spriteActionIndex, 0);
+    }
+    if (!motion || motion->sprClips.empty()) {
+        return false;
+    }
+
+    const vector3d& renderPos = ResolveAttachedActorDisplayPosition(effect);
+    tlvertex3d projectedBase{};
+    if (!ProjectMsgEffectPoint(viewMatrix, renderPos, &projectedBase)) {
+        return false;
+    }
+
+    QueuedMsgSpriteEffectDraw draw{};
+    draw.screenX = static_cast<int>(std::lround(projectedBase.x));
+    draw.screenY = static_cast<int>(std::lround(projectedBase.y));
+    draw.actionIndex = effect.m_spriteActionIndex;
+    draw.motionIndex = effect.m_spriteMotionIndex;
+    draw.spritePath = effect.m_customSpritePath;
+    draw.actPath = effect.m_customActPath;
+    draw.colorArgb = effect.m_colorArgb;
+    draw.alpha = effect.m_alpha;
+    draw.zoom = effect.m_zoom;
+    draw.alphaSortBase = alphaSortBase;
+    draw.projectedZ = projectedBase.z;
+    draw.projectedOow = projectedBase.oow;
+    draw.useProjectedDepth = true;
+    draw.usePerspectiveScale = true;
+    draw.bypassZoomClamp = true;
+    draw.pixelsPerTile = ResolveProjectedTilePixels(viewMatrix, renderPos);
+    const float actorZoom = effect.m_masterActor && effect.m_masterActor->m_zoom > 0.0f
+        ? effect.m_masterActor->m_zoom
+        : 1.0f;
+    draw.desiredWorldWidthCells = kAttachedActorSpriteWorldWidthCells * actorZoom;
+    g_queuedMsgSpriteEffects.push_back(draw);
+    return true;
+}
+
+bool RenderAttachedActorEffectInternal(CMsgEffect& effect,
+    const matrix& viewMatrix,
+    float ownerDepthKey,
+    float ownerScreenY,
+    bool afterOwner,
+    u32 frameId)
+{
+    if (!effect.m_masterActor || !effect.m_isVisible || effect.m_isDisappear) {
+        if (ShouldTraceAttachedCartEffect(effect)) {
+            DbgLog("[CartEffect] skip render gid=%u effect=%p visible=%d disappear=%d owner=%p\n",
+                static_cast<unsigned int>(effect.m_masterActor ? effect.m_masterActor->m_gid : 0),
+                static_cast<void*>(&effect),
+                effect.m_isVisible,
+                effect.m_isDisappear,
+                static_cast<void*>(effect.m_masterActor));
+        }
+        return false;
+    }
+
+    if (effect.m_followLastRenderFrame != frameId) {
+        if (!UpdateAttachedActorSpritePose(effect)) {
+            return false;
+        }
+
+        const vector3d& renderPos = ResolveAttachedActorDisplayPosition(effect);
+        tlvertex3d projectedBase{};
+        if (!ProjectMsgEffectPoint(viewMatrix, renderPos, &projectedBase)) {
+            return false;
+        }
+
+        effect.m_followRenderAfterOwner = projectedBase.y >= ownerScreenY ? 1 : 0;
+        effect.m_followLastRenderFrame = frameId;
+    }
+
+    if ((afterOwner ? 1u : 0u) != effect.m_followRenderAfterOwner) {
+        return false;
+    }
+
+    const float relativeDepthBias = afterOwner ? 0.0002f : -0.0002f;
+    const float alphaSortBase = ownerDepthKey + relativeDepthBias;
+    if (RenderAttachedActorSpriteWorldBillboard(effect, viewMatrix, alphaSortBase)) {
+        static std::map<u32, int> s_cartRenderSuccessLogs;
+        if (ShouldTraceAttachedCartEffect(effect) && s_cartRenderSuccessLogs[effect.m_masterActor->m_gid] < 8) {
+            ++s_cartRenderSuccessLogs[effect.m_masterActor->m_gid];
+            const vector3d& renderPos = ResolveAttachedActorDisplayPosition(effect);
+            DbgLog("[CartEffect] render world gid=%u effect=%p after=%d action=%d motion=%d pos=(%.2f,%.2f,%.2f)\n",
+                static_cast<unsigned int>(effect.m_masterActor->m_gid),
+                static_cast<void*>(&effect),
+                afterOwner ? 1 : 0,
+                effect.m_spriteActionIndex,
+                effect.m_spriteMotionIndex,
+                renderPos.x,
+                renderPos.y,
+                renderPos.z);
+        }
+        return true;
+    }
+
+    const bool queuedFallback = QueueAttachedActorSpriteProjectedFallback(effect, viewMatrix, alphaSortBase);
+    static std::map<u32, int> s_cartRenderFallbackLogs;
+    if (ShouldTraceAttachedCartEffect(effect) && s_cartRenderFallbackLogs[effect.m_masterActor->m_gid] < 8) {
+        ++s_cartRenderFallbackLogs[effect.m_masterActor->m_gid];
+        const vector3d& renderPos = ResolveAttachedActorDisplayPosition(effect);
+        DbgLog("[CartEffect] render fallback gid=%u effect=%p after=%d queued=%d action=%d motion=%d pos=(%.2f,%.2f,%.2f)\n",
+            static_cast<unsigned int>(effect.m_masterActor->m_gid),
+            static_cast<void*>(&effect),
+            afterOwner ? 1 : 0,
+            queuedFallback ? 1 : 0,
+            effect.m_spriteActionIndex,
+            effect.m_spriteMotionIndex,
+            renderPos.x,
+            renderPos.y,
+            renderPos.z);
+    }
+    return queuedFallback;
+}
+
+bool UpdateAttachedActorSpritePose(CMsgEffect& effect)
+{
+    if (!effect.m_masterActor) {
+        return false;
+    }
+
+    const u32 now = timeGetTime();
+    if (!effect.m_followInitialized) {
+        InitializeAttachedActorTrailPosition(effect);
+    }
+
+    if (!effect.m_followRenderInitialized) {
+        effect.m_followRenderPos = effect.m_pos;
+        effect.m_followRenderInitialized = 1;
+        effect.m_followRenderTick = now;
+        return true;
+    }
+
+    const u32 elapsedMs = now > effect.m_followRenderTick ? now - effect.m_followRenderTick : 0u;
+    const float clampedElapsedMs = static_cast<float>((std::min)(elapsedMs, 100u));
+    const float alpha = 1.0f - std::exp(-clampedElapsedMs / 24.0f);
+    effect.m_followRenderPos.x += (effect.m_pos.x - effect.m_followRenderPos.x) * alpha;
+    effect.m_followRenderPos.z += (effect.m_pos.z - effect.m_followRenderPos.z) * alpha;
+    effect.m_followRenderPos.y = ResolveWorldGroundHeight(&g_world, effect.m_followRenderPos.x, effect.m_followRenderPos.z);
+    effect.m_followRenderTick = now;
+    return true;
+}
+
 } // namespace
 
 CMsgEffect::CMsgEffect()
@@ -890,12 +1844,19 @@ CMsgEffect::CMsgEffect()
     , m_orgPos{}
     , m_destPos{}
     , m_destPos2{}
+    , m_followRenderPos{}
     , m_zoom(1.0f)
     , m_orgZoom(1.0f)
+    , m_followTravelDistance(0.0f)
+    , m_followLastRenderFrame(0)
+    , m_followRenderTick(0)
     , m_masterActor(nullptr)
     , m_isVisible(0)
     , m_isDisappear(0)
     , m_removedFromOwner(0)
+    , m_followInitialized(0)
+    , m_followRenderInitialized(0)
+    , m_followRenderAfterOwner(0)
 {
 }
 
@@ -928,6 +1889,15 @@ u8 CMsgEffect::OnProcess()
 
     const float stateCount = static_cast<float>(timeGetTime() - m_stateStartTick) * 0.041666668f;
     switch (m_msgEffectType) {
+    case kAttachedActorSpriteMsgEffectType:
+        if (!m_masterActor) {
+            m_isDisappear = 1;
+            break;
+        }
+        m_alpha = 255;
+        m_zoom = m_masterActor->m_zoom > 0.0f ? m_masterActor->m_zoom : 1.0f;
+        ProcessAttachedActorSpriteState(*this);
+        break;
     case kCriticalMsgEffectType: {
         if (m_destPos.x == 0.0f && m_masterActor) {
             ResolveLateralOffset(m_masterActor->m_roty, &m_destPos.x, &m_destPos.z);
@@ -1073,9 +2043,27 @@ void CMsgEffect::SendMsg(CGameObject* sender, int msg, msgparam_t par1, msgparam
         return;
     case 50:
         m_masterActor = dynamic_cast<CGameActor*>(sender);
+        m_followInitialized = 0;
+        m_followRenderInitialized = 0;
+        m_followRenderTick = timeGetTime();
+        m_followTravelDistance = 0.0f;
         if (m_masterActor && m_msgEffectType == 114) {
             m_pos.x = m_masterActor->m_pos.x;
             m_pos.z = m_masterActor->m_pos.z;
+        }
+        if (m_masterActor && m_msgEffectType == kAttachedActorSpriteMsgEffectType) {
+            InitializeAttachedActorTrailPosition(*this);
+            ProcessAttachedActorSpriteState(*this);
+            if (ShouldTraceAttachedCartEffect(*this)) {
+                DbgLog("[CartEffect] init gid=%u effect=%p pos=(%.2f,%.2f,%.2f) action=%d motion=%d\n",
+                    static_cast<unsigned int>(m_masterActor->m_gid),
+                    static_cast<void*>(this),
+                    m_pos.x,
+                    m_pos.y,
+                    m_pos.z,
+                    m_spriteActionIndex,
+                    m_spriteMotionIndex);
+            }
         }
         if (m_masterActor && IsAnimatedSpriteBackedMsgEffectType(m_msgEffectType)) {
             m_lastProcessedSpriteMotionIndex = m_spriteMotionIndex;
@@ -1124,21 +2112,40 @@ void CMsgEffect::Render(matrix* viewMatrix)
         return;
     }
 
+    if (m_msgEffectType == kAttachedActorSpriteMsgEffectType) {
+        return;
+    }
+
     tlvertex3d projected{};
     if (!ProjectMsgEffectPoint(*viewMatrix, m_pos, &projected)) {
         return;
     }
 
-    if (IsSpriteBackedMsgEffectType(m_msgEffectType)) {
+    if (IsSpriteBackedMsgEffectType(m_msgEffectType)
+        || (!m_customSpritePath.empty() && !m_customActPath.empty())) {
         QueuedMsgSpriteEffectDraw draw{};
         draw.screenX = static_cast<int>(std::lround(projected.x));
         draw.screenY = static_cast<int>(std::lround(projected.y));
         draw.actionIndex = m_spriteActionIndex;
         draw.motionIndex = m_spriteMotionIndex;
+        draw.spritePath = m_customSpritePath;
+        draw.actPath = m_customActPath;
         draw.colorArgb = m_colorArgb;
         draw.alpha = m_alpha;
         draw.zoom = m_zoom;
-        draw.alphaSortBase = m_msgEffectType == kCriticalMsgEffectType ? 1.6f : 1.7f;
+        draw.alphaSortBase = m_msgEffectType == kAttachedActorSpriteMsgEffectType
+            ? projected.oow
+            : (m_msgEffectType == kCriticalMsgEffectType ? 1.6f : 1.7f);
+        if (m_msgEffectType == kAttachedActorSpriteMsgEffectType) {
+            draw.projectedZ = projected.z;
+            draw.projectedOow = projected.oow;
+            draw.useProjectedDepth = true;
+            draw.usePerspectiveScale = true;
+            draw.bypassZoomClamp = true;
+            draw.pixelsPerTile = ResolveProjectedTilePixels(*viewMatrix, m_pos);
+            const float actorZoom = m_masterActor && m_masterActor->m_zoom > 0.0f ? m_masterActor->m_zoom : 1.0f;
+            draw.desiredWorldWidthCells = kAttachedActorSpriteWorldWidthCells * actorZoom;
+        }
         g_queuedMsgSpriteEffects.push_back(draw);
         return;
     }
@@ -1254,4 +2261,18 @@ bool HasActiveMsgEffects()
         }
     }
     return false;
+}
+
+bool RenderAttachedActorEffectPass(CMsgEffect& effect,
+    matrix* viewMatrix,
+    float ownerDepthKey,
+    float ownerScreenY,
+    bool afterOwner,
+    u32 frameId)
+{
+    if (!viewMatrix) {
+        return false;
+    }
+
+    return RenderAttachedActorEffectInternal(effect, *viewMatrix, ownerDepthKey, ownerScreenY, afterOwner, frameId);
 }

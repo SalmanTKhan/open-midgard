@@ -56,6 +56,8 @@ struct MapGameplaySendProfile {
     const char* name;
     u16 actionRequest;
     u16 useSkillToId;
+    u16 cartOff;
+    u16 changeCart;
     u16 useSkillToPos;
     u16 useSkillMap;
     u16 useItem;
@@ -230,6 +232,13 @@ bool BuildActiveActionRequestPacket(u32 targetGid,
 bool BuildActiveUseSkillToIdPacket(u16 skillId,
     u16 skillLevel,
     u32 targetGid,
+    void* outBuffer,
+    int outBufferSize,
+    int* outPacketLength);
+bool BuildActiveCartOffPacket(void* outBuffer,
+    int outBufferSize,
+    int* outPacketLength);
+bool BuildActiveChangeCartPacket(u16 type,
     void* outBuffer,
     int outBufferSize,
     int* outPacketLength);

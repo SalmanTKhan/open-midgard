@@ -324,10 +324,13 @@ void UINpcMenuWnd::OnDraw()
     ReleaseDrawTarget(hdc);
 }
 
-void UINpcMenuWnd::SetMenu(u32 npcId, const std::vector<std::string>& options)
+void UINpcMenuWnd::SetMenu(u32 npcId,
+    const std::vector<std::string>& options,
+    const std::vector<u8>& optionChoices)
 {
     m_npcId = npcId;
     m_options = options;
+    m_optionChoices = optionChoices;
     m_selectedIndex = m_options.empty() ? -1 : 0;
     m_hoverIndex = -1;
     m_pressedTarget = ClickTarget::None;
@@ -341,10 +344,24 @@ void UINpcMenuWnd::HideMenu()
 {
     m_npcId = 0;
     m_options.clear();
+    m_optionChoices.clear();
     m_selectedIndex = -1;
     m_hoverIndex = -1;
     m_pressedTarget = ClickTarget::None;
     SetShow(0);
+}
+
+u8 UINpcMenuWnd::GetSelectedChoice() const
+{
+    if (m_selectedIndex < 0 || m_selectedIndex >= static_cast<int>(m_options.size())) {
+        return 0;
+    }
+
+    if (m_optionChoices.size() == m_options.size()) {
+        return m_optionChoices[static_cast<size_t>(m_selectedIndex)];
+    }
+
+    return static_cast<u8>(m_selectedIndex + 1);
 }
 
 void UINpcMenuWnd::SubmitSelection(u8 choice)
@@ -385,7 +402,7 @@ bool UINpcMenuWnd::HandleKeyDown(int virtualKey)
 
     case VK_RETURN:
         if (m_selectedIndex >= 0 && m_selectedIndex < static_cast<int>(m_options.size())) {
-            SubmitSelection(static_cast<u8>(m_selectedIndex + 1));
+            SubmitSelection(GetSelectedChoice());
         }
         break;
 
@@ -474,7 +491,7 @@ void UINpcMenuWnd::OnLBtnUp(int x, int y)
 
     if (pressedTarget == ClickTarget::Ok && IsPointInRect(GetOkRect(), x, y)) {
         if (m_selectedIndex >= 0 && m_selectedIndex < static_cast<int>(m_options.size())) {
-            SubmitSelection(static_cast<u8>(m_selectedIndex + 1));
+            SubmitSelection(GetSelectedChoice());
         }
         return;
     }

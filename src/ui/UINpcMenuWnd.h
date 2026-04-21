@@ -18,7 +18,9 @@ public:
     void OnMouseMove(int x, int y) override;
     void OnLBtnUp(int x, int y) override;
 
-    void SetMenu(u32 npcId, const std::vector<std::string>& options);
+    void SetMenu(u32 npcId,
+        const std::vector<std::string>& options,
+        const std::vector<u8>& optionChoices);
     void HideMenu();
     bool HandleKeyDown(int virtualKey);
     u32 GetNpcId() const;
@@ -44,11 +46,13 @@ private:
     bool IsPointInRect(const RECT& rect, int x, int y) const;
     void StartDragging(int x, int y);
     void StopDragging();
+    u8 GetSelectedChoice() const;
     void SubmitSelection(u8 choice);
     void DrawButton(HDC hdc, const RECT& rect, const char* label, bool hovered, bool pressed) const;
 
     u32 m_npcId;
     std::vector<std::string> m_options;
+    std::vector<u8> m_optionChoices;
     int m_selectedIndex;
     int m_hoverIndex;
     ClickTarget m_pressedTarget;

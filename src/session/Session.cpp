@@ -1460,7 +1460,7 @@ void CSession::SetSelectedCharacterAppearance(const CHARACTER_INFO& info)
     std::memset(m_playerName, 0, sizeof(m_playerName));
     std::memcpy(m_playerName, info.name, sizeof(info.name));
     m_playerName[sizeof(info.name)] = '\0';
-    DbgLog("[Session] selected char appearance gid=%u job=%d head=%d weapon=%d shield=%d accBottom=%d accMid=%d accTop=%d headPal=%d bodyPal=%d hairColor=%u slot=%u name='%.24s'\n",
+    DbgLog("[Session] selected char appearance gid=%u job=%d head=%d weapon=%d shield=%d accBottom=%d accMid=%d accTop=%d headPal=%d bodyPal=%d hairColor=%u effect=0x%X slot=%u name='%.24s'\n",
         info.GID,
         static_cast<int>(info.job),
         static_cast<int>(info.head),
@@ -1472,6 +1472,7 @@ void CSession::SetSelectedCharacterAppearance(const CHARACTER_INFO& info)
         static_cast<int>(info.headpalette),
         static_cast<int>(info.bodypalette),
         static_cast<unsigned int>(info.haircolor),
+        info.effectstate,
         static_cast<unsigned int>(info.CharNum),
         reinterpret_cast<const char*>(info.name));
 }

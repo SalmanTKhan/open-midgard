@@ -110,6 +110,8 @@ public:
             GameMsg_RequestIdentifyInventoryItem = 20031,
                 GameMsg_RequestComposeCardIntoEquipment = 20032,
                 GameMsg_RequestPlayerContextAction = 20033,
+                GameMsg_RequestCartOff = 20039,
+                GameMsg_RequestChangeCart = 20040,
             GameMsg_RequestPartyCreate = 20034,
             GameMsg_RequestPartyChangeOptions = 20035,
             GameMsg_RequestPartyDisband = 20036,

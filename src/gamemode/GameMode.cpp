@@ -538,6 +538,7 @@ bool IsAttackTargetWithinRange(CGameMode& mode, const CGameActor& target, int at
 bool SendUseSkillToIdPacket(u16 skillId, u16 skillLevel, u32 targetGid);
 void ClearAttackChaseHint(CGameMode& mode);
 void ClearSkillChase(CGameMode& mode);
+void ClearPendingSkillUse(CGameMode& mode);
 void BeginSkillChase(CGameMode& mode, u32 targetGid, u16 skillId, u16 skillLevel, int skillRange);
 void DrawPlayerVitalsOverlay(CGameMode& mode, HDC hdc);
 void FillSolidRectArgb(unsigned int* pixels, int width, int height, const RECT& rect, COLORREF color);
@@ -2914,15 +2915,22 @@ void SetModeCursorAction(CGameMode& mode, CursorAction cursorActNum)
 
 constexpr int kSkillInfGroundSkill = 0x02;
 constexpr int kSkillInfSelfSkill = 0x04;
+constexpr u16 kSkillMerchantChangeCart = 154;
+constexpr int kEffectStatePushCartMask = 0x0008 | 0x0080 | 0x0100 | 0x0200 | 0x0400;
 
 enum class ShortcutSkillUseMode {
     ActorTarget,
     GroundTarget,
     ImmediateSelf,
+    CartSelect,
 };
 
 ShortcutSkillUseMode ResolveShortcutSkillUseMode(u16 skillId)
 {
+    if (skillId == kSkillMerchantChangeCart) {
+        return ShortcutSkillUseMode::CartSelect;
+    }
+
     const PLAYER_SKILL_INFO* skillInfo = g_session.GetSkillItemBySkillId(static_cast<int>(skillId));
     if (!skillInfo) {
         return ShortcutSkillUseMode::ActorTarget;
@@ -2936,6 +2944,48 @@ ShortcutSkillUseMode ResolveShortcutSkillUseMode(u16 skillId)
         return ShortcutSkillUseMode::ImmediateSelf;
     }
     return ShortcutSkillUseMode::ActorTarget;
+}
+
+bool IsPushCartEffectState(int effectState)
+{
+    return (effectState & kEffectStatePushCartMask) != 0;
+}
+
+const CGameActor* ResolveLocalPlayerActor()
+{
+    const CGameMode* gameMode = g_modeMgr.GetCurrentGameMode();
+    if (!gameMode || !gameMode->m_world) {
+        return nullptr;
+    }
+
+    return gameMode->m_world->m_player;
+}
+
+bool LocalPlayerHasPushCart()
+{
+    const CGameActor* actor = ResolveLocalPlayerActor();
+    return actor && IsPushCartEffectState(actor->m_effectState);
+}
+
+bool OpenSelectCartWindow()
+{
+    return g_windowMgr.MakeWindow(UIWindowMgr::WID_SELECTCARTWND) != nullptr;
+}
+
+bool HandleChangeCartSkillUiRequest(CGameMode& mode)
+{
+    ClearPendingSkillUse(mode);
+    ClearSkillChase(mode);
+    mode.m_lastMonGid = 0;
+    mode.m_lastLockOnMonGid = 0;
+    ClearAttackChaseHint(mode);
+
+    if (!LocalPlayerHasPushCart()) {
+        g_windowMgr.PushChatEvent("You must have a Pushcart.", 0x00FF4040u, 6);
+        return false;
+    }
+
+    return OpenSelectCartWindow();
 }
 
 int ResolveSkillUseRange(u16 skillId)
@@ -3115,6 +3165,7 @@ void UpdateGameplayCursor(CGameMode& mode)
             }
             return;
         case ShortcutSkillUseMode::ImmediateSelf:
+        case ShortcutSkillUseMode::CartSelect:
             break;
         }
     }
@@ -5522,6 +5573,12 @@ bool TryRequestPendingSkillFromScreenPoint(CGameMode& mode, int screenX, int scr
     const u16 skillLevel = static_cast<u16>(mode.m_skillUseInfo.level & 0xFFFF);
     const ShortcutSkillUseMode skillUseMode = ResolveShortcutSkillUseMode(skillId);
 
+    if (skillUseMode == ShortcutSkillUseMode::CartSelect) {
+        const bool handled = HandleChangeCartSkillUiRequest(mode);
+        ClearPendingSkillUse(mode);
+        return handled;
+    }
+
     if (skillUseMode == ShortcutSkillUseMode::ImmediateSelf) {
         if (SendUseSkillToIdPacket(skillId, skillLevel, ResolveSelfSkillTargetId())) {
             ClearSkillChase(mode);
@@ -5827,6 +5884,8 @@ bool RequestShortcutSlotUse(int visibleSlot)
 
     const u16 skillId = static_cast<u16>(slot->id & 0xFFFFu);
     switch (ResolveShortcutSkillUseMode(skillId)) {
+    case ShortcutSkillUseMode::CartSelect:
+        return HandleChangeCartSkillUiRequest(*gameMode);
     case ShortcutSkillUseMode::ImmediateSelf: {
         ClearSkillChase(*gameMode);
         gameMode->m_lastMonGid = 0;
@@ -5857,6 +5916,49 @@ bool RequestShortcutSlotUse(int visibleSlot)
     }
 
     return false;
+}
+
+bool RequestCartOff()
+{
+    std::array<u8, sizeof(PACKET_CZ_REQ_CARTOFF)> packetBuffer{};
+    int packetLength = 0;
+    if (!ro::net::BuildActiveCartOffPacket(
+            packetBuffer.data(),
+            static_cast<int>(packetBuffer.size()),
+            &packetLength)) {
+        return false;
+    }
+
+    const bool sent = CRagConnection::instance()->SendPacket(
+        reinterpret_cast<const char*>(packetBuffer.data()),
+        packetLength);
+    DbgLog("[GameMode] cart off sent=%d\n", sent ? 1 : 0);
+    return sent;
+}
+
+bool RequestChangeCart(u16 type)
+{
+    if (type < 1 || type > 5) {
+        return false;
+    }
+
+    std::array<u8, sizeof(PACKET_CZ_REQ_CHANGECART)> packetBuffer{};
+    int packetLength = 0;
+    if (!ro::net::BuildActiveChangeCartPacket(
+            type,
+            packetBuffer.data(),
+            static_cast<int>(packetBuffer.size()),
+            &packetLength)) {
+        return false;
+    }
+
+    const bool sent = CRagConnection::instance()->SendPacket(
+        reinterpret_cast<const char*>(packetBuffer.data()),
+        packetLength);
+    DbgLog("[GameMode] change cart type=%u sent=%d\n",
+        static_cast<unsigned int>(type),
+        sent ? 1 : 0);
+    return sent;
 }
 
 bool RequestIncreaseStatus(u16 statusId)
@@ -6766,8 +6868,6 @@ void ClearRuntimeActors(CGameMode& mode)
     CWorld* const world = mode.m_world ? mode.m_world : &g_world;
     if (world) {
         world->m_player = nullptr;
-        world->ClearFixedObjects();
-        world->m_actorList.clear();
     }
 
     ClearQueuedMsgEffects();
@@ -6787,6 +6887,8 @@ void ClearRuntimeActors(CGameMode& mode)
     mode.m_actorPosList.clear();
 
     if (world) {
+        world->m_actorList.clear();
+        world->ClearFixedObjects();
         world->RebuildSceneGraph();
         world->InvalidateBillboardFrameCache();
     }
@@ -6799,6 +6901,7 @@ void EnsureBootstrapSelfActor(CGameMode& mode)
     }
 
     CGameActor* actor = nullptr;
+    bool createdActor = false;
     const auto it = mode.m_runtimeActors.find(g_session.m_gid);
     if (it != mode.m_runtimeActors.end()) {
         actor = it->second;
@@ -6876,6 +6979,7 @@ void EnsureBootstrapSelfActor(CGameMode& mode)
         actor->m_path.Reset();
         actor->m_msgEffectList.clear();
         mode.m_runtimeActors.emplace(g_session.m_gid, actor);
+        createdActor = true;
 
         DbgLog("[GameMode] bootstrap self actor gid=%u map='%s' pos=%d,%d dir=%d\n",
             g_session.m_gid,
@@ -6909,6 +7013,18 @@ void EnsureBootstrapSelfActor(CGameMode& mode)
         actor->m_Sp = static_cast<u16>((std::max)(0, (std::min)(static_cast<int>(info->sp), 0xFFFF)));
         actor->m_MaxSp = static_cast<u16>((std::max)(0, (std::min)(static_cast<int>(info->maxsp), 0xFFFF)));
 
+        if (createdActor) {
+            actor->m_bodyState = info->bodystate;
+            actor->m_healthState = info->healthstate;
+            actor->m_effectState = info->effectstate;
+            PrimeLocalCartStateFromEffectState(info->effectstate);
+            DbgLog("[GameMode] bootstrap self selected-char states gid=%u body=%d health=%d effect=0x%X\n",
+                g_session.m_gid,
+                info->bodystate,
+                info->healthstate,
+                info->effectstate);
+        }
+
         if (actor->m_Hp > actor->m_MaxHp) {
             actor->m_Hp = actor->m_MaxHp;
         }
@@ -6923,6 +7039,8 @@ void EnsureBootstrapSelfActor(CGameMode& mode)
     actor->m_moveDestY = g_session.m_playerPosY;
     mode.m_actorPosList[g_session.m_gid] = CellPos{ g_session.m_playerPosX, g_session.m_playerPosY };
     mode.m_lastPcGid = g_session.m_gid;
+
+    ApplyPendingLocalCartState(mode);
 }
 
 float TileToWorldCoordX(const CWorld* world, int tileX)
@@ -8541,7 +8659,7 @@ void EnsureBootstrapWorldAssets(const CGameMode& mode)
     if (cache.mapName == mapName && !worldAlreadyBuilt && IsBootstrapWorldReady(cache)) {
         if (mode.m_world) {
             mode.m_world->ClearBackgroundObjects();
-            mode.m_world->ClearFixedObjects();
+            mode.m_world->ClearFixedObjects(true);
         }
         cache.nextBackgroundActorIndex = 0;
         cache.nextFixedEffectIndex = 0;
@@ -8551,7 +8669,7 @@ void EnsureBootstrapWorldAssets(const CGameMode& mode)
     if (cache.mapName != mapName) {
         if (mode.m_world) {
             mode.m_world->ClearBackgroundObjects();
-            mode.m_world->ClearFixedObjects();
+            mode.m_world->ClearFixedObjects(true);
         }
 
         ResetBootstrapWorldCache(cache);
@@ -9030,12 +9148,14 @@ bool ArmPendingSkillUseFromSkillList(int skillId)
         return false;
     }
 
-    constexpr int kSkillInfGroundSkill = 0x02;
-    constexpr int kSkillInfSelfSkill = 0x04;
-
     const u16 skillIdU = static_cast<u16>(skillId & 0xFFFF);
     const u16 skillLevel = static_cast<u16>(skill->level > 0 ? skill->level : 1);
     const int skillInf = skill->type;
+    const ShortcutSkillUseMode skillUseMode = ResolveShortcutSkillUseMode(skillIdU);
+
+    if (skillUseMode == ShortcutSkillUseMode::CartSelect) {
+        return HandleChangeCartSkillUiRequest(*gameMode);
+    }
 
     if ((skillInf & kSkillInfGroundSkill) != 0) {
         ClearSkillChase(*gameMode);
@@ -9985,6 +10105,12 @@ msgresult_t CGameMode::SendMsg(int msg, msgparam_t wparam, msgparam_t lparam, ms
 
     case GameMsg_RequestComposeCardIntoEquipment:
         return RequestComposeCardIntoEquipment(static_cast<s16>(wparam), static_cast<s16>(lparam)) ? 1 : 0;
+
+    case GameMsg_RequestCartOff:
+        return RequestCartOff() ? 1 : 0;
+
+    case GameMsg_RequestChangeCart:
+        return RequestChangeCart(static_cast<u16>(wparam)) ? 1 : 0;
 
     case GameMsg_RequestPartyCreate: {
         const char* partyName = reinterpret_cast<const char*>(wparam);

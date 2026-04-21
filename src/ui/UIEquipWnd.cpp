@@ -2,6 +2,7 @@
 
 #include "DebugLog.h"
 #include "gamemode/GameMode.h"
+#include "gamemode/GameModePacket.h"
 #include "gamemode/Mode.h"
 #include "UIItemWnd.h"
 #include "UIShortCutWnd.h"
@@ -53,9 +54,11 @@ constexpr int kMiniHeight = 34;
 constexpr int kTitleBarHeight = 17;
 constexpr int kQtButtonWidth = 12;
 constexpr int kQtButtonHeight = 11;
+constexpr int kQtCartOffButtonWidth = 30;
 constexpr int kButtonIdBase = 134;
 constexpr int kButtonIdClose = 135;
 constexpr int kButtonIdMini = 136;
+constexpr int kButtonIdCartOff = 137;
 constexpr const char* kUiKorPrefix =
     "texture\\"
     "\xC0\xAF\xC0\xFA\xC0\xCE\xC5\xCD\xC6\xE4\xC0\xCC\xBD\xBA"
@@ -165,6 +168,24 @@ RECT MakeEquipRect(int x, int y, int left, int top, int width, int height)
 bool IsPointInRect(const RECT& rect, int x, int y)
 {
     return x >= rect.left && x < rect.right && y >= rect.top && y < rect.bottom;
+}
+
+bool IsLocalPlayerPushCartEquipped()
+{
+    const CGameMode* gameMode = g_modeMgr.GetCurrentGameMode();
+    constexpr int kPushCartMask = 0x0008 | 0x0080 | 0x0100 | 0x0200 | 0x0400;
+    if (gameMode && gameMode->m_world && gameMode->m_world->m_player) {
+        if ((gameMode->m_world->m_player->m_effectState & kPushCartMask) != 0) {
+            return true;
+        }
+    }
+
+    return IsKnownLocalCartActive();
+}
+
+RECT GetCartOffButtonRect(int x, int y)
+{
+    return MakeEquipRect(x, y, 213, 2, kQtCartOffButtonWidth, 13);
 }
 
 void AddUniqueCandidate(std::vector<std::string>& out, const std::string& raw)
@@ -1107,6 +1128,8 @@ msgresult_t UIEquipWnd::SendMsg(UIWindow* sender, int msg, msgparam_t wparam, ms
     case kButtonIdMini:
         SetMiniMode(true);
         return 1;
+    case kButtonIdCartOff:
+        return g_modeMgr.SendMsg(CGameMode::GameMsg_RequestCartOff, 0, 0, 0);
     case kButtonIdClose:
         SetShow(0);
         return 1;
@@ -1246,6 +1269,13 @@ void UIEquipWnd::OnDraw()
     DrawWindowText(hdc, m_x + 18, m_y + 3, "Equipment", RGB(255, 255, 255));
     DrawWindowText(hdc, m_x + 17, m_y + 2, "Equipment", RGB(0, 0, 0));
 
+    if (IsLocalPlayerPushCartEquipped()) {
+        const RECT cartOffRect = GetCartOffButtonRect(m_x, m_y);
+        FillRectColor(hdc, cartOffRect, RGB(170, 76, 58));
+        FrameRectColor(hdc, cartOffRect, RGB(88, 34, 26));
+        DrawWindowTextRect(hdc, cartOffRect, "OFF", RGB(255, 250, 236), DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+    }
+
     if (m_h > kMiniHeight) {
         const CGameMode* gameMode = g_modeMgr.GetCurrentGameMode();
         const bool hideDraggedItem = gameMode
@@ -1320,11 +1350,19 @@ void UIEquipWnd::OnLBtnDown(int x, int y)
     if (IsQtUiRuntimeEnabled()) {
         const RECT baseRect = MakeEquipRect(m_x, m_y, 3, 3, kQtButtonWidth, kQtButtonHeight);
         const RECT miniRect = MakeEquipRect(m_x, m_y, 247, 3, kQtButtonWidth, kQtButtonHeight);
+        const RECT cartOffRect = GetCartOffButtonRect(m_x, m_y);
         const RECT closeRect = MakeEquipRect(m_x, m_y, 265, 3, kQtButtonWidth, kQtButtonHeight);
-        if (IsPointInRect(baseRect, x, y) || IsPointInRect(miniRect, x, y) || IsPointInRect(closeRect, x, y)) {
+        if (IsPointInRect(baseRect, x, y)
+            || IsPointInRect(miniRect, x, y)
+            || (IsLocalPlayerPushCartEquipped() && IsPointInRect(cartOffRect, x, y))
+            || IsPointInRect(closeRect, x, y)) {
             UIWindow::OnLBtnDown(x, y);
             return;
         }
+    }
+
+    if (IsLocalPlayerPushCartEquipped() && IsPointInRect(GetCartOffButtonRect(m_x, m_y), x, y)) {
+        return;
     }
 
     if (y >= m_y && y < m_y + kTitleBarHeight) {
@@ -1376,6 +1414,7 @@ void UIEquipWnd::OnLBtnUp(int x, int y)
 
         const RECT baseRect = MakeEquipRect(m_x, m_y, 3, 3, kQtButtonWidth, kQtButtonHeight);
         const RECT miniRect = MakeEquipRect(m_x, m_y, 247, 3, kQtButtonWidth, kQtButtonHeight);
+        const RECT cartOffRect = GetCartOffButtonRect(m_x, m_y);
         const RECT closeRect = MakeEquipRect(m_x, m_y, 265, 3, kQtButtonWidth, kQtButtonHeight);
 
         if (m_h == kMiniHeight && IsPointInRect(baseRect, x, y)) {
@@ -1386,6 +1425,10 @@ void UIEquipWnd::OnLBtnUp(int x, int y)
             SendMsg(this, 6, kButtonIdMini, 0, 0);
             return;
         }
+        if (IsLocalPlayerPushCartEquipped() && IsPointInRect(cartOffRect, x, y)) {
+            SendMsg(this, 6, kButtonIdCartOff, 0, 0);
+            return;
+        }
         if (IsPointInRect(closeRect, x, y)) {
             SendMsg(this, 6, kButtonIdClose, 0, 0);
             return;
@@ -1394,7 +1437,11 @@ void UIEquipWnd::OnLBtnUp(int x, int y)
         return;
     }
 
+    const bool wasDragging = m_isDragging != 0;
     UIFrameWnd::OnLBtnUp(x, y);
+    if (!wasDragging && IsLocalPlayerPushCartEquipped() && IsPointInRect(GetCartOffButtonRect(m_x, m_y), x, y)) {
+        SendMsg(this, 6, kButtonIdCartOff, 0, 0);
+    }
 }
 
 void UIEquipWnd::OnRBtnDown(int x, int y)
@@ -1608,7 +1655,7 @@ bool UIEquipWnd::GetHoveredItemForQt(shopui::ItemHoverInfo* outData) const
 
 int UIEquipWnd::GetQtSystemButtonCount() const
 {
-    return 3;
+    return 4;
 }
 
 bool UIEquipWnd::GetQtSystemButtonDisplayForQt(int index, QtButtonDisplay* outData) const
@@ -1637,6 +1684,15 @@ bool UIEquipWnd::GetQtSystemButtonDisplayForQt(int index, QtButtonDisplay* outDa
         outData->visible = !IsMiniMode();
         return true;
     case 2:
+        outData->id = kButtonIdCartOff;
+        outData->x = m_x + 213;
+        outData->y = m_y + 2;
+        outData->width = kQtCartOffButtonWidth;
+        outData->height = 13;
+        outData->label = "OFF";
+        outData->visible = IsLocalPlayerPushCartEquipped();
+        return true;
+    case 3:
         outData->id = kButtonIdClose;
         outData->x = m_x + 265;
         outData->y = m_y + 3;
@@ -1921,6 +1977,9 @@ unsigned long long UIEquipWnd::BuildVisualStateToken() const
         HashTokenValue(&hash, static_cast<unsigned long long>(gameMode->m_dragInfo.source));
         HashTokenValue(&hash, static_cast<unsigned long long>(gameMode->m_dragInfo.itemIndex));
         HashTokenValue(&hash, static_cast<unsigned long long>(gameMode->m_dragInfo.itemId));
+        if (gameMode->m_world && gameMode->m_world->m_player) {
+            HashTokenValue(&hash, static_cast<unsigned long long>(gameMode->m_world->m_player->m_effectState));
+        }
     }
 
     const std::list<ITEM_INFO>& items = g_session.GetInventoryItems();

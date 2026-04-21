@@ -190,6 +190,8 @@ void FillPacketSizeTable(PacketSizeTable& packetSizeTable)
     SetPacketSize(0x011A, 15);
     SetPacketSize(0x011F, 16);
     SetPacketSize(0x0120, 6);
+    SetPacketSize(0x0121, 14);             // ZC_UPDATE_CARTINFO
+    SetPacketSize(0x012B, 2);              // ZC_CLEAR_CART
     SetPacketSize(0x012F, kVariablePacketSize);
     SetPacketSize(0x0147, 39);              // ZC_AUTORUN_SKILL (e.g. Magnifier -> MC_IDENTIFY)
     SetPacketSize(0x0130, 6);

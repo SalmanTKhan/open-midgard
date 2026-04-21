@@ -243,6 +243,7 @@ public:
     u8 m_objectType;
     _MSG2AI m_homunMsg, m_homunResMsg, m_merMsg, m_merResMsg;
     CMsgEffect* m_birdEffect;
+    CMsgEffect* m_cartEffect;
     CMsgEffect* m_lastDamageNumberEffect;
     std::list<CMsgEffect*> m_msgEffectList;
     vector3d m_moveStartPos;
@@ -296,12 +297,21 @@ public:
     vector3d m_orgPos;
     vector3d m_destPos;
     vector3d m_destPos2;
+    vector3d m_followRenderPos;
     float m_zoom;
     float m_orgZoom;
+    float m_followTravelDistance;
+    u32 m_followLastRenderFrame;
+    u32 m_followRenderTick;
+    std::string m_customSpritePath;
+    std::string m_customActPath;
     CGameActor* m_masterActor;
     u8 m_isVisible;
     u8 m_isDisappear;
     u8 m_removedFromOwner;
+    u8 m_followInitialized;
+    u8 m_followRenderInitialized;
+    u8 m_followRenderAfterOwner;
 };
 
 void SetRuntimeActorCameraLongitude(float longitude);

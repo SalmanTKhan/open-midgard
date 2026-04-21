@@ -246,7 +246,7 @@ public:
 
     void ClearGround();
     void ClearBackgroundObjects();
-    void ClearFixedObjects();
+    void ClearFixedObjects(bool preserveAttachedActorEffects = false);
     void ClearSky();
     bool EnsureSkyActor();
     void NotifyActorDeleted(const CGameActor* actor);

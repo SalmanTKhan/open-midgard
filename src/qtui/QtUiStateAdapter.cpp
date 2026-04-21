@@ -36,6 +36,7 @@
 #include "ui/UIItemPurchaseWnd.h"
 #include "ui/UIItemSellWnd.h"
 #include "ui/UIItemShopWnd.h"
+#include "ui/UISelectCartWnd.h"
 #include "ui/UIMinimapWnd.h"
 #include "ui/UINewChatWnd.h"
 #include "ui/UINpcMenuWnd.h"
@@ -1069,6 +1070,31 @@ void PopulateNotificationState(QtUiState* state)
 void PopulateShopChoiceState(QtUiState* state)
 {
     if (!state) {
+        return;
+    }
+
+    const UISelectCartWnd* const cartWnd = g_windowMgr.m_selectCartWnd;
+    const bool cartVisible = IsGameplayWindowVisible(state, cartWnd);
+    if (cartVisible) {
+        state->setShopChoiceVisible(true);
+        state->setShopChoiceGeometry(cartWnd->m_x, cartWnd->m_y, cartWnd->m_w, cartWnd->m_h);
+        state->setShopChoiceText(QStringLiteral("Select Cart"), QStringLiteral("Choose the pushcart style to equip."));
+
+        QVariantList buttons;
+        const int optionCount = cartWnd->GetVisibleOptionCount();
+        for (int index = 0; index < optionCount; ++index) {
+            const RECT rect = cartWnd->GetOptionRectForRender(index);
+            QVariantMap button;
+            button.insert(QStringLiteral("label"), QStringLiteral("Cart %1").arg(index + 1));
+            button.insert(QStringLiteral("x"), QVariant::fromValue(static_cast<int>(rect.left)));
+            button.insert(QStringLiteral("y"), QVariant::fromValue(static_cast<int>(rect.top)));
+            button.insert(QStringLiteral("width"), QVariant::fromValue(static_cast<int>(rect.right - rect.left)));
+            button.insert(QStringLiteral("height"), QVariant::fromValue(static_cast<int>(rect.bottom - rect.top)));
+            button.insert(QStringLiteral("hot"), cartWnd->GetHoverIndex() == index);
+            button.insert(QStringLiteral("pressed"), cartWnd->GetPressedIndex() == index);
+            buttons.push_back(button);
+        }
+        state->setShopChoiceButtons(buttons);
         return;
     }
 

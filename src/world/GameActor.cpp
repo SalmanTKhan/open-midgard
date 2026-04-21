@@ -946,6 +946,141 @@ void SpawnLuckyDodgeEffect(CGameActor& actor)
     actor.m_msgEffectList.push_back(effect);
 }
 
+constexpr int kAttachedActorSpriteMsgEffectType = 203;
+constexpr const char* kEffectSpriteRoot = "data\\sprite\\\xC0\xCC\xC6\xD1\xC6\xAE\\";
+
+const char* ResolveCartEffectStem(int effectType)
+{
+    switch (effectType) {
+    case 1:
+        return "\xBC\xD5\xBC\xF6\xB7\xB9";
+    case 0x10:
+        return "\xBC\xD5\xBC\xF6\xB7\xB9" "1";
+    case 0x11:
+        return "\xBC\xD5\xBC\xF6\xB7\xB9" "2";
+    case 0x12:
+        return "\xBC\xD5\xBC\xF6\xB7\xB9" "3";
+    case 0x13:
+        return "\xBC\xD5\xBC\xF6\xB7\xB9" "4";
+    case 0x15:
+        return "\xBD\xB4\xB3\xEB\xBC\xD5\xBC\xF6\xB7\xB9";
+    case 0x19:
+        return "\xBA\xA3\xC0\xCC\xBA\xF1\xBC\xD5\xBC\xF6\xB7\xB9";
+    case 0x1A:
+        return "\xBA\xA3\xC0\xCC\xBA\xF1\xBC\xD5\xBC\xF6\xB7\xB9" "1";
+    case 0x1B:
+        return "\xBA\xA3\xC0\xCC\xBA\xF1\xBC\xD5\xBC\xF6\xB7\xB9" "2";
+    case 0x1C:
+        return "\xBA\xA3\xC0\xCC\xBA\xF1\xBC\xD5\xBC\xF6\xB7\xB9" "3";
+    case 0x1D:
+        return "\xBA\xA3\xC0\xCC\xBA\xF1\xBC\xD5\xBC\xF6\xB7\xB9" "4";
+    case 0x1E:
+        return "\xBA\xA3\xC0\xCC\xBA\xF1\xBD\xB4\xB3\xEB\xBC\xD5\xBC\xF6\xB7\xB9";
+    default:
+        return nullptr;
+    }
+}
+
+std::string BuildCartEffectPath(int effectType, const char* extension)
+{
+    const char* stem = ResolveCartEffectStem(effectType);
+    if (!stem || !extension) {
+        return {};
+    }
+
+    std::string path = kEffectSpriteRoot;
+    path += stem;
+    path += extension;
+    return path;
+}
+
+bool IsLiveMsgEffectObject(const CMsgEffect* effect)
+{
+    if (!effect) {
+        return false;
+    }
+
+    const auto it = std::find(g_world.m_gameObjectList.begin(), g_world.m_gameObjectList.end(),
+        static_cast<const CGameObject*>(effect));
+    return it != g_world.m_gameObjectList.end();
+}
+
+void DetachOwnedMsgEffect(CGameActor& actor, CMsgEffect* effect)
+{
+    if (!effect) {
+        return;
+    }
+
+    actor.DeleteMatchingEffect(effect);
+    effect->SendMsg(&actor, 49, 0, 0, 0);
+    effect->SendMsg(&actor, 53, 0, 0, 0);
+}
+
+void DestroyAttachedMsgEffect(CGameActor& actor, CMsgEffect** effectSlot)
+{
+    if (!effectSlot || !*effectSlot) {
+        return;
+    }
+
+    CMsgEffect* effect = *effectSlot;
+    DetachOwnedMsgEffect(actor, effect);
+    *effectSlot = nullptr;
+}
+
+void SpawnCartEffect(CGameActor& actor, int effectType)
+{
+    const std::string actPath = BuildCartEffectPath(effectType, ".act");
+    const std::string sprPath = BuildCartEffectPath(effectType, ".spr");
+    if (actPath.empty() || sprPath.empty()) {
+        return;
+    }
+
+    CActRes* actRes = g_resMgr.GetAs<CActRes>(actPath.c_str());
+    CSprRes* sprRes = g_resMgr.GetAs<CSprRes>(sprPath.c_str());
+    if (!actRes || !sprRes) {
+        DbgLog("[CartEffect] resource load failed gid=%u effectType=%d spr='%s' act='%s'\n",
+            static_cast<unsigned int>(actor.m_gid),
+            effectType,
+            sprPath.c_str(),
+            actPath.c_str());
+        return;
+    }
+
+    DestroyAttachedMsgEffect(actor, &actor.m_cartEffect);
+
+    CMsgEffect* effect = new CMsgEffect();
+    if (!effect) {
+        return;
+    }
+
+    effect->SendMsg(nullptr, 22, static_cast<int>(actor.m_gid), kAttachedActorSpriteMsgEffectType, 0);
+    effect->m_isVisible = 1;
+    effect->m_stateStartTick = timeGetTime();
+    effect->m_pos = actor.m_pos;
+    effect->m_orgPos = actor.m_pos;
+    effect->m_zoom = 1.0f;
+    effect->m_orgZoom = 1.0f;
+    effect->m_colorArgb = 0xFFFFFFFFu;
+    effect->m_spriteActionIndex = 0;
+    effect->m_spriteMotionIndex = 0;
+    effect->m_customSpritePath = sprPath;
+    effect->m_customActPath = actPath;
+    effect->SendMsg(&actor, 50, 0, 0, 0);
+
+    g_world.m_gameObjectList.push_back(effect);
+    actor.m_msgEffectList.push_back(effect);
+    actor.m_cartEffect = effect;
+    DbgLog("[CartEffect] spawn gid=%u effect=%p type=%d pos=(%.2f,%.2f,%.2f) spr='%s' act='%s'\n",
+        static_cast<unsigned int>(actor.m_gid),
+        static_cast<void*>(effect),
+        effectType,
+        actor.m_pos.x,
+        actor.m_pos.y,
+        actor.m_pos.z,
+        sprPath.c_str(),
+        actPath.c_str());
+}
+
 void MakeDamageNumber(CGameActor& actor, CGameActor* sourceActor, int value, u32 colorArgb, int kind)
 {
     const int clampedValue = ClampDamageNumber(value);
@@ -4056,6 +4191,7 @@ CGameActor::CGameActor()
     , m_merMsg{}
     , m_merResMsg{}
     , m_birdEffect(nullptr)
+    , m_cartEffect(nullptr)
     , m_lastDamageNumberEffect(nullptr)
     , m_moveStartPos{ 0.0f, 0.0f, 0.0f }
     , m_moveEndPos{ 0.0f, 0.0f, 0.0f }
@@ -4077,15 +4213,21 @@ CGameActor::~CGameActor()
 {
     DestroySkillRechargeGage();
     DetachEffects();
-    for (CMsgEffect* effect : m_msgEffectList) {
+    const std::vector<CMsgEffect*> ownedMsgEffects(m_msgEffectList.begin(), m_msgEffectList.end());
+    m_msgEffectList.clear();
+    m_birdEffect = nullptr;
+    m_cartEffect = nullptr;
+    m_lastDamageNumberEffect = nullptr;
+    for (CMsgEffect* effect : ownedMsgEffects) {
         if (!effect) {
+            continue;
+        }
+        if (!IsLiveMsgEffectObject(effect)) {
             continue;
         }
         effect->SendMsg(this, 49, 0, 0, 0);
         effect->SendMsg(this, 53, 0, 0, 0);
     }
-    m_msgEffectList.clear();
-    m_birdEffect = nullptr;
 }
 
 void CGameActor::SetChatBubbleText(const std::string& text, u32 untilTick)
@@ -4524,6 +4666,12 @@ void CGameActor::SendMsg(CGameObject* src, int msg, msgparam_t par1, msgparam_t 
     case 95:
         SpawnLuckyDodgeEffect(*this);
         return;
+    case 51:
+        SpawnCartEffect(*this, static_cast<int>(par1));
+        return;
+    case 52:
+        DestroyAttachedMsgEffect(*this, &m_cartEffect);
+        return;
     default:
         return;
     }
@@ -4769,6 +4917,14 @@ void CGameActor::DeleteMatchingEffect(CMsgEffect* effect)
     if (m_birdEffect == effect) {
         m_birdEffect = nullptr;
     }
+    if (m_cartEffect == effect) {
+        DbgLog("[CartEffect] detach gid=%u effect=%p removedFromOwner=%d disappear=%d\n",
+            static_cast<unsigned int>(m_gid),
+            static_cast<void*>(effect),
+            effect->m_removedFromOwner,
+            effect->m_isDisappear);
+        m_cartEffect = nullptr;
+    }
     if (m_lastDamageNumberEffect == effect) {
         m_lastDamageNumberEffect = nullptr;
     }
@@ -4781,12 +4937,16 @@ void CGameActor::DeleteMatchingEffect(CMsgEffect* effect)
 
 void CGameActor::DeleteTotalNumber(int kind)
 {
+    std::vector<CMsgEffect*> matchingEffects;
     for (CMsgEffect* effect : m_msgEffectList) {
         if (!effect || effect->m_msgEffectType != kind) {
             continue;
         }
-        effect->SendMsg(this, 49, 0, 0, 0);
-        effect->SendMsg(this, 53, 0, 0, 0);
+        matchingEffects.push_back(effect);
+    }
+
+    for (CMsgEffect* effect : matchingEffects) {
+        DetachOwnedMsgEffect(*this, effect);
     }
 }
 

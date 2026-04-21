@@ -90,6 +90,8 @@ namespace PacketVer22MapServerSend {
 constexpr u16 kWantToConnection = 0x009B;
 constexpr u16 kActionRequest = 0x0190;
 constexpr u16 kUseSkillToId = 0x0072;
+constexpr u16 kCartOff = 0x012A;
+constexpr u16 kChangeCart = 0x01AF;
 constexpr u16 kItemCompositionList = 0x017A;
 constexpr u16 kItemComposition = 0x017C;
 constexpr u16 kItemIdentify = 0x0178;
@@ -114,6 +116,8 @@ namespace PacketVer23MapServerSend {
 constexpr u16 kWantToConnection = 0x0436;
 constexpr u16 kActionRequest = 0x0437;
 constexpr u16 kUseSkillToId = 0x0438;
+constexpr u16 kCartOff = 0x012A;
+constexpr u16 kChangeCart = 0x01AF;
 constexpr u16 kItemCompositionList = 0x017A;
 constexpr u16 kItemComposition = 0x017C;
 constexpr u16 kItemIdentify = 0x0178;
@@ -141,6 +145,8 @@ namespace ActiveMapServerSend {
 constexpr u16 kWantToConnection = PacketVer23MapServerSend::kWantToConnection;
 constexpr u16 kActionRequest = PacketVer23MapServerSend::kActionRequest;
 constexpr u16 kUseSkillToId = PacketVer23MapServerSend::kUseSkillToId;
+constexpr u16 kCartOff = PacketVer23MapServerSend::kCartOff;
+constexpr u16 kChangeCart = PacketVer23MapServerSend::kChangeCart;
 constexpr u16 kItemCompositionList = PacketVer23MapServerSend::kItemCompositionList;
 constexpr u16 kItemComposition = PacketVer23MapServerSend::kItemComposition;
 constexpr u16 kItemIdentify = PacketVer23MapServerSend::kItemIdentify;
@@ -472,6 +478,15 @@ struct PACKET_CZ_USEITEM_PACKETVER22 {
     u32 TargetAID;
 };
 
+struct PACKET_CZ_REQ_CARTOFF {
+    u16 PacketType;    // 0x012A
+};
+
+struct PACKET_CZ_REQ_CHANGECART {
+    u16 PacketType;    // 0x01AF
+    u16 Type;
+};
+
 struct PACKET_CZ_ITEM_COMPOSITION_LIST {
     u16 PacketType;    // 0x017A
     u16 CardItemIndex;
@@ -721,6 +736,8 @@ static_assert(sizeof(PACKET_CZ_ITEM_THROW) == 10, "PACKET_CZ_ITEM_THROW size mis
 static_assert(sizeof(PACKET_CZ_USESKILLMAP) == 20, "PACKET_CZ_USESKILLMAP size mismatch");
 static_assert(sizeof(PACKET_CZ_USEITEM2) == 8, "PACKET_CZ_USEITEM2 size mismatch");
 static_assert(sizeof(PACKET_CZ_USEITEM_PACKETVER22) == 14, "PACKET_CZ_USEITEM_PACKETVER22 size mismatch");
+static_assert(sizeof(PACKET_CZ_REQ_CARTOFF) == 2, "PACKET_CZ_REQ_CARTOFF size mismatch");
+static_assert(sizeof(PACKET_CZ_REQ_CHANGECART) == 4, "PACKET_CZ_REQ_CHANGECART size mismatch");
 static_assert(sizeof(PACKET_CZ_ITEM_COMPOSITION_LIST) == 4, "PACKET_CZ_ITEM_COMPOSITION_LIST size mismatch");
 static_assert(sizeof(PACKET_CZ_ITEM_IDENTIFY) == 4, "PACKET_CZ_ITEM_IDENTIFY size mismatch");
 static_assert(sizeof(PACKET_CZ_ITEM_COMPOSITION) == 6, "PACKET_CZ_ITEM_COMPOSITION size mismatch");

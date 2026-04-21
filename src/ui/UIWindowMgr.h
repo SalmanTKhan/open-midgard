@@ -39,6 +39,7 @@ class UIPartyOptionWnd;
 class UINpcInputWnd;
 class UIChooseWnd;
 class UIChooseSellBuyWnd;
+class UISelectCartWnd;
 class UIItemShopWnd;
 class UIItemPurchaseWnd;
 class UIItemSellWnd;
@@ -96,6 +97,7 @@ public:
         WID_NOTIFYLEVELUPWND  = 21,
         WID_ITEMSELLWND       = 22,
         WID_SHORTCUTWND       = 23,
+        WID_SELECTCARTWND     = 0x5F,
         WID_STORAGEWND        = 50,
         WID_CHOOSEWND         = 17,
         WID_ROMAPWND          = 0x93,
@@ -212,6 +214,7 @@ public:
     UIMakeCharWnd* m_makeCharWnd;
     UIWaitWnd* m_waitWnd;
     UIChooseWnd* m_chooseWnd;
+    UISelectCartWnd* m_selectCartWnd;
     UIOptionWnd* m_optionWnd;
     UIItemWnd* m_itemWnd;
     UIItemInfoWnd* m_itemInfoWnd;

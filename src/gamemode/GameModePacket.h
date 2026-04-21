@@ -47,6 +47,12 @@ void RegisterDefaultGameModePacketHandlers(CGameModePacketRouter& router);
 // Removes runtime actors whose delayed despawn timer has expired.
 void CleanupPendingActorDespawns(CGameMode& mode);
 
+// Applies locally known cart-on/cart-off state to the self actor when packet order
+// leaves the bootstrap actor without option bits.
+void ApplyPendingLocalCartState(CGameMode& mode);
+void PrimeLocalCartStateFromEffectState(int effectState);
+bool IsKnownLocalCartActive();
+
 void SetPendingDisconnectAction(PendingDisconnectAction action);
 PendingDisconnectAction GetPendingDisconnectAction();
 void ClearPendingDisconnectAction();

@@ -11,6 +11,7 @@
 #include "UIPartyOptionWnd.h"
 #include "UINpcInputWnd.h"
 #include "UIChooseWnd.h"
+#include "UISelectCartWnd.h"
 #include "UIChooseSellBuyWnd.h"
 #include "UIEquipWnd.h"
 #include "UIItemCollectionWnd.h"
@@ -593,7 +594,7 @@ UIWindowMgr::UIWindowMgr()
       m_isDragAll(0), m_conversionMode(0),
     m_captureWindow(nullptr), m_editWindow(nullptr), m_modalWindow(nullptr), m_lastHitWindow(nullptr),
         m_loadingWnd(nullptr), m_roMapWnd(nullptr), m_minimapZoomWnd(nullptr), m_statusWnd(nullptr), m_sayDialogWnd(nullptr), m_npcMenuWnd(nullptr), m_playerContextMenuWnd(nullptr), m_joinPartyAcceptWnd(nullptr), m_messengerGroupWnd(nullptr), m_partyOptionWnd(nullptr), m_npcInputWnd(nullptr), m_chooseSellBuyWnd(nullptr), m_itemShopWnd(nullptr), m_itemPurchaseWnd(nullptr), m_itemSellWnd(nullptr), m_storageWnd(nullptr), m_shortCutWnd(nullptr), m_chatWnd(nullptr),
-                m_loginWnd(nullptr), m_selectServerWnd(nullptr), m_selectCharWnd(nullptr), m_makeCharWnd(nullptr), m_waitWnd(nullptr), m_chooseWnd(nullptr), m_optionWnd(nullptr), m_itemWnd(nullptr), m_itemInfoWnd(nullptr), m_itemCollectionWnd(nullptr), m_itemCompositionWnd(nullptr), m_itemIdentifyWnd(nullptr), m_questWnd(nullptr), m_basicInfoWnd(nullptr), m_notifyLevelUpWnd(nullptr), m_notifyJobLevelUpWnd(nullptr), m_equipWnd(nullptr), m_skillDescribeWnd(nullptr), m_skillListWnd(nullptr),
+            m_loginWnd(nullptr), m_selectServerWnd(nullptr), m_selectCharWnd(nullptr), m_makeCharWnd(nullptr), m_waitWnd(nullptr), m_chooseWnd(nullptr), m_selectCartWnd(nullptr), m_optionWnd(nullptr), m_itemWnd(nullptr), m_itemInfoWnd(nullptr), m_itemCollectionWnd(nullptr), m_itemCompositionWnd(nullptr), m_itemIdentifyWnd(nullptr), m_questWnd(nullptr), m_basicInfoWnd(nullptr), m_notifyLevelUpWnd(nullptr), m_notifyJobLevelUpWnd(nullptr), m_equipWnd(nullptr), m_skillDescribeWnd(nullptr), m_skillListWnd(nullptr),
                         m_wallpaperSurface(nullptr), m_uiComposeSurface(), m_chatActiveInputField(0), m_chatScrollLineOffset(0)
 {
     m_loginStatus = "Login: idle";
@@ -1019,6 +1020,16 @@ UIWindow* UIWindowMgr::MakeWindow(int windowId)
         m_equipWnd->SetShow(1);
         return m_equipWnd;
 
+    case WID_SELECTCARTWND:
+        if (!m_selectCartWnd) {
+            m_selectCartWnd = new UISelectCartWnd();
+            m_children.push_back(m_selectCartWnd);
+        }
+        m_children.remove(m_selectCartWnd);
+        m_children.push_back(m_selectCartWnd);
+        m_selectCartWnd->SetShow(1);
+        return m_selectCartWnd;
+
     case WID_SKILLDESCRIBEWND:
         if (!m_skillDescribeWnd) {
             m_skillDescribeWnd = new UISkillDescribeWnd();
@@ -1172,6 +1183,9 @@ bool UIWindowMgr::ToggleWindow(int windowId)
         break;
     case WID_EQUIPWND:
         window = m_equipWnd;
+        break;
+    case WID_SELECTCARTWND:
+        window = m_selectCartWnd;
         break;
     case WID_SKILLLISTWND:
         window = m_skillListWnd;
@@ -1330,6 +1344,9 @@ void UIWindowMgr::DeleteWindow(UIWindow* window)
     if (window == m_equipWnd) {
         m_equipWnd = nullptr;
     }
+    if (window == m_selectCartWnd) {
+        m_selectCartWnd = nullptr;
+    }
     if (window == m_skillDescribeWnd) {
         m_skillDescribeWnd = nullptr;
     }
@@ -1392,6 +1409,7 @@ void UIWindowMgr::RemoveAllWindows()
     m_makeCharWnd = nullptr;
     m_waitWnd = nullptr;
     m_chooseWnd = nullptr;
+    m_selectCartWnd = nullptr;
     m_optionWnd = nullptr;
     m_itemWnd = nullptr;
     m_itemInfoWnd = nullptr;
@@ -1411,6 +1429,7 @@ void UIWindowMgr::Reset() {
     m_selectCharWnd = nullptr;
     m_makeCharWnd = nullptr;
     m_chooseWnd = nullptr;
+    m_selectCartWnd = nullptr;
     m_optionWnd = nullptr;
     m_chatWnd = nullptr;
     m_chatEvents.clear();

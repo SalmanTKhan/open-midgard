@@ -1,4 +1,5 @@
 #include "World.h"
+#include "world/MsgEffect.h"
 #include "world/3dActor.h"
 #include "world/RagEffect.h"
 #include "DebugLog.h"
@@ -5215,12 +5216,27 @@ bool CWorld::EnsureSkyActor()
     return true;
 }
 
-void CWorld::ClearFixedObjects()
+void CWorld::ClearFixedObjects(bool preserveAttachedActorEffects)
 {
+    std::list<CGameObject*> preservedObjects;
+
     for (CGameObject* object : m_gameObjectList) {
+        if (!object) {
+            continue;
+        }
+
+        if (preserveAttachedActorEffects) {
+            if (CMsgEffect* msgEffect = dynamic_cast<CMsgEffect*>(object)) {
+                if (msgEffect->m_masterActor && !msgEffect->m_removedFromOwner) {
+                    preservedObjects.push_back(object);
+                    continue;
+                }
+            }
+        }
+
         delete object;
     }
-    m_gameObjectList.clear();
+    m_gameObjectList.swap(preservedObjects);
 
     for (CItem* item : m_itemList) {
         delete item;
@@ -5671,7 +5687,7 @@ bool CWorld::AppendFixedEffects(const C3dWorldRes& worldRes,
     bool clearExisting)
 {
     if (clearExisting) {
-        ClearFixedObjects();
+        ClearFixedObjects(true);
     }
 
     size_t effectIndex = 0;
@@ -6016,9 +6032,38 @@ void CWorld::RenderActors(const matrix& viewMatrix, float cameraLongitude)
     m_lastRenderStats.renderedBillboards = static_cast<u32>(renderEntries.size());
 
     const double billboardRenderStartMs = WorldNowMs();
+    static u32 s_attachedActorRenderFrame = 0;
+    ++s_attachedActorRenderFrame;
     for (const BillboardScreenEntry& entry : renderEntries) {
         RenderCachedActorShadow(entry, viewMatrix, zoom);
+        if (entry.actor && entry.actor->m_cartEffect) {
+            static std::map<u32, int> s_cartRenderLoopLogs;
+            if (entry.actor->m_gid != g_session.m_gid && s_cartRenderLoopLogs[entry.actor->m_gid] < 8) {
+                ++s_cartRenderLoopLogs[entry.actor->m_gid];
+                DbgLog("[CartEffect] render loop gid=%u actor=%p effect=%p depth=%.4f screenY=%.2f visible=%d\n",
+                    static_cast<unsigned int>(entry.actor->m_gid),
+                    static_cast<void*>(entry.actor),
+                    static_cast<void*>(entry.actor->m_cartEffect),
+                    entry.depthKey,
+                    entry.screenY,
+                    entry.actor->m_isVisible);
+            }
+            RenderAttachedActorEffectPass(*entry.actor->m_cartEffect,
+                const_cast<matrix*>(&viewMatrix),
+                entry.depthKey,
+                entry.screenY,
+                false,
+                s_attachedActorRenderFrame);
+        }
         RenderCachedBillboard(entry);
+        if (entry.actor && entry.actor->m_cartEffect) {
+            RenderAttachedActorEffectPass(*entry.actor->m_cartEffect,
+                const_cast<matrix*>(&viewMatrix),
+                entry.depthKey,
+                entry.screenY,
+                true,
+                s_attachedActorRenderFrame);
+        }
     }
     m_lastRenderStats.billboardRenderMs = WorldNowMs() - billboardRenderStartMs;
 }
