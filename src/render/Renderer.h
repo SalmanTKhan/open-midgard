@@ -193,6 +193,9 @@ public:
     int m_bRGBBitCount;
     int m_nClearColor;
 
+    void SetClearColor(int argb) { m_nClearColor = argb; }
+    int  GetClearColor() const { return m_nClearColor; }
+
     bool m_isVertexFog;
     bool m_isFoggy;
     bool m_fogChanged;

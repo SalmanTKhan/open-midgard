@@ -5,6 +5,7 @@
 #include "gamemode/Mode.h"
 #include "main/WinMain.h"
 #include "qtui/QtUiRuntime.h"
+#include "UiSkin.h"
 #include "ui/UIWindowMgr.h"
 
 #include <windows.h>
@@ -110,12 +111,7 @@ std::vector<std::string> BuildUiAssetCandidates(const char* fileName)
 
 std::string ResolveUiAssetPath(const char* fileName)
 {
-    for (const std::string& candidate : BuildUiAssetCandidates(fileName)) {
-        if (g_fileMgr.IsDataExist(candidate.c_str())) {
-            return candidate;
-        }
-    }
-    return NormalizeSlash(fileName ? fileName : "");
+    return ui_skin::ResolveUiAssetPath(fileName);
 }
 
 RECT MakeRect(int x, int y, int w, int h)

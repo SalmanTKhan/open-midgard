@@ -48,7 +48,9 @@
         "RO_ENABLE_DEV_DEPLOY": "ON",
         "RO_ENABLE_QT6_UI_SPIKE": "ON",
         "RO_QT_UI_SPIKE_DEFAULT_ENABLED": "ON",
-        "RO_QT_ROOT": "C:/Qt/6.11.0/mingw_64"
+        "RO_QT_ROOT": "C:/Qt/6.11.0/mingw_64",
+        "VCPKG_TARGET_TRIPLET": "x64-mingw-dynamic",
+        "VCPKG_HOST_TRIPLET": "x64-mingw-dynamic"
       }
     },
     {
@@ -72,7 +74,9 @@
         "RO_ENABLE_DEV_DEPLOY": "ON",
         "RO_ENABLE_QT6_UI_SPIKE": "ON",
         "RO_QT_UI_SPIKE_DEFAULT_ENABLED": "ON",
-        "RO_QT_ROOT": "C:/Qt/6.11.0/mingw_64"
+        "RO_QT_ROOT": "C:/Qt/6.11.0/mingw_64",
+        "VCPKG_TARGET_TRIPLET": "x64-mingw-dynamic",
+        "VCPKG_HOST_TRIPLET": "x64-mingw-dynamic"
       }
     },
     {

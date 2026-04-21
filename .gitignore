@@ -26,3 +26,5 @@ tools/
 build_output*.txt
 *.ps1
 *.py
+/screenshots
+/build-noqt

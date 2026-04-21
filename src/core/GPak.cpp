@@ -34,6 +34,80 @@ static const char k_GrfHeader[16] = "Master of Magic";
 
 // ---------------------------------------------------------------------------
 
+namespace {
+
+uint32_t ReadLe32(const unsigned char* bytes)
+{
+    return static_cast<uint32_t>(bytes[0])
+        | (static_cast<uint32_t>(bytes[1]) << 8)
+        | (static_cast<uint32_t>(bytes[2]) << 16)
+        | (static_cast<uint32_t>(bytes[3]) << 24);
+}
+
+bool AlphaLzssDecompress(const unsigned char* source,
+    unsigned int sourceLen,
+    unsigned char* dest,
+    unsigned int destLen)
+{
+    if ((!source || sourceLen == 0) && destLen != 0) {
+        return false;
+    }
+    if (!dest && destLen != 0) {
+        return false;
+    }
+    if (destLen == 0) {
+        return true;
+    }
+
+    unsigned int inputOffset = 0;
+    unsigned int outputOffset = 0;
+    unsigned char control = source[inputOffset++];
+    int controlCount = 0;
+
+    for (;;) {
+        if ((control & 0x01u) == 0) {
+            if (inputOffset >= sourceLen || outputOffset >= destLen) {
+                return false;
+            }
+            dest[outputOffset++] = source[inputOffset++];
+        }
+        else {
+            if (inputOffset + 1 >= sourceLen) {
+                return false;
+            }
+
+            const uint16_t codeword = static_cast<uint16_t>(source[inputOffset])
+                | (static_cast<uint16_t>(source[inputOffset + 1]) << 8);
+            inputOffset += 2;
+
+            const unsigned int phraseLength = static_cast<unsigned int>((codeword >> 12) & 0x0Fu) + 2u;
+            const unsigned int phraseIndex = static_cast<unsigned int>(codeword & 0x0FFFu);
+            if (phraseIndex == 0 || phraseIndex > outputOffset || outputOffset + phraseLength > destLen) {
+                return false;
+            }
+
+            for (unsigned int i = 0; i < phraseLength; ++i) {
+                dest[outputOffset] = dest[outputOffset - phraseIndex];
+                ++outputOffset;
+            }
+        }
+
+        control >>= 1;
+        ++controlCount;
+        if (inputOffset >= sourceLen) {
+            break;
+        }
+        if (controlCount >= 8) {
+            control = source[inputOffset++];
+            controlCount = 0;
+        }
+    }
+
+    return outputOffset == destLen;
+}
+
+} // namespace
+
 CGPak::CGPak()  { Init(); }
 CGPak::~CGPak() = default;
 
@@ -65,12 +139,41 @@ bool CGPak::Open(CMemFile* memFile)
     //   [42] uint32 version     -> m_FileVer
     const unsigned char* hdr = memFile->read(0, 46);
     if (!hdr) return false;
-    if (std::strncmp(reinterpret_cast<const char*>(hdr), k_GrfHeader, 15) != 0) return false;
+    if (std::strncmp(reinterpret_cast<const char*>(hdr), k_GrfHeader, 15) != 0)
+    {
+        if (memFile->size() < 9) {
+            return false;
+        }
 
-    m_PakInfoOffset = *reinterpret_cast<const uint32_t*>(hdr + 30) + 46;
-    m_FileCount     = *reinterpret_cast<const uint32_t*>(hdr + 38)
-                    - *reinterpret_cast<const uint32_t*>(hdr + 34) - 7;
-    m_FileVer       = *reinterpret_cast<const uint32_t*>(hdr + 42);
+        const unsigned char* tail = memFile->read(memFile->size() - 9, 9);
+        if (!tail) {
+            return false;
+        }
+
+        m_PakInfoOffset = ReadLe32(tail);
+        const uint32_t rawCount = ReadLe32(tail + 4);
+        m_FileCount = (rawCount << 16) | (rawCount >> 16);
+        m_FileVer = tail[8];
+
+        if (m_FileVer == 0x12u && m_PakInfoOffset < memFile->size() && m_FileCount > 0) {
+            DbgLog("[GPak::Open] Detected Alpha archive v0x%X, files: %u, pakInfoOffset: %u\n",
+                m_FileVer, m_FileCount, m_PakInfoOffset);
+            const bool ok = OpenPakAlpha();
+            if (!ok) {
+                m_FileVer = m_FileCount = m_PakInfoOffset = m_PakInfoSize = 0;
+                m_PakPack.clear();
+                m_pDecBuf.clear();
+                m_memFile = nullptr;
+            }
+            return ok;
+        }
+
+        return false;
+    }
+
+    m_PakInfoOffset = ReadLe32(hdr + 30) + 46;
+    m_FileCount     = ReadLe32(hdr + 38) - ReadLe32(hdr + 34) - 7;
+    m_FileVer       = ReadLe32(hdr + 42);
 
     DbgLog("[GPak::Open] GRF version: 0x%X, files: %u, pakInfoOffset: %u\n",
            m_FileVer, m_FileCount, m_PakInfoOffset);
@@ -143,6 +246,67 @@ char* CGPak::MakeSeed(const char* fileName, char* seed) const
         std::memcpy(seed + 1 + baseLen, base, 6 - baseLen);
     }
     return seed;
+}
+
+// ---------------------------------------------------------------------------
+// OpenPakAlpha  –  Parse the Alpha client archive table.
+// ---------------------------------------------------------------------------
+bool CGPak::OpenPakAlpha()
+{
+    const unsigned int fileSize = m_memFile->size();
+    if (m_PakInfoOffset >= fileSize) {
+        return false;
+    }
+
+    const unsigned char* iter = m_memFile->read(m_PakInfoOffset, fileSize - m_PakInfoOffset);
+    if (!iter) {
+        return false;
+    }
+
+    const unsigned char* end = iter + (fileSize - m_PakInfoOffset);
+    std::vector<PakPack> entries;
+    entries.reserve(m_FileCount);
+
+    for (unsigned int i = 0; i < m_FileCount; ++i) {
+        if (iter + 14 > end) {
+            return false;
+        }
+
+        const unsigned int nameLen = iter[0];
+        const uint8_t type = iter[1];
+        const unsigned int fileOffset = ReadLe32(iter + 2);
+        const unsigned int compressedSize = ReadLe32(iter + 6);
+        const unsigned int decompressedSize = ReadLe32(iter + 10);
+        const unsigned char* nameBytes = iter + 14;
+        if (nameBytes + nameLen + 1 > end) {
+            return false;
+        }
+
+        if (type != 2u) {
+            std::string decodedName;
+            decodedName.resize(nameLen);
+            for (unsigned int index = 0; index < nameLen; ++index) {
+                decodedName[index] = ChangeLHBit_BYTE(static_cast<char>(nameBytes[index]));
+            }
+
+            PakPack pack{};
+            pack.m_compressSize = compressedSize;
+            pack.m_dataSize = compressedSize;
+            pack.m_size = decompressedSize;
+            pack.m_type = type;
+            pack.m_Offset = fileOffset;
+            pack.m_fName.SetString(decodedName.c_str());
+            entries.push_back(pack);
+        }
+
+        iter = nameBytes + nameLen + 1;
+    }
+
+    m_PakPack = std::move(entries);
+    m_FileCount = static_cast<unsigned int>(m_PakPack.size());
+    std::sort(m_PakPack.begin(), m_PakPack.end(), PakPrtLess{});
+    m_pDecBuf.clear();
+    return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -366,6 +530,28 @@ void CGPak::CollectFileNamesByExtension(const char* ext, std::vector<std::string
 // ---------------------------------------------------------------------------
 bool CGPak::GetData(const PakPack& pack, void* buffer)
 {
+    if (m_FileVer < 0x100u) {
+        const unsigned char* raw = m_memFile->read(pack.m_Offset, pack.m_dataSize);
+        if (!raw) {
+            return false;
+        }
+
+        unsigned char* dst = static_cast<unsigned char*>(buffer);
+        if (pack.m_type == 0u) {
+            if (pack.m_size > pack.m_dataSize) {
+                return false;
+            }
+            std::memcpy(dst, raw, pack.m_size);
+            return true;
+        }
+
+        if (pack.m_type == 1u) {
+            return AlphaLzssDecompress(raw, pack.m_dataSize, dst, pack.m_size);
+        }
+
+        return false;
+    }
+
     const unsigned char* raw = m_memFile->read(pack.m_Offset + 46, pack.m_dataSize);
     if (!raw) return false;
 

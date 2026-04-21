@@ -6,6 +6,7 @@
 #include <string>
 
 void PlayUiButtonSound();
+void ResetUiButtonSoundPathCache();
 bool LoadUiWindowPlacement(const char* windowName, int* x, int* y);
 void SaveUiWindowPlacement(const char* windowName, int x, int y);
 HDC AcquireMainWindowDrawTarget();

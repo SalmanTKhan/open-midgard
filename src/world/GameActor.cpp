@@ -79,6 +79,7 @@ constexpr int kItemBillboardAnchorY = 72;
 constexpr float kGroundItemScreenScale = 1.6f;
 constexpr bool kLogActLoad = false;
 constexpr int kJobWarpNpc = 0x2D;
+constexpr int kJobWarpNpcCompat = 0x20;
 constexpr int kJobWarpPortal = 0x80;
 constexpr int kJobPreWarpPortal = 0x81;
 constexpr u32 kRemoteMoveStallLogThresholdMs = 250;
@@ -599,7 +600,8 @@ void ApplyQueuedHitReaction(CGameActor& actor, const WBA& hitInfo)
 
 bool IsPortalFallbackJob(int job)
 {
-    return job == kJobWarpNpc
+    return job == kJobWarpNpcCompat
+        || job == kJobWarpNpc
         || job == kJobWarpPortal
         || job == kJobPreWarpPortal;
 }
@@ -2023,7 +2025,10 @@ POINT GetPlayerLayerPoint(int layerPriority,
     int curMotion,
     int headMotionIndex)
 {
-    POINT point = imfRes->GetPoint(resolvedLayer, curAction, curMotion);
+    POINT point{ 0, 0 };
+    if (imfRes) {
+        point = imfRes->GetPoint(resolvedLayer, curAction, curMotion);
+    }
     if (!motion || motion->attachInfo.empty()) {
         return point;
     }
@@ -2654,7 +2659,7 @@ bool DrawPlayerOverlayMotion(BillboardComposeSurface& bitmap,
     CActRes* actRes = g_resMgr.GetAs<CActRes>(actName.c_str());
     CSprRes* sprRes = g_resMgr.GetAs<CSprRes>(sprName.c_str());
     CImfRes* imfRes = g_resMgr.GetAs<CImfRes>(imfName.c_str());
-    if (!actRes || !sprRes || !imfRes) {
+    if (!actRes || !sprRes) {
         return false;
     }
 
@@ -2667,7 +2672,10 @@ bool DrawPlayerOverlayMotion(BillboardComposeSurface& bitmap,
         return false;
     }
 
-    const POINT point = imfRes->GetPoint(layerIndex, curAction, curMotion);
+    POINT point{ 0, 0 };
+    if (imfRes) {
+        point = imfRes->GetPoint(layerIndex, curAction, curMotion);
+    }
     bitmap.BltSprite(drawX + point.x, drawY + point.y, sprRes, const_cast<CMotion*>(motion), sprRes->m_pal);
     return true;
 }
@@ -2797,7 +2805,7 @@ bool DrawPlayerLayer(BillboardComposeSurface& bitmap,
     CActRes* actRes = g_resMgr.GetAs<CActRes>(actName.c_str());
     CSprRes* sprRes = g_resMgr.GetAs<CSprRes>(sprName.c_str());
     CImfRes* imfRes = g_resMgr.GetAs<CImfRes>(imfName.c_str());
-    if (!actRes || !sprRes || !imfRes) {
+    if (!actRes || !sprRes) {
         static std::map<std::string, bool> loggedMissingResources;
         const std::string key = actName + "|" + sprName + "|" + imfName;
         if (loggedMissingResources.insert(std::make_pair(key, true)).second) {
@@ -2815,7 +2823,7 @@ bool DrawPlayerLayer(BillboardComposeSurface& bitmap,
         return false;
     }
 
-    int resolvedLayer = imfRes->GetLayer(layerIndex, curAction, curMotion);
+    int resolvedLayer = imfRes ? imfRes->GetLayer(layerIndex, curAction, curMotion) : layerIndex;
     if (resolvedLayer < 0) {
         resolvedLayer = layerIndex;
     }
@@ -3181,13 +3189,16 @@ bool DrawPcBillboard(BillboardComposeSurface& bitmap,
 bool ResolveNonPcSpritePaths(int job, char* actPath, char* sprPath)
 {
     const char* const jobName = g_session.GetJobName(job);
-    if (!jobName || !*jobName || !actPath || !sprPath) {
+    if (!actPath || !sprPath) {
         return false;
     }
 
-    const char* const spriteName = ResolveNonPcSpriteAlias(job, jobName);
+    const char* spriteName = (jobName && *jobName) ? ResolveNonPcSpriteAlias(job, jobName) : nullptr;
 
     if (job >= 1000) {
+        if (!spriteName || !*spriteName) {
+            return false;
+        }
         if (job >= 6001 && job <= 6047) {
             const char* const spriteRoot = (job >= 6017 && job <= 6046)
                 ? "data\\sprite\\mercenary\\"
@@ -3212,8 +3223,24 @@ bool ResolveNonPcSpritePaths(int job, char* actPath, char* sprPath)
         return true;
     }
 
-    std::sprintf(actPath, "%s%s.act", "data\\sprite\\NPC\\", spriteName);
-    std::sprintf(sprPath, "%s%s.spr", "data\\sprite\\NPC\\", spriteName);
+    if (spriteName && *spriteName) {
+        if (TryResolveNonPcSpritePaths("data\\sprite\\NPC\\", spriteName, actPath, sprPath)
+            || TryResolveNonPcSpritePaths("data\\sprite\\npc\\", spriteName, actPath, sprPath)
+            || TryResolveNonPcSpritePaths("data\\sprite\\", spriteName, actPath, sprPath)) {
+            return true;
+        }
+    }
+
+    char numericName[32] = {};
+    std::sprintf(numericName, "%d", job);
+    if (TryResolveNonPcSpritePaths("data\\sprite\\NPC\\", numericName, actPath, sprPath)
+        || TryResolveNonPcSpritePaths("data\\sprite\\npc\\", numericName, actPath, sprPath)
+        || TryResolveNonPcSpritePaths("data\\sprite\\", numericName, actPath, sprPath)) {
+        return true;
+    }
+
+    std::sprintf(actPath, "%s%s.act", "data\\sprite\\npc\\", numericName);
+    std::sprintf(sprPath, "%s%s.spr", "data\\sprite\\npc\\", numericName);
     return true;
 }
 

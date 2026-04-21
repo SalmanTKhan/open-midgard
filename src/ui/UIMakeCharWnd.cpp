@@ -12,6 +12,7 @@
 #include "main/WinMain.h"
 #include "ui/UiScale.h"
 #include "qtui/QtUiRuntime.h"
+#include "UiSkin.h"
 #include "ui/UIWindowMgr.h"
 
 #include <windows.h>
@@ -381,17 +382,7 @@ shopui::BitmapPixels LoadFirstBitmapPixelsFromCandidates(const std::vector<std::
 
 std::string ResolveUiAssetPath(const char* fileName)
 {
-    if (!fileName || !*fileName) {
-        return {};
-    }
-
-    const std::vector<std::string> candidates = BuildUiAssetCandidates(fileName);
-    for (const std::string& candidate : candidates) {
-        if (g_fileMgr.IsDataExist(candidate.c_str())) {
-            return candidate;
-        }
-    }
-    return {};
+    return ui_skin::TryResolveUiAssetPath(fileName);
 }
 
 RECT MakeRect(int x, int y, int w, int h)

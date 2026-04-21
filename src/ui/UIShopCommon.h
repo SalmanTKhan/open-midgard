@@ -1,6 +1,9 @@
 #pragma once
 
+#include "DebugLog.h"
 #include "core/File.h"
+#include "core/SettingsIni.h"
+#include "UiSkin.h"
 #include "item/Item.h"
 #include "render/DC.h"
 #include "res/Bitmap.h"
@@ -18,7 +21,9 @@
 #include <algorithm>
 #include <cstdio>
 #include <cstring>
+#include <sstream>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 #if RO_PLATFORM_WINDOWS
@@ -94,51 +99,84 @@ inline void AddUniqueCandidate(std::vector<std::string>& out, const std::string&
     out.push_back(normalized);
 }
 
+inline void AddStemVariants(std::vector<std::string>& out, const std::string& rawStem)
+{
+    AddUniqueCandidate(out, rawStem);
+    if (rawStem.empty()) {
+        return;
+    }
+
+    std::string underscored = rawStem;
+    std::replace(underscored.begin(), underscored.end(), ' ', '_');
+    AddUniqueCandidate(out, underscored);
+
+    std::string spaced = rawStem;
+    std::replace(spaced.begin(), spaced.end(), '_', ' ');
+    AddUniqueCandidate(out, spaced);
+
+    std::string compact = rawStem;
+    compact.erase(std::remove(compact.begin(), compact.end(), ' '), compact.end());
+    AddUniqueCandidate(out, compact);
+}
+
+inline std::string BuildItemAssetDebugKey(const ITEM_INFO& item, const char* assetKind)
+{
+    std::ostringstream stream;
+    stream << (assetKind ? assetKind : "asset")
+        << "|index=" << item.m_itemIndex
+        << "|id=" << item.GetItemId()
+        << "|type=" << item.m_itemType
+        << "|wear=" << item.m_wearLocation
+        << "|name=" << item.m_itemName
+        << "|resource=" << item.GetResourceName();
+    return stream.str();
+}
+
+inline void LogItemAssetCandidatesOnce(const ITEM_INFO& item,
+    const char* assetKind,
+    const std::vector<std::string>& attempts,
+    const char* outcome,
+    const std::string& resolvedPath = std::string())
+{
+    static std::unordered_set<std::string> s_loggedKeys;
+
+    std::string key = BuildItemAssetDebugKey(item, assetKind);
+    key += "|";
+    key += outcome ? outcome : "unknown";
+    if (!resolvedPath.empty()) {
+        key += "|";
+        key += ToLowerAscii(resolvedPath);
+    }
+
+    if (!s_loggedKeys.insert(key).second) {
+        return;
+    }
+
+    DbgLog("[ItemAsset] kind=%s outcome=%s index=%u id=%u type=%d wear=0x%04X name='%s' resource='%s'\n",
+        assetKind ? assetKind : "asset",
+        outcome ? outcome : "unknown",
+        item.m_itemIndex,
+        item.GetItemId(),
+        item.m_itemType,
+        static_cast<unsigned int>(item.m_wearLocation),
+        item.m_itemName.c_str(),
+        item.GetResourceName().c_str());
+    if (!resolvedPath.empty()) {
+        DbgLog("[ItemAsset]   [loaded] %s\n", resolvedPath.c_str());
+    }
+    for (const std::string& attempt : attempts) {
+        DbgLog("[ItemAsset]   %s\n", attempt.c_str());
+    }
+}
+
 inline std::vector<std::string> BuildUiAssetCandidates(const char* fileName)
 {
-    std::vector<std::string> out;
-    if (!fileName || !*fileName) {
-        return out;
-    }
-
-    const char* prefixes[] = {
-        "",
-        "skin\\default\\",
-        "skin\\default\\basic_interface\\",
-        "texture\\",
-        "texture\\interface\\",
-        "texture\\interface\\basic_interface\\",
-        "data\\",
-        "data\\texture\\",
-        "data\\texture\\interface\\",
-        "data\\texture\\interface\\basic_interface\\",
-        nullptr
-    };
-
-    std::string base = NormalizeSlash(fileName);
-    AddUniqueCandidate(out, base);
-
-    std::string filenameOnly = base;
-    const size_t slashPos = filenameOnly.find_last_of('\\');
-    if (slashPos != std::string::npos && slashPos + 1 < filenameOnly.size()) {
-        filenameOnly = filenameOnly.substr(slashPos + 1);
-    }
-
-    for (int index = 0; prefixes[index]; ++index) {
-        AddUniqueCandidate(out, std::string(prefixes[index]) + filenameOnly);
-    }
-
-    return out;
+    return ui_skin::BuildUiAssetCandidates(fileName);
 }
 
 inline std::string ResolveUiAssetPath(const char* fileName)
 {
-    for (const std::string& candidate : BuildUiAssetCandidates(fileName)) {
-        if (g_fileMgr.IsDataExist(candidate.c_str())) {
-            return candidate;
-        }
-    }
-    return NormalizeSlash(fileName ? fileName : "");
+    return ui_skin::ResolveUiAssetPath(fileName);
 }
 
 inline BitmapPixels LoadBitmapPixelsFromGameData(const std::string& path, bool applyTransparentKey = false)
@@ -350,6 +388,12 @@ inline RECT MakeRect(int x, int y, int w, int h)
     return rc;
 }
 
+inline int ShopRowHeight()
+{
+    const int raw = LoadSettingsIniInt("UI", "ShopRowHeight", 20);
+    return (std::max)(16, (std::min)(36, raw));
+}
+
 inline void HashTokenValue(unsigned long long* hash, unsigned long long value)
 {
     if (!hash) {
@@ -395,18 +439,6 @@ inline std::vector<std::string> BuildItemIconCandidates(const ITEM_INFO& item)
         return out;
     }
 
-    std::string stem = NormalizeSlash(resource);
-    std::string filenameOnly = stem;
-    const size_t slashPos = filenameOnly.find_last_of('\\');
-    if (slashPos != std::string::npos && slashPos + 1 < filenameOnly.size()) {
-        filenameOnly = filenameOnly.substr(slashPos + 1);
-    }
-
-    AddUniqueCandidate(out, stem);
-    AddUniqueCandidate(out, stem + ".bmp");
-    AddUniqueCandidate(out, filenameOnly);
-    AddUniqueCandidate(out, filenameOnly + ".bmp");
-
     const char* prefixes[] = {
         kUiKorPrefix,
         "texture\\\xC0\xAF\xC0\xFA\xC0\xCE\xC5\xCD\xC6\xE4\xC0\xCC\xBD\xBA\\item\\",
@@ -421,11 +453,28 @@ inline std::vector<std::string> BuildItemIconCandidates(const ITEM_INFO& item)
         nullptr
     };
 
-    for (int index = 0; prefixes[index]; ++index) {
-        AddUniqueCandidate(out, std::string(prefixes[index]) + stem);
-        AddUniqueCandidate(out, std::string(prefixes[index]) + stem + ".bmp");
-        AddUniqueCandidate(out, std::string(prefixes[index]) + filenameOnly);
-        AddUniqueCandidate(out, std::string(prefixes[index]) + filenameOnly + ".bmp");
+    const auto addStemFamily = [&](const std::string& rawStem) {
+        std::string stem = NormalizeSlash(rawStem);
+        std::string filenameOnly = stem;
+        const size_t slashPos = filenameOnly.find_last_of('\\');
+        if (slashPos != std::string::npos && slashPos + 1 < filenameOnly.size()) {
+            filenameOnly = filenameOnly.substr(slashPos + 1);
+        }
+
+        const std::vector<std::string> stems{ stem, filenameOnly };
+        for (const std::string& stemVariant : stems) {
+            AddStemVariants(out, stemVariant);
+            AddUniqueCandidate(out, stemVariant + ".bmp");
+            for (int index = 0; prefixes[index]; ++index) {
+                AddUniqueCandidate(out, std::string(prefixes[index]) + stemVariant);
+                AddUniqueCandidate(out, std::string(prefixes[index]) + stemVariant + ".bmp");
+            }
+        }
+    };
+
+    addStemFamily(resource);
+    if (resource != item.m_itemName && !item.m_itemName.empty()) {
+        addStemFamily(item.m_itemName);
     }
 
     return out;
@@ -444,18 +493,6 @@ inline std::vector<std::string> BuildItemCollectionCandidates(const ITEM_INFO& i
         return out;
     }
 
-    std::string stem = NormalizeSlash(resource);
-    std::string filenameOnly = stem;
-    const size_t slashPos = filenameOnly.find_last_of('\\');
-    if (slashPos != std::string::npos && slashPos + 1 < filenameOnly.size()) {
-        filenameOnly = filenameOnly.substr(slashPos + 1);
-    }
-
-    AddUniqueCandidate(out, stem);
-    AddUniqueCandidate(out, stem + ".bmp");
-    AddUniqueCandidate(out, filenameOnly);
-    AddUniqueCandidate(out, filenameOnly + ".bmp");
-
     const char* prefixes[] = {
         kUiKorPrefix,
         "data\\texture\\\xC0\xAF\xC0\xFA\xC0\xCE\xC5\xCD\xC6\xE4\xC0\xCC\xBD\xBA\\collection\\",
@@ -468,11 +505,28 @@ inline std::vector<std::string> BuildItemCollectionCandidates(const ITEM_INFO& i
         nullptr
     };
 
-    for (int index = 0; prefixes[index]; ++index) {
-        AddUniqueCandidate(out, std::string(prefixes[index]) + stem);
-        AddUniqueCandidate(out, std::string(prefixes[index]) + stem + ".bmp");
-        AddUniqueCandidate(out, std::string(prefixes[index]) + filenameOnly);
-        AddUniqueCandidate(out, std::string(prefixes[index]) + filenameOnly + ".bmp");
+    const auto addStemFamily = [&](const std::string& rawStem) {
+        std::string stem = NormalizeSlash(rawStem);
+        std::string filenameOnly = stem;
+        const size_t slashPos = filenameOnly.find_last_of('\\');
+        if (slashPos != std::string::npos && slashPos + 1 < filenameOnly.size()) {
+            filenameOnly = filenameOnly.substr(slashPos + 1);
+        }
+
+        const std::vector<std::string> stems{ stem, filenameOnly };
+        for (const std::string& stemVariant : stems) {
+            AddStemVariants(out, stemVariant);
+            AddUniqueCandidate(out, stemVariant + ".bmp");
+            for (int index = 0; prefixes[index]; ++index) {
+                AddUniqueCandidate(out, std::string(prefixes[index]) + stemVariant);
+                AddUniqueCandidate(out, std::string(prefixes[index]) + stemVariant + ".bmp");
+            }
+        }
+    };
+
+    addStemFamily(resource);
+    if (resource != item.m_itemName && !item.m_itemName.empty()) {
+        addStemFamily(item.m_itemName);
     }
 
     return out;
@@ -485,17 +539,25 @@ inline bool TryLoadItemIconPixels(const ITEM_INFO& item, BitmapPixels* outBitmap
     }
 
     outBitmap->Clear();
-    for (const std::string& candidate : BuildItemIconCandidates(item)) {
+    const std::vector<std::string> candidates = BuildItemIconCandidates(item);
+    std::vector<std::string> attempts;
+    attempts.reserve(candidates.size());
+    for (const std::string& candidate : candidates) {
         if (!g_fileMgr.IsDataExist(candidate.c_str())) {
+            attempts.push_back("[missing] " + candidate);
             continue;
         }
 
+        attempts.push_back("[found] " + candidate);
         *outBitmap = LoadBitmapPixelsFromGameData(candidate, true);
         if (outBitmap->IsValid()) {
+            LogItemAssetCandidatesOnce(item, "icon", attempts, "loaded", candidate);
             return true;
         }
+        attempts.push_back("[decode-failed] " + candidate);
     }
 
+    LogItemAssetCandidatesOnce(item, "icon", attempts, "miss");
     return false;
 }
 
@@ -506,17 +568,25 @@ inline bool TryLoadItemCollectionPixels(const ITEM_INFO& item, BitmapPixels* out
     }
 
     outBitmap->Clear();
-    for (const std::string& candidate : BuildItemCollectionCandidates(item)) {
+    const std::vector<std::string> candidates = BuildItemCollectionCandidates(item);
+    std::vector<std::string> attempts;
+    attempts.reserve(candidates.size());
+    for (const std::string& candidate : candidates) {
         if (!g_fileMgr.IsDataExist(candidate.c_str())) {
+            attempts.push_back("[missing] " + candidate);
             continue;
         }
 
+        attempts.push_back("[found] " + candidate);
         *outBitmap = LoadBitmapPixelsFromGameData(candidate, true);
         if (outBitmap->IsValid()) {
+            LogItemAssetCandidatesOnce(item, "collection", attempts, "loaded", candidate);
             return true;
         }
+        attempts.push_back("[decode-failed] " + candidate);
     }
 
+    LogItemAssetCandidatesOnce(item, "collection", attempts, "miss");
     return false;
 }
 

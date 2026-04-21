@@ -14,6 +14,9 @@ enum class AntiAliasingMode {
     None = 0,
     FXAA,
     SMAA,
+    MSAA2x,
+    MSAA4x,
+    MSAA8x,
 };
 
 enum class SmaaPreset {
@@ -44,6 +47,8 @@ bool DoesBackendSupportAntiAliasing(RenderBackendType backend);
 std::vector<AntiAliasingMode> GetSupportedAntiAliasingModesForBackend(RenderBackendType backend);
 bool DoesBackendSupportAntiAliasingMode(RenderBackendType backend, AntiAliasingMode mode);
 AntiAliasingMode GetEffectiveAntiAliasingModeForBackend(RenderBackendType backend, AntiAliasingMode requestedMode);
+int GetMsaaSampleCountForMode(AntiAliasingMode mode);
+bool IsMsaaMode(AntiAliasingMode mode);
 SmaaPreset GetDefaultSmaaPreset();
 const char* GetSmaaPresetName(SmaaPreset preset);
 void ClampGraphicsSettingsToBackend(RenderBackendType backend, GraphicsSettings* settings);

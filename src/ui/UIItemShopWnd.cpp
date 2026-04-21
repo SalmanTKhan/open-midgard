@@ -1,5 +1,6 @@
 #include "UIItemShopWnd.h"
 
+#include "UINpcInputWnd.h"
 #include "UIShopCommon.h"
 #include "UIWindowMgr.h"
 #include "gamemode/GameMode.h"
@@ -17,17 +18,25 @@
 namespace {
 
 constexpr int kWindowWidth = 320;
-constexpr int kWindowHeight = 274;
-constexpr int kListTop = 22;
+constexpr int kWindowHeight = 298;
+constexpr int kListTop = 26;
 constexpr int kListBottomMargin = 12;
 constexpr int kListSideMargin = 8;
-constexpr int kRowHeight = 18;
 
 std::string FormatPrice(int value)
 {
     char buffer[32];
     std::snprintf(buffer, sizeof(buffer), "%d", value);
     return std::string(buffer);
+}
+
+bool IsCtrlHeldForShop()
+{
+#if RO_PLATFORM_WINDOWS
+    return (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0;
+#else
+    return false;
+#endif
 }
 
 } // namespace
@@ -81,7 +90,7 @@ void UIItemShopWnd::StoreInfo()
 
 int UIItemShopWnd::GetVisibleRowCount() const
 {
-    return (std::max)(1, ((m_h - kListTop - kListBottomMargin) / kRowHeight) - 1);
+    return (std::max)(1, ((m_h - kListTop - kListBottomMargin) / shopui::ShopRowHeight()) - 1);
 }
 
 int UIItemShopWnd::GetMaxViewOffset() const
@@ -105,7 +114,7 @@ int UIItemShopWnd::HitTestSourceRow(int x, int y) const
         return -1;
     }
 
-    const int localRow = (y - listRect.top) / kRowHeight;
+    const int localRow = (y - listRect.top) / shopui::ShopRowHeight();
     if (localRow <= 0) {
         return -1;
     }
@@ -159,7 +168,7 @@ void UIItemShopWnd::OnDraw()
     shopui::FillRectColor(hdc, listRect, RGB(248, 248, 248));
     shopui::FrameRectColor(hdc, listRect, RGB(120, 120, 120));
 
-    const RECT headerRect = shopui::MakeRect(listRect.left + 1, listRect.top + 1, listRect.right - listRect.left - 2, kRowHeight - 1);
+    const RECT headerRect = shopui::MakeRect(listRect.left + 1, listRect.top + 1, listRect.right - listRect.left - 2, shopui::ShopRowHeight() - 1);
     shopui::FillRectColor(hdc, headerRect, RGB(222, 229, 237));
     shopui::DrawWindowTextRect(hdc, shopui::MakeRect(headerRect.left + 26, headerRect.top + 1, 170, headerRect.bottom - headerRect.top - 2), "Item", RGB(30, 30, 30), DT_LEFT | DT_VCENTER | DT_SINGLELINE);
     if (g_session.m_shopMode == NpcShopMode::Sell) {
@@ -173,9 +182,9 @@ void UIItemShopWnd::OnDraw()
     for (int rowIndex = startRow; rowIndex < endRow; ++rowIndex) {
         const NPC_SHOP_ROW& row = g_session.m_shopRows[static_cast<size_t>(rowIndex)];
         RECT rowRect = shopui::MakeRect(listRect.left + 1,
-            listRect.top + 1 + (rowIndex - startRow + 1) * kRowHeight,
+            listRect.top + 1 + (rowIndex - startRow + 1) * shopui::ShopRowHeight(),
             listRect.right - listRect.left - 2,
-            kRowHeight);
+            shopui::ShopRowHeight());
         const bool selected = g_session.m_shopSelectedSourceRow == rowIndex;
         const bool hot = m_hoverRow == rowIndex;
         if (selected) {
@@ -221,6 +230,9 @@ void UIItemShopWnd::OnLBtnDown(int x, int y)
     const int rowIndex = HitTestSourceRow(x, y);
     if (rowIndex >= 0) {
         g_session.m_shopSelectedSourceRow = rowIndex;
+        if (IsCtrlHeldForShop()) {
+            PromptShopAmount(rowIndex);
+        }
         return;
     }
     UIFrameWnd::OnLBtnDown(x, y);
@@ -229,9 +241,41 @@ void UIItemShopWnd::OnLBtnDown(int x, int y)
 void UIItemShopWnd::OnLBtnDblClk(int x, int y)
 {
     const int rowIndex = HitTestSourceRow(x, y);
-    if (rowIndex >= 0) {
-        g_session.AdjustNpcShopDealBySourceRow(static_cast<size_t>(rowIndex), 1);
+    if (rowIndex < 0) {
+        return;
     }
+    g_session.m_shopSelectedSourceRow = rowIndex;
+    g_session.AdjustNpcShopDealBySourceRow(static_cast<size_t>(rowIndex), 1);
+}
+
+void UIItemShopWnd::PromptShopAmount(int rowIndex)
+{
+    if (rowIndex < 0 || rowIndex >= static_cast<int>(g_session.m_shopRows.size())) {
+        return;
+    }
+    if (!g_windowMgr.m_npcInputWnd) {
+        return;
+    }
+    const NPC_SHOP_ROW& row = g_session.m_shopRows[static_cast<size_t>(rowIndex)];
+    char label[96];
+    std::snprintf(label, sizeof(label), "How many %s?", shopui::GetItemDisplayName(row.itemInfo).c_str());
+    const u32 maxQty = row.availableCount > 0 ? static_cast<u32>(row.availableCount) : 0u;
+    g_windowMgr.m_npcInputWnd->OpenGameNumberPrompt(
+        label,
+        CGameMode::GameMsg_ShopAddSourceRow,
+        static_cast<msgparam_t>(rowIndex),
+        1,
+        maxQty);
+}
+
+void UIItemShopWnd::OnRBtnDown(int x, int y)
+{
+    const int rowIndex = HitTestSourceRow(x, y);
+    if (rowIndex < 0) {
+        return;
+    }
+    const NPC_SHOP_ROW& row = g_session.m_shopRows[static_cast<size_t>(rowIndex)];
+    g_windowMgr.ShowItemInfoWindow(row.itemInfo, x + 12, y + 12);
 }
 
 void UIItemShopWnd::OnMouseMove(int x, int y)

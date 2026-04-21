@@ -331,6 +331,7 @@ PFN_vkCmdDraw vkCmdDraw = nullptr;
 PFN_vkCmdDrawIndexed vkCmdDrawIndexed = nullptr;
 PFN_vkCmdPipelineBarrier vkCmdPipelineBarrier = nullptr;
 PFN_vkCmdCopyImage vkCmdCopyImage = nullptr;
+PFN_vkCmdBlitImage vkCmdBlitImage = nullptr;
 PFN_vkCmdCopyBufferToImage vkCmdCopyBufferToImage = nullptr;
 PFN_vkDestroySurfaceKHR vkDestroySurfaceKHR = nullptr;
 PFN_vkGetPhysicalDeviceSurfaceSupportKHR vkGetPhysicalDeviceSurfaceSupportKHR = nullptr;
@@ -527,6 +528,7 @@ bool LoadVulkanDeviceFunctions(VkDevice device)
     vkCmdDrawIndexed = reinterpret_cast<PFN_vkCmdDrawIndexed>(vkGetDeviceProcAddr(device, "vkCmdDrawIndexed"));
     vkCmdPipelineBarrier = reinterpret_cast<PFN_vkCmdPipelineBarrier>(vkGetDeviceProcAddr(device, "vkCmdPipelineBarrier"));
     vkCmdCopyImage = reinterpret_cast<PFN_vkCmdCopyImage>(vkGetDeviceProcAddr(device, "vkCmdCopyImage"));
+    vkCmdBlitImage = reinterpret_cast<PFN_vkCmdBlitImage>(vkGetDeviceProcAddr(device, "vkCmdBlitImage"));
     vkCmdCopyBufferToImage = reinterpret_cast<PFN_vkCmdCopyBufferToImage>(vkGetDeviceProcAddr(device, "vkCmdCopyBufferToImage"));
     vkCreateSwapchainKHR = reinterpret_cast<PFN_vkCreateSwapchainKHR>(vkGetDeviceProcAddr(device, "vkCreateSwapchainKHR"));
     vkDestroySwapchainKHR = reinterpret_cast<PFN_vkDestroySwapchainKHR>(vkGetDeviceProcAddr(device, "vkDestroySwapchainKHR"));
@@ -597,6 +599,7 @@ bool LoadVulkanDeviceFunctions(VkDevice device)
         && vkCmdDrawIndexed
         && vkCmdPipelineBarrier
         && vkCmdCopyImage
+        && vkCmdBlitImage
         && vkCmdCopyBufferToImage
         && vkCreateSwapchainKHR
         && vkDestroySwapchainKHR
@@ -721,7 +724,7 @@ void ReleaseTextureMembers(CTexture* texture)
 class VulkanTextureHandle final : public IUnknown {
 public:
     VulkanTextureHandle(VkDevice device, uint32_t width, uint32_t height)
-        : m_refCount(1), m_device(device), m_width(width), m_height(height),
+        : m_refCount(1), m_device(device), m_width(width), m_height(height), m_mipLevels(1),
           m_image(VK_NULL_HANDLE), m_memory(VK_NULL_HANDLE), m_view(VK_NULL_HANDLE),
           m_layout(VK_IMAGE_LAYOUT_UNDEFINED)
     {
@@ -773,6 +776,7 @@ public:
     VkDevice m_device;
     uint32_t m_width;
     uint32_t m_height;
+    uint32_t m_mipLevels;
     VkImage m_image;
     VkDeviceMemory m_memory;
     VkImageView m_view;
@@ -2054,15 +2058,21 @@ public:
         unsigned int surfaceHeight = requestedHeight;
         AdjustTextureSize(&surfaceWidth, &surfaceHeight);
 
+        // Generate a mip chain for upscaled textures so anisotropic filtering has
+        // something to filter against. Non-upscaled textures (UI overlays, sprite
+        // atlases, cursor) keep a single mip — they're updated every frame and the
+        // GenerateMips cost would dwarf the quality win.
+        const bool wantMipmaps = texture->m_upscaleFactor > 1u;
         D3D11_TEXTURE2D_DESC desc{};
         desc.Width = (std::max)(1u, surfaceWidth);
         desc.Height = (std::max)(1u, surfaceHeight);
-        desc.MipLevels = 1;
+        desc.MipLevels = wantMipmaps ? 0 : 1;
         desc.ArraySize = 1;
         desc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
         desc.SampleDesc.Count = 1;
         desc.Usage = D3D11_USAGE_DEFAULT;
         desc.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET;
+        desc.MiscFlags = wantMipmaps ? D3D11_RESOURCE_MISC_GENERATE_MIPS : 0;
 
         ID3D11Texture2D* textureObject = nullptr;
         HRESULT hr = m_device->CreateTexture2D(&desc, nullptr, &textureObject);
@@ -2130,6 +2140,9 @@ public:
         updateBox.bottom = static_cast<UINT>(y + h);
         updateBox.back = 1;
         m_context->UpdateSubresource(textureObject, 0, &updateBox, uploadBuffer.data(), static_cast<UINT>(w * sizeof(unsigned int)), 0);
+        if (texture->m_upscaleFactor > 1u && texture->m_backendTextureView) {
+            m_context->GenerateMips(static_cast<ID3D11ShaderResourceView*>(texture->m_backendTextureView));
+        }
         return true;
     }
 
@@ -2374,12 +2387,17 @@ private:
 
         D3D11_SAMPLER_DESC samplerDesc{};
         const int anisotropicLevel = GetCachedGraphicsSettings().anisotropicLevel;
+        const int upscaleFactor = GetCachedGraphicsSettings().textureUpscaleFactor;
         const bool useAnisotropic = anisotropicLevel > 1;
         samplerDesc.Filter = useAnisotropic ? D3D11_FILTER_ANISOTROPIC : D3D11_FILTER_MIN_MAG_MIP_LINEAR;
         samplerDesc.AddressU = D3D11_TEXTURE_ADDRESS_WRAP;
         samplerDesc.AddressV = D3D11_TEXTURE_ADDRESS_WRAP;
         samplerDesc.AddressW = D3D11_TEXTURE_ADDRESS_WRAP;
         samplerDesc.MaxAnisotropy = static_cast<UINT>(useAnisotropic ? anisotropicLevel : 1);
+        // Upscaled textures get a small negative LOD bias so aniso reaches into
+        // the sharper upper mips, compensating for the mip selection preferring
+        // the larger-than-source top level.
+        samplerDesc.MipLODBias = upscaleFactor > 1 ? -0.5f : 0.0f;
         samplerDesc.MaxLOD = D3D11_FLOAT32_MAX;
         hr = m_device->CreateSamplerState(&samplerDesc, &m_samplerState);
         if (FAILED(hr) || !m_samplerState) {
@@ -5629,9 +5647,17 @@ public:
         unsigned int surfaceHeight = requestedHeight;
         AdjustTextureSize(&surfaceWidth, &surfaceHeight);
 
-        VulkanTextureHandle* textureHandle = CreateTextureHandle(
-            static_cast<uint32_t>((std::max)(1u, surfaceWidth)),
-            static_cast<uint32_t>((std::max)(1u, surfaceHeight)));
+        const uint32_t finalWidth = static_cast<uint32_t>((std::max)(1u, surfaceWidth));
+        const uint32_t finalHeight = static_cast<uint32_t>((std::max)(1u, surfaceHeight));
+        uint32_t mipLevels = 1;
+        if (texture->m_upscaleFactor > 1u) {
+            uint32_t maxExtent = finalWidth > finalHeight ? finalWidth : finalHeight;
+            while (maxExtent > 1u) {
+                maxExtent >>= 1u;
+                ++mipLevels;
+            }
+        }
+        VulkanTextureHandle* textureHandle = CreateTextureHandle(finalWidth, finalHeight, mipLevels);
         if (!textureHandle) {
             return false;
         }
@@ -6390,7 +6416,7 @@ private:
 
         VkPipelineMultisampleStateCreateInfo multisampling{};
         multisampling.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
-        multisampling.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+        multisampling.rasterizationSamples = m_msaaSampleCount;
 
         VkPipelineDepthStencilStateCreateInfo depthStencil{};
         depthStencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
@@ -6462,7 +6488,8 @@ private:
         return pipeline;
     }
 
-    bool CreateDepthResources(const VkExtent2D& extent, VkImage* outImage, VkDeviceMemory* outMemory, VkImageView* outImageView)
+    bool CreateDepthResources(const VkExtent2D& extent, VkImage* outImage, VkDeviceMemory* outMemory, VkImageView* outImageView,
+        VkSampleCountFlagBits sampleCount = VK_SAMPLE_COUNT_1_BIT)
     {
         if (!outImage || !outMemory || !outImageView || m_device == VK_NULL_HANDLE || extent.width == 0 || extent.height == 0) {
             return false;
@@ -6481,7 +6508,7 @@ private:
         imageInfo.extent.depth = 1;
         imageInfo.mipLevels = 1;
         imageInfo.arrayLayers = 1;
-        imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+        imageInfo.samples = sampleCount;
         imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
         imageInfo.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
         imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
@@ -6638,9 +6665,101 @@ private:
         return true;
     }
 
-    VulkanTextureHandle* CreateTextureHandle(uint32_t width, uint32_t height)
+    bool CreateMsaaColorResources(const VkExtent2D& extent, VkFormat format, VkSampleCountFlagBits sampleCount,
+        VkImage* outImage, VkDeviceMemory* outMemory, VkImageView* outImageView)
     {
+        if (!outImage || !outMemory || !outImageView || m_device == VK_NULL_HANDLE) {
+            return false;
+        }
+        *outImage = VK_NULL_HANDLE;
+        *outMemory = VK_NULL_HANDLE;
+        *outImageView = VK_NULL_HANDLE;
+
+        VkImageCreateInfo imageInfo{};
+        imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+        imageInfo.imageType = VK_IMAGE_TYPE_2D;
+        imageInfo.format = format;
+        imageInfo.extent.width = extent.width;
+        imageInfo.extent.height = extent.height;
+        imageInfo.extent.depth = 1;
+        imageInfo.mipLevels = 1;
+        imageInfo.arrayLayers = 1;
+        imageInfo.samples = sampleCount;
+        imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
+        // TRANSIENT because the MSAA color buffer is only resolved into a single-sample
+        // target and never read back as shader input. Lazy-allocated memory is ideal here
+        // when available, but we still request DEVICE_LOCAL as the primary memory type.
+        imageInfo.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT;
+        imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+        imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+
+        VkResult result = vkCreateImage(m_device, &imageInfo, nullptr, outImage);
+        if (result != VK_SUCCESS) {
+            m_bootstrap.initHr = static_cast<int>(result);
+            return false;
+        }
+
+        VkMemoryRequirements memoryRequirements{};
+        vkGetImageMemoryRequirements(m_device, *outImage, &memoryRequirements);
+
+        VkMemoryAllocateInfo allocInfo{};
+        allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+        allocInfo.allocationSize = memoryRequirements.size;
+        allocInfo.memoryTypeIndex = FindMemoryType(memoryRequirements.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+        if (allocInfo.memoryTypeIndex == kInvalidQueueFamilyIndex) {
+            vkDestroyImage(m_device, *outImage, nullptr);
+            *outImage = VK_NULL_HANDLE;
+            return false;
+        }
+
+        result = vkAllocateMemory(m_device, &allocInfo, nullptr, outMemory);
+        if (result != VK_SUCCESS) {
+            m_bootstrap.initHr = static_cast<int>(result);
+            vkDestroyImage(m_device, *outImage, nullptr);
+            *outImage = VK_NULL_HANDLE;
+            return false;
+        }
+
+        result = vkBindImageMemory(m_device, *outImage, *outMemory, 0);
+        if (result != VK_SUCCESS) {
+            m_bootstrap.initHr = static_cast<int>(result);
+            vkFreeMemory(m_device, *outMemory, nullptr);
+            vkDestroyImage(m_device, *outImage, nullptr);
+            *outMemory = VK_NULL_HANDLE;
+            *outImage = VK_NULL_HANDLE;
+            return false;
+        }
+
+        VkImageViewCreateInfo viewInfo{};
+        viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+        viewInfo.image = *outImage;
+        viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+        viewInfo.format = format;
+        viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        viewInfo.subresourceRange.baseMipLevel = 0;
+        viewInfo.subresourceRange.levelCount = 1;
+        viewInfo.subresourceRange.baseArrayLayer = 0;
+        viewInfo.subresourceRange.layerCount = 1;
+        result = vkCreateImageView(m_device, &viewInfo, nullptr, outImageView);
+        if (result != VK_SUCCESS) {
+            m_bootstrap.initHr = static_cast<int>(result);
+            vkFreeMemory(m_device, *outMemory, nullptr);
+            vkDestroyImage(m_device, *outImage, nullptr);
+            *outMemory = VK_NULL_HANDLE;
+            *outImage = VK_NULL_HANDLE;
+            return false;
+        }
+
+        return true;
+    }
+
+    VulkanTextureHandle* CreateTextureHandle(uint32_t width, uint32_t height, uint32_t mipLevels = 1)
+    {
+        if (mipLevels == 0) {
+            mipLevels = 1;
+        }
         VulkanTextureHandle* textureHandle = new VulkanTextureHandle(m_device, width, height);
+        textureHandle->m_mipLevels = mipLevels;
 
         VkImageCreateInfo imageInfo{};
         imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
@@ -6649,11 +6768,14 @@ private:
         imageInfo.extent.width = width;
         imageInfo.extent.height = height;
         imageInfo.extent.depth = 1;
-        imageInfo.mipLevels = 1;
+        imageInfo.mipLevels = mipLevels;
         imageInfo.arrayLayers = 1;
         imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
         imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
-        imageInfo.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+        // TRANSFER_SRC is needed so we can read from mip i-1 when blitting down to
+        // mip i during mipmap generation.
+        imageInfo.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT
+            | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
         imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
         imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 
@@ -6698,7 +6820,7 @@ private:
         viewInfo.format = VK_FORMAT_B8G8R8A8_UNORM;
         viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
         viewInfo.subresourceRange.baseMipLevel = 0;
-        viewInfo.subresourceRange.levelCount = 1;
+        viewInfo.subresourceRange.levelCount = mipLevels;
         viewInfo.subresourceRange.baseArrayLayer = 0;
         viewInfo.subresourceRange.layerCount = 1;
         result = vkCreateImageView(m_device, &viewInfo, nullptr, &textureHandle->m_view);
@@ -7003,24 +7125,123 @@ private:
         copyRegion.imageExtent.depth = 1;
         vkCmdCopyBufferToImage(commandBuffer, stagingBuffer, textureHandle->m_image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copyRegion);
 
+        // If this texture has a mip chain and the upload covers the whole top mip,
+        // blit-chain down through the remaining mips so anisotropic filtering and
+        // distance minification have real data to sample.
+        const bool fullExtentUpload = (x == 0 && y == 0
+            && static_cast<uint32_t>(w) == textureHandle->m_width
+            && static_cast<uint32_t>(h) == textureHandle->m_height);
+        const bool generateMipChain = textureHandle->m_mipLevels > 1 && fullExtentUpload;
+
+        if (generateMipChain) {
+            int32_t mipWidth = static_cast<int32_t>(textureHandle->m_width);
+            int32_t mipHeight = static_cast<int32_t>(textureHandle->m_height);
+            for (uint32_t level = 1; level < textureHandle->m_mipLevels; ++level) {
+                // Source mip (level-1): TRANSFER_DST → TRANSFER_SRC.
+                VkImageMemoryBarrier srcBarrier{};
+                srcBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+                srcBarrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+                srcBarrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+                srcBarrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+                srcBarrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+                srcBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+                srcBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+                srcBarrier.image = textureHandle->m_image;
+                srcBarrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+                srcBarrier.subresourceRange.baseMipLevel = level - 1;
+                srcBarrier.subresourceRange.levelCount = 1;
+                srcBarrier.subresourceRange.baseArrayLayer = 0;
+                srcBarrier.subresourceRange.layerCount = 1;
+                vkCmdPipelineBarrier(commandBuffer,
+                    VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                    0, 0, nullptr, 0, nullptr, 1, &srcBarrier);
+
+                // Destination mip (level): whatever → TRANSFER_DST. First-ever upload
+                // leaves this mip in UNDEFINED; subsequent uploads leave it in
+                // SHADER_READ_ONLY from the previous chain. Either way, discard it.
+                VkImageMemoryBarrier dstBarrier{};
+                dstBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+                dstBarrier.srcAccessMask = 0;
+                dstBarrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+                dstBarrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+                dstBarrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+                dstBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+                dstBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+                dstBarrier.image = textureHandle->m_image;
+                dstBarrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+                dstBarrier.subresourceRange.baseMipLevel = level;
+                dstBarrier.subresourceRange.levelCount = 1;
+                dstBarrier.subresourceRange.baseArrayLayer = 0;
+                dstBarrier.subresourceRange.layerCount = 1;
+                vkCmdPipelineBarrier(commandBuffer,
+                    VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                    0, 0, nullptr, 0, nullptr, 1, &dstBarrier);
+
+                const int32_t nextWidth = mipWidth > 1 ? mipWidth / 2 : 1;
+                const int32_t nextHeight = mipHeight > 1 ? mipHeight / 2 : 1;
+
+                VkImageBlit blit{};
+                blit.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+                blit.srcSubresource.mipLevel = level - 1;
+                blit.srcSubresource.baseArrayLayer = 0;
+                blit.srcSubresource.layerCount = 1;
+                blit.srcOffsets[0] = { 0, 0, 0 };
+                blit.srcOffsets[1] = { mipWidth, mipHeight, 1 };
+                blit.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+                blit.dstSubresource.mipLevel = level;
+                blit.dstSubresource.baseArrayLayer = 0;
+                blit.dstSubresource.layerCount = 1;
+                blit.dstOffsets[0] = { 0, 0, 0 };
+                blit.dstOffsets[1] = { nextWidth, nextHeight, 1 };
+                vkCmdBlitImage(commandBuffer,
+                    textureHandle->m_image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                    textureHandle->m_image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                    1, &blit, VK_FILTER_LINEAR);
+
+                mipWidth = nextWidth;
+                mipHeight = nextHeight;
+            }
+        }
+
         VkImageMemoryBarrier toShaderRead{};
         toShaderRead.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-        toShaderRead.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
         toShaderRead.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-        toShaderRead.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
         toShaderRead.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
         toShaderRead.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
         toShaderRead.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
         toShaderRead.image = textureHandle->m_image;
-        toShaderRead.subresourceRange = toTransfer.subresourceRange;
-        vkCmdPipelineBarrier(
-            commandBuffer,
-            VK_PIPELINE_STAGE_TRANSFER_BIT,
-            VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-            0,
-            0, nullptr,
-            0, nullptr,
-            1, &toShaderRead);
+        toShaderRead.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        toShaderRead.subresourceRange.baseArrayLayer = 0;
+        toShaderRead.subresourceRange.layerCount = 1;
+
+        if (generateMipChain) {
+            // Mips 0..N-2 are in TRANSFER_SRC_OPTIMAL, mip N-1 is in TRANSFER_DST_OPTIMAL.
+            // Transition them together with two writes so we end up with the whole chain
+            // in SHADER_READ_ONLY_OPTIMAL.
+            toShaderRead.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+            toShaderRead.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+            toShaderRead.subresourceRange.baseMipLevel = 0;
+            toShaderRead.subresourceRange.levelCount = textureHandle->m_mipLevels - 1;
+            vkCmdPipelineBarrier(commandBuffer,
+                VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                0, 0, nullptr, 0, nullptr, 1, &toShaderRead);
+
+            toShaderRead.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+            toShaderRead.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+            toShaderRead.subresourceRange.baseMipLevel = textureHandle->m_mipLevels - 1;
+            toShaderRead.subresourceRange.levelCount = 1;
+            vkCmdPipelineBarrier(commandBuffer,
+                VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                0, 0, nullptr, 0, nullptr, 1, &toShaderRead);
+        } else {
+            toShaderRead.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+            toShaderRead.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+            toShaderRead.subresourceRange.baseMipLevel = 0;
+            toShaderRead.subresourceRange.levelCount = 1;
+            vkCmdPipelineBarrier(commandBuffer,
+                VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                0, 0, nullptr, 0, nullptr, 1, &toShaderRead);
+        }
 
         textureHandle->m_layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
@@ -7053,6 +7274,8 @@ private:
         VkFilter minFilter;
         VkFilter magFilter;
         VkSamplerMipmapMode mipmapMode;
+        uint32_t anisoLevel;
+        int lodBiasTenths;
         VkSampler sampler;
     };
 
@@ -7065,10 +7288,17 @@ private:
             ? VK_SAMPLER_MIPMAP_MODE_LINEAR
             : VK_SAMPLER_MIPMAP_MODE_NEAREST;
 
+        const GraphicsSettings& gfx = GetCachedGraphicsSettings();
+        const bool aniso = m_samplerAnisotropySupported && gfx.anisotropicLevel > 1 && !pointSample;
+        const uint32_t anisoLevel = aniso ? static_cast<uint32_t>(gfx.anisotropicLevel) : 1u;
+        const int lodBiasTenths = gfx.textureUpscaleFactor > 1 ? -5 : 0;
+
         for (const SamplerCacheEntry& entry : m_samplerCache) {
             if (entry.minFilter == filter
                 && entry.magFilter == filter
-                && entry.mipmapMode == mipmapMode) {
+                && entry.mipmapMode == mipmapMode
+                && entry.anisoLevel == anisoLevel
+                && entry.lodBiasTenths == lodBiasTenths) {
                 return entry.sampler;
             }
         }
@@ -7082,16 +7312,22 @@ private:
         samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
         samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
         samplerInfo.minLod = 0.0f;
-        samplerInfo.maxLod = 0.0f;
-        samplerInfo.anisotropyEnable = VK_FALSE;
-        samplerInfo.maxAnisotropy = 1.0f;
+        // Allow the sampler to reach any mip the bound image view exposes. Views
+        // with only mip 0 are clamped automatically; views with a full chain get
+        // real minification.
+        samplerInfo.maxLod = VK_LOD_CLAMP_NONE;
+        samplerInfo.mipLodBias = static_cast<float>(lodBiasTenths) * 0.1f;
+        samplerInfo.anisotropyEnable = aniso ? VK_TRUE : VK_FALSE;
+        samplerInfo.maxAnisotropy = aniso
+            ? (std::min)(m_maxSamplerAnisotropy, static_cast<float>(anisoLevel))
+            : 1.0f;
 
         VkSampler sampler = VK_NULL_HANDLE;
         if (vkCreateSampler(m_device, &samplerInfo, nullptr, &sampler) != VK_SUCCESS) {
             return VK_NULL_HANDLE;
         }
 
-        m_samplerCache.push_back({ filter, filter, mipmapMode, sampler });
+        m_samplerCache.push_back({ filter, filter, mipmapMode, anisoLevel, lodBiasTenths, sampler });
         return sampler;
     }
 
@@ -7838,7 +8074,34 @@ private:
         vkGetPhysicalDeviceProperties(device, &properties);
         m_samplerAnisotropySupported = features.samplerAnisotropy == VK_TRUE;
         m_maxSamplerAnisotropy = properties.limits.maxSamplerAnisotropy > 1.0f ? properties.limits.maxSamplerAnisotropy : 1.0f;
+        // MSAA sample counts supported as both a color attachment and a depth attachment.
+        m_supportedSampleCounts = properties.limits.framebufferColorSampleCounts
+            & properties.limits.framebufferDepthSampleCounts;
         return true;
+    }
+
+    VkSampleCountFlagBits PickMsaaSampleCount(AntiAliasingMode mode) const
+    {
+        const int requested = GetMsaaSampleCountForMode(mode);
+        if (requested <= 1) {
+            return VK_SAMPLE_COUNT_1_BIT;
+        }
+        // Walk down from requested to 1x, picking the highest supported level that
+        // doesn't exceed what the user asked for.
+        const VkSampleCountFlagBits candidates[] = {
+            VK_SAMPLE_COUNT_8_BIT,
+            VK_SAMPLE_COUNT_4_BIT,
+            VK_SAMPLE_COUNT_2_BIT,
+        };
+        const int requestedBit = requested == 8 ? VK_SAMPLE_COUNT_8_BIT
+            : requested == 4 ? VK_SAMPLE_COUNT_4_BIT
+            : VK_SAMPLE_COUNT_2_BIT;
+        for (VkSampleCountFlagBits bit : candidates) {
+            if (bit <= requestedBit && (m_supportedSampleCounts & bit)) {
+                return bit;
+            }
+        }
+        return VK_SAMPLE_COUNT_1_BIT;
     }
 
     bool CreateLogicalDevice()
@@ -8079,12 +8342,32 @@ private:
             return false;
         }
 
+        // Compute effective MSAA sample count for this swapchain rebuild.
+        // Mutually exclusive with FXAA/SMAA (enum is single-choice).
+        m_msaaSampleCount = IsScenePostProcessEnabled()
+            ? VK_SAMPLE_COUNT_1_BIT
+            : PickMsaaSampleCount(GetCachedGraphicsSettings().antiAliasing);
+
         VkImage newDepthImage = VK_NULL_HANDLE;
         VkDeviceMemory newDepthMemory = VK_NULL_HANDLE;
         VkImageView newDepthImageView = VK_NULL_HANDLE;
-        if (!CreateDepthResources(extent, &newDepthImage, &newDepthMemory, &newDepthImageView)) {
+        if (!CreateDepthResources(extent, &newDepthImage, &newDepthMemory, &newDepthImageView, m_msaaSampleCount)) {
             vkDestroySwapchainKHR(m_device, newSwapChain, nullptr);
             return false;
+        }
+
+        VkImage newMsaaColorImage = VK_NULL_HANDLE;
+        VkDeviceMemory newMsaaColorMemory = VK_NULL_HANDLE;
+        VkImageView newMsaaColorImageView = VK_NULL_HANDLE;
+        if (m_msaaSampleCount > VK_SAMPLE_COUNT_1_BIT) {
+            if (!CreateMsaaColorResources(extent, surfaceFormat.format, m_msaaSampleCount,
+                    &newMsaaColorImage, &newMsaaColorMemory, &newMsaaColorImageView)) {
+                vkDestroyImageView(m_device, newDepthImageView, nullptr);
+                vkFreeMemory(m_device, newDepthMemory, nullptr);
+                vkDestroyImage(m_device, newDepthImage, nullptr);
+                vkDestroySwapchainKHR(m_device, newSwapChain, nullptr);
+                return false;
+            }
         }
 
         VkRenderPass newRenderPass = VK_NULL_HANDLE;
@@ -8159,16 +8442,29 @@ private:
                 vkDestroySwapchainKHR(m_device, newSwapChain, nullptr);
                 return false;
             }
-        } else if (!CreateRenderPass(surfaceFormat.format,
-                VK_ATTACHMENT_LOAD_OP_CLEAR,
-                VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-                VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
-                &newRenderPass)) {
-            vkDestroyImageView(m_device, newDepthImageView, nullptr);
-            vkFreeMemory(m_device, newDepthMemory, nullptr);
-            vkDestroyImage(m_device, newDepthImage, nullptr);
-            vkDestroySwapchainKHR(m_device, newSwapChain, nullptr);
-            return false;
+        } else {
+            const bool renderPassOk = m_msaaSampleCount > VK_SAMPLE_COUNT_1_BIT
+                ? CreateRenderPassMsaa(surfaceFormat.format,
+                      VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+                      m_msaaSampleCount,
+                      &newRenderPass)
+                : CreateRenderPass(surfaceFormat.format,
+                      VK_ATTACHMENT_LOAD_OP_CLEAR,
+                      VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                      VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+                      &newRenderPass);
+            if (!renderPassOk) {
+                if (newMsaaColorImageView != VK_NULL_HANDLE) {
+                    vkDestroyImageView(m_device, newMsaaColorImageView, nullptr);
+                    vkFreeMemory(m_device, newMsaaColorMemory, nullptr);
+                    vkDestroyImage(m_device, newMsaaColorImage, nullptr);
+                }
+                vkDestroyImageView(m_device, newDepthImageView, nullptr);
+                vkFreeMemory(m_device, newDepthMemory, nullptr);
+                vkDestroyImage(m_device, newDepthImage, nullptr);
+                vkDestroySwapchainKHR(m_device, newSwapChain, nullptr);
+                return false;
+            }
         }
 
         std::vector<VkImageView> newImageViews;
@@ -8189,7 +8485,13 @@ private:
 
         std::vector<VkFramebuffer> newFramebuffers;
         const VkRenderPass framebufferRenderPass = newOverlayRenderPass != VK_NULL_HANDLE ? newOverlayRenderPass : newRenderPass;
-        if (!CreateFramebuffers(framebufferRenderPass, newImageViews, newDepthImageView, extent, &newFramebuffers)) {
+        // MSAA only applies when going direct-to-swapchain (no FXAA/SMAA overlay pass).
+        // Feed the MSAA color view to CreateFramebuffers so it picks the 3-attachment layout.
+        const VkImageView framebufferMsaaView = (newOverlayRenderPass == VK_NULL_HANDLE)
+            ? newMsaaColorImageView
+            : VK_NULL_HANDLE;
+        if (!CreateFramebuffers(framebufferRenderPass, newImageViews, newDepthImageView, extent,
+                &newFramebuffers, framebufferMsaaView)) {
             DestroyImageViews(newImageViews);
             if (newPostPipeline != VK_NULL_HANDLE) {
                 vkDestroyPipeline(m_device, newPostPipeline, nullptr);
@@ -8198,6 +8500,11 @@ private:
                 vkDestroyRenderPass(m_device, newOverlayRenderPass, nullptr);
             }
             vkDestroyRenderPass(m_device, newRenderPass, nullptr);
+            if (newMsaaColorImageView != VK_NULL_HANDLE) {
+                vkDestroyImageView(m_device, newMsaaColorImageView, nullptr);
+                vkFreeMemory(m_device, newMsaaColorMemory, nullptr);
+                vkDestroyImage(m_device, newMsaaColorImage, nullptr);
+            }
             vkDestroyImageView(m_device, newDepthImageView, nullptr);
             vkFreeMemory(m_device, newDepthMemory, nullptr);
             vkDestroyImage(m_device, newDepthImage, nullptr);
@@ -8358,6 +8665,9 @@ private:
         m_depthImage = newDepthImage;
         m_depthMemory = newDepthMemory;
         m_depthImageView = newDepthImageView;
+        m_msaaColorImage = newMsaaColorImage;
+        m_msaaColorMemory = newMsaaColorMemory;
+        m_msaaColorImageView = newMsaaColorImageView;
         m_framebuffers = std::move(newFramebuffers);
         m_commandBuffers = std::move(newCommandBuffers);
         m_currentImageIndex = 0;
@@ -8436,6 +8746,98 @@ private:
         return true;
     }
 
+    // Render pass that renders MSAA color + MSAA depth and resolves into a single-sample
+    // output (the swapchain image). Used when AntiAliasing mode is MSAA_N_x and we go
+    // directly to the swapchain without an FXAA/SMAA post pass.
+    bool CreateRenderPassMsaa(VkFormat colorFormat, VkImageLayout resolveFinalLayout,
+        VkSampleCountFlagBits sampleCount, VkRenderPass* outRenderPass)
+    {
+        if (!outRenderPass || sampleCount == VK_SAMPLE_COUNT_1_BIT) {
+            return false;
+        }
+
+        *outRenderPass = VK_NULL_HANDLE;
+
+        VkAttachmentDescription colorAttachment{};
+        colorAttachment.format = colorFormat;
+        colorAttachment.samples = sampleCount;
+        colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+        colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+        colorAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+        colorAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+        colorAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        colorAttachment.finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+
+        VkAttachmentDescription depthAttachment{};
+        depthAttachment.format = m_depthFormat;
+        depthAttachment.samples = sampleCount;
+        depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+        depthAttachment.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+        depthAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+        depthAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+        depthAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        depthAttachment.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+
+        VkAttachmentDescription resolveAttachment{};
+        resolveAttachment.format = colorFormat;
+        resolveAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
+        resolveAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+        resolveAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+        resolveAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+        resolveAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+        resolveAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        resolveAttachment.finalLayout = resolveFinalLayout;
+
+        VkAttachmentReference colorRef{};
+        colorRef.attachment = 0;
+        colorRef.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+
+        VkAttachmentReference depthRef{};
+        depthRef.attachment = 1;
+        depthRef.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+
+        VkAttachmentReference resolveRef{};
+        resolveRef.attachment = 2;
+        resolveRef.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+
+        VkSubpassDescription subpass{};
+        subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+        subpass.colorAttachmentCount = 1;
+        subpass.pColorAttachments = &colorRef;
+        subpass.pResolveAttachments = &resolveRef;
+        subpass.pDepthStencilAttachment = &depthRef;
+
+        VkSubpassDependency dependency{};
+        dependency.srcSubpass = VK_SUBPASS_EXTERNAL;
+        dependency.dstSubpass = 0;
+        dependency.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
+        dependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
+        dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+
+        const VkAttachmentDescription attachments[] = {
+            colorAttachment,
+            depthAttachment,
+            resolveAttachment,
+        };
+
+        VkRenderPassCreateInfo renderPassInfo{};
+        renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
+        renderPassInfo.attachmentCount = static_cast<uint32_t>(std::size(attachments));
+        renderPassInfo.pAttachments = attachments;
+        renderPassInfo.subpassCount = 1;
+        renderPassInfo.pSubpasses = &subpass;
+        renderPassInfo.dependencyCount = 1;
+        renderPassInfo.pDependencies = &dependency;
+
+        const VkResult result = vkCreateRenderPass(m_device, &renderPassInfo, nullptr, outRenderPass);
+        if (result != VK_SUCCESS) {
+            m_bootstrap.initHr = static_cast<int>(result);
+            DbgLog("[Render] Vulkan vkCreateRenderPass (MSAA) failed (vk=%d).\n", static_cast<int>(result));
+            return false;
+        }
+        return true;
+    }
+
     bool CreateSceneFramebuffer(VkRenderPass renderPass, VkImageView colorImageView, VkImageView depthImageView,
         const VkExtent2D& extent, VkFramebuffer* outFramebuffer)
     {
@@ -8501,7 +8903,8 @@ private:
 
     bool CreateFramebuffers(VkRenderPass renderPass, const std::vector<VkImageView>& imageViews,
         VkImageView depthImageView,
-        const VkExtent2D& extent, std::vector<VkFramebuffer>* outFramebuffers)
+        const VkExtent2D& extent, std::vector<VkFramebuffer>* outFramebuffers,
+        VkImageView msaaColorImageView = VK_NULL_HANDLE)
     {
         if (!outFramebuffers || depthImageView == VK_NULL_HANDLE) {
             return false;
@@ -8510,15 +8913,26 @@ private:
         outFramebuffers->clear();
         outFramebuffers->reserve(imageViews.size());
         for (VkImageView imageView : imageViews) {
-            const VkImageView attachments[] = {
+            // MSAA layout expected by CreateRenderPassMsaa:
+            //   [0] MSAA color, [1] MSAA/single-sample depth, [2] resolve = swapchain.
+            // Non-MSAA layout: [0] color (swapchain), [1] depth.
+            const VkImageView msaaAttachments[] = {
+                msaaColorImageView,
+                depthImageView,
+                imageView,
+            };
+            const VkImageView singleSampleAttachments[] = {
                 imageView,
                 depthImageView,
             };
+            const bool useMsaa = msaaColorImageView != VK_NULL_HANDLE;
             VkFramebufferCreateInfo framebufferInfo{};
             framebufferInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
             framebufferInfo.renderPass = renderPass;
-            framebufferInfo.attachmentCount = static_cast<uint32_t>(std::size(attachments));
-            framebufferInfo.pAttachments = attachments;
+            framebufferInfo.attachmentCount = useMsaa
+                ? static_cast<uint32_t>(std::size(msaaAttachments))
+                : static_cast<uint32_t>(std::size(singleSampleAttachments));
+            framebufferInfo.pAttachments = useMsaa ? msaaAttachments : singleSampleAttachments;
             framebufferInfo.width = extent.width;
             framebufferInfo.height = extent.height;
             framebufferInfo.layers = 1;
@@ -8653,6 +9067,18 @@ private:
         if (m_sceneImage != VK_NULL_HANDLE) {
             vkDestroyImage(m_device, m_sceneImage, nullptr);
             m_sceneImage = VK_NULL_HANDLE;
+        }
+        if (m_msaaColorImageView != VK_NULL_HANDLE) {
+            vkDestroyImageView(m_device, m_msaaColorImageView, nullptr);
+            m_msaaColorImageView = VK_NULL_HANDLE;
+        }
+        if (m_msaaColorMemory != VK_NULL_HANDLE) {
+            vkFreeMemory(m_device, m_msaaColorMemory, nullptr);
+            m_msaaColorMemory = VK_NULL_HANDLE;
+        }
+        if (m_msaaColorImage != VK_NULL_HANDLE) {
+            vkDestroyImage(m_device, m_msaaColorImage, nullptr);
+            m_msaaColorImage = VK_NULL_HANDLE;
         }
         if (m_depthImageView != VK_NULL_HANDLE) {
             vkDestroyImageView(m_device, m_depthImageView, nullptr);
@@ -9062,6 +9488,11 @@ private:
     VulkanTextureHandle* m_defaultTexture;
     bool m_samplerAnisotropySupported;
     float m_maxSamplerAnisotropy;
+    VkSampleCountFlagBits m_msaaSampleCount = VK_SAMPLE_COUNT_1_BIT;
+    VkSampleCountFlags m_supportedSampleCounts = VK_SAMPLE_COUNT_1_BIT;
+    VkImage m_msaaColorImage = VK_NULL_HANDLE;
+    VkDeviceMemory m_msaaColorMemory = VK_NULL_HANDLE;
+    VkImageView m_msaaColorImageView = VK_NULL_HANDLE;
 #if !RO_PLATFORM_WINDOWS && RO_ENABLE_QT6_UI
     QVulkanInstance* m_qtVulkanInstance;
 #endif

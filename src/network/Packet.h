@@ -1,6 +1,8 @@
 #pragma once
 #include "Types.h"
 
+extern int g_version;
+
 #pragma pack(push, 1)
 
 enum PacketId {
@@ -41,6 +43,29 @@ enum PacketId {
 
 namespace PacketProfile {
 constexpr int kMapServerClientPacketVersion = 23;
+constexpr int kSabineVersionBeta1 = 200;
+constexpr int kSabineVersionBeta2 = 300;
+constexpr u16 kReqEmotion = 0x00BF;
+constexpr u16 kEmotion = 0x00C0;
+
+namespace EarlyMapServerSend {
+constexpr u16 kWantToConnection = 0x000E;
+constexpr u16 kNotifyActorInit = 0x0019;
+constexpr u16 kTickSend = 0x001A;
+constexpr u16 kWalkToXY = 0x0021;
+constexpr u16 kActionRequest = 0x0025;
+constexpr u16 kGlobalMessage = 0x0027;
+constexpr u16 kGetCharNameRequest = 0x002F;
+constexpr u16 kChangeDir = 0x0036;
+constexpr u16 kTakeItem = 0x003A;
+constexpr u16 kDropItem = 0x003D;
+constexpr u16 kUseItem = 0x0042;
+constexpr u16 kEquipItem = 0x0044;
+constexpr u16 kUnequipItem = 0x0046;
+constexpr u16 kSkillUp = 0x00AE;
+constexpr u16 kUseSkillToId = 0x00AF;
+constexpr u16 kUseSkillToPos = 0x00B2;
+}
 
 namespace PacketVer23LoginChain {
 // 2008-09-10aSakexe keeps the classic account/char opcodes, but the account login
@@ -168,6 +193,271 @@ constexpr u16 kWhisper = PacketVer23MapServerSend::kWhisper;
 constexpr u16 kGlobalMessage = PacketVer23MapServerSend::kGlobalMessage;
 }
 
+inline bool UsesEarlyMapServerSendProfile()
+{
+    return g_version > 0 && g_version < kSabineVersionBeta2;
+}
+
+inline bool UsesAlphaMapServerSendProfile()
+{
+    return g_version > 0 && g_version < kSabineVersionBeta1;
+}
+
+inline bool UsesBeta1MapServerSendProfile()
+{
+    return g_version >= kSabineVersionBeta1 && g_version < kSabineVersionBeta2;
+}
+
+inline u16 GetWantToConnectionOpcode()
+{
+    return UsesEarlyMapServerSendProfile() ? EarlyMapServerSend::kWantToConnection : ActiveMapServerSend::kWantToConnection;
+}
+
+inline u16 GetNotifyActorInitOpcode()
+{
+    return UsesEarlyMapServerSendProfile() ? EarlyMapServerSend::kNotifyActorInit : ActiveMapServerSend::kNotifyActorInit;
+}
+
+inline u16 GetTickSendOpcode()
+{
+    return UsesEarlyMapServerSendProfile() ? EarlyMapServerSend::kTickSend : ActiveMapServerSend::kTickSend;
+}
+
+inline u16 GetWalkToXYOpcode()
+{
+    return UsesEarlyMapServerSendProfile() ? EarlyMapServerSend::kWalkToXY : ActiveMapServerSend::kWalkToXY;
+}
+
+inline u16 GetActionRequestOpcode()
+{
+    return UsesEarlyMapServerSendProfile() ? EarlyMapServerSend::kActionRequest : ActiveMapServerSend::kActionRequest;
+}
+
+inline u16 GetGlobalMessageOpcode()
+{
+    return UsesEarlyMapServerSendProfile() ? EarlyMapServerSend::kGlobalMessage : ActiveMapServerSend::kGlobalMessage;
+}
+
+inline u16 GetCharNameRequestOpcode()
+{
+    return UsesEarlyMapServerSendProfile() ? EarlyMapServerSend::kGetCharNameRequest : ActiveMapServerSend::kGetCharNameRequest;
+}
+
+inline u16 GetChangeDirOpcode()
+{
+    return UsesEarlyMapServerSendProfile() ? EarlyMapServerSend::kChangeDir : ActiveMapServerSend::kChangeDir;
+}
+
+inline u16 GetNpcContactOpcode()
+{
+    if (UsesAlphaMapServerSendProfile()) {
+        return 0x002B;
+    }
+    if (UsesEarlyMapServerSendProfile()) {
+        return 0x002C;
+    }
+    return 0x0090;
+}
+
+inline u16 GetNpcChooseMenuOpcode()
+{
+    if (UsesAlphaMapServerSendProfile()) {
+        return 0x0053;
+    }
+    if (UsesEarlyMapServerSendProfile()) {
+        return 0x0054;
+    }
+    return 0x00B8;
+}
+
+inline u16 GetNpcNextClickOpcode()
+{
+    if (UsesAlphaMapServerSendProfile()) {
+        return 0x0054;
+    }
+    if (UsesEarlyMapServerSendProfile()) {
+        return 0x0055;
+    }
+    return 0x00B9;
+}
+
+inline u16 GetTakeItemOpcode()
+{
+    return UsesEarlyMapServerSendProfile() ? EarlyMapServerSend::kTakeItem : ActiveMapServerSend::kTakeItem;
+}
+
+inline u16 GetDropItemOpcode()
+{
+    return UsesEarlyMapServerSendProfile() ? EarlyMapServerSend::kDropItem : ActiveMapServerSend::kDropItem;
+}
+
+inline u16 GetUseItemOpcode()
+{
+    if (UsesAlphaMapServerSendProfile()) {
+        return EarlyMapServerSend::kUseItem;
+    }
+    if (UsesEarlyMapServerSendProfile()) {
+        return 0x0043;
+    }
+    return ActiveMapServerSend::kUseItem;
+}
+
+inline u16 GetEquipItemOpcode()
+{
+    if (UsesAlphaMapServerSendProfile()) {
+        return EarlyMapServerSend::kEquipItem;
+    }
+    if (UsesEarlyMapServerSendProfile()) {
+        return 0x0045;
+    }
+    return ActiveMapServerSend::kEquipItem;
+}
+
+inline u16 GetUnequipItemOpcode()
+{
+    if (UsesAlphaMapServerSendProfile()) {
+        return EarlyMapServerSend::kUnequipItem;
+    }
+    if (UsesEarlyMapServerSendProfile()) {
+        return 0x0047;
+    }
+    return ActiveMapServerSend::kUnequipItem;
+}
+
+inline u16 GetSkillUpOpcode()
+{
+    return UsesEarlyMapServerSendProfile() ? EarlyMapServerSend::kSkillUp : ActiveMapServerSend::kSkillUp;
+}
+
+inline u16 GetUseSkillToIdOpcode()
+{
+    return UsesEarlyMapServerSendProfile() ? EarlyMapServerSend::kUseSkillToId : ActiveMapServerSend::kUseSkillToId;
+}
+
+inline u16 GetUseSkillToPosOpcode()
+{
+    return UsesEarlyMapServerSendProfile() ? EarlyMapServerSend::kUseSkillToPos : ActiveMapServerSend::kUseSkillToPos;
+}
+
+inline u16 GetUseSkillMapOpcode()
+{
+    return UsesEarlyMapServerSendProfile() ? 0 : ActiveMapServerSend::kUseSkillMap;
+}
+
+inline const char* GetOpcodeName(u16 packetId)
+{
+    switch (packetId) {
+    case 0x0000: return "CA_LOGIN";
+    case 0x0001: return "CH_ENTER";
+    case 0x0002: return "CH_SELECT_CHAR";
+    case 0x0004: return "CH_DELETE_CHAR";
+    case 0x0005: return "AC_ACCEPT_LOGIN";
+    case 0x0007: return "HC_ACCEPT_ENTER";
+    case 0x000E: return "CZ_ENTER";
+    case 0x000F: return "ZC_ACCEPT_ENTER";
+    case 0x0010: return "ZC_REFUSE_ENTER";
+    case 0x0014: return "ZC_NOTIFY_STANDENTRY";
+    case 0x0015: return "ZC_NOTIFY_NEWENTRY";
+    case 0x0016: return "ZC_NOTIFY_ACTENTRY";
+    case 0x0017: return "ZC_NOTIFY_MOVEENTRY";
+    case 0x0018: return "ZC_NOTIFY_STANDENTRY_NPC";
+    case 0x0019: return "CZ_NOTIFY_ACTORINIT";
+    case 0x001A: return "CZ_REQUEST_TIME";
+    case 0x001B: return "ZC_NOTIFY_TIME";
+    case 0x001C: return "ZC_NOTIFY_VANISH";
+    case 0x0021: return "CZ_REQUEST_MOVE";
+    case 0x0022: return "ZC_NOTIFY_MOVE";
+    case 0x0023: return "ZC_NOTIFY_PLAYERMOVE";
+    case 0x0024: return "ZC_STOPMOVE";
+    case 0x0025: return "CZ_REQUEST_ACT";
+    case 0x0026: return "ZC_NOTIFY_ACT";
+    case 0x0027: return UsesBeta1MapServerSendProfile() ? "ZC_NOTIFY_ACT_POSITION" : "CZ_REQUEST_CHAT";
+    case 0x0028: return UsesAlphaMapServerSendProfile() ? "ZC_NOTIFY_CHAT" : "CZ_REQUEST_CHAT";
+    case 0x0029: return UsesAlphaMapServerSendProfile() ? "ZC_NOTIFY_PLAYERCHAT" : "ZC_NOTIFY_CHAT";
+    case 0x002A: return UsesAlphaMapServerSendProfile() ? "SERVER_ENTRY_ACK" : "ZC_NOTIFY_PLAYERCHAT";
+    case 0x002B: return UsesAlphaMapServerSendProfile() ? "CZ_CONTACTNPC" : "SERVER_ENTRY_ACK";
+    case 0x002C: return UsesAlphaMapServerSendProfile() ? "ZC_NPCACK_MAPMOVE" : "CZ_CONTACTNPC";
+    case 0x002D: return UsesAlphaMapServerSendProfile() ? "ZC_NPCACK_SERVERMOVE" : "ZC_NPCACK_MAPMOVE";
+    case 0x002E: return UsesAlphaMapServerSendProfile() ? "ZC_NPCACK_ENABLE" : "ZC_NPCACK_SERVERMOVE";
+    case 0x002F: return UsesAlphaMapServerSendProfile() ? "CZ_REQNAME" : "ZC_NPCACK_ENABLE";
+    case 0x0030: return UsesAlphaMapServerSendProfile() ? "ZC_ACK_REQNAME" : "CZ_REQNAME";
+    case 0x0031: return UsesAlphaMapServerSendProfile() ? "CZ_WHISPER" : "ZC_ACK_REQNAME";
+    case 0x0036: return "CZ_CHANGE_DIRECTION";
+    case 0x0037: return "ZC_CHANGE_DIRECTION";
+    case 0x003A: return "CZ_ITEM_PICKUP";
+    case 0x003B: return "ZC_ITEM_PICKUP_ACK";
+    case 0x003C: return "ZC_ITEM_DISAPPEAR";
+    case 0x003D: return "CZ_ITEM_THROW";
+    case 0x003E: return "ZC_NORMAL_ITEMLIST";
+    case 0x003F: return "ZC_EQUIPMENT_ITEMLIST";
+    case 0x0042: return UsesBeta1MapServerSendProfile() ? "CZ_ITEM_THROW" : "CZ_USE_ITEM";
+    case 0x0043: return UsesBeta1MapServerSendProfile() ? "CZ_USE_ITEM" : "ZC_USE_ITEM_ACK";
+    case 0x0044: return UsesBeta1MapServerSendProfile() ? "ZC_USE_ITEM_ACK" : "CZ_REQ_WEAR_EQUIP";
+    case 0x0045: return UsesBeta1MapServerSendProfile() ? "CZ_REQ_WEAR_EQUIP" : "ZC_REQ_WEAR_EQUIP_ACK";
+    case 0x0046: return UsesBeta1MapServerSendProfile() ? "ZC_REQ_WEAR_EQUIP_ACK" : "CZ_REQ_TAKEOFF_EQUIP";
+    case 0x0047: return UsesBeta1MapServerSendProfile() ? "CZ_REQ_TAKEOFF_EQUIP" : "ZC_REQ_TAKEOFF_EQUIP_ACK";
+    case 0x004B: return "ZC_PAR_CHANGE";
+    case 0x004C: return UsesEarlyMapServerSendProfile() && !UsesAlphaMapServerSendProfile() ? "ZC_PAR_CHANGE" : "ZC_LONGPAR_CHANGE";
+    case 0x004D: return UsesEarlyMapServerSendProfile() && !UsesAlphaMapServerSendProfile() ? "ZC_LONGPAR_CHANGE" : "CZ_RESTART";
+    case 0x004E: return UsesEarlyMapServerSendProfile() && !UsesAlphaMapServerSendProfile() ? "CZ_RESTART" : "ZC_RESTART_ACK";
+    case 0x004F: return UsesEarlyMapServerSendProfile() && !UsesAlphaMapServerSendProfile() ? "ZC_RESTART_ACK" : "ZC_SAY_DIALOG";
+    case 0x0050: return UsesEarlyMapServerSendProfile() && !UsesAlphaMapServerSendProfile() ? "ZC_SAY_DIALOG" : "ZC_WAIT_DIALOG";
+    case 0x0051: return UsesEarlyMapServerSendProfile() && !UsesAlphaMapServerSendProfile() ? "ZC_WAIT_DIALOG" : "ZC_CLOSE_DIALOG";
+    case 0x0052: return UsesEarlyMapServerSendProfile() && !UsesAlphaMapServerSendProfile() ? "ZC_CLOSE_DIALOG" : "ZC_MENU_LIST";
+    case 0x0053: return UsesEarlyMapServerSendProfile() && !UsesAlphaMapServerSendProfile() ? "ZC_MENU_LIST" : "CZ_CHOOSE_MENU";
+    case 0x0054: return UsesEarlyMapServerSendProfile() && !UsesAlphaMapServerSendProfile() ? "CZ_CHOOSE_MENU" : "CZ_REQ_NEXT_SCRIPT";
+    case 0x0055: return UsesEarlyMapServerSendProfile() && !UsesAlphaMapServerSendProfile() ? "CZ_REQ_NEXT_SCRIPT" : "CZ_REQ_STATUS";
+    case 0x0056: return UsesEarlyMapServerSendProfile() && !UsesAlphaMapServerSendProfile() ? "CZ_REQ_STATUS" : "CZ_STATUS_CHANGE";
+    case 0x0057: return UsesEarlyMapServerSendProfile() && !UsesAlphaMapServerSendProfile() ? "CZ_STATUS_CHANGE" : "ZC_STATUS_CHANGE_ACK";
+    case 0x0058: return UsesEarlyMapServerSendProfile() && !UsesAlphaMapServerSendProfile() ? "ZC_STATUS_CHANGE_ACK" : "ZC_STATUS";
+    case 0x0059: return UsesEarlyMapServerSendProfile() && !UsesAlphaMapServerSendProfile() ? "ZC_STATUS" : "ZC_STATUS_CHANGE";
+    case 0x005A: return UsesEarlyMapServerSendProfile() && !UsesAlphaMapServerSendProfile() ? "ZC_STATUS_CHANGE" : "CZ_REQ_EMOTION";
+    case 0x005B: return UsesEarlyMapServerSendProfile() && !UsesAlphaMapServerSendProfile() ? "CZ_REQ_EMOTION" : "ZC_EMOTION";
+    case 0x005C: return UsesEarlyMapServerSendProfile() && !UsesAlphaMapServerSendProfile() ? "ZC_EMOTION" : "CZ_REQ_USER_COUNT";
+    case 0x005D: return UsesEarlyMapServerSendProfile() && !UsesAlphaMapServerSendProfile() ? "CZ_REQ_USER_COUNT" : "ZC_USER_COUNT";
+    case 0x005E: return UsesEarlyMapServerSendProfile() && !UsesAlphaMapServerSendProfile() ? "ZC_USER_COUNT" : "ZC_SPRITE_CHANGE";
+    case 0x005F: return UsesEarlyMapServerSendProfile() && !UsesAlphaMapServerSendProfile() ? "ZC_SPRITE_CHANGE" : "ZC_SELECT_DEALTYPE";
+    case 0x0060: return UsesEarlyMapServerSendProfile() && !UsesAlphaMapServerSendProfile() ? "ZC_SELECT_DEALTYPE" : "CZ_ACK_SELECT_DEALTYPE";
+    case 0x0085: return "CZ_CHANGE_DIRECTION";
+    case 0x0089: return "CZ_REQUEST_TIME";
+    case 0x008C: return "CZ_REQNAME";
+    case 0x00A7: return UsesAlphaMapServerSendProfile() ? "ZC_SKILLINFO_UPDATE" : "CZ_REQUEST_MOVE";
+    case 0x00A8: return UsesAlphaMapServerSendProfile() ? "ZC_SKILLINFO_LIST" : "ZC_MVP";
+    case 0x00A9: return UsesAlphaMapServerSendProfile() ? "ZC_ACK_TOUSESKILL" : "CZ_REQ_WEAR_EQUIP";
+    case 0x00AA: return UsesAlphaMapServerSendProfile() ? "ZC_ADD_SKILL"
+        : (UsesBeta1MapServerSendProfile() ? "ZC_SKILLINFO_UPDATE" : "ZC_REQ_WEAR_EQUIP_ACK");
+    case 0x00AB: return UsesBeta1MapServerSendProfile() ? "ZC_SKILLINFO_LIST" : "ZC_REQ_TAKEOFF_EQUIP";
+    case 0x00AC: return UsesBeta1MapServerSendProfile() ? "ZC_ACK_TOUSESKILL" : "ZC_REQ_TAKEOFF_EQUIP_ACK";
+    case 0x00AD: return UsesBeta1MapServerSendProfile() ? "ZC_ADD_SKILL" : "CZ_REQ_ITEM_EXPLANATION_BYNAME";
+    case 0x00AE: return "CZ_UPGRADE_SKILLLEVEL";
+    case 0x00AF: return "CZ_USE_SKILL";
+    case 0x00B0: return UsesBeta1MapServerSendProfile() ? "ZC_NOTIFY_SKILL" : nullptr;
+    case 0x00B1: return UsesBeta1MapServerSendProfile() ? "ZC_NOTIFY_SKILL_POSITION" : nullptr;
+    case 0x00B2: return "CZ_USE_SKILL_TOGROUND";
+    case 0x00B3: return UsesBeta1MapServerSendProfile() ? "ZC_NOTIFY_GROUNDSKILL" : "ZC_ACK_DISCONNECT_CHARACTER";
+    case 0x00B5: return UsesBeta1MapServerSendProfile() ? "ZC_STATE_CHANGE" : "ZC_WAIT_DIALOG";
+    case 0x00B6: return UsesBeta1MapServerSendProfile() ? "ZC_USE_SKILL" : "ZC_CLOSE_DIALOG";
+    case 0x00BC: return UsesBeta1MapServerSendProfile() ? "ZC_SKILL_DISAPPEAR" : "ZC_STATUS_CHANGE_ACK";
+    case 0x00BD: return UsesBeta1MapServerSendProfile() ? "ZC_NOTIFY_CARTITEM_COUNTINFO" : "ZC_STATUS";
+    case 0x00BE: return UsesBeta1MapServerSendProfile() ? "ZC_CART_EQUIPMENT_ITEMLIST" : nullptr;
+    case 0x00BF: return "CZ_REQ_EMOTION";
+    case 0x00C0: return UsesBeta1MapServerSendProfile() ? "ZC_ADD_ITEM_TO_CART" : "ZC_EMOTION";
+    case 0x00D5: return UsesBeta1MapServerSendProfile() ? "ZC_ATTACK_FAILURE_FOR_DISTANCE" : nullptr;
+    case 0x00D6: return UsesBeta1MapServerSendProfile() ? "ZC_ATTACK_RANGE" : nullptr;
+    case 0x00D7: return UsesBeta1MapServerSendProfile() ? "ZC_ACTION_FAILURE" : nullptr;
+    case 0x00D9: return UsesBeta1MapServerSendProfile() ? "ZC_RECOVERY" : nullptr;
+    case 0x00DA: return UsesBeta1MapServerSendProfile() ? "ZC_USESKILL_ACK" : nullptr;
+    case 0x00DC: return "CZ_MOVETO_MAP";
+    case 0x0201: return "ZC_FRIENDS_LIST";
+    case 0x0436: return "CZ_ENTER";
+    case 0x0437: return "CZ_REQUEST_ACT";
+    case 0x0438: return "CZ_USE_SKILL";
+    case 0x0439: return "CZ_USE_ITEM";
+    default:
+        return nullptr;
+    }
+}
+
 namespace LegacyNpcScriptSend {
 constexpr u16 kContactNpc = 0x0090;
 constexpr u16 kSelectMenu = 0x00B8;
@@ -194,6 +484,31 @@ namespace ActiveStorageSend {
 constexpr u16 kMoveToStorage = PacketVer23StorageSend::kMoveToStorage;
 constexpr u16 kMoveFromStorage = PacketVer23StorageSend::kMoveFromStorage;
 constexpr u16 kCloseStorage = PacketVer23StorageSend::kCloseStorage;
+}
+
+namespace EarlyCartSend {
+// Sabine Alpha/Beta1 cart send opcodes (pre-packet_ver 22).
+constexpr u16 kMoveBodyToCart = 0x00C2;
+constexpr u16 kMoveCartToBody = 0x00C3;
+constexpr u16 kMoveStoreToCart = 0x00C4;
+constexpr u16 kMoveCartToStore = 0x00C5;
+constexpr u16 kCartOff = 0x00C6;
+}
+
+namespace PacketVer23CartSend {
+constexpr u16 kMoveBodyToCart = 0x0126;
+constexpr u16 kMoveCartToBody = 0x0127;
+constexpr u16 kMoveStoreToCart = 0x0128;
+constexpr u16 kMoveCartToStore = 0x0129;
+constexpr u16 kCartOff = 0x012A;
+}
+
+namespace ActiveCartSend {
+constexpr u16 kMoveBodyToCart = PacketVer23CartSend::kMoveBodyToCart;
+constexpr u16 kMoveCartToBody = PacketVer23CartSend::kMoveCartToBody;
+constexpr u16 kMoveStoreToCart = PacketVer23CartSend::kMoveStoreToCart;
+constexpr u16 kMoveCartToStore = PacketVer23CartSend::kMoveCartToStore;
+constexpr u16 kCartOff = PacketVer23CartSend::kCartOff;
 }
 
 namespace LegacyPartySend {
@@ -408,6 +723,17 @@ struct PACKET_CZ_ACTION_REQUEST2 {
     u16 PacketType;    // 0x0437 for packet_ver 23
     u32 TargetGID;
     u8  Action;
+};
+
+struct PACKET_CZ_REQ_EMOTION {
+    u16 PacketType;    // CZ_REQ_EMOTION / 0x00BF
+    u8  EmotionType;
+};
+
+struct PACKET_ZC_EMOTION {
+    u16 PacketType;    // ZC_EMOTION / 0x00C0
+    u32 GID;
+    u8  EmotionType;
 };
 
 struct PACKET_CZ_USESKILLTOID_PACKETVER22 {
@@ -641,6 +967,13 @@ struct PACKET_CZ_CLOSE_STORE {
     u16 PacketType;    // 0x0193 for packet_ver 22/23 pre-renewal storage family
 };
 
+// Generic 8-byte cart move packet shared across 0x0126/0x0127/0x0128/0x0129.
+struct PACKET_CZ_MOVE_CART {
+    u16 PacketType;
+    u16 ItemIndex;
+    u32 Count;
+};
+
 struct PACKET_CZ_SHORTCUT_KEY_CHANGE {
     u16 PacketType;    // 0x02BA
     u16 Index;
@@ -728,6 +1061,8 @@ static_assert(sizeof(PACKET_CZ_REQNAME2) == 11, "PACKET_CZ_REQNAME2 size mismatc
 static_assert(sizeof(PACKET_CZ_REQNAME_LEGACY) == 6, "PACKET_CZ_REQNAME_LEGACY size mismatch");
 static_assert(sizeof(PACKET_CZ_ACTION_REQUEST_PACKETVER22) == 19, "PACKET_CZ_ACTION_REQUEST_PACKETVER22 size mismatch");
 static_assert(sizeof(PACKET_CZ_ACTION_REQUEST2) == 7, "PACKET_CZ_ACTION_REQUEST2 size mismatch");
+static_assert(sizeof(PACKET_CZ_REQ_EMOTION) == 3, "PACKET_CZ_REQ_EMOTION size mismatch");
+static_assert(sizeof(PACKET_ZC_EMOTION) == 7, "PACKET_ZC_EMOTION size mismatch");
 static_assert(sizeof(PACKET_CZ_USESKILLTOID_PACKETVER22) == 25, "PACKET_CZ_USESKILLTOID_PACKETVER22 size mismatch");
 static_assert(sizeof(PACKET_CZ_USESKILLTOID2) == 10, "PACKET_CZ_USESKILLTOID2 size mismatch");
 static_assert(sizeof(PACKET_CZ_USESKILLTOPOS) == 22, "PACKET_CZ_USESKILLTOPOS size mismatch");
@@ -764,6 +1099,7 @@ static_assert(sizeof(PACKET_CZ_REQ_EXPEL_GROUP_MEMBER) == 30, "PACKET_CZ_REQ_EXP
 static_assert(sizeof(PACKET_CZ_MOVE_ITEM_TO_STORE) == 14, "PACKET_CZ_MOVE_ITEM_TO_STORE size mismatch");
 static_assert(sizeof(PACKET_CZ_MOVE_ITEM_FROM_STORE) == 22, "PACKET_CZ_MOVE_ITEM_FROM_STORE size mismatch");
 static_assert(sizeof(PACKET_CZ_CLOSE_STORE) == 2, "PACKET_CZ_CLOSE_STORE size mismatch");
+static_assert(sizeof(PACKET_CZ_MOVE_CART) == 8, "PACKET_CZ_MOVE_CART size mismatch");
 static_assert(sizeof(PACKET_CZ_SHORTCUT_KEY_CHANGE) == 11, "PACKET_CZ_SHORTCUT_KEY_CHANGE size mismatch");
 
 #pragma pack(pop)

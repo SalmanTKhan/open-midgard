@@ -38,6 +38,8 @@ class UIMessengerGroupWnd;
 class UIPartyOptionWnd;
 class UINpcInputWnd;
 class UIChooseWnd;
+class UIVirtualKeyboardWnd;
+class UIControllerWnd;
 class UIChooseSellBuyWnd;
 class UISelectCartWnd;
 class UIItemShopWnd;
@@ -102,6 +104,16 @@ public:
         WID_CHOOSEWND         = 17,
         WID_ROMAPWND          = 0x93,
         WID_NOTIFYJOBLEVELUPWND = 49,
+        WID_CONTROLLERWND      = 51,
+        WID_CARTWND           = 60,
+        WID_GUILDWND          = 61,
+        WID_MAILBOXWND        = 62,
+        WID_MAILREADWND       = 63,
+        WID_MAILSENDWND       = 64,
+        WID_PETINFOWND        = 65,
+        WID_EGGLISTWND        = 66,
+        WID_HOMUNINFOWND      = 67,
+        WID_MERCINFOWND       = 68,
     };
 
     UIWindowMgr();
@@ -140,6 +152,7 @@ public:
     void RemoveAllWindows();
     void DeleteWindow(UIWindow* window);
     void AddWindowFront(UIWindow* window);
+    void ReloadLegacySkinAssets(UIWindow* preserveWindow = nullptr);
 
     // Input routing
     void OnLBtnDown(int x, int y);
@@ -157,6 +170,9 @@ public:
     void RepositionManagedWindowsForUiScale(int previousPercent, int nextPercent);
     void SnapWindowToNearby(UIWindow* window, int* x, int* y) const;
     void EnsureChatWindowVisible();
+    bool IsTextInputActive() const;
+    void ShowVirtualKeyboard(int clientWidth, int clientHeight);
+    void HideVirtualKeyboard();
     bool HasActiveNpcDialog() const;
     void CloseNpcDialogWindows();
     void ClosePlayerContextMenu();
@@ -215,6 +231,8 @@ public:
     UIWaitWnd* m_waitWnd;
     UIChooseWnd* m_chooseWnd;
     UISelectCartWnd* m_selectCartWnd;
+    UIVirtualKeyboardWnd* m_virtualKeyboardWnd;
+    UIControllerWnd* m_controllerWnd;
     UIOptionWnd* m_optionWnd;
     UIItemWnd* m_itemWnd;
     UIItemInfoWnd* m_itemInfoWnd;
@@ -228,6 +246,15 @@ public:
     UIEquipWnd* m_equipWnd;
     UISkillDescribeWnd* m_skillDescribeWnd;
     UISkillListWnd* m_skillListWnd;
+    class UICartWnd* m_cartWnd;
+    class UIGuildWnd* m_guildWnd;
+    class UIMailBoxWnd* m_mailBoxWnd;
+    class UIMailReadWnd* m_mailReadWnd;
+    class UIMailSendWnd* m_mailSendWnd;
+    class UIPetInfoWnd* m_petInfoWnd;
+    class UIEggListWnd* m_eggListWnd;
+    class UIHomunInfoWnd* m_homunInfoWnd;
+    class UIMercInfoWnd* m_mercInfoWnd;
     std::string m_loginStatus;
     std::string m_loginWallpaper;
     std::string m_loadedWallpaperPath;
@@ -244,8 +271,8 @@ public:
 private:
     UIWindow* HitTestWindow(int x, int y) const;
     bool HasFrontMenuUiVisible() const;
-    bool HandleHotkeyBeforeFocusedUi(int virtualKey, bool isAltDown, bool isCtrlDown, bool hasFrontMenuUi);
-    bool HandleHotkeyAfterFocusedUi(int virtualKey, bool hasFrontMenuUi);
+    bool HandleHotkeyBeforeFocusedUi(int virtualKey, bool isAltDown, bool isCtrlDown, bool isShiftDown, bool hasFrontMenuUi);
+    bool HandleHotkeyAfterFocusedUi(int virtualKey, bool isAltDown, bool isCtrlDown, bool isShiftDown, bool hasFrontMenuUi);
     bool HasBlockingUiForGameplayHotkeys() const;
     void ReleaseComposeSurface();
     bool EnsureComposeSurface(int width, int height);

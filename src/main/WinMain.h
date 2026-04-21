@@ -17,7 +17,6 @@ bool            InitApp(HINSTANCE hInstance, int nCmdShow);
 int             ReadRegistry();
 LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
 void            ExitApp();
-void            CheckSystemMessage();
 void            SetWindowActiveMode(int active);
 bool            GetWindowActiveMode();
 void            RefreshMainWindowTitle(const char* status = nullptr);

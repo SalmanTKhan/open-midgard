@@ -3,12 +3,14 @@
 #include "GameMode.h"
 #include "DebugLog.h"
 #include "core/ClientInfoLocale.h"
+#include "input/Gamepad.h"
 #include "qtui/QtUiRuntime.h"
 #include "render/Renderer.h"
 #include "render3d/RenderDevice.h"
 #include "res/Texture.h"
 #include "ui/UIWindowMgr.h"
 #include "main/WinMain.h"
+#include <algorithm>
 #include <cstring>
 #include <windows.h>
 
@@ -267,6 +269,45 @@ void CModeMgr::Run(int startMode, const char* worldName)
             }
 
             if (m_curMode) {
+                // Pump the gamepad every frame. dt is wall-clock delta since
+                // the previous tick, clamped so a stall (debugger, loading)
+                // doesn't flick the virtual cursor across the screen.
+                static DWORD s_gamepadLastTick = 0;
+                const DWORD nowTick = GetTickCount();
+                if (s_gamepadLastTick == 0) s_gamepadLastTick = nowTick;
+                const float gamepadDt =
+                    std::min(0.1f, static_cast<float>(nowTick - s_gamepadLastTick) * 0.001f);
+                s_gamepadLastTick = nowTick;
+
+                if (g_hMainWnd) {
+                    RECT rc{};
+                    if (GetClientRect(g_hMainWnd, &rc)) {
+                        gamepad::g_gamepad.Poll(
+                            gamepadDt,
+                            rc.right - rc.left,
+                            rc.bottom - rc.top);
+                    }
+                }
+
+                // Keyboard hold-to-walk: poll WASD every frame so holding a
+                // key walks smoothly (one move request every 200 ms) instead
+                // of stepping once per WM_KEYDOWN.
+                static DWORD s_lastWasdTick = 0;
+                if (!g_windowMgr.IsTextInputActive()
+                    && nowTick - s_lastWasdTick > 200) {
+                    int wasdDx = 0, wasdDy = 0;
+                    if (GetAsyncKeyState('W') & 0x8000) wasdDy =  1;
+                    if (GetAsyncKeyState('S') & 0x8000) wasdDy = -1;
+                    if (GetAsyncKeyState('A') & 0x8000) wasdDx = -1;
+                    if (GetAsyncKeyState('D') & 0x8000) wasdDx =  1;
+                    if (wasdDx != 0 || wasdDy != 0) {
+                        g_modeMgr.SendMsg(CGameMode::GameMsg_RequestMoveDelta,
+                            static_cast<msgparam_t>(wasdDx),
+                            static_cast<msgparam_t>(wasdDy));
+                        s_lastWasdTick = nowTick;
+                    }
+                }
+
                 ProcessQtUiRuntimeEvents();
                 m_curMode->OnRun();
                 RecordMainWindowFrame();

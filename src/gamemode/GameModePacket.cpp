@@ -6,6 +6,7 @@
 #include "GameMode.h"
 #include "PacketPadding.h"
 #include "core/Globals.h"
+#include "core/ClientFeature.h"
 #include "Types.h"
 #include "core/File.h"
 #include "pathfinder/PathFinder.h"
@@ -38,6 +39,7 @@
 #include "ui/UIStatusWnd.h"
 #include "ui/UIWindowMgr.h"
 #include "world/GameActor.h"
+#include "world/MsgEffect.h"
 #include "world/RagEffect.h"
 #include "world/World.h"
 
@@ -72,6 +74,9 @@ constexpr u32 kActorChatBubblePerCharLifetimeMs = 90;
 constexpr u32 kActorChatBubbleMinLifetimeMs = 4500;
 constexpr u32 kActorChatBubbleMaxLifetimeMs = 12000;
 constexpr u32 kActorNameRequestCooldownMs = 1000;
+constexpr int kEmotionMsgEffectType = 18;
+constexpr const char* kEmotionSpritePath = "data\\sprite\\\xC0\xCC\xC6\xD1\xC6\xAE\\emotion.spr";
+constexpr const char* kEmotionActPath = "data\\sprite\\\xC0\xCC\xC6\xD1\xC6\xAE\\emotion.act";
 
 PendingDisconnectAction g_pendingDisconnectAction = PendingDisconnectAction::None;
 u32 g_lastLocalLevelUpEffectId = 0;
@@ -131,6 +136,61 @@ void SendActorNameRequestIfNeeded(CGameMode& mode, u32 gid)
     if (sent) {
         mode.m_actorNameByGIDReqTimer[gid] = now;
     }
+}
+
+void ClearExistingEmotionEffects(CGameActor& actor)
+{
+    for (CMsgEffect* effect : actor.m_msgEffectList) {
+        if (effect && effect->m_msgEffectType == kEmotionMsgEffectType) {
+            effect->SendMsg(effect, 53, 0, 0, 0);
+        }
+    }
+}
+
+void SpawnEmotionEffect(CGameActor& actor, int emotionType)
+{
+    if (emotionType < 0 || emotionType > 87) {
+        return;
+    }
+    if (!g_session.m_isEffectOn) {
+        return;
+    }
+
+    ClearExistingEmotionEffects(actor);
+
+    CMsgEffect* effect = new CMsgEffect();
+    if (!effect) {
+        return;
+    }
+
+    effect->SendMsg(nullptr, 22, static_cast<int>(actor.m_gid), kEmotionMsgEffectType, 0);
+    effect->m_customSpritePath = kEmotionSpritePath;
+    effect->m_customActPath = kEmotionActPath;
+    effect->m_spriteActionIndex = emotionType;
+    effect->m_spriteMotionIndex = 0;
+    effect->m_pos = actor.m_pos;
+    effect->m_orgPos = effect->m_pos;
+    effect->m_pos.y -= 20.0f;
+    effect->m_orgPos.y = effect->m_pos.y;
+    effect->m_zoom = 1.0f;
+    effect->m_orgZoom = 1.0f;
+    effect->m_alpha = 255;
+    effect->m_colorArgb = 0xFFFFFFFFu;
+    effect->m_isVisible = 1;
+    effect->SendMsg(&actor, 50, 0, 0, 0);
+
+    g_world.m_gameObjectList.push_back(effect);
+    actor.m_msgEffectList.push_back(effect);
+}
+
+bool ApplyLocalEmotionEffectImpl(CGameMode& mode, int emotionType)
+{
+    if (!mode.m_world || !mode.m_world->m_player) {
+        return false;
+    }
+
+    SpawnEmotionEffect(*mode.m_world->m_player, emotionType);
+    return true;
 }
 
 void StartLocalPickupAnimation(CGameMode& mode, u32 objectAid);
@@ -2167,6 +2227,406 @@ void HandleStorageClose(CGameMode&, const PacketView&)
     g_session.CloseStorage();
     g_windowMgr.CloseStorageWindows();
     DbgLog("[GameMode] storage close\n");
+}
+
+void HandleCartCountInfo(CGameMode&, const PacketView& packet)
+{
+    if (!IsFeatureEnabled(ClientFeature::Cart)) {
+        return;
+    }
+    if (!packet.data || packet.packetLength < 14) {
+        return;
+    }
+    const int curCount = static_cast<int>(ReadLE16(packet.data + 2));
+    const int maxCount = static_cast<int>(ReadLE16(packet.data + 4));
+    const int curWeight = static_cast<int>(ReadLE32(packet.data + 6));
+    const int maxWeight = static_cast<int>(ReadLE32(packet.data + 10));
+    g_session.OpenCart(curCount, maxCount, curWeight, maxWeight);
+    g_windowMgr.MakeWindow(UIWindowMgr::WID_CARTWND);
+    DbgLog("[GameMode] cart count cur=%d max=%d weight=%d/%d\n",
+        curCount, maxCount, curWeight, maxWeight);
+}
+
+void HandleCartNormalList(CGameMode&, const PacketView& packet)
+{
+    if (!IsFeatureEnabled(ClientFeature::Cart)) {
+        return;
+    }
+    if (!packet.data || packet.packetLength < 4) {
+        return;
+    }
+    const size_t entrySize = 10;
+    for (size_t offset = 4; offset + entrySize <= static_cast<size_t>(packet.packetLength); offset += entrySize) {
+        ITEM_INFO item{};
+        item.m_itemIndex = ReadLE16(packet.data + offset);
+        item.SetItemId(ReadLE16(packet.data + offset + 2));
+        item.m_itemType = packet.data[offset + 4];
+        item.m_isIdentified = packet.data[offset + 5];
+        item.m_num = static_cast<int>(ReadLE16(packet.data + offset + 6));
+        item.m_wearLocation = ReadLE16(packet.data + offset + 8);
+        if (item.m_num <= 0) {
+            item.m_num = 1;
+        }
+        g_session.SetCartItem(item);
+    }
+}
+
+void HandleCartEquipList(CGameMode&, const PacketView& packet)
+{
+    if (!IsFeatureEnabled(ClientFeature::Cart)) {
+        return;
+    }
+    if (!packet.data || packet.packetLength < 4) {
+        return;
+    }
+    const size_t entrySize = 20;
+    for (size_t offset = 4; offset + entrySize <= static_cast<size_t>(packet.packetLength); offset += entrySize) {
+        ITEM_INFO item{};
+        item.m_itemIndex = ReadLE16(packet.data + offset);
+        item.SetItemId(ReadLE16(packet.data + offset + 2));
+        item.m_itemType = packet.data[offset + 4];
+        item.m_isIdentified = packet.data[offset + 5];
+        item.m_location = ReadLE16(packet.data + offset + 6);
+        item.m_wearLocation = 0;
+        item.m_isDamaged = packet.data[offset + 10];
+        item.m_refiningLevel = packet.data[offset + 11];
+        item.m_slot[0] = ReadLE16(packet.data + offset + 12);
+        item.m_slot[1] = ReadLE16(packet.data + offset + 14);
+        item.m_slot[2] = ReadLE16(packet.data + offset + 16);
+        item.m_slot[3] = ReadLE16(packet.data + offset + 18);
+        item.m_num = 1;
+        g_session.SetCartItem(item);
+    }
+}
+
+void HandleCartItemAdded(CGameMode&, const PacketView& packet)
+{
+    if (!IsFeatureEnabled(ClientFeature::Cart)) {
+        return;
+    }
+    if (!packet.data) {
+        return;
+    }
+    ITEM_INFO item{};
+    item.m_itemIndex = ReadLE16(packet.data + 2);
+    item.m_num = static_cast<int>(ReadLE32(packet.data + 4));
+    item.SetItemId(ReadLE16(packet.data + 8));
+
+    if (packet.packetId == 0x0124) {
+        if (packet.packetLength < 21) {
+            return;
+        }
+        item.m_isIdentified = packet.data[10];
+        item.m_isDamaged = packet.data[11];
+        item.m_refiningLevel = packet.data[12];
+        item.m_slot[0] = ReadLE16(packet.data + 13);
+        item.m_slot[1] = ReadLE16(packet.data + 15);
+        item.m_slot[2] = ReadLE16(packet.data + 17);
+        item.m_slot[3] = ReadLE16(packet.data + 19);
+    } else if (packet.packetId == 0x01C5) {
+        if (packet.packetLength < 22) {
+            return;
+        }
+        item.m_itemType = packet.data[10];
+        item.m_isIdentified = packet.data[11];
+        item.m_isDamaged = packet.data[12];
+        item.m_refiningLevel = packet.data[13];
+        item.m_slot[0] = ReadLE16(packet.data + 14);
+        item.m_slot[1] = ReadLE16(packet.data + 16);
+        item.m_slot[2] = ReadLE16(packet.data + 18);
+        item.m_slot[3] = ReadLE16(packet.data + 20);
+    } else {
+        return;
+    }
+    if (item.m_num <= 0) {
+        item.m_num = 1;
+    }
+    if (item.m_itemIndex == 0) {
+        return;
+    }
+    g_session.AddCartItem(item);
+}
+
+void HandleCartItemRemoved(CGameMode&, const PacketView& packet)
+{
+    if (!IsFeatureEnabled(ClientFeature::Cart)) {
+        return;
+    }
+    if (!packet.data || packet.packetLength < 8) {
+        return;
+    }
+    const unsigned int itemIndex = ReadLE16(packet.data + 2);
+    const int amount = static_cast<int>(ReadLE32(packet.data + 4));
+    g_session.RemoveCartItem(itemIndex, amount);
+}
+
+void HandleCartAddAck(CGameMode&, const PacketView& packet)
+{
+    if (!packet.data || packet.packetLength < 3) {
+        return;
+    }
+    DbgLog("[GameMode] cart add ack result=%d\n", packet.data[2]);
+}
+
+void HandlePetProperty(CGameMode&, const PacketView& packet)
+{
+    if (!IsFeatureEnabled(ClientFeature::Pet)) {
+        return;
+    }
+    if (!packet.data || packet.packetLength < 37) {
+        return;
+    }
+    char name[25] = {};
+    std::memcpy(name, packet.data + 2, 24);
+    const int level = static_cast<int>(ReadLE16(packet.data + 27));
+    const int fullness = static_cast<int>(ReadLE16(packet.data + 29));
+    const int intimacy = static_cast<int>(ReadLE16(packet.data + 31));
+    const int itemId = static_cast<int>(ReadLE16(packet.data + 33));
+    const int job = static_cast<int>(ReadLE16(packet.data + 35));
+    g_session.SetPetProperty(name, level, fullness, intimacy, itemId, job);
+}
+
+void HandlePetFeedResult(CGameMode&, const PacketView& packet)
+{
+    if (!IsFeatureEnabled(ClientFeature::Pet)) {
+        return;
+    }
+    if (!packet.data || packet.packetLength < 5) {
+        return;
+    }
+    const int result = static_cast<int8_t>(packet.data[2]);
+    const int itemId = static_cast<int>(ReadLE16(packet.data + 3));
+    DbgLog("[GameMode] pet feed result=%d itemId=%d\n", result, itemId);
+}
+
+void HandlePetStateChange(CGameMode&, const PacketView& packet)
+{
+    if (!IsFeatureEnabled(ClientFeature::Pet)) {
+        return;
+    }
+    if (!packet.data || packet.packetLength < 11) {
+        return;
+    }
+}
+
+void HandlePetEggList(CGameMode&, const PacketView& packet)
+{
+    if (!IsFeatureEnabled(ClientFeature::Pet)) {
+        return;
+    }
+    if (!packet.data || packet.packetLength < 4) {
+        return;
+    }
+    std::vector<int> eggs;
+    for (size_t offset = 4; offset + 2 <= static_cast<size_t>(packet.packetLength); offset += 2) {
+        eggs.push_back(static_cast<int>(ReadLE16(packet.data + offset)));
+    }
+    g_session.SetPetEggList(eggs);
+    if (!eggs.empty()) {
+        g_windowMgr.MakeWindow(UIWindowMgr::WID_EGGLISTWND);
+    }
+}
+
+void HandlePetAct(CGameMode&, const PacketView& packet)
+{
+    if (!IsFeatureEnabled(ClientFeature::Pet)) {
+        return;
+    }
+    if (!packet.data || packet.packetLength < 10) {
+        return;
+    }
+}
+
+void HandleHomunProperty(CGameMode&, const PacketView& packet)
+{
+    if (!IsFeatureEnabled(ClientFeature::Homunculus)) {
+        return;
+    }
+    if (!packet.data || packet.packetLength < 65) {
+        return;
+    }
+    char name[25] = {};
+    std::memcpy(name, packet.data + 2, 24);
+    const int level = static_cast<int>(ReadLE16(packet.data + 27));
+    const int hunger = static_cast<int>(ReadLE16(packet.data + 29));
+    const int intimacy = static_cast<int>(ReadLE16(packet.data + 31));
+    const int hp = static_cast<int>(ReadLE16(packet.data + 53));
+    const int maxHp = static_cast<int>(ReadLE16(packet.data + 55));
+    const int sp = static_cast<int>(ReadLE16(packet.data + 57));
+    const int maxSp = static_cast<int>(ReadLE16(packet.data + 59));
+    g_session.SetHomunProperty(0u, name, level, hp, maxHp, sp, maxSp, hunger, intimacy);
+}
+
+void HandleMercProperty(CGameMode&, const PacketView& packet)
+{
+    if (!IsFeatureEnabled(ClientFeature::Mercenary)) {
+        return;
+    }
+    if (!packet.data || packet.packetLength < 80) {
+        return;
+    }
+    const int level = static_cast<int>(ReadLE16(packet.data + 6));
+    const int faith = static_cast<int>(ReadLE16(packet.data + 8));
+    const int calls = static_cast<int>(ReadLE32(packet.data + 10));
+    const u32 expire = ReadLE32(packet.data + 14);
+    char name[25] = {};
+    std::memcpy(name, packet.data + 34, 24);
+    const int hp = static_cast<int>(ReadLE32(packet.data + 58));
+    const int maxHp = static_cast<int>(ReadLE32(packet.data + 62));
+    const int sp = static_cast<int>(ReadLE32(packet.data + 66));
+    const int maxSp = static_cast<int>(ReadLE32(packet.data + 70));
+    g_session.SetMercProperty(0u, name, level, hp, maxHp, sp, maxSp, faith, calls, expire);
+}
+
+void HandleGuildBasicInfo(CGameMode&, const PacketView& packet)
+{
+    if (!IsFeatureEnabled(ClientFeature::Guild)) {
+        return;
+    }
+    if (!packet.data || packet.packetLength < 96) {
+        return;
+    }
+    const int guildId = static_cast<int>(ReadLE32(packet.data + 2));
+    const int emblemId = static_cast<int>(ReadLE32(packet.data + 28));
+    char name[25] = {};
+    char master[25] = {};
+    std::memcpy(name, packet.data + 32, 24);
+    std::memcpy(master, packet.data + 56, 24);
+    g_session.SetGuildBasic(guildId, emblemId, name, master);
+}
+
+void HandleGuildLeaveOrDisband(CGameMode&, const PacketView&)
+{
+    if (!IsFeatureEnabled(ClientFeature::Guild)) {
+        return;
+    }
+    g_session.ClearGuild();
+}
+
+void HandleGuildMemberList(CGameMode&, const PacketView& packet)
+{
+    if (!IsFeatureEnabled(ClientFeature::Guild)) {
+        return;
+    }
+    if (!packet.data || packet.packetLength < 4) {
+        return;
+    }
+    const size_t entrySize = 104;
+    std::vector<GUILD_MEMBER> members;
+    for (size_t offset = 4; offset + entrySize <= static_cast<size_t>(packet.packetLength); offset += entrySize) {
+        GUILD_MEMBER m{};
+        m.aid = ReadLE32(packet.data + offset + 0);
+        m.gid = ReadLE32(packet.data + offset + 4);
+        m.headType = static_cast<int>(static_cast<int16_t>(ReadLE16(packet.data + offset + 8)));
+        m.headPalette = static_cast<int>(static_cast<int16_t>(ReadLE16(packet.data + offset + 10)));
+        m.sex = static_cast<int>(static_cast<int16_t>(ReadLE16(packet.data + offset + 12)));
+        m.job = static_cast<int>(static_cast<int16_t>(ReadLE16(packet.data + offset + 14)));
+        m.level = static_cast<int>(static_cast<int16_t>(ReadLE16(packet.data + offset + 16)));
+        m.memberExp = static_cast<int>(ReadLE32(packet.data + offset + 18));
+        m.currentState = static_cast<int>(ReadLE32(packet.data + offset + 22));
+        m.positionId = static_cast<int>(ReadLE32(packet.data + offset + 26));
+        std::memcpy(m.memo, packet.data + offset + 30, 50);
+        std::memcpy(m.name, packet.data + offset + 80, 24);
+        members.push_back(m);
+    }
+    g_session.SetGuildMembers(std::move(members));
+    DbgLog("[GameMode] guild member list count=%zu\n", g_session.GetGuildMembers().size());
+}
+
+void HandleMailList(CGameMode&, const PacketView& packet)
+{
+    if (!IsFeatureEnabled(ClientFeature::MailLegacy)) {
+        return;
+    }
+    if (!packet.data || packet.packetLength < 4) {
+        return;
+    }
+    const size_t entrySize = 73;
+    std::vector<MAIL_HEADER> headers;
+    for (size_t offset = 4; offset + entrySize <= static_cast<size_t>(packet.packetLength); offset += entrySize) {
+        MAIL_HEADER h{};
+        h.mailId = ReadLE32(packet.data + offset);
+        std::memcpy(h.title, packet.data + offset + 4, 40);
+        h.isRead = packet.data[offset + 44];
+        std::memcpy(h.sender, packet.data + offset + 45, 24);
+        h.expireTime = ReadLE32(packet.data + offset + 69);
+        headers.push_back(h);
+    }
+    g_session.OpenMailBox();
+    g_session.SetMailHeaders(std::move(headers));
+    g_windowMgr.MakeWindow(UIWindowMgr::WID_MAILBOXWND);
+}
+
+void HandleMailRead(CGameMode&, const PacketView& packet)
+{
+    if (!IsFeatureEnabled(ClientFeature::MailLegacy)) {
+        return;
+    }
+    if (!packet.data || packet.packetLength < 97) {
+        return;
+    }
+    MAIL_BODY body{};
+    body.mailId = ReadLE32(packet.data + 4);
+    std::memcpy(body.title, packet.data + 8, 40);
+    std::memcpy(body.sender, packet.data + 48, 24);
+    body.zeny = ReadLE32(packet.data + 76);
+    const u32 itemAmount = ReadLE32(packet.data + 80);
+    body.attachAmount = static_cast<u16>(itemAmount);
+    body.attachItemId = ReadLE16(packet.data + 84);
+    body.attachIdentified = packet.data[86];
+    body.attachDamaged = packet.data[87];
+    body.attachRefine = packet.data[88];
+    for (int i = 0; i < 4; ++i) {
+        body.attachCards[i] = ReadLE16(packet.data + 89 + (i * 2));
+    }
+    const size_t bodyStart = 97;
+    const size_t bodyLen = static_cast<size_t>(packet.packetLength) > bodyStart
+        ? static_cast<size_t>(packet.packetLength) - bodyStart
+        : 0;
+    const size_t copyLen = (std::min)(bodyLen, sizeof(body.body) - 1);
+    std::memcpy(body.body, packet.data + bodyStart, copyLen);
+    g_session.SetMailReadBody(body);
+    g_windowMgr.MakeWindow(UIWindowMgr::WID_MAILREADWND);
+}
+
+void HandleMailDeleteAck(CGameMode&, const PacketView& packet)
+{
+    if (!IsFeatureEnabled(ClientFeature::MailLegacy)) {
+        return;
+    }
+    if (!packet.data || packet.packetLength < 7) {
+        return;
+    }
+    const u32 mailId = ReadLE32(packet.data + 2);
+    const u8 result = packet.data[6];
+    if (result == 0) {
+        g_session.RemoveMailHeader(mailId);
+    }
+}
+
+void HandleMailSendAck(CGameMode&, const PacketView& packet)
+{
+    if (!IsFeatureEnabled(ClientFeature::MailLegacy)) {
+        return;
+    }
+    if (!packet.data || packet.packetLength < 3) {
+        return;
+    }
+}
+
+void HandleMailNewNotice(CGameMode&, const PacketView& packet)
+{
+    if (!IsFeatureEnabled(ClientFeature::MailLegacy)) {
+        return;
+    }
+    if (!packet.data || packet.packetLength < 70) {
+        return;
+    }
+    char sender[25] = {};
+    char title[40] = {};
+    std::memcpy(sender, packet.data + 2, 24);
+    std::memcpy(title, packet.data + 26, 40);
+    g_windowMgr.PushChatEvent("You have received a new mail.", 0x00FFFF00u, 6);
 }
 
 void HandleStoragePasswordRequest(CGameMode&, const PacketView& packet)
@@ -4252,7 +4712,7 @@ const char* ResolveSkillFailMessage(u16 skillId, u32 btype, u8 cause)
         case 0:
             return "Basic skill failed.";
         case 1:
-            return "Cannot use emotions.";
+            return "Cannot emote.";
         case 2:
             return "Cannot sit.";
         case 3:
@@ -4303,6 +4763,13 @@ void HandleSkillFailAck(CGameMode& mode, const PacketView& packet)
     const u8 cause = packet.data[9];
     const char* message = ResolveSkillFailMessage(skillId, btype, cause);
 
+    if (skillId == 1 && btype == 1) {
+        if (CGameMode* gameMode = g_modeMgr.GetCurrentGameMode()) {
+            gameMode->m_isReqEmotion = 0;
+            gameMode->m_reqEmotionTick = 0;
+        }
+    }
+
     DbgLog("[GameMode] skill fail ack opcode=0x%04X skill=%u num=%u result=%u cause=%u msg='%s'\n",
         packet.packetId,
         static_cast<unsigned int>(skillId),
@@ -4314,6 +4781,31 @@ void HandleSkillFailAck(CGameMode& mode, const PacketView& packet)
     g_windowMgr.SendMsg(kUiChatEventMsg,
         reinterpret_cast<msgparam_t>(message),
         static_cast<int>(kSystemNoticeColor));
+}
+
+void HandleEmotion(CGameMode& mode, const PacketView& packet)
+{
+    if (!packet.data || packet.packetLength < 7) {
+        return;
+    }
+
+    const u32 gid = ReadLE32(packet.data + 2);
+    const int emotionType = static_cast<int>(packet.data[6]);
+    if (CGameActor* actor = ResolveNotifyEffectActor(mode, gid)) {
+        SpawnEmotionEffect(*actor, emotionType);
+    }
+
+    if (CGameMode* gameMode = g_modeMgr.GetCurrentGameMode()) {
+        gameMode->m_isReqEmotion = 0;
+        gameMode->m_reqEmotionTick = 0;
+    }
+
+    const char* packetName = PacketProfile::GetOpcodeName(packet.packetId);
+    DbgLog("[GameMode] emotion pkt=%s(0x%04X) gid=%u type=%d\n",
+        packetName ? packetName : "?",
+        static_cast<unsigned int>(packet.packetId),
+        static_cast<unsigned int>(gid),
+        emotionType);
 }
 
 void HandleActorActionNotify(CGameMode& mode, const PacketView& packet)
@@ -7683,6 +8175,11 @@ void ApplyPendingLocalCartState(CGameMode& mode)
     ApplyLocalCartStateToActor(mode.m_world->m_player);
 }
 
+bool ApplyLocalEmotionEffect(CGameMode& mode, int emotionType)
+{
+    return ApplyLocalEmotionEffectImpl(mode, emotionType);
+}
+
 void PrimeLocalCartStateFromEffectState(int effectState)
 {
     UpdateKnownLocalCartState(IsEffectStatePushCart(effectState), effectState);
@@ -8504,6 +9001,9 @@ void RegisterDefaultGameModePacketHandlers(CGameModePacketRouter& router)
     router.Register(0x010F, HandlePlayerSkillList);
     router.Register(0x0110, HandleSkillFailAck);
     router.Register(0x0111, HandlePlayerSkillAdd);
+    if (ro::net::GetPacketSize(PacketProfile::kEmotion) == 7) {
+        router.Register(PacketProfile::kEmotion, HandleEmotion);
+    }
     router.Register(0x0235, HandleHomunSkillList);
     router.Register(0x0239, HandleHomunSkillUpdate);
     router.Register(0x029D, HandleMercSkillList);
@@ -8572,6 +9072,29 @@ void RegisterDefaultGameModePacketHandlers(CGameModePacketRouter& router)
     RegisterHandlerIfValid(router, receiveProfile.storageItemAddedBasic, HandleStorageItemAdded);
     router.Register(0x00F6, HandleStorageItemRemoved);
     router.Register(0x00F8, HandleStorageClose);
+    router.Register(0x0121, HandleCartCountInfo);
+    router.Register(0x0122, HandleCartEquipList);
+    router.Register(0x0123, HandleCartNormalList);
+    router.Register(0x0124, HandleCartItemAdded);
+    router.Register(0x01C5, HandleCartItemAdded);
+    router.Register(0x0125, HandleCartItemRemoved);
+    router.Register(0x012B, HandleCartOff);
+    router.Register(0x012C, HandleCartAddAck);
+    router.Register(0x01A2, HandlePetProperty);
+    router.Register(0x01A3, HandlePetFeedResult);
+    router.Register(0x01A4, HandlePetStateChange);
+    router.Register(0x01A6, HandlePetEggList);
+    router.Register(0x01AA, HandlePetAct);
+    router.Register(0x022E, HandleHomunProperty);
+    router.Register(0x029B, HandleMercProperty);
+    router.Register(0x016C, HandleGuildBasicInfo);
+    router.Register(0x015E, HandleGuildLeaveOrDisband);
+    router.Register(0x0154, HandleGuildMemberList);
+    router.Register(0x0240, HandleMailList);
+    router.Register(0x0242, HandleMailRead);
+    router.Register(0x0245, HandleMailDeleteAck);
+    router.Register(0x0249, HandleMailSendAck);
+    router.Register(0x024A, HandleMailNewNotice);
     RegisterHandlerIfValid(router, receiveProfile.partyInviteAckBasic, HandlePartyInviteAck);
     RegisterHandlerIfValid(router, receiveProfile.partyInviteRequestBasic, HandlePartyInviteRequest);
     router.Register(0x00FA, HandlePartyCreateAck);

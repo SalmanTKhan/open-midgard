@@ -16,6 +16,7 @@ struct ITEM_INFO {
     int m_realPrice = 0;
     int m_slot[4] = { 0, 0, 0, 0 };
     std::string m_itemName;
+    std::string m_resourceName;
     unsigned char m_isIdentified = 0;
     unsigned char m_isDamaged = 0;
     int m_refiningLevel = 0;
@@ -56,10 +57,16 @@ public:
     std::string GetResourceName(unsigned int itemId, bool identified);
     int GetSlotCount(unsigned int itemId);
     std::string GetCardIllustName(unsigned int itemId);
+    unsigned int FindItemIdByName(const std::string& name);
+    std::string FindDisplayNameByName(const std::string& name);
+    std::string FindDescriptionByName(const std::string& name);
+    std::string FindResourceNameByName(const std::string& name);
+    int FindSlotCountByName(const std::string& name);
     int GetVisibleHeadgearViewId(unsigned int itemId);
     std::string GetVisibleHeadgearResourceNameByViewId(int viewId);
     std::string GetCardPrefixName(unsigned int itemId);
     bool IsCardItem(unsigned int itemId);
+    bool IsCardItemName(const std::string& name);
     bool IsPostfixCard(unsigned int itemId);
 
 private:
@@ -71,6 +78,10 @@ private:
     bool LoadCardPrefixTable();
     bool LoadCardPostfixTable();
     bool LoadCardItemTable();
+    bool LoadLegacyDisplayTable();
+    bool LoadLegacyDescriptionTable();
+    bool LoadLegacySlotCountTable();
+    bool LoadLegacyItemNameTable();
     bool ParsePairTable(const char* fileName, void (*assignValue)(ItemMetadata&, std::string&&));
     bool ParseIntegerPairTable(const char* fileName, void (*assignValue)(ItemMetadata&, int));
     bool ParseDescriptionBlocks(const char* fileName);
@@ -78,11 +89,17 @@ private:
 
     bool m_loaded;
     std::unordered_map<unsigned int, ItemMetadata> m_metadata;
+    std::unordered_map<std::string, unsigned int> m_itemIdsByLookupKey;
+    std::unordered_map<std::string, std::string> m_displayNamesByLookupKey;
+    std::unordered_map<std::string, std::string> m_descriptionsByLookupKey;
+    std::unordered_map<std::string, std::string> m_resourceNamesByLookupKey;
+    std::unordered_map<std::string, int> m_slotCountsByLookupKey;
     std::unordered_map<int, std::string> m_visibleHeadgearResourceNamesByViewId;
     std::unordered_map<std::string, int> m_visibleHeadgearViewIdsByResourceName;
     std::unordered_map<unsigned int, std::string> m_cardPrefixNames;
     std::unordered_set<unsigned int> m_cardPostfixIds;
     std::unordered_set<unsigned int> m_cardItemIds;
+    std::unordered_set<std::string> m_cardItemLookupKeys;
 };
 
 extern CItemMgr g_ttemmgr;

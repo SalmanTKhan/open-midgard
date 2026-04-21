@@ -8,6 +8,7 @@
 #include "qtui/QtUiRuntime.h"
 #include "render/DC.h"
 #include "res/Bitmap.h"
+#include "UiSkin.h"
 #include "session/Session.h"
 #include "world/World.h"
 
@@ -135,12 +136,7 @@ std::vector<std::string> BuildUiAssetCandidates(const char* fileName)
 
 std::string ResolveUiAssetPath(const char* fileName)
 {
-    for (const std::string& candidate : BuildUiAssetCandidates(fileName)) {
-        if (g_fileMgr.IsDataExist(candidate.c_str())) {
-            return candidate;
-        }
-    }
-    return NormalizeSlash(fileName ? fileName : "");
+    return ui_skin::ResolveUiAssetPath(fileName);
 }
 
 std::vector<std::string> BuildMinimapCandidates(const std::string& bitmapName)

@@ -1,5 +1,6 @@
 #include "NpcDialogColoredText.h"
 
+#include "qtui/QtUiRuntime.h"
 #include "render/DC.h"
 
 #if RO_ENABLE_QT6_UI
@@ -44,7 +45,13 @@ bool IsColorCodeAt(const std::string& t, size_t i)
     return true;
 }
 
-bool TryConsumeColorCode(const std::string& t, size_t& i, COLORREF& out)
+COLORREF ThemeDialogTextColor()
+{
+    const std::uint32_t argb = GetQtUiRuntimeThemeTextArgb();
+    return RGB((argb >> 16) & 0xFFu, (argb >> 8) & 0xFFu, argb & 0xFFu);
+}
+
+bool TryConsumeColorCode(const std::string& t, size_t& i, COLORREF defaultColor, COLORREF& out)
 {
     if (!IsColorCodeAt(t, i)) {
         return false;
@@ -52,7 +59,7 @@ bool TryConsumeColorCode(const std::string& t, size_t& i, COLORREF& out)
     const int r = (HexValue(t[i + 1]) << 4) | HexValue(t[i + 2]);
     const int g = (HexValue(t[i + 3]) << 4) | HexValue(t[i + 4]);
     const int b = (HexValue(t[i + 5]) << 4) | HexValue(t[i + 6]);
-    out = RGB(r, g, b);
+    out = (r == 0 && g == 0 && b == 0) ? defaultColor : RGB(r, g, b);
     i += 7;
     return true;
 }
@@ -308,7 +315,8 @@ void DrawNpcSayDialogColoredText(HDC hdc, const RECT& textRect, const std::strin
     const int lineHeight = (std::max)(1, metrics.height());
     int x = 0;
     int y = 0;
-    COLORREF color = RGB(0, 0, 0);
+    const COLORREF defaultColor = ThemeDialogTextColor();
+    COLORREF color = defaultColor;
     size_t i = 0;
 
     while (i < text.size()) {
@@ -329,7 +337,7 @@ void DrawNpcSayDialogColoredText(HDC hdc, const RECT& textRect, const std::strin
         }
 
         COLORREF newColor{};
-        if (TryConsumeColorCode(text, i, newColor)) {
+        if (TryConsumeColorCode(text, i, defaultColor, newColor)) {
             color = newColor;
             continue;
         }
@@ -357,7 +365,8 @@ void DrawNpcSayDialogColoredText(HDC hdc, const RECT& textRect, const std::strin
     const int lineHeight = tm.tmHeight;
     int x = textRect.left;
     int y = textRect.top;
-    COLORREF color = RGB(0, 0, 0);
+    const COLORREF defaultColor = ThemeDialogTextColor();
+    COLORREF color = defaultColor;
     size_t i = 0;
 
     while (i < text.size()) {
@@ -379,7 +388,7 @@ void DrawNpcSayDialogColoredText(HDC hdc, const RECT& textRect, const std::strin
         }
 
         COLORREF newColor{};
-        if (TryConsumeColorCode(text, i, newColor)) {
+        if (TryConsumeColorCode(text, i, defaultColor, newColor)) {
             color = newColor;
             continue;
         }
@@ -426,13 +435,14 @@ void DrawNpcMenuOptionColoredText(HDC hdc, const RECT& textRect, const std::stri
     const int lineHeight = (std::max)(1, metrics.height());
     const int yBase = (std::max)(0, (height - lineHeight) / 2);
 
-    COLORREF color = RGB(0, 0, 0);
+    const COLORREF defaultColor = ThemeDialogTextColor();
+    COLORREF color = defaultColor;
     int x = 0;
     size_t i = 0;
 
     while (i < text.size() && x < width) {
         COLORREF newColor{};
-        if (TryConsumeColorCode(text, i, newColor)) {
+        if (TryConsumeColorCode(text, i, defaultColor, newColor)) {
             color = newColor;
             continue;
         }
@@ -471,13 +481,14 @@ void DrawNpcMenuOptionColoredText(HDC hdc, const RECT& textRect, const std::stri
     const int lineHeight = tm.tmHeight;
     const int yBase = textRect.top + ((textRect.bottom - textRect.top) - lineHeight) / 2;
 
-    COLORREF color = RGB(0, 0, 0);
+    const COLORREF defaultColor = ThemeDialogTextColor();
+    COLORREF color = defaultColor;
     int x = textRect.left;
     size_t i = 0;
 
     while (i < text.size() && x < textRect.right) {
         COLORREF newColor{};
-        if (TryConsumeColorCode(text, i, newColor)) {
+        if (TryConsumeColorCode(text, i, defaultColor, newColor)) {
             color = newColor;
             continue;
         }

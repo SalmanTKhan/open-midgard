@@ -700,7 +700,7 @@ void C3dNode::Render(const matrix& parentWorld, const matrix& viewMatrix, bool f
                 || ((projected[1].color >> 24) & 0xFFu) < 0xFFu
                 || ((projected[2].color >> 24) & 0xFFu) < 0xFFu;
             if (isAlpha) {
-                renderFace->alphaSortKey = (std::max)(projected[0].oow, (std::max)(projected[1].oow, projected[2].oow));
+                renderFace->alphaSortKey = (std::min)(projected[0].oow, (std::min)(projected[1].oow, projected[2].oow));
             }
             g_renderer.AddRP(renderFace, isAlpha ? 1 : 0);
         }

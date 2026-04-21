@@ -3,12 +3,15 @@
 #include "audio/Audio.h"
 #include "core/File.h"
 #include "core/SettingsIni.h"
+#include "DebugLog.h"
 #include "main/WinMain.h"
 #include "qtui/QtPlatformWindow.h"
 #include "qtui/QtUiRuntime.h"
 #include "render/DC.h"
 #include "res/Bitmap.h"
 #include "ui/UiScale.h"
+#include "ui/UiSkin.h"
+#include "ui/UIWindow.h"
 #include "ui/UIWindowMgr.h"
 
 #include <windows.h>
@@ -48,11 +51,16 @@ constexpr char kOptionWndNoCtrlValue[] = "NoCtrl";
 constexpr char kOptionWndAttackSnapValue[] = "AttackSnap";
 constexpr char kOptionWndSkillSnapValue[] = "SkillSnap";
 constexpr char kOptionWndItemSnapValue[] = "ItemSnap";
+constexpr char kOptionWndAlwaysShowNamesValue[] = "AlwaysShowNames";
 constexpr char kOptionWndCollapsedValue[] = "Collapsed";
 constexpr char kOptionWndTabValue[] = "Tab";
 
+constexpr char kUiSettingsSection[] = "UI";
+constexpr char kUiSkinValue[] = "Skin";
+constexpr char kUiThemeValue[] = "Theme";
+
 constexpr int kDefaultWidth = 308;
-constexpr int kDefaultHeight = 238;
+constexpr int kDefaultHeight = 290;
 constexpr int kCollapsedHeight = 17;
 constexpr int kTitleBarHeight = 17;
 constexpr int kDefaultX = 185;
@@ -89,6 +97,7 @@ constexpr int kCheckIdNoCtrl = 403;
 constexpr int kCheckIdAttack = 404;
 constexpr int kCheckIdSkill = 405;
 constexpr int kCheckIdItem = 406;
+constexpr int kCheckIdAlwaysShowNames = 407;
 
 constexpr std::array<RenderBackendType, 4> kRendererEntries = {
     RenderBackendType::LegacyDirect3D7,
@@ -433,6 +442,12 @@ const char* GetAntiAliasingName(AntiAliasingMode mode)
         return "FXAA";
     case AntiAliasingMode::SMAA:
         return "SMAA";
+    case AntiAliasingMode::MSAA2x:
+        return "MSAA 2x";
+    case AntiAliasingMode::MSAA4x:
+        return "MSAA 4x";
+    case AntiAliasingMode::MSAA8x:
+        return "MSAA 8x";
     default:
         return "Off";
     }
@@ -466,6 +481,34 @@ std::string FormatPercentText(int value)
     char buffer[16] = {};
     std::snprintf(buffer, sizeof(buffer), "%d%%", value);
     return std::string(buffer);
+}
+
+std::string FormatSkinDisplayName(const std::string& skinName)
+{
+    return ui_skin::FormatSkinDisplayName(skinName);
+}
+
+std::string FormatThemeDisplayName(const std::string& themeName)
+{
+    if (themeName.empty()) {
+        return "Light";
+    }
+    std::string pretty = themeName;
+    pretty[0] = static_cast<char>(std::toupper(static_cast<unsigned char>(pretty[0])));
+    for (size_t i = 1; i < pretty.size(); ++i) {
+        pretty[i] = static_cast<char>(std::tolower(static_cast<unsigned char>(pretty[i])));
+    }
+    return pretty;
+}
+
+bool IsKnownThemeName(const std::string& value)
+{
+    return _stricmp(value.c_str(), "light") == 0
+        || _stricmp(value.c_str(), "dark") == 0
+        || _stricmp(value.c_str(), "midnight") == 0
+        || _stricmp(value.c_str(), "slate") == 0
+        || _stricmp(value.c_str(), "forest") == 0
+        || _stricmp(value.c_str(), "parchment") == 0;
 }
 
 void LoadSavedAudioSettingsFromIni(int* bgmVolume, int* soundVolume, int* bgmEnabled, int* soundEnabled)
@@ -518,6 +561,7 @@ UIOptionWnd::UIOptionWnd()
       m_attackSnapCheckBox(nullptr),
       m_skillSnapCheckBox(nullptr),
       m_itemSnapCheckBox(nullptr),
+      m_alwaysShowNamesCheckBox(nullptr),
       m_orgHeight(kDefaultHeight),
       m_bgmVolume(100),
       m_soundVolume(100),
@@ -527,6 +571,7 @@ UIOptionWnd::UIOptionWnd()
       m_attackSnap(0),
       m_skillSnap(0),
       m_itemSnap(0),
+      m_alwaysShowNames(0),
             m_guiScalePercent(GetConfiguredUiScalePercent()),
             m_appliedGuiScalePercent(GetConfiguredUiScalePercent()),
       m_collapsed(0),
@@ -616,8 +661,8 @@ void UIOptionWnd::RefreshResolutionEntries()
 
         RECT clientRect{};
         if (g_hMainWnd && GetClientRect(g_hMainWnd, &clientRect)) {
-            maxWidth = (std::max)(maxWidth, clientRect.right - clientRect.left);
-            maxHeight = (std::max)(maxHeight, clientRect.bottom - clientRect.top);
+            maxWidth = (std::max)(maxWidth, static_cast<int>(clientRect.right - clientRect.left));
+            maxHeight = (std::max)(maxHeight, static_cast<int>(clientRect.bottom - clientRect.top));
         }
 
 #if RO_ENABLE_QT6_UI
@@ -649,6 +694,66 @@ void UIOptionWnd::RefreshResolutionEntries()
         }
         return lhs.height < rhs.height;
     });
+}
+
+void UIOptionWnd::RefreshAvailableThemes()
+{
+    m_availableThemes.clear();
+    m_availableThemes.push_back("light");
+    m_availableThemes.push_back("dark");
+    m_availableThemes.push_back("midnight");
+    m_availableThemes.push_back("slate");
+    m_availableThemes.push_back("forest");
+    m_availableThemes.push_back("parchment");
+
+    std::string configured = LoadSettingsIniString(kUiSettingsSection, kUiThemeValue, "light");
+    std::transform(configured.begin(), configured.end(), configured.begin(), [](unsigned char c) {
+        return static_cast<char>(std::tolower(c));
+    });
+    if (!IsKnownThemeName(configured)) {
+        configured = "light";
+    }
+    m_selectedTheme = configured;
+}
+
+void UIOptionWnd::ApplySelectedTheme()
+{
+    std::string normalized = m_selectedTheme;
+    std::transform(normalized.begin(), normalized.end(), normalized.begin(), [](unsigned char c) {
+        return static_cast<char>(std::tolower(c));
+    });
+    if (!IsKnownThemeName(normalized)) {
+        normalized = "light";
+    }
+    m_selectedTheme = normalized;
+    const bool saved = SaveSettingsIniString(kUiSettingsSection, kUiThemeValue, normalized.c_str());
+    DbgLog("[Theme] ApplySelectedTheme normalized=%s saved=%d\n", normalized.c_str(), saved ? 1 : 0);
+    SetQtUiRuntimeThemeMode(normalized.c_str());
+}
+
+void UIOptionWnd::RefreshAvailableSkins()
+{
+    m_availableSkins = ui_skin::EnumerateAvailableSkins();
+    if (m_availableSkins.empty()) {
+        m_availableSkins.push_back("default");
+    }
+
+    const std::string configuredSkin = ui_skin::CanonicalizeSkinName(ui_skin::GetConfiguredUiSkinName());
+    m_selectedSkin = configuredSkin;
+
+    bool foundSelected = false;
+    for (const std::string& skinName : m_availableSkins) {
+        if (_stricmp(skinName.c_str(), configuredSkin.c_str()) == 0) {
+            foundSelected = true;
+            m_selectedSkin = skinName;
+            break;
+        }
+    }
+
+    if (!foundSelected) {
+        m_availableSkins.push_back(configuredSkin);
+        m_selectedSkin = configuredSkin;
+    }
 }
 
 int UIOptionWnd::FindResolutionIndex(int width, int height) const
@@ -744,6 +849,7 @@ void UIOptionWnd::LoadSettings()
     m_attackSnap = LoadSettingsIniInt(kOptionWndSection, kOptionWndAttackSnapValue, m_attackSnap);
     m_skillSnap = LoadSettingsIniInt(kOptionWndSection, kOptionWndSkillSnapValue, m_skillSnap);
     m_itemSnap = LoadSettingsIniInt(kOptionWndSection, kOptionWndItemSnapValue, m_itemSnap);
+    m_alwaysShowNames = LoadSettingsIniInt(kOptionWndSection, kOptionWndAlwaysShowNamesValue, m_alwaysShowNames);
     m_collapsed = LoadSettingsIniInt(kOptionWndSection, kOptionWndCollapsedValue, m_collapsed);
     m_activeTab = LoadSettingsIniInt(kOptionWndSection, kOptionWndTabValue, m_activeTab);
     m_guiScalePercent = GetConfiguredUiScalePercent();
@@ -755,6 +861,8 @@ void UIOptionWnd::LoadSettings()
     m_selectedRenderBackend = NormalizeSelectedBackend(GetConfiguredRenderBackend());
     m_appliedRenderBackend = GetActiveRenderBackend();
     RefreshResolutionEntries();
+    RefreshAvailableSkins();
+    RefreshAvailableThemes();
 
     if (m_w <= 0) {
         m_w = kDefaultWidth;
@@ -785,6 +893,7 @@ void UIOptionWnd::LoadSettings()
     m_attackSnap = (m_attackSnap != 0) ? 1 : 0;
     m_skillSnap = (m_skillSnap != 0) ? 1 : 0;
     m_itemSnap = (m_itemSnap != 0) ? 1 : 0;
+    m_alwaysShowNames = (m_alwaysShowNames != 0) ? 1 : 0;
     m_guiScalePercent = ClampUiScalePercent(m_guiScalePercent);
     m_appliedGuiScalePercent = ClampUiScalePercent(m_appliedGuiScalePercent);
     m_guiScalePercent = m_appliedGuiScalePercent;
@@ -822,11 +931,40 @@ void UIOptionWnd::SaveSettings() const
     SaveSettingsIniInt(kOptionWndSection, kOptionWndAttackSnapValue, m_attackSnap != 0 ? 1 : 0);
     SaveSettingsIniInt(kOptionWndSection, kOptionWndSkillSnapValue, m_skillSnap != 0 ? 1 : 0);
     SaveSettingsIniInt(kOptionWndSection, kOptionWndItemSnapValue, m_itemSnap != 0 ? 1 : 0);
+    SaveSettingsIniInt(kOptionWndSection, kOptionWndAlwaysShowNamesValue, m_alwaysShowNames != 0 ? 1 : 0);
     SaveSettingsIniInt(kOptionWndSection, kOptionWndCollapsedValue, m_collapsed != 0 ? 1 : 0);
     SaveSettingsIniInt(kOptionWndSection, kOptionWndTabValue, m_activeTab);
+    SaveSettingsIniString(kUiSettingsSection, kUiSkinValue, ui_skin::CanonicalizeSkinName(m_selectedSkin).c_str());
+    SaveSettingsIniString(kUiSettingsSection, kUiThemeValue, m_selectedTheme.c_str());
     SaveConfiguredUiScalePercent(m_appliedGuiScalePercent);
 
     SaveGraphicsPreferences();
+}
+
+void UIOptionWnd::ApplySelectedSkin()
+{
+    const std::string normalizedSkin = ui_skin::CanonicalizeSkinName(m_selectedSkin);
+    const std::string configuredSkin = ui_skin::CanonicalizeSkinName(ui_skin::GetConfiguredUiSkinName());
+    if (_stricmp(normalizedSkin.c_str(), configuredSkin.c_str()) == 0) {
+        return;
+    }
+
+    m_selectedSkin = normalizedSkin;
+    SaveSettingsIniString(kUiSettingsSection, kUiSkinValue, normalizedSkin.c_str());
+    SaveSettings();
+    ui_skin::InvalidateSkinCache();
+    g_windowMgr.ReloadLegacySkinAssets(this);
+    ReloadSkinResources();
+}
+
+void UIOptionWnd::ReloadSkinResources()
+{
+    m_assetsProbed = false;
+    ClearResources();
+    EnsureResources();
+    RefreshAvailableSkins();
+    LayoutControls();
+    Invalidate();
 }
 
 bool UIOptionWnd::HasPendingUiScaleApply() const
@@ -913,6 +1051,12 @@ void UIOptionWnd::LayoutControls()
         m_itemSnapCheckBox->Move(toggleRect.left, toggleRect.top);
         m_itemSnapCheckBox->SetShow(showGame ? 1 : 0);
         m_itemSnapCheckBox->SetCheck(m_itemSnap);
+    }
+    if (m_alwaysShowNamesCheckBox) {
+        const RECT toggleRect = GetGameToggleRect(4);
+        m_alwaysShowNamesCheckBox->Move(toggleRect.left, toggleRect.top);
+        m_alwaysShowNamesCheckBox->SetShow(showGame ? 1 : 0);
+        m_alwaysShowNamesCheckBox->SetCheck(m_alwaysShowNames);
     }
 }
 
@@ -1065,6 +1209,60 @@ RECT UIOptionWnd::GetRowNextButtonRect(int rowIndex) const
     return rc;
 }
 
+RECT UIOptionWnd::GetSkinRowRect() const
+{
+    const int skinRowIndex = static_cast<int>(GetVisibleGraphicsRows().size());
+    return GetRowRect(skinRowIndex);
+}
+
+RECT UIOptionWnd::GetSkinPrevButtonRect() const
+{
+    const int skinRowIndex = static_cast<int>(GetVisibleGraphicsRows().size());
+    return GetRowPrevButtonRect(skinRowIndex);
+}
+
+RECT UIOptionWnd::GetSkinNextButtonRect() const
+{
+    const int skinRowIndex = static_cast<int>(GetVisibleGraphicsRows().size());
+    return GetRowNextButtonRect(skinRowIndex);
+}
+
+RECT UIOptionWnd::GetThemeRowRect() const
+{
+    const int themeRowIndex = static_cast<int>(GetVisibleGraphicsRows().size()) + 1;
+    return GetRowRect(themeRowIndex);
+}
+
+RECT UIOptionWnd::GetThemePrevButtonRect() const
+{
+    const int themeRowIndex = static_cast<int>(GetVisibleGraphicsRows().size()) + 1;
+    return GetRowPrevButtonRect(themeRowIndex);
+}
+
+RECT UIOptionWnd::GetThemeNextButtonRect() const
+{
+    const int themeRowIndex = static_cast<int>(GetVisibleGraphicsRows().size()) + 1;
+    return GetRowNextButtonRect(themeRowIndex);
+}
+
+RECT UIOptionWnd::GetShopRowHeightRowRect() const
+{
+    const int rowIndex = static_cast<int>(GetVisibleGraphicsRows().size()) + 2;
+    return GetRowRect(rowIndex);
+}
+
+RECT UIOptionWnd::GetShopRowHeightPrevButtonRect() const
+{
+    const int rowIndex = static_cast<int>(GetVisibleGraphicsRows().size()) + 2;
+    return GetRowPrevButtonRect(rowIndex);
+}
+
+RECT UIOptionWnd::GetShopRowHeightNextButtonRect() const
+{
+    const int rowIndex = static_cast<int>(GetVisibleGraphicsRows().size()) + 2;
+    return GetRowNextButtonRect(rowIndex);
+}
+
 RECT UIOptionWnd::GetRestartButtonRect() const
 {
     RECT contentRect = GetContentRect();
@@ -1105,8 +1303,10 @@ RECT UIOptionWnd::GetSoundSliderRect() const
 
 RECT UIOptionWnd::GetGuiScaleSliderRect() const
 {
+    // Slot below the last Game-tab toggle (toggle index 4 at top+120 — ends ~+136),
+    // with padding so the knob and label don't collide with the toggle row above.
     RECT contentRect = GetContentRect();
-    RECT rc = { contentRect.left + 66, contentRect.top + 120, contentRect.right - 52, contentRect.top + 134 };
+    RECT rc = { contentRect.left + 66, contentRect.top + 150, contentRect.right - 52, contentRect.top + 164 };
     return rc;
 }
 
@@ -1347,6 +1547,63 @@ void UIOptionWnd::CycleGraphicsSetting(GraphicsRowId rowId, int direction)
                 break;
             }
         }
+    } else if (rowId == GraphicsRow_Skin) {
+        if (m_availableSkins.empty()) {
+            RefreshAvailableSkins();
+        }
+        if (!m_availableSkins.empty()) {
+            int selectedIndex = -1;
+            for (size_t index = 0; index < m_availableSkins.size(); ++index) {
+                if (_stricmp(m_availableSkins[index].c_str(), m_selectedSkin.c_str()) == 0) {
+                    selectedIndex = static_cast<int>(index);
+                    break;
+                }
+            }
+            if (selectedIndex < 0) {
+                selectedIndex = 0;
+            }
+            selectedIndex += direction > 0 ? 1 : -1;
+            if (selectedIndex < 0) {
+                selectedIndex = static_cast<int>(m_availableSkins.size()) - 1;
+            } else if (selectedIndex >= static_cast<int>(m_availableSkins.size())) {
+                selectedIndex = 0;
+            }
+            m_selectedSkin = m_availableSkins[static_cast<size_t>(selectedIndex)];
+            ApplySelectedSkin();
+        }
+    } else if (rowId == GraphicsRow_Theme) {
+        if (m_availableThemes.empty()) {
+            RefreshAvailableThemes();
+        }
+        if (!m_availableThemes.empty()) {
+            int selectedIndex = -1;
+            for (size_t index = 0; index < m_availableThemes.size(); ++index) {
+                if (_stricmp(m_availableThemes[index].c_str(), m_selectedTheme.c_str()) == 0) {
+                    selectedIndex = static_cast<int>(index);
+                    break;
+                }
+            }
+            if (selectedIndex < 0) {
+                selectedIndex = 0;
+            }
+            selectedIndex += direction > 0 ? 1 : -1;
+            if (selectedIndex < 0) {
+                selectedIndex = static_cast<int>(m_availableThemes.size()) - 1;
+            } else if (selectedIndex >= static_cast<int>(m_availableThemes.size())) {
+                selectedIndex = 0;
+            }
+            m_selectedTheme = m_availableThemes[static_cast<size_t>(selectedIndex)];
+            ApplySelectedTheme();
+        }
+    } else if (rowId == GraphicsRow_ShopRowHeight) {
+        int current = LoadSettingsIniInt("UI", "ShopRowHeight", 20);
+        const int step = 2;
+        int next = current + (direction > 0 ? step : -step);
+        if (next < 16) next = 16;
+        if (next > 36) next = 36;
+        if (next != current) {
+            SaveSettingsIniInt("UI", "ShopRowHeight", next);
+        }
     }
 
     Invalidate();
@@ -1368,6 +1625,15 @@ std::string UIOptionWnd::GetGraphicsRowValue(GraphicsRowId rowId) const
         return FormatMultiplierText(m_graphicsSettings.textureUpscaleFactor);
     case GraphicsRow_AnisotropicFiltering:
         return FormatAnisotropicText(m_graphicsSettings.anisotropicLevel);
+    case GraphicsRow_Skin:
+        return FormatSkinDisplayName(m_selectedSkin);
+    case GraphicsRow_Theme:
+        return FormatThemeDisplayName(m_selectedTheme);
+    case GraphicsRow_ShopRowHeight: {
+        char buffer[16];
+        std::snprintf(buffer, sizeof(buffer), "%d px", shopui::ShopRowHeight());
+        return std::string(buffer);
+    }
     default:
         return std::string();
     }
@@ -1403,6 +1669,7 @@ void UIOptionWnd::OnCreate(int cx, int cy)
         m_attackSnapCheckBox = makeCheckBox(kCheckIdAttack, m_attackSnap);
         m_skillSnapCheckBox = makeCheckBox(kCheckIdSkill, m_skillSnap);
         m_itemSnapCheckBox = makeCheckBox(kCheckIdItem, m_itemSnap);
+        m_alwaysShowNamesCheckBox = makeCheckBox(kCheckIdAlwaysShowNames, m_alwaysShowNames);
     }
 
     LayoutControls();
@@ -1526,6 +1793,13 @@ void UIOptionWnd::OnDraw()
                 TextOutA(hdc, m_itemSnapCheckBox->m_x + 18, m_itemSnapCheckBox->m_y - 1, "Item target snap", 16);
 #endif
             }
+            if (m_alwaysShowNamesCheckBox) {
+#if RO_ENABLE_QT6_UI
+                DrawUiOptionText(hdc, m_alwaysShowNamesCheckBox->m_x + 18, m_alwaysShowNamesCheckBox->m_y - 1, "Always show actor names", RGB(0, 0, 0));
+#else
+                TextOutA(hdc, m_alwaysShowNamesCheckBox->m_x + 18, m_alwaysShowNamesCheckBox->m_y - 1, "Always show actor names", 23);
+#endif
+            }
 
             const std::string guiScaleText = FormatPercentText(m_guiScalePercent);
             DrawSlider(hdc,
@@ -1565,6 +1839,9 @@ void UIOptionWnd::OnDraw()
                 }
                 DrawSettingRow(hdc, static_cast<int>(index), label, GetGraphicsRowValue(rows[index]));
             }
+            DrawSettingRow(hdc, static_cast<int>(rows.size()), "Skin", GetGraphicsRowValue(GraphicsRow_Skin));
+            DrawSettingRow(hdc, static_cast<int>(rows.size()) + 1, "Theme", GetGraphicsRowValue(GraphicsRow_Theme));
+            DrawSettingRow(hdc, static_cast<int>(rows.size()) + 2, "Shop row height", GetGraphicsRowValue(GraphicsRow_ShopRowHeight));
         }
 
         if (HasPendingGraphicsRestart()) {
@@ -1639,6 +1916,30 @@ void UIOptionWnd::OnLBtnDown(int x, int y)
                     CycleGraphicsSetting(rows[index], 1);
                     return;
                 }
+            }
+            if (PointInRectXY(GetSkinPrevButtonRect(), x, y)) {
+                CycleGraphicsSetting(GraphicsRow_Skin, -1);
+                return;
+            }
+            if (PointInRectXY(GetSkinNextButtonRect(), x, y) || PointInRectXY(GetSkinRowRect(), x, y)) {
+                CycleGraphicsSetting(GraphicsRow_Skin, 1);
+                return;
+            }
+            if (PointInRectXY(GetThemePrevButtonRect(), x, y)) {
+                CycleGraphicsSetting(GraphicsRow_Theme, -1);
+                return;
+            }
+            if (PointInRectXY(GetThemeNextButtonRect(), x, y) || PointInRectXY(GetThemeRowRect(), x, y)) {
+                CycleGraphicsSetting(GraphicsRow_Theme, 1);
+                return;
+            }
+            if (PointInRectXY(GetShopRowHeightPrevButtonRect(), x, y)) {
+                CycleGraphicsSetting(GraphicsRow_ShopRowHeight, -1);
+                return;
+            }
+            if (PointInRectXY(GetShopRowHeightNextButtonRect(), x, y) || PointInRectXY(GetShopRowHeightRowRect(), x, y)) {
+                CycleGraphicsSetting(GraphicsRow_ShopRowHeight, 1);
+                return;
             }
         }
 
@@ -1779,6 +2080,7 @@ bool UIOptionWnd::HandleQtToggleClick(int x, int y)
         &m_attackSnap,
         &m_skillSnap,
         &m_itemSnap,
+        &m_alwaysShowNames,
     };
 
     for (int index = 0; index < static_cast<int>(std::size(gameToggleValues)); ++index) {
@@ -1829,6 +2131,8 @@ msgresult_t UIOptionWnd::SendMsg(UIWindow* sender, int msg, msgparam_t wparam, m
         m_skillSnap = (lparam != 0) ? 1 : 0;
     } else if (sender == m_itemSnapCheckBox) {
         m_itemSnap = (lparam != 0) ? 1 : 0;
+    } else if (sender == m_alwaysShowNamesCheckBox) {
+        m_alwaysShowNames = (lparam != 0) ? 1 : 0;
     } else {
         return 0;
     }
@@ -1975,6 +2279,7 @@ bool UIOptionWnd::GetDisplayDataForQt(DisplayData* outData) const
                 { 1, m_attackSnap != 0, "Attack target snap" },
                 { 2, m_skillSnap != 0, "Skill target snap" },
                 { 3, m_itemSnap != 0, "Item target snap" },
+                { 4, m_alwaysShowNames != 0, "Always show actor names" },
             };
             for (const ToggleDef& def : toggleDefs) {
                 const RECT toggleRect = GetGameToggleRect(def.index);
@@ -2057,6 +2362,72 @@ bool UIOptionWnd::GetDisplayDataForQt(DisplayData* outData) const
                 row.value = GetGraphicsRowValue(rows[index]);
                 data.graphicsRows.push_back(std::move(row));
             }
+
+            DisplayGraphicsRow skinRow{};
+            const RECT skinRect = GetSkinRowRect();
+            const RECT skinPrevRect = GetSkinPrevButtonRect();
+            const RECT skinNextRect = GetSkinNextButtonRect();
+            skinRow.x = skinRect.left;
+            skinRow.y = skinRect.top;
+            skinRow.width = skinRect.right - skinRect.left;
+            skinRow.height = skinRect.bottom - skinRect.top;
+            skinRow.prevX = skinPrevRect.left;
+            skinRow.prevY = skinPrevRect.top;
+            skinRow.prevWidth = skinPrevRect.right - skinPrevRect.left;
+            skinRow.prevHeight = skinPrevRect.bottom - skinPrevRect.top;
+            skinRow.nextX = skinNextRect.left;
+            skinRow.nextY = skinNextRect.top;
+            skinRow.nextWidth = skinNextRect.right - skinNextRect.left;
+            skinRow.nextHeight = skinNextRect.bottom - skinNextRect.top;
+            skinRow.prevLabel = "<";
+            skinRow.nextLabel = ">";
+            skinRow.label = "Skin";
+            skinRow.value = GetGraphicsRowValue(GraphicsRow_Skin);
+            data.graphicsRows.push_back(std::move(skinRow));
+
+            DisplayGraphicsRow themeRow{};
+            const RECT themeRect = GetThemeRowRect();
+            const RECT themePrevRect = GetThemePrevButtonRect();
+            const RECT themeNextRect = GetThemeNextButtonRect();
+            themeRow.x = themeRect.left;
+            themeRow.y = themeRect.top;
+            themeRow.width = themeRect.right - themeRect.left;
+            themeRow.height = themeRect.bottom - themeRect.top;
+            themeRow.prevX = themePrevRect.left;
+            themeRow.prevY = themePrevRect.top;
+            themeRow.prevWidth = themePrevRect.right - themePrevRect.left;
+            themeRow.prevHeight = themePrevRect.bottom - themePrevRect.top;
+            themeRow.nextX = themeNextRect.left;
+            themeRow.nextY = themeNextRect.top;
+            themeRow.nextWidth = themeNextRect.right - themeNextRect.left;
+            themeRow.nextHeight = themeNextRect.bottom - themeNextRect.top;
+            themeRow.prevLabel = "<";
+            themeRow.nextLabel = ">";
+            themeRow.label = "Theme";
+            themeRow.value = GetGraphicsRowValue(GraphicsRow_Theme);
+            data.graphicsRows.push_back(std::move(themeRow));
+
+            DisplayGraphicsRow shopRow{};
+            const RECT shopRect = GetShopRowHeightRowRect();
+            const RECT shopPrevRect = GetShopRowHeightPrevButtonRect();
+            const RECT shopNextRect = GetShopRowHeightNextButtonRect();
+            shopRow.x = shopRect.left;
+            shopRow.y = shopRect.top;
+            shopRow.width = shopRect.right - shopRect.left;
+            shopRow.height = shopRect.bottom - shopRect.top;
+            shopRow.prevX = shopPrevRect.left;
+            shopRow.prevY = shopPrevRect.top;
+            shopRow.prevWidth = shopPrevRect.right - shopPrevRect.left;
+            shopRow.prevHeight = shopPrevRect.bottom - shopPrevRect.top;
+            shopRow.nextX = shopNextRect.left;
+            shopRow.nextY = shopNextRect.top;
+            shopRow.nextWidth = shopNextRect.right - shopNextRect.left;
+            shopRow.nextHeight = shopNextRect.bottom - shopNextRect.top;
+            shopRow.prevLabel = "<";
+            shopRow.nextLabel = ">";
+            shopRow.label = "Shop row height";
+            shopRow.value = GetGraphicsRowValue(GraphicsRow_ShopRowHeight);
+            data.graphicsRows.push_back(std::move(shopRow));
         }
     }
 

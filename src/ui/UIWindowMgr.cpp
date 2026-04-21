@@ -12,6 +12,8 @@
 #include "UINpcInputWnd.h"
 #include "UIChooseWnd.h"
 #include "UISelectCartWnd.h"
+#include "UIVirtualKeyboardWnd.h"
+#include "UIControllerWnd.h"
 #include "UIChooseSellBuyWnd.h"
 #include "UIEquipWnd.h"
 #include "UIItemCollectionWnd.h"
@@ -20,6 +22,15 @@
 #include "UIItemInfoWnd.h"
 #include "UIItemWnd.h"
 #include "UIStorageWnd.h"
+#include "UICartWnd.h"
+#include "UIGuildWnd.h"
+#include "UIMailBoxWnd.h"
+#include "UIMailReadWnd.h"
+#include "UIMailSendWnd.h"
+#include "UIPetInfoWnd.h"
+#include "UIEggListWnd.h"
+#include "UIHomunInfoWnd.h"
+#include "UIMercInfoWnd.h"
 #include "UIItemPurchaseWnd.h"
 #include "UIItemSellWnd.h"
 #include "UIItemShopWnd.h"
@@ -36,6 +47,7 @@
 #include "UISelectCharWnd.h"
 #include "UIWaitWnd.h"
 #include "UiScale.h"
+#include "input/HotkeyBindings.h"
 #include "gamemode/CursorRenderer.h"
 #include "gamemode/GameMode.h"
 #include "gamemode/LoginMode.h"
@@ -592,9 +604,9 @@ UIWindowMgr::UIWindowMgr()
       m_gronMsnWndShow(0), m_gronMsgWndShow(0), m_chatWndStatus(0),
       m_miniMapZoomFactor(1.0f), m_miniMapArgb(0), m_isDrawCompass(0),
       m_isDragAll(0), m_conversionMode(0),
-    m_captureWindow(nullptr), m_editWindow(nullptr), m_modalWindow(nullptr), m_lastHitWindow(nullptr),
-        m_loadingWnd(nullptr), m_roMapWnd(nullptr), m_minimapZoomWnd(nullptr), m_statusWnd(nullptr), m_sayDialogWnd(nullptr), m_npcMenuWnd(nullptr), m_playerContextMenuWnd(nullptr), m_joinPartyAcceptWnd(nullptr), m_messengerGroupWnd(nullptr), m_partyOptionWnd(nullptr), m_npcInputWnd(nullptr), m_chooseSellBuyWnd(nullptr), m_itemShopWnd(nullptr), m_itemPurchaseWnd(nullptr), m_itemSellWnd(nullptr), m_storageWnd(nullptr), m_shortCutWnd(nullptr), m_chatWnd(nullptr),
-            m_loginWnd(nullptr), m_selectServerWnd(nullptr), m_selectCharWnd(nullptr), m_makeCharWnd(nullptr), m_waitWnd(nullptr), m_chooseWnd(nullptr), m_selectCartWnd(nullptr), m_optionWnd(nullptr), m_itemWnd(nullptr), m_itemInfoWnd(nullptr), m_itemCollectionWnd(nullptr), m_itemCompositionWnd(nullptr), m_itemIdentifyWnd(nullptr), m_questWnd(nullptr), m_basicInfoWnd(nullptr), m_notifyLevelUpWnd(nullptr), m_notifyJobLevelUpWnd(nullptr), m_equipWnd(nullptr), m_skillDescribeWnd(nullptr), m_skillListWnd(nullptr),
+      m_captureWindow(nullptr), m_editWindow(nullptr), m_modalWindow(nullptr), m_lastHitWindow(nullptr),
+      m_loadingWnd(nullptr), m_roMapWnd(nullptr), m_minimapZoomWnd(nullptr), m_statusWnd(nullptr), m_sayDialogWnd(nullptr), m_npcMenuWnd(nullptr), m_playerContextMenuWnd(nullptr), m_joinPartyAcceptWnd(nullptr), m_messengerGroupWnd(nullptr), m_partyOptionWnd(nullptr), m_npcInputWnd(nullptr), m_chooseSellBuyWnd(nullptr), m_itemShopWnd(nullptr), m_itemPurchaseWnd(nullptr), m_itemSellWnd(nullptr), m_storageWnd(nullptr), m_shortCutWnd(nullptr), m_chatWnd(nullptr),
+      m_loginWnd(nullptr), m_selectServerWnd(nullptr), m_selectCharWnd(nullptr), m_makeCharWnd(nullptr), m_waitWnd(nullptr), m_chooseWnd(nullptr), m_selectCartWnd(nullptr), m_virtualKeyboardWnd(nullptr), m_controllerWnd(nullptr), m_optionWnd(nullptr), m_itemWnd(nullptr), m_itemInfoWnd(nullptr), m_itemCollectionWnd(nullptr), m_itemCompositionWnd(nullptr), m_itemIdentifyWnd(nullptr), m_questWnd(nullptr), m_basicInfoWnd(nullptr), m_notifyLevelUpWnd(nullptr), m_notifyJobLevelUpWnd(nullptr), m_equipWnd(nullptr), m_skillDescribeWnd(nullptr), m_skillListWnd(nullptr),
                         m_wallpaperSurface(nullptr), m_uiComposeSurface(), m_chatActiveInputField(0), m_chatScrollLineOffset(0)
 {
     m_loginStatus = "Login: idle";
@@ -726,6 +738,42 @@ void UIWindowMgr::EnsureChatWindowVisible()
     m_chatWnd->SetShow(1);
 }
 
+bool UIWindowMgr::IsTextInputActive() const
+{
+    if (m_editWindow) return true;
+    if (m_chatWnd && m_chatWnd->IsInputActive()) {
+        for (const UIWindow* child : m_children) {
+            if (!child || child == m_chatWnd || child == m_virtualKeyboardWnd || child == m_controllerWnd) {
+                continue;
+            }
+            if (child->m_show != 0) {
+                return false;
+            }
+        }
+        return true;
+    }
+    return false;
+}
+
+void UIWindowMgr::ShowVirtualKeyboard(int clientWidth, int clientHeight)
+{
+    if (!m_virtualKeyboardWnd) {
+        m_virtualKeyboardWnd = new UIVirtualKeyboardWnd();
+        m_children.push_back(m_virtualKeyboardWnd);
+    }
+    m_virtualKeyboardWnd->PositionBottomCenter(clientWidth, clientHeight);
+    m_children.remove(m_virtualKeyboardWnd);
+    m_children.push_back(m_virtualKeyboardWnd);
+    m_virtualKeyboardWnd->SetShow(1);
+}
+
+void UIWindowMgr::HideVirtualKeyboard()
+{
+    if (m_virtualKeyboardWnd) {
+        m_virtualKeyboardWnd->SetShow(0);
+    }
+}
+
 bool UIWindowMgr::HasActiveNpcDialog() const
 {
     return (m_sayDialogWnd && m_sayDialogWnd->m_show != 0)
@@ -792,6 +840,8 @@ bool UIWindowMgr::EnsureComposeSurface(int width, int height)
 }
 
 bool UIWindowMgr::Init() {
+    hotkeys::bindings::Load();
+
     if (!m_loginWnd) {
         m_loginWnd = new UILoginWnd();
         if (!m_loginWallpaper.empty()) {
@@ -929,6 +979,87 @@ UIWindow* UIWindowMgr::MakeWindow(int windowId)
         m_children.push_back(m_storageWnd);
         m_storageWnd->SetShow(1);
         return m_storageWnd;
+    case WID_CARTWND:
+        if (!m_cartWnd) {
+            m_cartWnd = new UICartWnd();
+            m_children.push_back(m_cartWnd);
+        }
+        m_children.remove(m_cartWnd);
+        m_children.push_back(m_cartWnd);
+        m_cartWnd->SetShow(1);
+        return m_cartWnd;
+    case WID_GUILDWND:
+        if (!m_guildWnd) {
+            m_guildWnd = new UIGuildWnd();
+            m_children.push_back(m_guildWnd);
+        }
+        m_children.remove(m_guildWnd);
+        m_children.push_back(m_guildWnd);
+        m_guildWnd->SetShow(1);
+        return m_guildWnd;
+    case WID_MAILBOXWND:
+        if (!m_mailBoxWnd) {
+            m_mailBoxWnd = new UIMailBoxWnd();
+            m_children.push_back(m_mailBoxWnd);
+        }
+        m_children.remove(m_mailBoxWnd);
+        m_children.push_back(m_mailBoxWnd);
+        m_mailBoxWnd->SetShow(1);
+        return m_mailBoxWnd;
+    case WID_MAILREADWND:
+        if (!m_mailReadWnd) {
+            m_mailReadWnd = new UIMailReadWnd();
+            m_children.push_back(m_mailReadWnd);
+        }
+        m_children.remove(m_mailReadWnd);
+        m_children.push_back(m_mailReadWnd);
+        m_mailReadWnd->SetShow(1);
+        return m_mailReadWnd;
+    case WID_MAILSENDWND:
+        if (!m_mailSendWnd) {
+            m_mailSendWnd = new UIMailSendWnd();
+            m_children.push_back(m_mailSendWnd);
+        }
+        m_children.remove(m_mailSendWnd);
+        m_children.push_back(m_mailSendWnd);
+        m_mailSendWnd->SetShow(1);
+        return m_mailSendWnd;
+    case WID_PETINFOWND:
+        if (!m_petInfoWnd) {
+            m_petInfoWnd = new UIPetInfoWnd();
+            m_children.push_back(m_petInfoWnd);
+        }
+        m_children.remove(m_petInfoWnd);
+        m_children.push_back(m_petInfoWnd);
+        m_petInfoWnd->SetShow(1);
+        return m_petInfoWnd;
+    case WID_EGGLISTWND:
+        if (!m_eggListWnd) {
+            m_eggListWnd = new UIEggListWnd();
+            m_children.push_back(m_eggListWnd);
+        }
+        m_children.remove(m_eggListWnd);
+        m_children.push_back(m_eggListWnd);
+        m_eggListWnd->SetShow(1);
+        return m_eggListWnd;
+    case WID_HOMUNINFOWND:
+        if (!m_homunInfoWnd) {
+            m_homunInfoWnd = new UIHomunInfoWnd();
+            m_children.push_back(m_homunInfoWnd);
+        }
+        m_children.remove(m_homunInfoWnd);
+        m_children.push_back(m_homunInfoWnd);
+        m_homunInfoWnd->SetShow(1);
+        return m_homunInfoWnd;
+    case WID_MERCINFOWND:
+        if (!m_mercInfoWnd) {
+            m_mercInfoWnd = new UIMercInfoWnd();
+            m_children.push_back(m_mercInfoWnd);
+        }
+        m_children.remove(m_mercInfoWnd);
+        m_children.push_back(m_mercInfoWnd);
+        m_mercInfoWnd->SetShow(1);
+        return m_mercInfoWnd;
 
     case WID_SHORTCUTWND:
         if (!m_shortCutWnd) {
@@ -1160,6 +1291,24 @@ UIWindow* UIWindowMgr::MakeWindow(int windowId)
         m_optionWnd->SetShow(1);
         return m_optionWnd;
 
+    case WID_CONTROLLERWND: {
+        if (!m_controllerWnd) {
+            m_controllerWnd = new UIControllerWnd();
+            m_children.push_back(m_controllerWnd);
+        }
+        RECT clientRect{};
+        int cw = 1920, ch = 1080;
+        if (g_hMainWnd && GetClientRect(g_hMainWnd, &clientRect)) {
+            cw = clientRect.right - clientRect.left;
+            ch = clientRect.bottom - clientRect.top;
+        }
+        m_controllerWnd->PositionCentered(cw, ch);
+        m_children.remove(m_controllerWnd);
+        m_children.push_back(m_controllerWnd);
+        m_controllerWnd->SetShow(1);
+        return m_controllerWnd;
+    }
+
     default:
         return nullptr;
     }
@@ -1195,6 +1344,36 @@ bool UIWindowMgr::ToggleWindow(int windowId)
         break;
     case WID_ROMAPWND:
         window = m_roMapWnd;
+        break;
+    case WID_CONTROLLERWND:
+        window = m_controllerWnd;
+        break;
+    case WID_CARTWND:
+        window = m_cartWnd;
+        break;
+    case WID_GUILDWND:
+        window = m_guildWnd;
+        break;
+    case WID_MAILBOXWND:
+        window = m_mailBoxWnd;
+        break;
+    case WID_MAILREADWND:
+        window = m_mailReadWnd;
+        break;
+    case WID_MAILSENDWND:
+        window = m_mailSendWnd;
+        break;
+    case WID_PETINFOWND:
+        window = m_petInfoWnd;
+        break;
+    case WID_EGGLISTWND:
+        window = m_eggListWnd;
+        break;
+    case WID_HOMUNINFOWND:
+        window = m_homunInfoWnd;
+        break;
+    case WID_MERCINFOWND:
+        window = m_mercInfoWnd;
         break;
     default:
         window = nullptr;
@@ -1262,6 +1441,12 @@ void UIWindowMgr::DeleteWindow(UIWindow* window)
     }
     if (window == m_chooseWnd) {
         m_chooseWnd = nullptr;
+    }
+    if (window == m_virtualKeyboardWnd) {
+        m_virtualKeyboardWnd = nullptr;
+    }
+    if (window == m_controllerWnd) {
+        m_controllerWnd = nullptr;
     }
     if (window == m_optionWnd) {
         m_optionWnd = nullptr;
@@ -1353,8 +1538,85 @@ void UIWindowMgr::DeleteWindow(UIWindow* window)
     if (window == m_skillListWnd) {
         m_skillListWnd = nullptr;
     }
+    if (window == m_cartWnd) {
+        m_cartWnd = nullptr;
+    }
+    if (window == m_guildWnd) {
+        m_guildWnd = nullptr;
+    }
+    if (window == m_mailBoxWnd) {
+        m_mailBoxWnd = nullptr;
+    }
+    if (window == m_mailReadWnd) {
+        m_mailReadWnd = nullptr;
+    }
+    if (window == m_mailSendWnd) {
+        m_mailSendWnd = nullptr;
+    }
+    if (window == m_petInfoWnd) {
+        m_petInfoWnd = nullptr;
+    }
+    if (window == m_eggListWnd) {
+        m_eggListWnd = nullptr;
+    }
+    if (window == m_homunInfoWnd) {
+        m_homunInfoWnd = nullptr;
+    }
+    if (window == m_mercInfoWnd) {
+        m_mercInfoWnd = nullptr;
+    }
 
     delete window;
+}
+
+void UIWindowMgr::ReloadLegacySkinAssets(UIWindow* preserveWindow)
+{
+    ResetUiButtonSoundPathCache();
+
+    const struct ReloadableWindowEntry {
+        int windowId;
+        UIWindow* window;
+    } reloadableWindows[] = {
+        { WID_LOGINWND, m_loginWnd },
+        { WID_SELECTCHARWND, m_selectCharWnd },
+        { WID_MAKECHARWND, m_makeCharWnd },
+        { WID_OPTIONWND, m_optionWnd },
+        { WID_BASICINFOWND, m_basicInfoWnd },
+        { WID_STATUSWND, m_statusWnd },
+        { WID_ITEMWND, m_itemWnd },
+        { WID_EQUIPWND, m_equipWnd },
+        { WID_SKILLLISTWND, m_skillListWnd },
+        { WID_NOTIFYLEVELUPWND, m_notifyLevelUpWnd },
+        { WID_NOTIFYJOBLEVELUPWND, m_notifyJobLevelUpWnd },
+        { WID_CHOOSEWND, m_chooseWnd },
+    };
+
+    std::vector<int> windowsToRecreate;
+    for (const ReloadableWindowEntry& entry : reloadableWindows) {
+        if (!entry.window || entry.window == preserveWindow) {
+            continue;
+        }
+
+        const bool wasShown = entry.window->m_show != 0;
+        entry.window->StoreInfo();
+        DeleteWindow(entry.window);
+        if (wasShown) {
+            windowsToRecreate.push_back(entry.windowId);
+        }
+    }
+
+    if (!m_loadingWnd) {
+        m_loadedWallpaperPath.clear();
+    }
+    if (IsLoadingScreenVisible(*this) && !m_loadedWallpaperPath.empty()) {
+        SetWallpaperFromGameData(m_loadedWallpaperPath);
+    }
+
+    for (int windowId : windowsToRecreate) {
+        MakeWindow(windowId);
+    }
+
+    NotifyQtUiRuntimeSkinChanged();
 }
 
 void UIWindowMgr::RemoveAllWindows()
@@ -1410,6 +1672,8 @@ void UIWindowMgr::RemoveAllWindows()
     m_waitWnd = nullptr;
     m_chooseWnd = nullptr;
     m_selectCartWnd = nullptr;
+    m_virtualKeyboardWnd = nullptr;
+    m_controllerWnd = nullptr;
     m_optionWnd = nullptr;
     m_itemWnd = nullptr;
     m_itemInfoWnd = nullptr;
@@ -1421,6 +1685,15 @@ void UIWindowMgr::RemoveAllWindows()
     m_equipWnd = nullptr;
     m_skillDescribeWnd = nullptr;
     m_skillListWnd = nullptr;
+    m_cartWnd = nullptr;
+    m_guildWnd = nullptr;
+    m_mailBoxWnd = nullptr;
+    m_mailReadWnd = nullptr;
+    m_mailSendWnd = nullptr;
+    m_petInfoWnd = nullptr;
+    m_eggListWnd = nullptr;
+    m_homunInfoWnd = nullptr;
+    m_mercInfoWnd = nullptr;
 }
 
 void UIWindowMgr::Reset() {
@@ -1430,6 +1703,8 @@ void UIWindowMgr::Reset() {
     m_makeCharWnd = nullptr;
     m_chooseWnd = nullptr;
     m_selectCartWnd = nullptr;
+    m_virtualKeyboardWnd = nullptr;
+    m_controllerWnd = nullptr;
     m_optionWnd = nullptr;
     m_chatWnd = nullptr;
     m_chatEvents.clear();
@@ -2260,29 +2535,70 @@ bool UIWindowMgr::HasFrontMenuUiVisible() const
         || (m_makeCharWnd && m_makeCharWnd->m_show != 0);
 }
 
-bool UIWindowMgr::HandleHotkeyBeforeFocusedUi(int virtualKey, bool isAltDown, bool isCtrlDown, bool hasFrontMenuUi)
+bool UIWindowMgr::HandleHotkeyBeforeFocusedUi(int virtualKey, bool isAltDown, bool isCtrlDown, bool isShiftDown, bool hasFrontMenuUi)
 {
-    if (isCtrlDown && virtualKey == VK_TAB && !hasFrontMenuUi) {
-        ToggleWindow(WID_ROMAPWND);
+    const auto match = [&](hotkeys::KeyboardAction action) {
+        return hotkeys::bindings::MatchKeyboardBinding(action, virtualKey, isAltDown, isCtrlDown, isShiftDown);
+    };
+
+    const bool controllerWindowVisible = m_controllerWnd && m_controllerWnd->m_show != 0;
+    if (controllerWindowVisible && !match(hotkeys::KeyboardAction::ToggleControllerWindow)) {
+        return false;
+    }
+
+    if (!hasFrontMenuUi && match(hotkeys::KeyboardAction::ToggleControllerWindow)) {
+        ToggleWindow(WID_CONTROLLERWND);
         return true;
     }
 
-    if (isAltDown && !hasFrontMenuUi) {
+    if (!hasFrontMenuUi && match(hotkeys::KeyboardAction::ToggleOptionsWindow)) {
+        ToggleWindow(WID_OPTIONWND);
+        return true;
+    }
+
+    if (!hasFrontMenuUi && match(hotkeys::KeyboardAction::MapToggle)) {
+        ToggleWindow(WID_ROMAPWND);
+        return true;
+    }
+    if (!hasFrontMenuUi && match(hotkeys::KeyboardAction::InventoryToggle)) {
+        ToggleWindow(WID_ITEMWND);
+        return true;
+    }
+    if (!hasFrontMenuUi && match(hotkeys::KeyboardAction::EquipToggle)) {
+        ToggleWindow(WID_EQUIPWND);
+        return true;
+    }
+    if (!hasFrontMenuUi && match(hotkeys::KeyboardAction::SkillToggle)) {
+        ToggleWindow(WID_SKILLLISTWND);
+        return true;
+    }
+    if (!hasFrontMenuUi && match(hotkeys::KeyboardAction::StatusToggle)) {
+        ToggleWindow(WID_STATUSWND);
+        return true;
+    }
+    if (!hasFrontMenuUi && isAltDown) {
         switch (virtualKey) {
-        case 'A':
-            ToggleWindow(WID_STATUSWND);
-            return true;
-        case 'E':
-            ToggleWindow(WID_ITEMWND);
-            return true;
-        case 'Q':
-            ToggleWindow(WID_EQUIPWND);
-            return true;
-        case 'S':
-            ToggleWindow(WID_SKILLLISTWND);
-            return true;
         case 'Z':
             ToggleWindow(WID_MESSENGERGROUPWND);
+            return true;
+        case 'W':
+            ToggleWindow(WID_CARTWND);
+            return true;
+        case 'G':
+            ToggleWindow(WID_GUILDWND);
+            return true;
+        case 'M':
+            ToggleWindow(WID_MAILBOXWND);
+            return true;
+        case 'J':
+            if (g_session.IsMercActive()) {
+                ToggleWindow(WID_MERCINFOWND);
+            } else {
+                ToggleWindow(WID_HOMUNINFOWND);
+            }
+            return true;
+        case 'P':
+            ToggleWindow(WID_PETINFOWND);
             return true;
         default:
             break;
@@ -2292,11 +2608,43 @@ bool UIWindowMgr::HandleHotkeyBeforeFocusedUi(int virtualKey, bool isAltDown, bo
     return false;
 }
 
-bool UIWindowMgr::HandleHotkeyAfterFocusedUi(int virtualKey, bool hasFrontMenuUi)
+bool UIWindowMgr::HandleHotkeyAfterFocusedUi(int virtualKey, bool isAltDown, bool isCtrlDown, bool isShiftDown, bool hasFrontMenuUi)
 {
-    if (!hasFrontMenuUi && virtualKey >= VK_F1 && virtualKey <= VK_F9) {
-        g_modeMgr.SendMsg(CGameMode::GameMsg_RequestShortcutUse, virtualKey - VK_F1, 0, 0);
-        return true;
+    const auto match = [&](hotkeys::KeyboardAction action) {
+        return hotkeys::bindings::MatchKeyboardBinding(action, virtualKey, isAltDown, isCtrlDown, isShiftDown);
+    };
+
+    if (!hasFrontMenuUi) {
+        for (int slot = 0; slot < 9; ++slot) {
+            const auto action = static_cast<hotkeys::KeyboardAction>(
+                static_cast<int>(hotkeys::KeyboardAction::Quickslot1) + slot);
+            if (match(action)) {
+                g_modeMgr.SendMsg(CGameMode::GameMsg_RequestShortcutUse, slot, 0, 0);
+                return true;
+            }
+        }
+    }
+
+    if (!hasFrontMenuUi && isAltDown && !isCtrlDown && !isShiftDown) {
+        int emotionType = -1;
+        switch (virtualKey) {
+        case '1': emotionType = 0; break;
+        case '2': emotionType = 1; break;
+        case '3': emotionType = 2; break;
+        case '4': emotionType = 3; break;
+        case '5': emotionType = 4; break;
+        case '6': emotionType = 5; break;
+        case '7': emotionType = 6; break;
+        case '8': emotionType = 7; break;
+        case '9': emotionType = 8; break;
+        case '0': emotionType = 9; break;
+        default:
+            break;
+        }
+
+        if (emotionType >= 0) {
+            return g_modeMgr.SendMsg(CGameMode::GameMsg_RequestEmotion, emotionType, 0, 0) != 0;
+        }
     }
 
     if (virtualKey == VK_ESCAPE && !hasFrontMenuUi) {
@@ -2307,8 +2655,33 @@ bool UIWindowMgr::HandleHotkeyAfterFocusedUi(int virtualKey, bool hasFrontMenuUi
         return true;
     }
 
-    if (virtualKey == VK_INSERT && !hasFrontMenuUi) {
+    if (!hasFrontMenuUi && !HasBlockingUiForGameplayHotkeys() && match(hotkeys::KeyboardAction::ResetCamera)) {
+        g_modeMgr.SendMsg(CGameMode::GameMsg_ResetCamera, 0, 0, 0);
+        return true;
+    }
+
+    if (!hasFrontMenuUi && !HasBlockingUiForGameplayHotkeys() && match(hotkeys::KeyboardAction::SitStand)) {
         g_modeMgr.SendMsg(CGameMode::GameMsg_ToggleSitStand, 0, 0, 0);
+        return true;
+    }
+
+    if (!hasFrontMenuUi && !HasBlockingUiForGameplayHotkeys() && match(hotkeys::KeyboardAction::QuestToggle)) {
+        g_modeMgr.SendMsg(CGameMode::GameMsg_RequestShortcutUse, 8, 0, 0);
+        return true;
+    }
+
+    if (!hasFrontMenuUi && !HasBlockingUiForGameplayHotkeys() && match(hotkeys::KeyboardAction::HotbarPagePrev)) {
+        g_session.SetShortcutPage(g_session.GetShortcutPage() - 1);
+        if (m_shortCutWnd) {
+            m_shortCutWnd->Invalidate();
+        }
+        return true;
+    }
+    if (!hasFrontMenuUi && !HasBlockingUiForGameplayHotkeys() && match(hotkeys::KeyboardAction::HotbarPageNext)) {
+        g_session.SetShortcutPage(g_session.GetShortcutPage() + 1);
+        if (m_shortCutWnd) {
+            m_shortCutWnd->Invalidate();
+        }
         return true;
     }
 
@@ -2328,20 +2701,29 @@ bool UIWindowMgr::HasBlockingUiForGameplayHotkeys() const
         || (m_storageWnd && m_storageWnd->m_show != 0)
         || (m_chooseSellBuyWnd && m_chooseSellBuyWnd->m_show != 0)
         || (m_chooseWnd && m_chooseWnd->m_show != 0)
+        || (m_controllerWnd && m_controllerWnd->m_show != 0)
         || (m_optionWnd && m_optionWnd->m_show != 0);
 }
 
 bool UIWindowMgr::OnQtKeyDown(int virtualKey, bool isAltDown, bool isCtrlDown, bool isShiftDown)
 {
-    (void)isShiftDown;
-
     const bool hasFrontMenuUi = HasFrontMenuUiVisible();
-    if (HandleHotkeyBeforeFocusedUi(virtualKey, isAltDown, isCtrlDown, hasFrontMenuUi)) {
+    if (HandleHotkeyBeforeFocusedUi(virtualKey, isAltDown, isCtrlDown, isShiftDown, hasFrontMenuUi)) {
         return true;
     }
 
     if (m_storageWnd && m_storageWnd->m_show != 0 && virtualKey == VK_ESCAPE) {
         return g_modeMgr.SendMsg(CGameMode::GameMsg_RequestStorageClose, 0, 0, 0) != 0;
+    }
+
+    if (m_controllerWnd && m_controllerWnd->m_show != 0) {
+        m_controllerWnd->OnKeyDown(virtualKey);
+        return true;
+    }
+
+    if (m_optionWnd && m_optionWnd->m_show != 0) {
+        m_optionWnd->OnKeyDown(virtualKey);
+        return true;
     }
 
     if (HasBlockingUiForGameplayHotkeys()) {
@@ -2352,7 +2734,7 @@ bool UIWindowMgr::OnQtKeyDown(int virtualKey, bool isAltDown, bool isCtrlDown, b
         return false;
     }
 
-    return HandleHotkeyAfterFocusedUi(virtualKey, hasFrontMenuUi);
+    return HandleHotkeyAfterFocusedUi(virtualKey, isAltDown, isCtrlDown, isShiftDown, hasFrontMenuUi);
 }
 
 void UIWindowMgr::OnKeyDown(int virtualKey)
@@ -2360,8 +2742,9 @@ void UIWindowMgr::OnKeyDown(int virtualKey)
     const bool hasFrontMenuUi = HasFrontMenuUiVisible();
     const bool isAltDown = (GetKeyState(VK_MENU) & 0x8000) != 0;
     const bool isCtrlDown = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
+    const bool isShiftDown = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
 
-    if (HandleHotkeyBeforeFocusedUi(virtualKey, isAltDown, isCtrlDown, hasFrontMenuUi)) {
+    if (HandleHotkeyBeforeFocusedUi(virtualKey, isAltDown, isCtrlDown, isShiftDown, hasFrontMenuUi)) {
         return;
     }
 
@@ -2457,7 +2840,7 @@ void UIWindowMgr::OnKeyDown(int virtualKey)
         return;
     }
 
-    if (HandleHotkeyAfterFocusedUi(virtualKey, hasFrontMenuUi)) {
+    if (HandleHotkeyAfterFocusedUi(virtualKey, isAltDown, isCtrlDown, isShiftDown, hasFrontMenuUi)) {
         return;
     }
 

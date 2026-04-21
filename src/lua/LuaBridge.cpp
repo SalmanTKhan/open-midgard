@@ -732,6 +732,7 @@ void CLuaBridge::Shutdown()
 		m_state = nullptr;
 	}
 	m_loadedScripts.clear();
+	m_missingScripts.clear();
 	m_skillEffectInfoCache.clear();
 	m_missingSkillEffectInfoIds.clear();
 	m_lastError.clear();
@@ -981,11 +982,18 @@ bool CLuaBridge::LoadRagnarokScriptOnce(const char* relativePath)
 		return true;
 	}
 
+	if (m_missingScripts.find(normalized) != m_missingScripts.end()) {
+		m_lastError = "previously missing Lua/LUB script";
+		return false;
+	}
+
 	if (!LoadRagnarokScript(normalized.c_str())) {
+		m_missingScripts.insert(normalized);
 		return false;
 	}
 
 	m_loadedScripts.push_back(normalized);
+	m_missingScripts.erase(normalized);
 	return true;
 }
 

@@ -19,6 +19,7 @@
 #include "res/PaletteRes.h"
 #include "res/Sprite.h"
 #include "res/Texture.h"
+#include "UiSkin.h"
 #include "session/Session.h"
 #include "world/GameActor.h"
 #include "world/World.h"
@@ -92,6 +93,28 @@ constexpr std::array<EquipSlotDefLocal, 10> kEquipSlots = {{
     { 128, 240, 147 }, // accessory right
     { 2, 8, 83 },      // weapon
 }};
+
+struct EquipSlotTypeInfo {
+    const char* name;
+    const char* glyph;
+};
+
+EquipSlotTypeInfo GetEquipSlotTypeInfo(int wearMask)
+{
+    switch (wearMask) {
+        case 256: return { "Headgear (Top)", "\xE2\x9B\x91" };   // U+26D1 helmet
+        case 512: return { "Headgear (Mid)", "\xF0\x9F\x95\xB6" }; // U+1F576 sunglasses
+        case 1:   return { "Headgear (Bot)", "\xF0\x9F\x98\xB7" }; // U+1F637 mask
+        case 16:  return { "Armor",          "\xF0\x9F\x91\x95" }; // U+1F455 shirt
+        case 2:   return { "Weapon",         "\xE2\x9A\x94" };     // U+2694 crossed swords
+        case 32:  return { "Shield",         "\xF0\x9F\x9B\xA1" }; // U+1F6E1 shield
+        case 4:   return { "Garment",        "\xF0\x9F\xA7\xA3" }; // U+1F9E3 scarf
+        case 64:  return { "Footgear",       "\xF0\x9F\x91\xA2" }; // U+1F462 boot
+        case 8:   return { "Accessory (L)",  "\xF0\x9F\x92\x8D" }; // U+1F48D ring
+        case 128: return { "Accessory (R)",  "\xF0\x9F\x92\x8D" }; // U+1F48D ring
+        default:  return { "Slot",           "" };
+    }
+}
 
 bool IsLeftEquipSlot(const EquipSlotDefLocal& slot)
 {
@@ -243,12 +266,7 @@ std::vector<std::string> BuildUiAssetCandidates(const char* fileName)
 
 std::string ResolveUiAssetPath(const char* fileName)
 {
-    for (const std::string& candidate : BuildUiAssetCandidates(fileName)) {
-        if (g_fileMgr.IsDataExist(candidate.c_str())) {
-            return candidate;
-        }
-    }
-    return NormalizeSlash(fileName ? fileName : "");
+    return ui_skin::ResolveUiAssetPath(fileName);
 }
 
 shopui::BitmapPixels LoadBitmapPixelsFromGameData(const std::string& path)
@@ -1608,6 +1626,9 @@ bool UIEquipWnd::GetDisplayDataForQt(DisplayData* outData) const
             slot.width = kSlotIconSize;
             slot.height = kSlotIconSize;
             slot.leftColumn = IsLeftEquipSlot(kEquipSlots[i]);
+            const EquipSlotTypeInfo slotTypeInfo = GetEquipSlotTypeInfo(kEquipSlots[i].wearMask);
+            slot.slotTypeName = slotTypeInfo.name;
+            slot.slotGlyph = slotTypeInfo.glyph;
 
             const ITEM_INFO* drawItem = slotItems[i];
             if (drawItem
@@ -1618,6 +1639,7 @@ bool UIEquipWnd::GetDisplayDataForQt(DisplayData* outData) const
             if (drawItem) {
                 slot.occupied = true;
                 slot.hovered = static_cast<int>(i) == m_hoveredSlot;
+                slot.itemIndex = drawItem->m_itemIndex;
                 slot.itemId = drawItem->GetItemId();
                 slot.label = drawItem->GetEquipDisplayName();
             }

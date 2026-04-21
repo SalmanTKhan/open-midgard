@@ -3,7 +3,10 @@
 #include "DebugLog.h"
 #include "GameMode.h"
 #include "Mode.h"
+#include "input/Gamepad.h"
 #include "main/WinMain.h"
+#include "qtui/QtPlatformWindow.h"
+#include "qtui/QtUiRuntime.h"
 #include "render/DC.h"
 #include "res/ActRes.h"
 #include "res/Sprite.h"
@@ -994,6 +997,38 @@ void UpdateModeCursorClientPos(int x, int y)
     s_cachedClientCursorPos.x = x;
     s_cachedClientCursorPos.y = y;
     s_hasCachedClientCursorPos = true;
+}
+
+static bool SetSystemCursorClientPos(int x, int y)
+{
+    if (!g_hMainWnd) {
+        return false;
+    }
+
+#if RO_ENABLE_QT6_UI && !RO_PLATFORM_WINDOWS
+    if (IsQtUiRuntimeEnabled()) {
+        return RoQtSetCursorPos(g_hMainWnd, x, y);
+    }
+#endif
+
+#if RO_PLATFORM_WINDOWS
+    POINT screenPos{ x, y };
+    if (!ClientToScreen(g_hMainWnd, &screenPos)) {
+        return false;
+    }
+    return SetCursorPos(screenPos.x, screenPos.y) != 0;
+#else
+    (void)x;
+    (void)y;
+    return false;
+#endif
+}
+
+void SetModeCursorClientPos(int x, int y)
+{
+    UpdateModeCursorClientPos(x, y);
+    SetSystemCursorClientPos(x, y);
+    gamepad::g_gamepad.SyncVirtualCursorClientPos(x, y);
 }
 
 bool GetModeCursorClientPos(POINT* outPoint)

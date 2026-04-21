@@ -1,4 +1,26 @@
 cmake_minimum_required(VERSION 3.20)
+
+# Auto-pick up a sibling vcpkg checkout (or VCPKG_ROOT env var) so optional
+# packages like SDL2 resolve without each developer having to remember the
+# -DCMAKE_TOOLCHAIN_FILE flag. Must run before project().
+if(NOT DEFINED CMAKE_TOOLCHAIN_FILE AND NOT DEFINED ENV{CMAKE_TOOLCHAIN_FILE})
+    set(_ro_vcpkg_candidates
+        "$ENV{VCPKG_ROOT}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../vcpkg"
+        "${CMAKE_CURRENT_SOURCE_DIR}/vcpkg"
+        "C:/vcpkg"
+    )
+    foreach(_ro_vcpkg_root IN LISTS _ro_vcpkg_candidates)
+        if(_ro_vcpkg_root AND EXISTS "${_ro_vcpkg_root}/scripts/buildsystems/vcpkg.cmake")
+            set(CMAKE_TOOLCHAIN_FILE "${_ro_vcpkg_root}/scripts/buildsystems/vcpkg.cmake"
+                CACHE FILEPATH "Vcpkg toolchain file")
+            message(STATUS "Auto-detected vcpkg toolchain: ${CMAKE_TOOLCHAIN_FILE}")
+            break()
+        endif()
+    endforeach()
+    unset(_ro_vcpkg_candidates)
+endif()
+
 project(OpenMidgard VERSION 2008.0 LANGUAGES C CXX)
 
 if(NOT WIN32)
@@ -21,13 +43,14 @@ option(RO_ENABLE_BINK_VIDEO "Enable Bink video runtime loading" ON)
 option(RO_ENABLE_GRANNY "Enable Granny runtime loading" ON)
 option(RO_ENABLE_IJL "Enable Intel JPEG Library runtime loading" OFF)
 option(RO_ENABLE_DEV_DEPLOY "Copy build output to the local OldRO folder" ON)
-option(RO_ENABLE_QT6_UI "Enable the Qt 6 / QML GPU UI runtime" OFF)
+option(RO_ENABLE_QT6_UI "Enable the Qt 6 / QML GPU UI runtime" ON)
 option(RO_ENABLE_QT6_UI_SPIKE "Deprecated alias for RO_ENABLE_QT6_UI" OFF)
-option(RO_QT_UI_DEFAULT_ENABLED "Enable the Qt UI runtime by default unless OPEN_MIDGARD_QT_UI overrides it" OFF)
+option(RO_QT_UI_DEFAULT_ENABLED "Enable the Qt UI runtime by default unless OPEN_MIDGARD_QT_UI overrides it" ON)
 option(RO_QT_UI_SPIKE_DEFAULT_ENABLED "Deprecated alias for RO_QT_UI_DEFAULT_ENABLED" OFF)
 option(RO_ENABLE_NATIVE_D3D11 "Enable the native Direct3D 11 backend when supported" ON)
 option(RO_ENABLE_NATIVE_D3D12 "Enable the native Direct3D 12 backend when supported" ON)
 option(RO_LOG_VULKAN_STATS "Log vulkan performance stats" OFF)
+option(RO_ENABLE_GAMEPAD "Enable SDL3-based gamepad/controller support" ON)
 set(RO_QT_ROOT "" CACHE PATH "Compiler-compatible Qt 6 kit root (for example C:/Qt/6.11.0/msvc2022_64)")
 set(RO_QT_WINDEPLOYQT_EXECUTABLE "" CACHE FILEPATH "Path to the matching windeployqt.exe")
 
@@ -98,6 +121,23 @@ add_compile_definitions(
     RO_QT_UI_SPIKE_DEFAULT_ENABLED=$<BOOL:${RO_QT_UI_SPIKE_DEFAULT_ENABLED}>
     RO_LOG_VULKAN_STATS=$<BOOL:${RO_LOG_VULKAN_STATS}>
 )
+
+# ─── Optional gamepad backend (SDL3) ──────────────────────────────────────
+set(RO_HAS_GAMEPAD 0)
+if(RO_ENABLE_GAMEPAD)
+    find_package(SDL3 CONFIG QUIET)
+    if(SDL3_FOUND OR TARGET SDL3::SDL3)
+        set(RO_HAS_GAMEPAD 1)
+        message(STATUS "Gamepad support  : enabled (SDL3)")
+    else()
+        message(WARNING "RO_ENABLE_GAMEPAD=ON but SDL3 was not found; gamepad support disabled. "
+                        "Install SDL3 (vcpkg manifest pulls it automatically, apt: 'libsdl3-dev') to enable.")
+        set(RO_ENABLE_GAMEPAD OFF CACHE BOOL "Enable SDL3-based gamepad/controller support" FORCE)
+    endif()
+else()
+    message(STATUS "Gamepad support  : disabled")
+endif()
+add_compile_definitions(RO_HAS_GAMEPAD=${RO_HAS_GAMEPAD})
 
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/src)
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")

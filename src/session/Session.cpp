@@ -20,6 +20,7 @@ constexpr const char* kHumanSpriteRoot = "data\\sprite\\\xC0\xCE\xB0\xA3\xC1\xB7
 constexpr const char* kAccessorySpriteRoot = "data\\sprite\\\xBE\xC7\xBC\xBC\xBB\xE7\xB8\xAE\\";
 constexpr const char* kBodyDir = "\xB8\xF6\xC5\xEB";
 constexpr const char* kHeadDir = "\xB8\xD3\xB8\xAE\xC5\xEB";
+constexpr const char* kLegacyHeadDir = "\xB8\xD3\xB8\xAE";
 constexpr const char* kImfRoot = "data\\imf\\";
 constexpr const char* kBodyPaletteRoot = "data\\palette\\\xB8\xF6\\";
 constexpr const char* kHeadPaletteRoot = "data\\palette\\\xB8\xD3\xB8\xAE\\";
@@ -319,6 +320,11 @@ constexpr JobTokenEntry kJobTokens[] = {
 const char* GetSexToken(int sex)
 {
     return sex ? kMaleSex : kFemaleSex;
+}
+
+char GetClassicEnglishSexToken(int sex)
+{
+    return sex ? 'm' : 'f';
 }
 
 const char* FindExactJobToken(int job)
@@ -743,6 +749,128 @@ std::vector<std::string> BuildPlayerBodyJobTokenCandidates(int job)
     return candidates;
 }
 
+const char* GetClassicEnglishBodyToken(int job)
+{
+    const int normalizedJob = (job == JT_G_MASTER) ? 0 : ((job > 3950) ? (job - 3950) : job);
+    switch (normalizedJob) {
+    case 0: return "novice";
+    case 1: return "swordman";
+    case 2: return "magician";
+    case 3: return "archer";
+    case 4: return "acolyte";
+    case 5: return "merchant";
+    case 6: return "thief";
+    case 7: return "knight";
+    case 8: return "priest";
+    case 9: return "wizard";
+    case 10: return "blacksmith";
+    case 11: return "hunter";
+    case 12: return "assassin";
+    case 14: return "crusader";
+    case 15: return "monk";
+    case 16: return "sage";
+    case 17: return "rogue";
+    case 18: return "alchemist";
+    case 19: return "bard";
+    default:
+        return nullptr;
+    }
+}
+
+bool TryBuildExistingPlayerBodyPath(const char* extension, const std::string& jobToken, int sex, char* outPath)
+{
+    if (!extension || !*extension || jobToken.empty() || !outPath) {
+        return false;
+    }
+
+    const char* sexToken = GetSexToken(sex);
+    char candidate[260] = {};
+
+    std::sprintf(candidate, "%s%s\\%s\\%s_%s.%s", kHumanSpriteRoot, kBodyDir, sexToken, jobToken.c_str(), sexToken, extension);
+    if (ResourceExistsLocalFirst(candidate)) {
+        std::strcpy(outPath, candidate);
+        return true;
+    }
+
+    std::sprintf(candidate, "%s%s\\%s_%s.%s", kHumanSpriteRoot, jobToken.c_str(), jobToken.c_str(), sexToken, extension);
+    if (ResourceExistsLocalFirst(candidate)) {
+        std::strcpy(outPath, candidate);
+        return true;
+    }
+
+    return false;
+}
+
+bool TryBuildExistingClassicEnglishPlayerBodyPath(const char* extension, int job, int sex, char* outPath)
+{
+    if (!extension || !*extension || !outPath) {
+        return false;
+    }
+
+    const char* englishToken = GetClassicEnglishBodyToken(job);
+    if (!englishToken || !*englishToken) {
+        return false;
+    }
+
+    char candidate[260] = {};
+    std::sprintf(candidate, "%s%s_%c.%s", kHumanSpriteRoot, englishToken, GetClassicEnglishSexToken(sex), extension);
+    if (!ResourceExistsLocalFirst(candidate)) {
+        return false;
+    }
+
+    std::strcpy(outPath, candidate);
+    return true;
+}
+
+bool TryBuildExistingHeadPath(const char* extension, int resolvedHead, int sex, char* outPath)
+{
+    if (!extension || !*extension || resolvedHead < 0 || !outPath) {
+        return false;
+    }
+
+    const char* sexToken = GetSexToken(sex);
+    const char englishSexToken = GetClassicEnglishSexToken(sex);
+    char candidate[260] = {};
+
+    std::sprintf(candidate, "%s%s\\%s\\%d_%s.%s", kHumanSpriteRoot, kHeadDir, sexToken, resolvedHead, sexToken, extension);
+    if (ResourceExistsLocalFirst(candidate)) {
+        std::strcpy(outPath, candidate);
+        return true;
+    }
+
+    std::sprintf(candidate, "%s%s\\%d_%s.%s", kHumanSpriteRoot, kHeadDir, resolvedHead, sexToken, extension);
+    if (ResourceExistsLocalFirst(candidate)) {
+        std::strcpy(outPath, candidate);
+        return true;
+    }
+
+    std::sprintf(candidate, "%s%s\\%s\\%d_%s.%s", kHumanSpriteRoot, kLegacyHeadDir, sexToken, resolvedHead, sexToken, extension);
+    if (ResourceExistsLocalFirst(candidate)) {
+        std::strcpy(outPath, candidate);
+        return true;
+    }
+
+    std::sprintf(candidate, "%s%s\\%d_%s.%s", kHumanSpriteRoot, kLegacyHeadDir, resolvedHead, sexToken, extension);
+    if (ResourceExistsLocalFirst(candidate)) {
+        std::strcpy(outPath, candidate);
+        return true;
+    }
+
+    std::sprintf(candidate, "%s%s\\%c\\%c%d.%s", kHumanSpriteRoot, kLegacyHeadDir, englishSexToken, englishSexToken, resolvedHead, extension);
+    if (ResourceExistsLocalFirst(candidate)) {
+        std::strcpy(outPath, candidate);
+        return true;
+    }
+
+    std::sprintf(candidate, "%s%s\\%c%d.%s", kHumanSpriteRoot, kLegacyHeadDir, englishSexToken, resolvedHead, extension);
+    if (ResourceExistsLocalFirst(candidate)) {
+        std::strcpy(outPath, candidate);
+        return true;
+    }
+
+    return false;
+}
+
 std::vector<std::string> BuildPlayerImfJobTokenCandidates(int job)
 {
     std::vector<std::string> candidates;
@@ -756,12 +884,10 @@ bool HasPlayerBodyResourcePairForToken(const std::string& jobToken, int sex)
         return false;
     }
 
-    const char* sexToken = GetSexToken(sex);
     char actPath[260] = {};
     char sprPath[260] = {};
-    std::sprintf(actPath, "%s%s\\%s\\%s_%s.act", kHumanSpriteRoot, kBodyDir, sexToken, jobToken.c_str(), sexToken);
-    std::sprintf(sprPath, "%s%s\\%s\\%s_%s.spr", kHumanSpriteRoot, kBodyDir, sexToken, jobToken.c_str(), sexToken);
-    return ResourceExistsLocalFirst(actPath) && ResourceExistsLocalFirst(sprPath);
+    return TryBuildExistingPlayerBodyPath("act", jobToken, sex, actPath)
+        && TryBuildExistingPlayerBodyPath("spr", jobToken, sex, sprPath);
 }
 
 std::string ResolveExistingPlayerBodyJobToken(int job, int sex)
@@ -1202,7 +1328,9 @@ char* BuildPlayerBodyResourceName(const CSession& session,
     const int weaponType = ResolvePlayerBodyWeaponType(session, normalizedJob, weaponItemId);
     for (const std::string& jobToken : jobTokens) {
         char basePath[260] = {};
-        std::sprintf(basePath, "%s%s\\%s\\%s_%s.%s", kHumanSpriteRoot, kBodyDir, sexToken, jobToken.c_str(), sexToken, extension);
+        if (!TryBuildExistingPlayerBodyPath(extension, jobToken, sex, basePath)) {
+            *basePath = 0;
+        }
 
         if (weaponType > 0) {
             char candidate[260] = {};
@@ -1230,10 +1358,14 @@ char* BuildPlayerBodyResourceName(const CSession& session,
             }
         }
 
-        if (hasMatchingBodyResourcePair(basePath)) {
+        if (*basePath != 0 && hasMatchingBodyResourcePair(basePath)) {
             std::strcpy(buf, basePath);
             return buf;
         }
+    }
+
+    if (TryBuildExistingClassicEnglishPlayerBodyPath(extension, job, sex, buf)) {
+        return buf;
     }
 
     std::strcpy(buf, fallbackPath);
@@ -1554,6 +1686,11 @@ void CSession::ClearStorageItems()
     m_storageItems.clear();
 }
 
+void CSession::ClearCartItems()
+{
+    m_cartItems.clear();
+}
+
 void CSession::ClearSkillItems()
 {
     m_skillItems.clear();
@@ -1785,6 +1922,266 @@ void CSession::RemoveStorageItem(unsigned int itemIndex, int amount)
         }
         return;
     }
+}
+
+void CSession::OpenCart(int currentCount, int maxCount, int currentWeight, int maxWeight)
+{
+    m_cartActive = true;
+    m_cartCurrentCount = (std::max)(0, currentCount);
+    m_cartMaxCount = (std::max)(0, maxCount);
+    m_cartCurrentWeight = (std::max)(0, currentWeight);
+    m_cartMaxWeight = (std::max)(0, maxWeight);
+}
+
+void CSession::CloseCart()
+{
+    m_cartActive = false;
+    m_cartCurrentCount = 0;
+    m_cartMaxCount = 0;
+    m_cartCurrentWeight = 0;
+    m_cartMaxWeight = 0;
+    ClearCartItems();
+}
+
+void CSession::SetCartItem(const ITEM_INFO& itemInfo)
+{
+    auto it = std::find_if(m_cartItems.begin(), m_cartItems.end(), [&](const ITEM_INFO& existing) {
+        return existing.m_itemIndex == itemInfo.m_itemIndex;
+    });
+
+    if (it != m_cartItems.end()) {
+        *it = itemInfo;
+        return;
+    }
+
+    m_cartItems.push_back(itemInfo);
+}
+
+void CSession::AddCartItem(const ITEM_INFO& itemInfo)
+{
+    auto it = std::find_if(m_cartItems.begin(), m_cartItems.end(), [&](const ITEM_INFO& existing) {
+        return existing.m_itemIndex == itemInfo.m_itemIndex;
+    });
+
+    if (it != m_cartItems.end()) {
+        it->m_num += itemInfo.m_num;
+        if (itemInfo.GetItemId() != 0) {
+            it->SetItemId(itemInfo.GetItemId());
+        }
+        if (itemInfo.m_itemType != 0) {
+            it->m_itemType = itemInfo.m_itemType;
+        }
+        if (itemInfo.m_location != 0) {
+            it->m_location = itemInfo.m_location;
+        }
+        if (itemInfo.m_wearLocation != 0) {
+            it->m_wearLocation = itemInfo.m_wearLocation;
+        }
+        it->m_isIdentified = itemInfo.m_isIdentified;
+        it->m_isDamaged = itemInfo.m_isDamaged;
+        it->m_refiningLevel = itemInfo.m_refiningLevel;
+        it->m_deleteTime = itemInfo.m_deleteTime;
+        std::memcpy(it->m_slot, itemInfo.m_slot, sizeof(it->m_slot));
+        return;
+    }
+
+    m_cartItems.push_back(itemInfo);
+    if (m_cartActive) {
+        ++m_cartCurrentCount;
+    }
+}
+
+void CSession::RemoveCartItem(unsigned int itemIndex, int amount)
+{
+    for (auto it = m_cartItems.begin(); it != m_cartItems.end(); ++it) {
+        if (it->m_itemIndex != itemIndex) {
+            continue;
+        }
+
+        if (amount <= 0 || it->m_num <= amount) {
+            m_cartItems.erase(it);
+            if (m_cartActive) {
+                m_cartCurrentCount = (std::max)(0, m_cartCurrentCount - 1);
+            }
+        } else {
+            it->m_num -= amount;
+        }
+        return;
+    }
+}
+
+bool CSession::IsCartActive() const { return m_cartActive; }
+int CSession::GetCartCurrentCount() const { return m_cartCurrentCount; }
+int CSession::GetCartMaxCount() const { return m_cartMaxCount; }
+int CSession::GetCartCurrentWeight() const { return m_cartCurrentWeight; }
+int CSession::GetCartMaxWeight() const { return m_cartMaxWeight; }
+const std::list<ITEM_INFO>& CSession::GetCartItems() const { return m_cartItems; }
+
+void CSession::SetPetProperty(const char* name, int level, int fullness, int intimacy, int itemId, int job)
+{
+    m_petActive = true;
+    std::memset(m_petName, 0, sizeof(m_petName));
+    if (name) {
+        std::strncpy(m_petName, name, sizeof(m_petName) - 1);
+    }
+    m_petLevel = level;
+    m_petFullness = fullness;
+    m_petIntimacy = intimacy;
+    m_petItemId = itemId;
+    m_petJob = job;
+}
+
+void CSession::SetPetEggList(const std::vector<int>& eggs)
+{
+    m_petEggList = eggs;
+}
+
+void CSession::ClearPet()
+{
+    m_petActive = false;
+    std::memset(m_petName, 0, sizeof(m_petName));
+    m_petLevel = 0;
+    m_petFullness = 0;
+    m_petIntimacy = 0;
+    m_petItemId = 0;
+    m_petJob = 0;
+    m_petEggList.clear();
+}
+
+bool CSession::IsPetActive() const { return m_petActive; }
+
+void CSession::SetHomunProperty(u32 gid, const char* name, int level, int hp, int maxHp, int sp, int maxSp, int hunger, int intimacy)
+{
+    m_homunActive = true;
+    m_homunGid = gid;
+    std::memset(m_homunName, 0, sizeof(m_homunName));
+    if (name) {
+        std::strncpy(m_homunName, name, sizeof(m_homunName) - 1);
+    }
+    m_homunLevel = level;
+    m_homunHp = hp;
+    m_homunMaxHp = maxHp;
+    m_homunSp = sp;
+    m_homunMaxSp = maxSp;
+    m_homunHunger = hunger;
+    m_homunIntimacy = intimacy;
+}
+
+void CSession::ClearHomun()
+{
+    m_homunActive = false;
+    m_homunGid = 0;
+    std::memset(m_homunName, 0, sizeof(m_homunName));
+    m_homunLevel = 0;
+    m_homunHp = m_homunMaxHp = m_homunSp = m_homunMaxSp = 0;
+    m_homunHunger = m_homunIntimacy = 0;
+    ClearHomunSkillItems();
+}
+
+bool CSession::IsHomunActive() const { return m_homunActive; }
+
+void CSession::SetMercProperty(u32 gid, const char* name, int level, int hp, int maxHp, int sp, int maxSp, int faith, int calls, u32 expireTime)
+{
+    m_mercActive = true;
+    m_mercGid = gid;
+    std::memset(m_mercName, 0, sizeof(m_mercName));
+    if (name) {
+        std::strncpy(m_mercName, name, sizeof(m_mercName) - 1);
+    }
+    m_mercLevel = level;
+    m_mercHp = hp;
+    m_mercMaxHp = maxHp;
+    m_mercSp = sp;
+    m_mercMaxSp = maxSp;
+    m_mercFaith = faith;
+    m_mercCalls = calls;
+    m_mercExpireTime = expireTime;
+}
+
+void CSession::ClearMerc()
+{
+    m_mercActive = false;
+    m_mercGid = 0;
+    std::memset(m_mercName, 0, sizeof(m_mercName));
+    m_mercLevel = 0;
+    m_mercHp = m_mercMaxHp = m_mercSp = m_mercMaxSp = 0;
+    m_mercFaith = m_mercCalls = 0;
+    m_mercExpireTime = 0;
+    ClearMercSkillItems();
+}
+
+bool CSession::IsMercActive() const { return m_mercActive; }
+
+void CSession::SetGuildBasic(int guildId, int emblemId, const char* name, const char* masterName)
+{
+    m_guildId = guildId;
+    m_guildEmblemId = emblemId;
+    std::memset(m_guildName, 0, sizeof(m_guildName));
+    if (name) {
+        std::strncpy(m_guildName, name, sizeof(m_guildName) - 1);
+    }
+    std::memset(m_guildMasterName, 0, sizeof(m_guildMasterName));
+    if (masterName) {
+        std::strncpy(m_guildMasterName, masterName, sizeof(m_guildMasterName) - 1);
+    }
+}
+
+void CSession::ClearGuild()
+{
+    m_guildId = 0;
+    m_guildEmblemId = 0;
+    std::memset(m_guildName, 0, sizeof(m_guildName));
+    std::memset(m_guildMasterName, 0, sizeof(m_guildMasterName));
+    m_guildMembers.clear();
+}
+
+bool CSession::IsInGuild() const { return m_guildId != 0; }
+
+void CSession::SetGuildMembers(std::vector<GUILD_MEMBER> members)
+{
+    m_guildMembers = std::move(members);
+}
+
+const std::vector<GUILD_MEMBER>& CSession::GetGuildMembers() const
+{
+    return m_guildMembers;
+}
+
+void CSession::OpenMailBox() { m_mailBoxOpen = true; }
+
+void CSession::CloseMailBox()
+{
+    m_mailBoxOpen = false;
+    m_mailHeaders.clear();
+    m_mailReadBody = MAIL_BODY{};
+}
+
+bool CSession::IsMailBoxOpen() const { return m_mailBoxOpen; }
+
+void CSession::SetMailHeaders(std::vector<MAIL_HEADER> headers) { m_mailHeaders = std::move(headers); }
+const std::vector<MAIL_HEADER>& CSession::GetMailHeaders() const { return m_mailHeaders; }
+void CSession::SetMailReadBody(const MAIL_BODY& body) { m_mailReadBody = body; }
+const MAIL_BODY& CSession::GetMailReadBody() const { return m_mailReadBody; }
+
+bool CSession::RemoveMailHeader(u32 mailId)
+{
+    for (auto it = m_mailHeaders.begin(); it != m_mailHeaders.end(); ++it) {
+        if (it->mailId == mailId) {
+            m_mailHeaders.erase(it);
+            return true;
+        }
+    }
+    return false;
+}
+
+const ITEM_INFO* CSession::GetCartItemByIndex(unsigned int itemIndex) const
+{
+    for (const ITEM_INFO& item : m_cartItems) {
+        if (item.m_itemIndex == itemIndex) {
+            return &item;
+        }
+    }
+    return nullptr;
 }
 
 bool CSession::SetInventoryItemWearLocation(unsigned int itemIndex, int wearLocation)
@@ -2439,10 +2836,12 @@ const char* CSession::GetJobDisplayName(int job) const
         return inserted.first->second.c_str();
     }
 
+    const char* generatedName = LookupGeneratedJobName(job);
+    auto inserted = m_jobDisplayNameCache.emplace(job, generatedName ? generatedName : "");
     DbgLog("[Session] Falling back to generated display job name job=%d name='%s'\n",
         job,
-        LookupGeneratedJobName(job) ? LookupGeneratedJobName(job) : "");
-    return LookupGeneratedJobName(job);
+        inserted.first->second.c_str());
+    return inserted.first->second.c_str();
 }
 
 const char* CSession::GetJobName(int job) const
@@ -2527,17 +2926,23 @@ int CSession::GetSex() const
 
 char* CSession::GetJobActName(int job, int sex, char* buf)
 {
-    const char* sexToken = GetSexToken(sex);
     const std::string jobToken = ResolveExistingPlayerBodyJobToken(job, sex);
-    std::sprintf(buf, "%s%s\\%s\\%s_%s.act", kHumanSpriteRoot, kBodyDir, sexToken, jobToken.c_str(), sexToken);
+    if (!TryBuildExistingPlayerBodyPath("act", jobToken, sex, buf)
+        && !TryBuildExistingClassicEnglishPlayerBodyPath("act", job, sex, buf)) {
+        const char* sexToken = GetSexToken(sex);
+        std::sprintf(buf, "%s%s\\%s\\%s_%s.act", kHumanSpriteRoot, kBodyDir, sexToken, jobToken.c_str(), sexToken);
+    }
     return buf;
 }
 
 char* CSession::GetJobSprName(int job, int sex, char* buf)
 {
-    const char* sexToken = GetSexToken(sex);
     const std::string jobToken = ResolveExistingPlayerBodyJobToken(job, sex);
-    std::sprintf(buf, "%s%s\\%s\\%s_%s.spr", kHumanSpriteRoot, kBodyDir, sexToken, jobToken.c_str(), sexToken);
+    if (!TryBuildExistingPlayerBodyPath("spr", jobToken, sex, buf)
+        && !TryBuildExistingClassicEnglishPlayerBodyPath("spr", job, sex, buf)) {
+        const char* sexToken = GetSexToken(sex);
+        std::sprintf(buf, "%s%s\\%s\\%s_%s.spr", kHumanSpriteRoot, kBodyDir, sexToken, jobToken.c_str(), sexToken);
+    }
     return buf;
 }
 
@@ -2558,8 +2963,10 @@ char* CSession::GetHeadActName(int job, int* head, int sex, char* buf)
     if (head) {
         *head = resolvedHead;
     }
-    const char* sexToken = GetSexToken(sex);
-    std::sprintf(buf, "%s%s\\%s\\%d_%s.act", kHumanSpriteRoot, kHeadDir, sexToken, resolvedHead, sexToken);
+    if (!TryBuildExistingHeadPath("act", resolvedHead, sex, buf)) {
+        const char* sexToken = GetSexToken(sex);
+        std::sprintf(buf, "%s%s\\%s\\%d_%s.act", kHumanSpriteRoot, kHeadDir, sexToken, resolvedHead, sexToken);
+    }
     return buf;
 }
 
@@ -2570,8 +2977,10 @@ char* CSession::GetHeadSprName(int job, int* head, int sex, char* buf)
     if (head) {
         *head = resolvedHead;
     }
-    const char* sexToken = GetSexToken(sex);
-    std::sprintf(buf, "%s%s\\%s\\%d_%s.spr", kHumanSpriteRoot, kHeadDir, sexToken, resolvedHead, sexToken);
+    if (!TryBuildExistingHeadPath("spr", resolvedHead, sex, buf)) {
+        const char* sexToken = GetSexToken(sex);
+        std::sprintf(buf, "%s%s\\%s\\%d_%s.spr", kHumanSpriteRoot, kHeadDir, sexToken, resolvedHead, sexToken);
+    }
     return buf;
 }
 

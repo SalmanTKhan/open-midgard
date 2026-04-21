@@ -46,6 +46,7 @@ constexpr float kAttachedActorRenderLagMs = 110.0f;
 constexpr float kAttachedActorRenderLagMinMs = 70.0f;
 constexpr float kAttachedActorRenderLagMaxMs = 220.0f;
 constexpr float kAttachedActorTrailSampleMs = 45.0f;
+constexpr int kEmotionMsgEffectType = 18;
 
 bool ShouldTraceAttachedCartEffect(const CMsgEffect& effect)
 {
@@ -139,19 +140,22 @@ bool IsSpriteBackedMsgEffectType(int msgEffectType)
 {
     return msgEffectType == kMissMsgEffectType
         || msgEffectType == kCriticalMsgEffectType
-        || msgEffectType == kLuckyDodgeMsgEffectType;
+        || msgEffectType == kLuckyDodgeMsgEffectType
+        || msgEffectType == kEmotionMsgEffectType;
 }
 
 bool IsAnimatedSpriteBackedMsgEffectType(int msgEffectType)
 {
     return msgEffectType == kCriticalMsgEffectType
-        || msgEffectType == kLuckyDodgeMsgEffectType;
+        || msgEffectType == kLuckyDodgeMsgEffectType
+        || msgEffectType == kEmotionMsgEffectType;
 }
 
 bool TryPlayMsgSpriteMotionEvent(const CMsgEffect& effect, int motionIndex)
 {
-    CActRes* act = GetMissEffectAct();
-    if (!act) {
+    CSprRes* sprite = nullptr;
+    CActRes* act = nullptr;
+    if (!ResolveMsgSpriteResources(effect.m_customSpritePath, effect.m_customActPath, &sprite, &act)) {
         return false;
     }
 
@@ -1083,20 +1087,6 @@ bool GetMsgSpriteDrawBounds(const QueuedMsgSpriteEffectDraw& draw, RECT* outRect
     return true;
 }
 
-int ResolveMsgSpriteMotionCount(int actionIndex)
-{
-    CActRes* act = GetMissEffectAct();
-    if (!act) {
-        return 0;
-    }
-
-    int motionCount = 0;
-    while (act->GetMotion(actionIndex, motionCount)) {
-        ++motionCount;
-    }
-    return motionCount;
-}
-
 void ResolveLateralOffset(float rotationDegrees, float* outX, float* outZ)
 {
     if (!outX || !outZ) {
@@ -1913,7 +1903,7 @@ u8 CMsgEffect::OnProcess()
         m_zoom = stateCount >= 0.0f ? (std::max)(1.0f, m_orgZoom - stateCount * 0.14400001f) : m_orgZoom;
         m_alpha = (std::max)(0, static_cast<int>(255.0f - stateCount * 3.45f));
 
-        const int motionCount = ResolveMsgSpriteMotionCount(m_spriteActionIndex);
+        const int motionCount = ResolveMsgSpriteMotionCountForEffect(*this, m_spriteActionIndex);
         if (motionCount <= 0) {
             m_isDisappear = 1;
             break;
@@ -1939,13 +1929,42 @@ u8 CMsgEffect::OnProcess()
             m_pos.z = m_masterActor->m_pos.z;
         }
 
-        const int motionCount = ResolveMsgSpriteMotionCount(m_spriteActionIndex);
+        const int motionCount = ResolveMsgSpriteMotionCountForEffect(*this, m_spriteActionIndex);
         if (motionCount <= 0) {
             m_isDisappear = 1;
             break;
         }
 
         const int nextMotionIndex = (std::min)(static_cast<int>(stateCount), motionCount - 1);
+        if (m_lastProcessedSpriteMotionIndex >= 0 && nextMotionIndex > m_lastProcessedSpriteMotionIndex) {
+            for (int motionIndex = m_lastProcessedSpriteMotionIndex + 1; motionIndex <= nextMotionIndex; ++motionIndex) {
+                TryPlayMsgSpriteMotionEvent(*this, motionIndex);
+            }
+        }
+
+        m_spriteMotionIndex = nextMotionIndex;
+        m_lastProcessedSpriteMotionIndex = nextMotionIndex;
+        m_alpha = 255;
+        m_zoom = m_orgZoom;
+        if (stateCount >= static_cast<float>(motionCount)) {
+            m_isDisappear = 1;
+        }
+        break;
+    }
+    case kEmotionMsgEffectType: {
+        if (m_masterActor) {
+            m_pos.x = m_masterActor->m_pos.x;
+            m_pos.z = m_masterActor->m_pos.z;
+            m_pos.y = m_masterActor->m_pos.y - 20.0f;
+        }
+
+        const int motionCount = ResolveMsgSpriteMotionCountForEffect(*this, m_spriteActionIndex);
+        if (motionCount <= 0) {
+            m_isDisappear = 1;
+            break;
+        }
+
+        const int nextMotionIndex = (std::min)(static_cast<int>(stateCount * 0.5f), motionCount - 1);
         if (m_lastProcessedSpriteMotionIndex >= 0 && nextMotionIndex > m_lastProcessedSpriteMotionIndex) {
             for (int motionIndex = m_lastProcessedSpriteMotionIndex + 1; motionIndex <= nextMotionIndex; ++motionIndex) {
                 TryPlayMsgSpriteMotionEvent(*this, motionIndex);

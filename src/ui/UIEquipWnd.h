@@ -32,8 +32,11 @@ public:
         bool occupied = false;
         bool hovered = false;
         bool leftColumn = false;
+        unsigned int itemIndex = 0;
         unsigned int itemId = 0;
         std::string label;
+        std::string slotTypeName;
+        std::string slotGlyph;
     };
 
     struct DisplayData {

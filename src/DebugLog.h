@@ -6,6 +6,42 @@
 #include <cstdarg>
 #include <cstring>
 
+inline bool& DbgLogConsoleEnabled()
+{
+    static bool enabled = false;
+    return enabled;
+}
+
+inline void EnableDbgLogConsole(bool enabled)
+{
+#if RO_PLATFORM_WINDOWS
+    if (!enabled) {
+        return;
+    }
+
+    static bool initialized = false;
+    if (!initialized) {
+        if (!GetConsoleWindow()) {
+            if (!AllocConsole()) {
+                return;
+            }
+        }
+
+        FILE* stream = nullptr;
+        freopen_s(&stream, "CONOUT$", "w", stdout);
+        freopen_s(&stream, "CONOUT$", "w", stderr);
+        freopen_s(&stream, "CONIN$", "r", stdin);
+        setvbuf(stdout, nullptr, _IONBF, 0);
+        setvbuf(stderr, nullptr, _IONBF, 0);
+        initialized = true;
+    }
+
+    DbgLogConsoleEnabled() = true;
+#else
+    (void)enabled;
+#endif
+}
+
 inline void DbgLog(const char* fmt, ...)
 {
     char msg[1024];
@@ -43,5 +79,10 @@ inline void DbgLog(const char* fmt, ...)
     {
         fputs(line, f);
         fclose(f);
+    }
+
+    if (DbgLogConsoleEnabled()) {
+        fputs(line, stdout);
+        fflush(stdout);
     }
 }

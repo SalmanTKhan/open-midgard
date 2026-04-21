@@ -208,12 +208,26 @@ void FillPacketSizeTable(PacketSizeTable& packetSizeTable)
     SetPacketSize(0x0141, 14);
     SetPacketSize(0x0142, 6);
     SetPacketSize(0x0148, 8);
+    SetPacketSize(0x014C, kVariablePacketSize); // ZC_MYGUILD_BASIC_INFO (ally list)
+    SetPacketSize(0x014E, 6);                   // ZC_ACK_CREATE_GUILD
+    SetPacketSize(0x0152, kVariablePacketSize); // ZC_GUILD_EMBLEM_IMG
+    SetPacketSize(0x0154, kVariablePacketSize); // ZC_MEMBERMGR_INFO (entry 104)
+    SetPacketSize(0x0156, kVariablePacketSize); // ZC_ACK_REQ_CHANGE_MEMBERS (entry 12)
+    SetPacketSize(0x015A, 66);                  // ZC_ACK_BAN_GUILD
+    SetPacketSize(0x015C, 66);                  // ZC_ACK_LEAVE_GUILD (mes 40)
+    SetPacketSize(0x015E, 6);                   // ZC_ACK_DISORGANIZE_GUILD
+    SetPacketSize(0x0160, kVariablePacketSize); // ZC_POSITION_ID_NAME_INFO
+    SetPacketSize(0x0162, kVariablePacketSize); // ZC_GUILD_SKILLINFO
     SetPacketSize(0x0163, kVariablePacketSize);
     SetPacketSize(0x0164, kVariablePacketSize);
     SetPacketSize(0x0165, 30);
     SetPacketSize(0x0166, kVariablePacketSize);
     SetPacketSize(0x0167, 3);
     SetPacketSize(0x0168, 14);
+    SetPacketSize(0x016A, 14);                  // ZC_REQ_JOIN_GUILD
+    SetPacketSize(0x016C, 114);                 // ZC_UPDATE_GDID (basic info pre-renewal)
+    SetPacketSize(0x016D, 14);                  // ZC_UPDATE_CHARSTAT
+    SetPacketSize(0x016F, 182);                 // ZC_GUILD_NOTICE
     SetPacketSize(0x0170, 14);
     SetPacketSize(0x0171, 30);
     SetPacketSize(0x0172, 10);

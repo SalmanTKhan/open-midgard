@@ -17,6 +17,7 @@ public:
     void OnDraw() override;
     void OnLBtnDown(int x, int y) override;
     void OnLBtnDblClk(int x, int y) override;
+    void OnRBtnDown(int x, int y) override;
     void OnMouseMove(int x, int y) override;
     void OnWheel(int delta) override;
     void HandleKeyDown(int virtualKey);
@@ -25,6 +26,7 @@ public:
     int GetVisibleRowCountForQt() const;
 
 private:
+    void PromptShopAmount(int rowIndex);
     int GetVisibleRowCount() const;
     int GetMaxViewOffset() const;
     RECT GetListRect() const;

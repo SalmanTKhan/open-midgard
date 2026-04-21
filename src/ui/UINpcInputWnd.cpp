@@ -1,5 +1,7 @@
 #include "UINpcInputWnd.h"
 
+#include "input/Gamepad.h"
+#include "gamemode/CursorRenderer.h"
 #include "render/DC.h"
 #include "UIWindow.h"
 #include "UIWindowMgr.h"
@@ -73,6 +75,21 @@ RECT MakeRect(int left, int top, int width, int height)
 {
     RECT rect{ left, top, left + width, top + height };
     return rect;
+}
+
+void SnapCursorToRect(const RECT& rect)
+{
+#if RO_HAS_GAMEPAD
+    if (!gamepad::g_gamepad.IsConnected()) {
+        return;
+    }
+
+    const int centerX = (rect.left + rect.right) / 2;
+    const int centerY = (rect.top + rect.bottom) / 2;
+    SetModeCursorClientPos(centerX, centerY);
+#else
+    (void)rect;
+#endif
 }
 
 #if RO_ENABLE_QT6_UI
@@ -354,6 +371,7 @@ void UINpcInputWnd::OpenForMode(u32 npcId, InputMode mode, SubmitAction action, 
     m_pressedTarget = ClickTarget::None;
     SetShow(1);
     g_windowMgr.m_editWindow = m_editCtrl;
+    SnapCursorToRect(GetOkRect());
     Invalidate();
 }
 
@@ -410,9 +428,6 @@ bool UINpcInputWnd::SubmitCurrentText()
     u32 numericValue = 0;
     if (m_submitAction == SubmitAction::GameMessage) {
         numericValue = std::strtoul(text, nullptr, 10);
-        if (numericValue == 0) {
-            return false;
-        }
         if (m_maxNumberValue > 0) {
             numericValue = (std::min)(numericValue, m_maxNumberValue);
         }

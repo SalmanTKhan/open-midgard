@@ -20,6 +20,121 @@
 #include <algorithm>
 #include <cstdlib>
 
+#ifdef WM_MOUSEMOVE
+#undef WM_MOUSEMOVE
+#endif
+#ifdef WM_LBUTTONDOWN
+#undef WM_LBUTTONDOWN
+#endif
+#ifdef WM_LBUTTONUP
+#undef WM_LBUTTONUP
+#endif
+#ifdef WM_LBUTTONDBLCLK
+#undef WM_LBUTTONDBLCLK
+#endif
+#ifdef WM_RBUTTONDOWN
+#undef WM_RBUTTONDOWN
+#endif
+#ifdef WM_RBUTTONUP
+#undef WM_RBUTTONUP
+#endif
+#ifdef WM_MOUSEWHEEL
+#undef WM_MOUSEWHEEL
+#endif
+#ifdef WM_CHAR
+#undef WM_CHAR
+#endif
+#ifdef WM_KEYDOWN
+#undef WM_KEYDOWN
+#endif
+#ifdef WM_SYSKEYDOWN
+#undef WM_SYSKEYDOWN
+#endif
+#ifdef WM_ACTIVATE
+#undef WM_ACTIVATE
+#endif
+#ifdef WM_CLOSE
+#undef WM_CLOSE
+#endif
+#ifdef MK_LBUTTON
+#undef MK_LBUTTON
+#endif
+#ifdef MK_RBUTTON
+#undef MK_RBUTTON
+#endif
+#ifdef WA_INACTIVE
+#undef WA_INACTIVE
+#endif
+#ifdef WA_ACTIVE
+#undef WA_ACTIVE
+#endif
+#ifdef VK_BACK
+#undef VK_BACK
+#endif
+#ifdef VK_TAB
+#undef VK_TAB
+#endif
+#ifdef VK_RETURN
+#undef VK_RETURN
+#endif
+#ifdef VK_SHIFT
+#undef VK_SHIFT
+#endif
+#ifdef VK_CONTROL
+#undef VK_CONTROL
+#endif
+#ifdef VK_MENU
+#undef VK_MENU
+#endif
+#ifdef VK_ESCAPE
+#undef VK_ESCAPE
+#endif
+#ifdef VK_PRIOR
+#undef VK_PRIOR
+#endif
+#ifdef VK_NEXT
+#undef VK_NEXT
+#endif
+#ifdef VK_LEFT
+#undef VK_LEFT
+#endif
+#ifdef VK_UP
+#undef VK_UP
+#endif
+#ifdef VK_RIGHT
+#undef VK_RIGHT
+#endif
+#ifdef VK_DOWN
+#undef VK_DOWN
+#endif
+#ifdef VK_INSERT
+#undef VK_INSERT
+#endif
+#ifdef VK_DELETE
+#undef VK_DELETE
+#endif
+#ifdef VK_F1
+#undef VK_F1
+#endif
+#ifdef VK_F9
+#undef VK_F9
+#endif
+#ifdef VK_F10
+#undef VK_F10
+#endif
+#ifdef VK_F11
+#undef VK_F11
+#endif
+#ifdef VK_F12
+#undef VK_F12
+#endif
+#ifdef VK_OEM_PLUS
+#undef VK_OEM_PLUS
+#endif
+#ifdef VK_OEM_MINUS
+#undef VK_OEM_MINUS
+#endif
+
 namespace {
 
 constexpr unsigned int WM_MOUSEMOVE = 0x0200u;
@@ -348,6 +463,17 @@ bool RoQtGetCursorPos(POINT* point)
     const QPoint pos = QCursor::pos();
     point->x = pos.x();
     point->y = pos.y();
+    return true;
+}
+
+bool RoQtSetCursorPos(RoNativeWindowHandle window, int x, int y)
+{
+    RoQtMainWindow* mainWindow = AsWindow(window);
+    if (!mainWindow) {
+        return false;
+    }
+
+    QCursor::setPos(mainWindow->mapToGlobal(QPoint(x, y)));
     return true;
 }
 

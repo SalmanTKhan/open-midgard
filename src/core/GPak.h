@@ -17,7 +17,7 @@ struct PakPack
     unsigned int m_compressSize;    // Compressed size after encryption strip
     unsigned int m_dataSize;        // Size of the encrypted/compressed block
     unsigned int m_size;            // Original (uncompressed) size
-    uint8_t      m_type;            // Bit flags: 0x2=encrypted, 0x4=never-encrypt
+    uint8_t      m_type;            // GRF flags or Alpha entry type
     unsigned int m_Offset;          // Byte offset inside the archive
 };
 
@@ -32,7 +32,7 @@ struct PakPrtLess
 
 class CMemFile;
 //===========================================================================
-// CGPak  –  Reader for Gravity's .grf archive format (versions 0x100–0x103)
+// CGPak  –  Reader for Gravity archive formats, including Alpha and GRF 0x100–0x200
 //===========================================================================
 class CGPak
 {
@@ -57,6 +57,7 @@ public:
 protected:
     void Init();
 
+    bool OpenPakAlpha(); // Alpha client archive format (v0x12 trailer table)
     bool OpenPak01();   // GRF version 0x100–0x103 (DES encrypted index)
     bool OpenPak02();   // GRF version 0x200 (zlib compressed index)
 

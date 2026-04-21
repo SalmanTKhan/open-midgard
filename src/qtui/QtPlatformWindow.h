@@ -25,6 +25,7 @@ void RoQtProcessEvents();
 bool RoQtGetClientRect(RoNativeWindowHandle window, RECT* rect);
 bool RoQtScreenToClient(RoNativeWindowHandle window, POINT* point);
 bool RoQtGetCursorPos(POINT* point);
+bool RoQtSetCursorPos(RoNativeWindowHandle window, int x, int y);
 bool RoQtSetWindowTitle(RoNativeWindowHandle window, const char* title);
 bool RoQtShowWindow(RoNativeWindowHandle window);
 bool RoQtFocusWindow(RoNativeWindowHandle window);
@@ -38,6 +39,7 @@ inline void RoQtProcessEvents() {}
 inline bool RoQtGetClientRect(RoNativeWindowHandle, RECT*) { return false; }
 inline bool RoQtScreenToClient(RoNativeWindowHandle, POINT*) { return false; }
 inline bool RoQtGetCursorPos(POINT*) { return false; }
+inline bool RoQtSetCursorPos(RoNativeWindowHandle, int, int) { return false; }
 inline bool RoQtSetWindowTitle(RoNativeWindowHandle, const char*) { return false; }
 inline bool RoQtShowWindow(RoNativeWindowHandle) { return false; }
 inline bool RoQtFocusWindow(RoNativeWindowHandle) { return false; }

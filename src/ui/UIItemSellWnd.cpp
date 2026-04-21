@@ -1,5 +1,6 @@
 #include "UIItemSellWnd.h"
 
+#include "UINpcInputWnd.h"
 #include "UIShopCommon.h"
 #include "UIItemShopWnd.h"
 #include "UIWindowMgr.h"
@@ -18,13 +19,11 @@
 namespace {
 
 constexpr int kWindowWidth = 240;
-constexpr int kWindowHeight = 274;
-constexpr int kListTop = 22;
+constexpr int kWindowHeight = 298;
+constexpr int kListTop = 26;
 constexpr int kListBottomMargin = 58;
 constexpr int kListSideMargin = 8;
-constexpr int kRowHeight = 18;
-constexpr int kButtonWidth = 68;
-constexpr int kButtonHeight = 20;
+constexpr int kButtonHeight = 22;
 
 std::string FormatNumber(int value)
 {
@@ -50,6 +49,15 @@ void DrawButton(HDC hdc, const RECT& rect, const char* label, bool hot, bool pre
     shopui::FillRectColor(hdc, rect, fill);
     shopui::FrameRectColor(hdc, rect, RGB(88, 88, 88));
     shopui::DrawWindowTextRect(hdc, rect, label ? label : "", RGB(24, 24, 24), DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+}
+
+bool IsCtrlHeldForSell()
+{
+#if RO_PLATFORM_WINDOWS
+    return (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0;
+#else
+    return false;
+#endif
 }
 
 } // namespace
@@ -109,7 +117,7 @@ RECT UIItemSellWnd::GetListRect() const
 
 int UIItemSellWnd::GetVisibleRowCount() const
 {
-    return (std::max)(1, (m_h - kListTop - kListBottomMargin) / kRowHeight);
+    return (std::max)(1, (m_h - kListTop - kListBottomMargin) / shopui::ShopRowHeight());
 }
 
 int UIItemSellWnd::GetMaxViewOffset() const
@@ -128,7 +136,7 @@ int UIItemSellWnd::HitTestDealRow(int x, int y) const
         return -1;
     }
 
-    const int localRow = (y - listRect.top) / kRowHeight;
+    const int localRow = (y - listRect.top) / shopui::ShopRowHeight();
     const int rowIndex = m_viewOffset + localRow - 1;
     if (rowIndex < 0 || rowIndex >= static_cast<int>(g_session.m_shopDealRows.size())) {
         return -1;
@@ -138,15 +146,12 @@ int UIItemSellWnd::HitTestDealRow(int x, int y) const
 
 RECT UIItemSellWnd::GetButtonRect(ButtonId buttonId) const
 {
+    const int actionY = m_y + m_h - 32;
     switch (buttonId) {
-    case ButtonAdd:
-        return shopui::MakeRect(m_x + 10, m_y + m_h - 52, kButtonWidth, kButtonHeight);
-    case ButtonRemove:
-        return shopui::MakeRect(m_x + 84, m_y + m_h - 52, kButtonWidth, kButtonHeight);
     case ButtonConfirm:
-        return shopui::MakeRect(m_x + 10, m_y + m_h - 28, 104, kButtonHeight);
+        return shopui::MakeRect(m_x + 10, actionY, 104, kButtonHeight);
     case ButtonCancel:
-        return shopui::MakeRect(m_x + 124, m_y + m_h - 28, 104, kButtonHeight);
+        return shopui::MakeRect(m_x + 124, actionY, 104, kButtonHeight);
     default:
         return shopui::MakeRect(0, 0, 0, 0);
     }
@@ -154,7 +159,7 @@ RECT UIItemSellWnd::GetButtonRect(ButtonId buttonId) const
 
 UIItemSellWnd::ButtonId UIItemSellWnd::HitTestButton(int x, int y) const
 {
-    for (int id = ButtonAdd; id <= ButtonCancel; ++id) {
+    for (int id = 0; id < ButtonCount; ++id) {
         const RECT rect = GetButtonRect(static_cast<ButtonId>(id));
         if (x >= rect.left && x < rect.right && y >= rect.top && y < rect.bottom) {
             return static_cast<ButtonId>(id);
@@ -166,18 +171,6 @@ UIItemSellWnd::ButtonId UIItemSellWnd::HitTestButton(int x, int y) const
 void UIItemSellWnd::ActivateButton(ButtonId buttonId)
 {
     switch (buttonId) {
-    case ButtonAdd:
-        if (g_session.m_shopSelectedSourceRow >= 0) {
-            g_session.AdjustNpcShopDealBySourceRow(static_cast<size_t>(g_session.m_shopSelectedSourceRow), 1);
-        }
-        break;
-    case ButtonRemove:
-        if (g_session.m_shopSelectedDealRow >= 0) {
-            g_session.AdjustNpcShopDealByDealRow(static_cast<size_t>(g_session.m_shopSelectedDealRow), -1);
-        } else if (g_session.m_shopSelectedSourceRow >= 0) {
-            g_session.AdjustNpcShopDealBySourceRow(static_cast<size_t>(g_session.m_shopSelectedSourceRow), -1);
-        }
-        break;
     case ButtonConfirm:
         g_modeMgr.SendMsg(CGameMode::GameMsg_RequestShopSellList, 0, 0, 0);
         break;
@@ -209,7 +202,7 @@ void UIItemSellWnd::OnDraw()
     shopui::FillRectColor(hdc, listRect, RGB(248, 248, 248));
     shopui::FrameRectColor(hdc, listRect, RGB(120, 120, 120));
 
-    const RECT headerRect = shopui::MakeRect(listRect.left + 1, listRect.top + 1, listRect.right - listRect.left - 2, kRowHeight - 1);
+    const RECT headerRect = shopui::MakeRect(listRect.left + 1, listRect.top + 1, listRect.right - listRect.left - 2, shopui::ShopRowHeight() - 1);
     shopui::FillRectColor(hdc, headerRect, RGB(222, 229, 237));
     shopui::DrawWindowTextRect(hdc, shopui::MakeRect(headerRect.left + 4, headerRect.top + 1, 126, headerRect.bottom - headerRect.top - 2), "Item", RGB(30, 30, 30), DT_LEFT | DT_VCENTER | DT_SINGLELINE);
     shopui::DrawWindowTextRect(hdc, shopui::MakeRect(headerRect.left + 126, headerRect.top + 1, 34, headerRect.bottom - headerRect.top - 2), "Qty", RGB(30, 30, 30), DT_CENTER | DT_VCENTER | DT_SINGLELINE);
@@ -221,9 +214,9 @@ void UIItemSellWnd::OnDraw()
     for (int rowIndex = startRow; rowIndex < endRow; ++rowIndex) {
         const NPC_SHOP_DEAL_ROW& row = g_session.m_shopDealRows[static_cast<size_t>(rowIndex)];
         RECT rowRect = shopui::MakeRect(listRect.left + 1,
-            listRect.top + 1 + (rowIndex - startRow + 1) * kRowHeight,
+            listRect.top + 1 + (rowIndex - startRow + 1) * shopui::ShopRowHeight(),
             listRect.right - listRect.left - 2,
-            kRowHeight);
+            shopui::ShopRowHeight());
         const bool selected = g_session.m_shopSelectedDealRow == rowIndex;
         const bool hot = m_hoverRow == rowIndex;
         if (selected) {
@@ -254,14 +247,31 @@ void UIItemSellWnd::OnDraw()
     shopui::DrawWindowTextRect(hdc, totalLabelRect, "Total", RGB(36, 36, 36), DT_LEFT | DT_VCENTER | DT_SINGLELINE);
     shopui::DrawWindowTextRect(hdc, totalValueRect, FormatNumber(g_session.m_shopDealTotal), RGB(28, 60, 98), DT_RIGHT | DT_VCENTER | DT_SINGLELINE);
 
-    DrawButton(hdc, GetButtonRect(ButtonAdd), "Add", m_hoverButton == ButtonAdd, m_pressedButton == ButtonAdd);
-    DrawButton(hdc, GetButtonRect(ButtonRemove), "Remove", m_hoverButton == ButtonRemove, m_pressedButton == ButtonRemove);
     DrawButton(hdc, GetButtonRect(ButtonConfirm), "Sell", m_hoverButton == ButtonConfirm, m_pressedButton == ButtonConfirm);
     DrawButton(hdc, GetButtonRect(ButtonCancel), "Cancel", m_hoverButton == ButtonCancel, m_pressedButton == ButtonCancel);
 
     m_lastDrawStateToken = BuildDisplayStateToken();
     m_hasDrawStateToken = true;
     ReleaseDrawTarget(hdc);
+}
+
+void UIItemSellWnd::PromptDealAmount(int rowIndex)
+{
+    if (rowIndex < 0 || rowIndex >= static_cast<int>(g_session.m_shopDealRows.size())) {
+        return;
+    }
+    if (!g_windowMgr.m_npcInputWnd) {
+        return;
+    }
+    const NPC_SHOP_DEAL_ROW& row = g_session.m_shopDealRows[static_cast<size_t>(rowIndex)];
+    char label[96];
+    std::snprintf(label, sizeof(label), "Set quantity for %s (0 to remove)", shopui::GetItemDisplayName(row.itemInfo).c_str());
+    g_windowMgr.m_npcInputWnd->OpenGameNumberPrompt(
+        label,
+        CGameMode::GameMsg_ShopSetDealQty,
+        static_cast<msgparam_t>(rowIndex),
+        static_cast<u32>(row.quantity),
+        0);
 }
 
 void UIItemSellWnd::OnLBtnDown(int x, int y)
@@ -274,6 +284,9 @@ void UIItemSellWnd::OnLBtnDown(int x, int y)
     const int rowIndex = HitTestDealRow(x, y);
     if (rowIndex >= 0) {
         g_session.m_shopSelectedDealRow = rowIndex;
+        if (IsCtrlHeldForSell()) {
+            PromptDealAmount(rowIndex);
+        }
         return;
     }
 
@@ -283,10 +296,21 @@ void UIItemSellWnd::OnLBtnDown(int x, int y)
 void UIItemSellWnd::OnLBtnDblClk(int x, int y)
 {
     const int rowIndex = HitTestDealRow(x, y);
-    if (rowIndex >= 0) {
-        g_session.m_shopSelectedDealRow = rowIndex;
-        g_session.AdjustNpcShopDealByDealRow(static_cast<size_t>(rowIndex), -1);
+    if (rowIndex < 0) {
+        return;
     }
+    g_session.m_shopSelectedDealRow = rowIndex;
+    g_session.AdjustNpcShopDealByDealRow(static_cast<size_t>(rowIndex), -1);
+}
+
+void UIItemSellWnd::OnRBtnDown(int x, int y)
+{
+    const int rowIndex = HitTestDealRow(x, y);
+    if (rowIndex < 0) {
+        return;
+    }
+    const NPC_SHOP_DEAL_ROW& row = g_session.m_shopDealRows[static_cast<size_t>(rowIndex)];
+    g_windowMgr.ShowItemInfoWindow(row.itemInfo, x + 12, y + 12);
 }
 
 void UIItemSellWnd::OnLBtnUp(int x, int y)
@@ -323,15 +347,6 @@ void UIItemSellWnd::HandleKeyDown(int virtualKey)
         ActivateButton(ButtonConfirm);
         return;
     }
-    if (virtualKey == VK_ADD || virtualKey == VK_OEM_PLUS) {
-        ActivateButton(ButtonAdd);
-        return;
-    }
-    if (virtualKey == VK_SUBTRACT || virtualKey == VK_OEM_MINUS) {
-        ActivateButton(ButtonRemove);
-        return;
-    }
-
     if (g_session.m_shopDealRows.empty()) {
         return;
     }
@@ -384,7 +399,7 @@ int UIItemSellWnd::GetPressedButton() const
 
 bool UIItemSellWnd::GetButtonRectForQt(int buttonId, RECT* outRect) const
 {
-    if (!outRect || buttonId < ButtonAdd || buttonId > ButtonCancel) {
+    if (!outRect || buttonId < 0 || buttonId >= ButtonCount) {
         return false;
     }
 

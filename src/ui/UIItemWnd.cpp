@@ -1,10 +1,12 @@
 #include "UIItemWnd.h"
 
 #include "gamemode/GameMode.h"
+#include "input/Gamepad.h"
 #include "UIEquipWnd.h"
 #include "UINpcInputWnd.h"
 #include "UIShortCutWnd.h"
 #include "UIStorageWnd.h"
+#include "gamemode/CursorRenderer.h"
 #include "UIWindowMgr.h"
 #include "core/File.h"
 #include "item/Item.h"
@@ -12,6 +14,7 @@
 #include "qtui/QtUiRuntime.h"
 #include "render/DC.h"
 #include "res/Bitmap.h"
+#include "UiSkin.h"
 #include "render/DrawUtil.h"
 #include "session/Session.h"
 #include "ui/UIWindow.h"
@@ -112,6 +115,23 @@ bool IsPointInRect(const RECT& rect, int x, int y)
     return x >= rect.left && x < rect.right && y >= rect.top && y < rect.bottom;
 }
 
+#if RO_HAS_GAMEPAD
+void SnapCursorToRectIfNeeded(const RECT& rect)
+{
+    if (!gamepad::g_gamepad.IsConnected()) {
+        return;
+    }
+
+    POINT cursorPos{};
+    if (GetModeCursorClientPos(&cursorPos)
+        && IsPointInRect(rect, cursorPos.x, cursorPos.y)) {
+        return;
+    }
+
+    SetModeCursorClientPos((rect.left + rect.right) / 2, (rect.top + rect.bottom) / 2);
+}
+#endif
+
 void AddUniqueCandidate(std::vector<std::string>& out, const std::string& raw)
 {
     if (raw.empty()) {
@@ -167,12 +187,7 @@ std::vector<std::string> BuildUiAssetCandidates(const char* fileName)
 
 std::string ResolveUiAssetPath(const char* fileName)
 {
-    for (const std::string& candidate : BuildUiAssetCandidates(fileName)) {
-        if (g_fileMgr.IsDataExist(candidate.c_str())) {
-            return candidate;
-        }
-    }
-    return NormalizeSlash(fileName ? fileName : "");
+    return ui_skin::ResolveUiAssetPath(fileName);
 }
 
 shopui::BitmapPixels LoadBitmapPixelsFromGameData(const std::string& path)
@@ -647,6 +662,14 @@ void UIItemWnd::SetShow(int show)
     if (show != 0) {
         EnsureCreated();
         LayoutChildren();
+#if RO_HAS_GAMEPAD
+        if (m_h > kMiniHeight) {
+            const int tabCenterY = m_y + kGridTop
+                + (m_currentTab * kTabHeight) / kTabCount
+                + (kTabHeight / (2 * kTabCount));
+            SnapCursorToRectIfNeeded(RECT{ m_x, tabCenterY, m_x + 1, tabCenterY + 1 });
+        }
+#endif
     }
 }
 
@@ -1262,6 +1285,7 @@ bool UIItemWnd::GetDisplayDataForQt(DisplayData* outData) const
                 slot.occupied = true;
                 slot.hovered = itemIndex == m_hoveredItemIndex;
                 slot.count = drawItem->m_num;
+                slot.itemIndex = drawItem->m_itemIndex;
                 slot.itemId = drawItem->GetItemId();
                 slot.label = BuildShortItemLabel(*drawItem);
                 slot.tooltip = shopui::BuildItemHoverText(*drawItem);

@@ -1,5 +1,6 @@
 #include "Connection.h"
 #include "GronPacket.h"
+#include "Packet.h"
 #include "DebugLog.h"
 
 #include <algorithm>
@@ -76,11 +77,13 @@ void FormatRecentPacketHistory(char* outText, size_t outTextSize)
         const int index = (g_recentRecvPacketIndex - g_recentRecvPacketCount + i + static_cast<int>(std::size(g_recentRecvPackets)))
             % static_cast<int>(std::size(g_recentRecvPackets));
         const RecentRecvPacket& packet = g_recentRecvPackets[index];
+        const char* packetName = PacketProfile::GetOpcodeName(packet.packetId);
         cursor += std::snprintf(
             outText + cursor,
             outTextSize - cursor,
-            "%s0x%04X/%d",
+            "%s%s(0x%04X)/%d",
             (i > 0) ? " " : "",
+            packetName ? packetName : "?",
             packet.packetId,
             packet.packetSize);
     }
@@ -94,12 +97,67 @@ void LogFirstSeenUnknownRecvPacket(u16 packetId, int bufferedBytes, CPacketQueue
         char history[8 * 16 + 1] = {};
         FormatQueueSample(queue, sample, sizeof(sample));
         FormatRecentPacketHistory(history, sizeof(history));
-        DbgLog("[Net] dropping unknown recv packet id=0x%04X buffered=%d recent=%s sample=%s\n",
+        const char* packetName = PacketProfile::GetOpcodeName(packetId);
+        DbgLog("[Net] dropping unknown recv packet %s(0x%04X) buffered=%d recent=%s sample=%s\n",
+            packetName ? packetName : "?",
             packetId,
             bufferedBytes,
             history,
             sample);
     }
+}
+
+bool TryResyncUnknownRecvPacket(CPacketQueue& queue, int bufferedBytes)
+{
+    if (!PacketProfile::UsesEarlyMapServerSendProfile() || bufferedBytes < 3) {
+        return false;
+    }
+
+    char raw[32] = {};
+    const int sampleBytes = (std::min)(bufferedBytes, static_cast<int>(sizeof(raw)));
+    if (sampleBytes < 3 || !queue.Peek(raw, sampleBytes)) {
+        return false;
+    }
+
+    for (int offset = 1; offset + 1 < sampleBytes; ++offset) {
+        const u16 candidateId = static_cast<u16>(
+            static_cast<unsigned char>(raw[offset]) |
+            (static_cast<u16>(static_cast<unsigned char>(raw[offset + 1])) << 8));
+        const s16 knownSize = ro::net::GetPacketSize(candidateId);
+        if (knownSize == 0) {
+            continue;
+        }
+
+        int candidateSize = knownSize;
+        if (knownSize == ro::net::kVariablePacketSize) {
+            if (offset + 3 >= sampleBytes) {
+                continue;
+            }
+            candidateSize = static_cast<int>(
+                static_cast<unsigned char>(raw[offset + 2]) |
+                (static_cast<u16>(static_cast<unsigned char>(raw[offset + 3])) << 8));
+            if (candidateSize < 4 || candidateSize > 0x7FFF) {
+                continue;
+            }
+        }
+
+        char sample[3 * 16 + 1] = {};
+        char history[8 * 16 + 1] = {};
+        FormatQueueSample(queue, sample, sizeof(sample));
+        FormatRecentPacketHistory(history, sizeof(history));
+        const char* packetName = PacketProfile::GetOpcodeName(candidateId);
+        DbgLog("[Net] resynced recv stream drop=%d next=%s(0x%04X) size=%d recent=%s sample=%s\n",
+            offset,
+            packetName ? packetName : "?",
+            candidateId,
+            candidateSize,
+            history,
+            sample);
+        queue.RemoveData(offset);
+        return true;
+    }
+
+    return false;
 }
 
 void LogFirstSeenRecvPacket0077(int bufferedBytes, s16 knownSize, CPacketQueue& queue)
@@ -115,7 +173,8 @@ void LogFirstSeenRecvPacket0077(int bufferedBytes, s16 knownSize, CPacketQueue& 
     char history[8 * 16 + 1] = {};
     FormatQueueSample(queue, sample, sizeof(sample));
     FormatRecentPacketHistory(history, sizeof(history));
-    DbgLog("[Net] observed recv packet id=0x0077 buffered=%d knownSize=%d recent=%s sample=%s\n",
+    DbgLog("[Net] observed recv packet %s(0x0077) buffered=%d knownSize=%d recent=%s sample=%s\n",
+        PacketProfile::GetOpcodeName(0x0077) ? PacketProfile::GetOpcodeName(0x0077) : "?",
         bufferedBytes,
         static_cast<int>(knownSize),
         history,
@@ -130,7 +189,9 @@ void LogFirstSeenInvalidVariablePacket(u16 packetId, int packetSize, CPacketQueu
         char history[8 * 16 + 1] = {};
         FormatQueueSample(queue, sample, sizeof(sample));
         FormatRecentPacketHistory(history, sizeof(history));
-        DbgLog("[Net] dropping invalid variable recv packet id=0x%04X size=%d recent=%s sample=%s\n",
+        const char* packetName = PacketProfile::GetOpcodeName(packetId);
+        DbgLog("[Net] dropping invalid variable recv packet %s(0x%04X) size=%d recent=%s sample=%s\n",
+            packetName ? packetName : "?",
             packetId,
             packetSize,
             history,
@@ -142,24 +203,38 @@ void ResetConnectionRecvTrace(const char* ip, int port)
 {
     g_recentRecvPacketCount = 0;
     g_recentRecvPacketIndex = 0;
-    g_recvTracePacketsRemaining = 24;
+    g_recvTracePacketsRemaining = PacketProfile::UsesEarlyMapServerSendProfile() ? 96 : 24;
     DbgLog("[Net] connect trace armed ip=%s port=%d budget=%d\n",
         ip ? ip : "",
         port,
         g_recvTracePacketsRemaining);
 }
 
-void LogConnectionRecvTrace(u16 packetId, int packetSize)
+void LogConnectionRecvTrace(u16 packetId, const std::vector<u8>& packet)
 {
     if (g_recvTracePacketsRemaining <= 0) {
         return;
     }
 
     --g_recvTracePacketsRemaining;
-    DbgLog("[Net] recv trace id=0x%04X size=%d remaining=%d\n",
+    char sample[3 * 8 + 1] = {};
+    size_t cursor = 0;
+    const int sampleBytes = (std::min)(static_cast<int>(packet.size()), 8);
+    for (int i = 0; i < sampleBytes && cursor + 4 < sizeof(sample); ++i) {
+        cursor += std::snprintf(
+            sample + cursor,
+            sizeof(sample) - cursor,
+            "%02X%s",
+            packet[static_cast<size_t>(i)],
+            (i + 1 < sampleBytes) ? " " : "");
+    }
+    const char* packetName = PacketProfile::GetOpcodeName(packetId);
+    DbgLog("[Net] recv trace %s(0x%04X) size=%d remaining=%d sample=%s\n",
+        packetName ? packetName : "?",
         packetId,
-        packetSize,
-        g_recvTracePacketsRemaining);
+        static_cast<int>(packet.size()),
+        g_recvTracePacketsRemaining,
+        sample);
 }
 
 int GetLastSocketErrorCode()
@@ -495,6 +570,9 @@ bool CRagConnection::RecvPacket(std::vector<u8>& outPacket)
             // Unknown packet id: drop this header and keep scanning so one unsupported
             // packet doesn't stall the whole login/game receive pipeline.
             LogFirstSeenUnknownRecvPacket(packetId, m_recvQueue.GetSize(), m_recvQueue);
+            if (TryResyncUnknownRecvPacket(m_recvQueue, m_recvQueue.GetSize())) {
+                continue;
+            }
             m_recvQueue.RemoveData(2);
             continue;
         }
@@ -523,7 +601,7 @@ bool CRagConnection::RecvPacket(std::vector<u8>& outPacket)
         const bool popped = m_recvQueue.Pop(reinterpret_cast<char*>(outPacket.data()), packetSize);
         if (popped) {
             RememberRecvPacket(packetId, packetSize);
-            LogConnectionRecvTrace(packetId, packetSize);
+            LogConnectionRecvTrace(packetId, outPacket);
         }
         return popped;
     }

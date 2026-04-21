@@ -1,6 +1,8 @@
 #include "QtUiRuntime.h"
 
 #include "QtUiStateAdapter.h"
+#include "QtUiTheme.h"
+#include "core/SettingsIni.h"
 
 #include "QtUiStatusIconCatalog.h"
 
@@ -56,6 +58,7 @@
 #include <QQuickWindow>
 #include <QResource>
 #include <QSGRendererInterface>
+#include <vulkan/vulkan.h>
 #include <QVulkanInstance>
 
 #if RO_PLATFORM_WINDOWS && RO_HAS_NATIVE_D3D12
@@ -345,26 +348,53 @@ void RecordQtUiOverlayPerf(bool gameplay, bool nativePath, double updateMs, doub
     MaybeLogQtUiPerfStats();
 }
 
-bool TryBuildItemIconImage(unsigned int itemId, bool identified, QImage* outImage)
+unsigned int ParseUnsignedQueryParameter(const QString& id, const QString& key)
 {
-    if (!outImage || itemId == 0) {
+    const QString token = key + QStringLiteral("=");
+    const int start = id.indexOf(token);
+    if (start < 0) {
+        return 0;
+    }
+
+    const int valueStart = start + token.size();
+    int valueEnd = id.indexOf(QLatin1Char('&'), valueStart);
+    if (valueEnd < 0) {
+        valueEnd = id.size();
+    }
+
+    bool ok = false;
+    const unsigned int value = id.mid(valueStart, valueEnd - valueStart).toUInt(&ok);
+    return ok ? value : 0;
+}
+
+bool TryBuildItemIconImage(unsigned int itemId, unsigned int itemIndex, bool identified, QImage* outImage)
+{
+    if (!outImage || (itemId == 0 && itemIndex == 0)) {
         return false;
     }
 
     static std::unordered_map<std::uint64_t, QImage> s_itemIconCache;
-    const std::uint64_t cacheKey = (static_cast<std::uint64_t>(itemId) << 1) | (identified ? 1ull : 0ull);
+    const std::uint64_t cacheKey =
+        (static_cast<std::uint64_t>(itemId) << 33)
+        ^ (static_cast<std::uint64_t>(itemIndex) << 1)
+        ^ (identified ? 1ull : 0ull);
     const auto cached = s_itemIconCache.find(cacheKey);
     if (cached != s_itemIconCache.end()) {
         *outImage = cached->second;
         return !outImage->isNull();
     }
 
-    const ITEM_INFO* item = g_session.GetInventoryItemByItemId(itemId);
+    const ITEM_INFO* item = itemIndex != 0 ? g_session.GetInventoryItemByIndex(itemIndex) : nullptr;
+    if (!item && itemId != 0) {
+        item = g_session.GetInventoryItemByItemId(itemId);
+    }
     ITEM_INFO requestedItem;
     if (item) {
         requestedItem = *item;
-    } else {
+    } else if (itemId != 0) {
         requestedItem.SetItemId(itemId);
+    } else {
+        return false;
     }
     requestedItem.m_isIdentified = identified ? 1 : 0;
 
@@ -386,26 +416,41 @@ bool TryBuildItemIconImage(unsigned int itemId, bool identified, QImage* outImag
     return !outImage->isNull();
 }
 
+bool TryBuildItemCollectionImage(unsigned int itemId, unsigned int itemIndex, bool identified, QImage* outImage);
+
 bool TryBuildItemCollectionImage(unsigned int itemId, bool identified, QImage* outImage)
 {
-    if (!outImage || itemId == 0) {
+    return TryBuildItemCollectionImage(itemId, 0, identified, outImage);
+}
+
+bool TryBuildItemCollectionImage(unsigned int itemId, unsigned int itemIndex, bool identified, QImage* outImage)
+{
+    if (!outImage || (itemId == 0 && itemIndex == 0)) {
         return false;
     }
 
     static std::unordered_map<std::uint64_t, QImage> s_itemCollectionCache;
-    const std::uint64_t cacheKey = (static_cast<std::uint64_t>(itemId) << 1) | (identified ? 1ull : 0ull);
+    const std::uint64_t cacheKey =
+        (static_cast<std::uint64_t>(itemId) << 33)
+        ^ (static_cast<std::uint64_t>(itemIndex) << 1)
+        ^ (identified ? 1ull : 0ull);
     const auto cached = s_itemCollectionCache.find(cacheKey);
     if (cached != s_itemCollectionCache.end()) {
         *outImage = cached->second;
         return !outImage->isNull();
     }
 
-    const ITEM_INFO* item = g_session.GetInventoryItemByItemId(itemId);
+    const ITEM_INFO* item = itemIndex != 0 ? g_session.GetInventoryItemByIndex(itemIndex) : nullptr;
+    if (!item && itemId != 0) {
+        item = g_session.GetInventoryItemByItemId(itemId);
+    }
     ITEM_INFO requestedItem;
     if (item) {
         requestedItem = *item;
-    } else {
+    } else if (itemId != 0) {
         requestedItem.SetItemId(itemId);
+    } else {
+        return false;
     }
     requestedItem.m_isIdentified = identified ? 1 : 0;
 
@@ -849,15 +894,17 @@ public:
             bool ok = false;
             const unsigned int itemId = baseId.mid(QStringLiteral("item/").size()).toUInt(&ok);
             if (ok) {
+                const unsigned int itemIndex = ParseUnsignedQueryParameter(id, QStringLiteral("itemIndex"));
                 const bool identified = !id.contains(QStringLiteral("identified=0"));
-                TryBuildItemIconImage(itemId, identified, &image);
+                TryBuildItemIconImage(itemId, itemIndex, identified, &image);
             }
         } else if (baseId.startsWith(QStringLiteral("collection/"))) {
             bool ok = false;
             const unsigned int itemId = baseId.mid(QStringLiteral("collection/").size()).toUInt(&ok);
             if (ok) {
+                const unsigned int itemIndex = ParseUnsignedQueryParameter(id, QStringLiteral("itemIndex"));
                 const bool identified = !id.contains(QStringLiteral("identified=0"));
-                TryBuildItemCollectionImage(itemId, identified, &image);
+                TryBuildItemCollectionImage(itemId, itemIndex, identified, &image);
             }
         } else if (baseId.startsWith(QStringLiteral("illust/"))) {
             bool ok = false;
@@ -1039,6 +1086,9 @@ public:
 
         delete m_stateAdapter;
         m_stateAdapter = nullptr;
+
+        delete m_theme;
+        m_theme = nullptr;
 
         if (m_ownedApplication) {
             delete m_application;
@@ -1552,6 +1602,11 @@ private:
         EnsureQtUiResourcesInitialized();
 
         m_stateAdapter = new QtUiStateAdapter();
+        m_theme = new QtUiTheme();
+        {
+            const std::string savedTheme = LoadSettingsIniString("UI", "Theme", "dark");
+            m_theme->setModeByName(QString::fromStdString(savedTheme));
+        }
         m_renderControl = new QQuickRenderControl();
         m_quickWindow = new QQuickWindow(m_renderControl);
         m_quickWindow->setColor(Qt::transparent);
@@ -1560,6 +1615,7 @@ private:
         m_engine = new QQmlEngine();
         m_engine->addImageProvider(QStringLiteral("openmidgard"), new QtUiImageProvider());
         m_engine->rootContext()->setContextProperty(QStringLiteral("uiState"), m_stateAdapter->stateObject());
+        m_engine->rootContext()->setContextProperty(QStringLiteral("Theme"), m_theme);
 
         QQmlComponent component(m_engine, QUrl(QStringLiteral("qrc:/qtui/qml/GameOverlay.qml")));
         if (component.isError()) {
@@ -1606,6 +1662,46 @@ private:
             GetCurrentUiRenderBackend(),
             m_nativeOverlayBackend);
     }
+
+public:
+    void notifySkinChanged()
+    {
+        if (m_stateAdapter) {
+            m_stateAdapter->bumpSkinRevision();
+        }
+    }
+
+    void setThemeMode(const QString& mode)
+    {
+        if (m_theme) {
+            m_theme->setModeByName(mode);
+        }
+    }
+
+    QString themeMode() const
+    {
+        return m_theme ? m_theme->mode() : QStringLiteral("light");
+    }
+
+    quint32 themeBackgroundArgb() const
+    {
+        const QColor c = m_theme ? m_theme->background() : QColor(243, 240, 231, 255);
+        return (static_cast<quint32>(c.alpha() > 0 ? 0xFF : 0xFF) << 24)
+             | (static_cast<quint32>(c.red()) << 16)
+             | (static_cast<quint32>(c.green()) << 8)
+             | static_cast<quint32>(c.blue());
+    }
+
+    quint32 themeTextArgb() const
+    {
+        const QColor c = m_theme ? m_theme->text() : QColor(30, 24, 16, 255);
+        return (static_cast<quint32>(c.alpha() > 0 ? 0xFF : 0xFF) << 24)
+             | (static_cast<quint32>(c.red()) << 16)
+             | (static_cast<quint32>(c.green()) << 8)
+             | static_cast<quint32>(c.blue());
+    }
+
+private:
 
     bool renderToImage(int width, int height)
     {
@@ -1860,6 +1956,7 @@ private:
 
     QGuiApplication* m_application = nullptr;
     QtUiStateAdapter* m_stateAdapter = nullptr;
+    QtUiTheme* m_theme = nullptr;
     QQuickRenderControl* m_renderControl = nullptr;
     QQuickWindow* m_quickWindow = nullptr;
     QQmlEngine* m_engine = nullptr;
@@ -1971,6 +2068,52 @@ bool RenderQtUiMenuOverlayTexture(CTexture* texture, int width, int height)
     (void)width;
     (void)height;
     return false;
+#endif
+}
+
+void NotifyQtUiRuntimeSkinChanged()
+{
+#if RO_ENABLE_QT6_UI
+    Runtime().notifySkinChanged();
+#endif
+}
+
+void SetQtUiRuntimeThemeMode(const char* mode)
+{
+#if RO_ENABLE_QT6_UI
+    DbgLog("[Theme] SetQtUiRuntimeThemeMode(%s)\n", mode ? mode : "(null)");
+    Runtime().setThemeMode(QString::fromUtf8(mode ? mode : ""));
+#else
+    (void)mode;
+#endif
+}
+
+const char* GetQtUiRuntimeThemeMode()
+{
+#if RO_ENABLE_QT6_UI
+    static QByteArray s_mode;
+    s_mode = Runtime().themeMode().toUtf8();
+    return s_mode.constData();
+#else
+    return "light";
+#endif
+}
+
+std::uint32_t GetQtUiRuntimeThemeBackgroundArgb()
+{
+#if RO_ENABLE_QT6_UI
+    return Runtime().themeBackgroundArgb();
+#else
+    return 0xFFF3F0E7u;
+#endif
+}
+
+std::uint32_t GetQtUiRuntimeThemeTextArgb()
+{
+#if RO_ENABLE_QT6_UI
+    return Runtime().themeTextArgb();
+#else
+    return 0xFF1E1810u;
 #endif
 }
 

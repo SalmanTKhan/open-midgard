@@ -66,10 +66,17 @@ void SanitizeGraphicsSettings(GraphicsSettings* settings)
 
     settings->textureUpscaleFactor = (std::max)(1, (std::min)(4, settings->textureUpscaleFactor));
     settings->anisotropicLevel = ClampToAllowedAnisotropy(settings->anisotropicLevel);
-    if (settings->antiAliasing != AntiAliasingMode::None
-        && settings->antiAliasing != AntiAliasingMode::FXAA
-        && settings->antiAliasing != AntiAliasingMode::SMAA) {
+    switch (settings->antiAliasing) {
+    case AntiAliasingMode::None:
+    case AntiAliasingMode::FXAA:
+    case AntiAliasingMode::SMAA:
+    case AntiAliasingMode::MSAA2x:
+    case AntiAliasingMode::MSAA4x:
+    case AntiAliasingMode::MSAA8x:
+        break;
+    default:
         settings->antiAliasing = AntiAliasingMode::None;
+        break;
     }
 }
 
@@ -160,14 +167,36 @@ bool DoesBackendSupportAnisotropicFiltering(RenderBackendType backend)
 std::vector<AntiAliasingMode> GetSupportedAntiAliasingModesForBackend(RenderBackendType backend)
 {
     switch (backend) {
+    case RenderBackendType::Vulkan:
+        return { AntiAliasingMode::None, AntiAliasingMode::FXAA, AntiAliasingMode::SMAA,
+            AntiAliasingMode::MSAA2x, AntiAliasingMode::MSAA4x, AntiAliasingMode::MSAA8x };
+
     case RenderBackendType::Direct3D11:
     case RenderBackendType::Direct3D12:
-    case RenderBackendType::Vulkan:
         return { AntiAliasingMode::None, AntiAliasingMode::FXAA, AntiAliasingMode::SMAA };
 
     default:
         return {};
     }
+}
+
+int GetMsaaSampleCountForMode(AntiAliasingMode mode)
+{
+    switch (mode) {
+    case AntiAliasingMode::MSAA2x:
+        return 2;
+    case AntiAliasingMode::MSAA4x:
+        return 4;
+    case AntiAliasingMode::MSAA8x:
+        return 8;
+    default:
+        return 1;
+    }
+}
+
+bool IsMsaaMode(AntiAliasingMode mode)
+{
+    return GetMsaaSampleCountForMode(mode) > 1;
 }
 
 bool DoesBackendSupportAntiAliasing(RenderBackendType backend)

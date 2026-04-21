@@ -17,6 +17,7 @@ struct ClientInfoConnection {
 // Client info locale functions
 //===========================================================================
 bool InitClientInfo(const char* fileName);
+bool InitFallbackClientInfo();
 XMLElement* GetClientInfo();
 
 void SelectClientInfo(int connectionIndex);

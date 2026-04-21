@@ -102,6 +102,7 @@ public:
     msgresult_t SendMsg(UIWindow* sender, int msg, msgparam_t wparam, msgparam_t lparam, msgparam_t extra) override;
     void OnKeyDown(int virtualKey) override;
     bool GetDisplayDataForQt(DisplayData* outData) const;
+    void ReloadSkinResources();
 
 private:
     enum TabId {
@@ -126,6 +127,9 @@ private:
         GraphicsRow_AntiAliasing,
         GraphicsRow_TextureUpscale,
         GraphicsRow_AnisotropicFiltering,
+        GraphicsRow_Skin,
+        GraphicsRow_Theme,
+        GraphicsRow_ShopRowHeight,
     };
 
     struct ResolutionEntry {
@@ -154,6 +158,15 @@ private:
     RECT GetRowNextButtonRect(int rowIndex) const;
     RECT GetRestartButtonRect() const;
     RECT GetApplyButtonRect() const;
+    RECT GetSkinRowRect() const;
+    RECT GetSkinPrevButtonRect() const;
+    RECT GetSkinNextButtonRect() const;
+    RECT GetThemeRowRect() const;
+    RECT GetThemePrevButtonRect() const;
+    RECT GetThemeNextButtonRect() const;
+    RECT GetShopRowHeightRowRect() const;
+    RECT GetShopRowHeightPrevButtonRect() const;
+    RECT GetShopRowHeightNextButtonRect() const;
     RECT GetBgmSliderRect() const;
     RECT GetSoundSliderRect() const;
     RECT GetGuiScaleSliderRect() const;
@@ -169,8 +182,11 @@ private:
         const char* valueText = nullptr) const;
     void DrawHeaderButton(HDC hdc, const RECT& rect, const char* text) const;
     void DrawTabButton(HDC hdc, const RECT& rect, const char* text, bool active) const;
+    void DrawSelectorRow(HDC hdc, const RECT& rowRect, const RECT& prevRect, const RECT& nextRect, const char* label, const std::string& value) const;
     void DrawSettingRow(HDC hdc, int rowIndex, const char* label, const std::string& value) const;
     void RefreshResolutionEntries();
+    void RefreshAvailableSkins();
+    void RefreshAvailableThemes();
     int FindResolutionIndex(int width, int height) const;
     std::vector<GraphicsRowId> GetVisibleGraphicsRows() const;
     std::vector<RenderBackendType> GetSupportedRenderBackends() const;
@@ -186,6 +202,8 @@ private:
     bool HasPendingUiScaleApply() const;
     void ApplyPendingUiScale();
     void DiscardPendingUiScale();
+    void ApplySelectedSkin();
+    void ApplySelectedTheme();
     bool HandleQtToggleClick(int x, int y);
 
     bool m_controlsCreated;
@@ -200,6 +218,7 @@ private:
     UICheckBox* m_attackSnapCheckBox;
     UICheckBox* m_skillSnapCheckBox;
     UICheckBox* m_itemSnapCheckBox;
+    UICheckBox* m_alwaysShowNamesCheckBox;
     int m_orgHeight;
     int m_bgmVolume;
     int m_soundVolume;
@@ -209,6 +228,7 @@ private:
     int m_attackSnap;
     int m_skillSnap;
     int m_itemSnap;
+    int m_alwaysShowNames;
     int m_guiScalePercent;
     int m_appliedGuiScalePercent;
     int m_collapsed;
@@ -223,4 +243,8 @@ private:
     RenderBackendType m_selectedRenderBackend;
     RenderBackendType m_appliedRenderBackend;
     std::vector<ResolutionEntry> m_resolutionEntries;
+    std::vector<std::string> m_availableSkins;
+    std::string m_selectedSkin;
+    std::vector<std::string> m_availableThemes;
+    std::string m_selectedTheme;
 };

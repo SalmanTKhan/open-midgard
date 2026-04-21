@@ -1,6 +1,7 @@
 #include "UIShortCutWnd.h"
 
 #include "UIShopCommon.h"
+#include "input/HotkeyBindings.h"
 #include "UIWindowMgr.h"
 #include "gamemode/GameMode.h"
 #include "gamemode/Mode.h"
@@ -150,7 +151,8 @@ std::string BuildShortcutSlotKeyLabel(int visibleSlot)
     if (visibleSlot < 0 || visibleSlot >= kShortcutSlotsPerPage) {
         return std::string();
     }
-    return "F" + std::to_string(visibleSlot + 1);
+    const auto action = static_cast<hotkeys::KeyboardAction>(static_cast<int>(hotkeys::KeyboardAction::Quickslot1) + visibleSlot);
+    return hotkeys::bindings::FormatKeyboardBinding(action);
 }
 
 int ResolveShortcutSkillUseLevel(const SHORTCUT_SLOT& slot, const PLAYER_SKILL_INFO* skill)

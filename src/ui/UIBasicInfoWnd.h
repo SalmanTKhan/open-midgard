@@ -34,6 +34,11 @@ public:
         int maxWeight = 0;
         int expPercent = 0;
         int jobExpPercent = 0;
+        bool cartActive = false;
+        int cartCurrentCount = 0;
+        int cartMaxCount = 0;
+        int cartCurrentWeight = 0;
+        int cartMaxWeight = 0;
     };
 
     UIBasicInfoWnd();

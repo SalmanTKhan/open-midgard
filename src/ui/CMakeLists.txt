@@ -1,4 +1,6 @@
 add_library(ro_ui STATIC
+    UiSkin.h
+    UiSkin.cpp
     UIWindow.h
     UIWindow.cpp
     UiScale.h
@@ -70,6 +72,10 @@ add_library(ro_ui STATIC
     UIChooseWnd.cpp
     UISelectCartWnd.h
     UISelectCartWnd.cpp
+    UIVirtualKeyboardWnd.h
+    UIVirtualKeyboardWnd.cpp
+    UIControllerWnd.h
+    UIControllerWnd.cpp
     UIOptionWnd.h
     UIOptionWnd.cpp
     UIFrameWnd.h
@@ -84,6 +90,24 @@ add_library(ro_ui STATIC
     UIWaitWnd.cpp
     UILoadingWnd.h
     UILoadingWnd.cpp
+    UICartWnd.h
+    UICartWnd.cpp
+    UIGuildWnd.h
+    UIGuildWnd.cpp
+    UIMailBoxWnd.h
+    UIMailBoxWnd.cpp
+    UIMailReadWnd.h
+    UIMailReadWnd.cpp
+    UIMailSendWnd.h
+    UIMailSendWnd.cpp
+    UIPetInfoWnd.h
+    UIPetInfoWnd.cpp
+    UIEggListWnd.h
+    UIEggListWnd.cpp
+    UIHomunInfoWnd.h
+    UIHomunInfoWnd.cpp
+    UIMercInfoWnd.h
+    UIMercInfoWnd.cpp
 )
 
 target_include_directories(ro_ui PUBLIC 
@@ -97,6 +121,17 @@ target_link_libraries(ro_ui PUBLIC
     ro_session
     ro_skill
 )
+
+# UIControllerWnd visualizes SDL_GamepadButton state from the gamepad
+# binding table. Link SDL3 headers privately so the UI can consume those
+# types without forcing SDL on every downstream target.
+if(RO_HAS_GAMEPAD)
+    if(TARGET SDL3::SDL3)
+        target_link_libraries(ro_ui PRIVATE SDL3::SDL3)
+    elseif(TARGET SDL3::SDL3-static)
+        target_link_libraries(ro_ui PRIVATE SDL3::SDL3-static)
+    endif()
+endif()
 
 if(RO_ENABLE_QT6_UI)
     target_link_libraries(ro_ui PUBLIC

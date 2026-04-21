@@ -6,6 +6,7 @@ Item {
     height: parent ? parent.height : 720
     property bool loginCaretVisible: true
     property real uiScale: Math.max(0.5, uiState.uiScale || 1.0)
+    readonly property bool darkTheme: Theme.mode === "dark"
 
     function rgbaColor(red, green, blue, alpha) {
         return Qt.rgba(red / 255.0, green / 255.0, blue / 255.0, Math.max(0.0, Math.min(1.0, alpha)))
@@ -30,24 +31,34 @@ Item {
         return clampValue(y, 0, root.height - overlayHeight)
     }
 
-    function itemIconSource(itemId, identified) {
-        if (!(itemId > 0)) {
+    function asObject(value) {
+        return (value && typeof value === "object") ? value : ({})
+    }
+
+    function itemIconSource(itemId, itemIndex, identified) {
+        if (!(itemId > 0) && !(itemIndex > 0)) {
             return ""
         }
         let source = "image://openmidgard/item/" + itemId
+        if (itemIndex > 0) {
+            source += "?itemIndex=" + itemIndex
+        }
         if (identified !== undefined) {
-            source += "?identified=" + (identified ? "1" : "0")
+            source += (source.indexOf("?") >= 0 ? "&" : "?") + "identified=" + (identified ? "1" : "0")
         }
         return source
     }
 
-    function collectionImageSource(itemId, identified) {
-        if (!(itemId > 0)) {
+    function collectionImageSource(itemId, itemIndex, identified) {
+        if (!(itemId > 0) && !(itemIndex > 0)) {
             return ""
         }
         let source = "image://openmidgard/collection/" + itemId
+        if (itemIndex > 0) {
+            source += "?itemIndex=" + itemIndex
+        }
         if (identified !== undefined) {
-            source += "?identified=" + (identified ? "1" : "0")
+            source += (source.indexOf("?") >= 0 ? "&" : "?") + "identified=" + (identified ? "1" : "0")
         }
         return source
     }
@@ -71,13 +82,42 @@ Item {
             .replace(/'/g, "&#39;")
     }
 
-    function roColorTextToRichText(text) {
+    function adjustTextColorForTheme(hex) {
+        const r = parseInt(hex.substring(0, 2), 16)
+        const g = parseInt(hex.substring(2, 4), 16)
+        const b = parseInt(hex.substring(4, 6), 16)
+        const bg = Theme.background
+        const bgLum = 0.2126 * bg.r + 0.7152 * bg.g + 0.0722 * bg.b
+        const darkBg = bgLum < 0.5
+        const textLum = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255
+        if (darkBg && textLum < 0.55) {
+            const t = 0.75
+            const nr = Math.round(r + (255 - r) * t)
+            const ng = Math.round(g + (255 - g) * t)
+            const nb = Math.round(b + (255 - b) * t)
+            return "#" + ("0" + nr.toString(16)).slice(-2)
+                + ("0" + ng.toString(16)).slice(-2)
+                + ("0" + nb.toString(16)).slice(-2)
+        }
+        if (!darkBg && textLum > 0.85) {
+            const t = 0.65
+            const nr = Math.round(r * (1 - t))
+            const ng = Math.round(g * (1 - t))
+            const nb = Math.round(b * (1 - t))
+            return "#" + ("0" + nr.toString(16)).slice(-2)
+                + ("0" + ng.toString(16)).slice(-2)
+                + ("0" + nb.toString(16)).slice(-2)
+        }
+        return "#" + hex
+    }
+
+    function roColorTextToRichText(text, defaultTextColor) {
         if (!text) {
             return ""
         }
 
-        let out = "<span style=\"color:#111111\">"
-        let currentColor = "111111"
+        const baseColor = defaultTextColor ? String(defaultTextColor) : String(Theme.text)
+        let out = "<span style=\"color:" + baseColor + "\">"
         for (let index = 0; index < text.length; ++index) {
             const ch = text[index]
             if (ch === "^" && index + 6 < text.length) {
@@ -89,8 +129,8 @@ Item {
                     }
                 }
                 if (isColor) {
-                    currentColor = text.substring(index + 1, index + 7)
-                    out += "</span><span style=\"color:#" + currentColor + "\">"
+                    const currentColor = text.substring(index + 1, index + 7)
+                    out += "</span><span style=\"color:" + (currentColor === "000000" ? baseColor : adjustTextColorForTheme(currentColor)) + "\">"
                     index += 6
                     continue
                 }
@@ -169,7 +209,7 @@ Item {
 
     function charSelectPanelKey() {
         var details = uiState && uiState.charSelectSelectedDetails ? uiState.charSelectSelectedDetails : {}
-        return details.imageRevision || "0"
+        return (details.imageRevision || "0") + "-s" + (uiState.skinRevision || "0")
     }
 
     Timer {
@@ -189,7 +229,7 @@ Item {
             || uiState.charSelectVisible
             || uiState.makeCharVisible
             || uiState.loadingVisible)
-            ? "image://openmidgard/wallpaper?rev=" + encodeURIComponent(uiState.wallpaperRevision || "none")
+            ? "image://openmidgard/wallpaper?rev=" + encodeURIComponent(uiState.wallpaperRevision || "none") + "&skin=" + encodeURIComponent(uiState.skinRevision || "0")
             : ""
     }
 
@@ -464,9 +504,9 @@ Item {
         width: uiState.sayDialogWidth
         height: uiState.sayDialogHeight
         radius: 10
-        color: "#f8f8f8"
+        color: Theme.surface
         border.width: 1
-        border.color: "#828282"
+        border.color: Theme.borderStrong
         visible: uiState.sayDialogVisible
 
         Text {
@@ -476,6 +516,7 @@ Item {
             height: uiState.sayDialogHasAction ? (parent.height - 10 - 10 - 22 - 8) : (parent.height - 20)
             text: uiState.sayDialogText
             textFormat: Text.RichText
+            color: Theme.text
             font.pixelSize: 12
             wrapMode: Text.WordWrap
             verticalAlignment: Text.AlignTop
@@ -487,14 +528,17 @@ Item {
             width: uiState.sayDialogActionButton.width || 0
             height: uiState.sayDialogActionButton.height || 0
             visible: uiState.sayDialogActionButton.visible || false
-            color: (uiState.sayDialogActionButton.pressed || false) ? "#c4c4c4" : ((uiState.sayDialogActionButton.hovered || false) ? "#e4e4e4" : "#f0f0f0")
+            radius: 4
+            color: (uiState.sayDialogActionButton.pressed || false)
+                ? Theme.buttonBgPressed
+                : ((uiState.sayDialogActionButton.hovered || false) ? Theme.buttonBgHover : Theme.buttonBg)
             border.width: 1
-            border.color: "#6e6e6e"
+            border.color: Theme.buttonBorder
 
             Text {
                 anchors.centerIn: parent
                 text: uiState.sayDialogActionButton.label || ""
-                color: "#000000"
+                color: Theme.buttonText
                 font.pixelSize: 12
             }
         }
@@ -506,9 +550,9 @@ Item {
         width: uiState.npcInputWidth
         height: uiState.npcInputHeight
         radius: 10
-        color: "#f8f8f8"
+        color: Theme.surface
         border.width: 1
-        border.color: "#828282"
+        border.color: Theme.borderStrong
         visible: uiState.npcInputVisible
 
         Text {
@@ -516,7 +560,7 @@ Item {
             y: 9
             width: parent.width - 20
             text: uiState.npcInputLabel
-            color: "#000000"
+            color: Theme.text
             font.pixelSize: 12
         }
 
@@ -525,9 +569,10 @@ Item {
             y: 26
             width: parent.width - 20
             height: 22
-            color: "#fff7c8"
+            radius: 3
+            color: Theme.inputBg
             border.width: 1
-            border.color: "#000000"
+            border.color: Theme.inputBorder
 
             Text {
                 anchors.left: parent.left
@@ -535,7 +580,7 @@ Item {
                 anchors.verticalCenter: parent.verticalCenter
                 width: parent.width - 12
                 text: uiState.npcInputText
-                color: "#000000"
+                color: Theme.inputText
                 font.pixelSize: 12
                 elide: Text.ElideRight
             }
@@ -550,14 +595,15 @@ Item {
                 y: (modelData.y || 0) - uiState.npcInputY
                 width: modelData.width || 0
                 height: modelData.height || 0
-                color: modelData.pressed ? "#c4c4c4" : "#f0f0f0"
+                radius: 4
+                color: modelData.pressed ? Theme.buttonBgPressed : Theme.buttonBg
                 border.width: 1
-                border.color: "#6e6e6e"
+                border.color: Theme.buttonBorder
 
                 Text {
                     anchors.centerIn: parent
                     text: modelData.label || ""
-                    color: "#000000"
+                    color: Theme.buttonText
                     font.pixelSize: 12
                 }
             }
@@ -570,9 +616,9 @@ Item {
         width: uiState.chooseMenuWidth
         height: uiState.chooseMenuHeight
         radius: 8
-        color: "#ffffff"
+        color: Theme.surface
         border.width: 1
-        border.color: "#b8b8b8"
+        border.color: Theme.borderStrong
         visible: uiState.chooseMenuVisible
 
         Repeater {
@@ -585,16 +631,17 @@ Item {
                 y: 12 + index * 23
                 width: 221
                 height: 20
+                radius: 3
                 color: index === uiState.chooseMenuPressedIndex
-                    ? "#b7c8de"
-                    : (index === uiState.chooseMenuSelectedIndex ? "#cad8ea" : "#f1f1f1")
+                    ? Theme.buttonBgPressed
+                    : (index === uiState.chooseMenuSelectedIndex ? Theme.buttonBgHover : Theme.buttonBg)
                 border.width: 1
-                border.color: "#8f8f8f"
+                border.color: Theme.buttonBorder
 
                 Text {
                     anchors.centerIn: parent
                     text: modelData
-                    color: "#1a1a1a"
+                    color: Theme.buttonText
                     font.pixelSize: 12
                 }
             }
@@ -602,40 +649,53 @@ Item {
     }
 
     Rectangle {
+        id: itemShopWindow
         x: uiState.itemShopX
         y: uiState.itemShopY
         width: uiState.itemShopWidth
         height: uiState.itemShopHeight
-        color: "#ececec"
+        radius: 8
+        clip: true
+        color: Theme.background
         border.width: 1
-        border.color: "#484848"
+        border.color: Theme.borderStrong
         visible: uiState.itemShopVisible
+
+        readonly property bool showQuantity: uiState.itemShopData.showQuantity || false
+        readonly property int qtyColX: 188
+        readonly property int qtyColWidth: 40
+        readonly property int priceColWidth: 78
+        readonly property int priceColMargin: 8
+        readonly property int shopRowHeight: uiState.itemShopData.rowHeight || 20
+        readonly property int shopIconSize: Math.max(14, shopRowHeight - 4)
 
         Rectangle {
             x: 0
             y: 0
             width: parent.width
-            height: 17
-            color: "#52657b"
+            height: 22
+            color: Theme.accent
         }
 
         Text {
-            x: 6
-            y: 1
+            x: 10
+            y: 4
             text: uiState.itemShopData.title || uiState.itemShopTitle
-            color: "#ffffff"
+            color: Theme.accentText
             font.pixelSize: 12
             font.bold: true
         }
 
         Rectangle {
             x: 8
-            y: 22
+            y: 26
             width: parent.width - 16
             height: parent.height - 34
-            color: "#f8f8f8"
+            color: Theme.surface
             border.width: 1
-            border.color: "#787878"
+            border.color: Theme.border
+            radius: 4
+            clip: true
 
             Column {
                 x: 1
@@ -645,36 +705,42 @@ Item {
 
                 Rectangle {
                     width: parent.width
-                    height: 17
-                    color: "#dee5ed"
+                    height: 20
+                    color: Theme.surfaceAlt
 
                     Text {
                         x: 26
-                        y: 2
-                        width: (uiState.itemShopData.showQuantity || false) ? 160 : (parent.width - 110)
+                        y: 3
+                        width: itemShopWindow.showQuantity
+                            ? (itemShopWindow.qtyColX - 30)
+                            : (parent.width - itemShopWindow.priceColWidth - itemShopWindow.priceColMargin - 30)
                         text: uiState.itemShopData.nameLabel || ""
-                        color: "#1e1e1e"
+                        color: Theme.textMuted
                         font.pixelSize: 11
+                        font.bold: true
+                        elide: Text.ElideRight
                     }
 
                     Text {
-                        x: 190
-                        y: 2
-                        width: 38
-                        visible: uiState.itemShopData.showQuantity || false
+                        x: itemShopWindow.qtyColX
+                        y: 3
+                        width: itemShopWindow.qtyColWidth
+                        visible: itemShopWindow.showQuantity
                         text: uiState.itemShopData.quantityLabel || ""
-                        color: "#1e1e1e"
+                        color: Theme.textMuted
                         font.pixelSize: 11
+                        font.bold: true
                         horizontalAlignment: Text.AlignHCenter
                     }
 
                     Text {
-                        x: width - 60
-                        y: 2
-                        width: 54
+                        x: parent.width - itemShopWindow.priceColWidth - itemShopWindow.priceColMargin
+                        y: 3
+                        width: itemShopWindow.priceColWidth
                         text: uiState.itemShopData.priceLabel || ""
-                        color: "#1e1e1e"
+                        color: Theme.textMuted
                         font.pixelSize: 11
+                        font.bold: true
                         horizontalAlignment: Text.AlignRight
                     }
                 }
@@ -685,37 +751,58 @@ Item {
                     delegate: Rectangle {
                         required property var modelData
                         width: parent.width
-                        height: 18
-                        color: modelData.selected ? "#bccce2" : (modelData.hover ? "#e2eaf4" : "transparent")
+                        height: itemShopWindow.shopRowHeight
+                        color: modelData.selected
+                            ? Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.28)
+                            : (modelData.hover
+                                ? Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.12)
+                                : "transparent")
+
+                        Image {
+                            x: 4
+                            anchors.verticalCenter: parent.verticalCenter
+                            width: itemShopWindow.shopIconSize
+                            height: itemShopWindow.shopIconSize
+                            fillMode: Image.PreserveAspectFit
+                            smooth: false
+                            source: root.itemIconSource(
+                                modelData.itemId || 0,
+                                modelData.itemIndex || 0,
+                                modelData.identified)
+                            visible: (modelData.itemId || 0) > 0 || (modelData.itemIndex || 0) > 0
+                        }
 
                         Text {
-                            x: 24
-                            y: 2
-                            width: (uiState.itemShopData.showQuantity || false) ? 160 : (parent.width - 110)
+                            x: itemShopWindow.shopIconSize + 10
+                            anchors.verticalCenter: parent.verticalCenter
+                            width: itemShopWindow.showQuantity
+                                ? (itemShopWindow.qtyColX - (itemShopWindow.shopIconSize + 14))
+                                : (parent.width - itemShopWindow.priceColWidth - itemShopWindow.priceColMargin - (itemShopWindow.shopIconSize + 14))
                             text: modelData.name
-                            color: "#1a1a1a"
-                            font.pixelSize: 11
+                            color: Theme.text
+                            font.pixelSize: Math.min(13, Math.max(11, itemShopWindow.shopRowHeight - 8))
                             elide: Text.ElideRight
                         }
 
                         Text {
-                            x: 188
-                            y: 2
-                            width: 38
-                            visible: uiState.itemShopData.showQuantity || false
+                            x: itemShopWindow.qtyColX
+                            anchors.verticalCenter: parent.verticalCenter
+                            width: itemShopWindow.qtyColWidth
+                            visible: itemShopWindow.showQuantity
                             text: modelData.quantity
-                            color: "#303030"
-                            font.pixelSize: 11
+                            color: Theme.text
+                            font.pixelSize: Math.min(13, Math.max(11, itemShopWindow.shopRowHeight - 8))
                             horizontalAlignment: Text.AlignHCenter
                         }
 
                         Text {
-                            x: parent.width - 76
-                            y: 2
-                            width: 70
+                            x: parent.width - itemShopWindow.priceColWidth - itemShopWindow.priceColMargin
+                            anchors.verticalCenter: parent.verticalCenter
+                            width: itemShopWindow.priceColWidth
                             text: modelData.price
-                            color: "#1c3c62"
-                            font.pixelSize: 11
+                            color: Theme.accent
+                            font.pixelSize: Math.min(13, Math.max(11, itemShopWindow.shopRowHeight - 8))
+                            font.bold: true
                             horizontalAlignment: Text.AlignRight
                         }
                     }
@@ -725,40 +812,52 @@ Item {
     }
 
     Rectangle {
+        id: itemPurchaseWindow
         x: uiState.itemPurchaseX
         y: uiState.itemPurchaseY
         width: uiState.itemPurchaseWidth
         height: uiState.itemPurchaseHeight
-        color: "#ececec"
+        radius: 8
+        clip: true
+        color: Theme.background
         border.width: 1
-        border.color: "#484848"
+        border.color: Theme.borderStrong
         visible: uiState.itemPurchaseVisible
+
+        readonly property int qtyColX: 132
+        readonly property int qtyColWidth: 36
+        readonly property int costColWidth: 60
+        readonly property int costColMargin: 8
+        readonly property int shopRowHeight: uiState.itemPurchaseData.rowHeight || 20
+        readonly property int shopIconSize: Math.max(14, shopRowHeight - 4)
 
         Rectangle {
             x: 0
             y: 0
             width: parent.width
-            height: 17
-            color: "#52657b"
+            height: 22
+            color: Theme.accent
         }
 
         Text {
-            x: 6
-            y: 1
+            x: 10
+            y: 4
             text: uiState.itemPurchaseData.title || ""
-            color: "#ffffff"
+            color: Theme.accentText
             font.pixelSize: 12
             font.bold: true
         }
 
         Rectangle {
             x: 8
-            y: 22
+            y: 26
             width: parent.width - 16
             height: parent.height - 80
-            color: "#f8f8f8"
+            color: Theme.surface
             border.width: 1
-            border.color: "#787878"
+            border.color: Theme.border
+            radius: 4
+            clip: true
 
             Column {
                 x: 1
@@ -768,34 +867,39 @@ Item {
 
                 Rectangle {
                     width: parent.width
-                    height: 17
-                    color: "#dee5ed"
+                    height: 20
+                    color: Theme.surfaceAlt
 
                     Text {
-                        x: 4
-                        y: 2
+                        x: 26
+                        y: 3
+                        width: itemPurchaseWindow.qtyColX - 30
                         text: uiState.itemPurchaseData.nameLabel || ""
-                        color: "#1e1e1e"
+                        color: Theme.textMuted
                         font.pixelSize: 11
+                        font.bold: true
+                        elide: Text.ElideRight
                     }
 
                     Text {
-                        x: 126
-                        y: 2
-                        width: 34
+                        x: itemPurchaseWindow.qtyColX
+                        y: 3
+                        width: itemPurchaseWindow.qtyColWidth
                         text: uiState.itemPurchaseData.quantityLabel || ""
-                        color: "#1e1e1e"
+                        color: Theme.textMuted
                         font.pixelSize: 11
+                        font.bold: true
                         horizontalAlignment: Text.AlignHCenter
                     }
 
                     Text {
-                        x: width - 64
-                        y: 2
-                        width: 56
+                        x: parent.width - itemPurchaseWindow.costColWidth - itemPurchaseWindow.costColMargin
+                        y: 3
+                        width: itemPurchaseWindow.costColWidth
                         text: uiState.itemPurchaseData.amountLabel || ""
-                        color: "#1e1e1e"
+                        color: Theme.textMuted
                         font.pixelSize: 11
+                        font.bold: true
                         horizontalAlignment: Text.AlignRight
                     }
                 }
@@ -806,36 +910,55 @@ Item {
                     delegate: Rectangle {
                         required property var modelData
                         width: parent.width
-                        height: 18
-                        color: modelData.selected ? "#bccce2" : (modelData.hover ? "#e2eaf4" : "transparent")
+                        height: itemPurchaseWindow.shopRowHeight
+                        color: modelData.selected
+                            ? Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.28)
+                            : (modelData.hover
+                                ? Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.12)
+                                : "transparent")
+
+                        Image {
+                            x: 4
+                            anchors.verticalCenter: parent.verticalCenter
+                            width: itemPurchaseWindow.shopIconSize
+                            height: itemPurchaseWindow.shopIconSize
+                            fillMode: Image.PreserveAspectFit
+                            smooth: false
+                            source: root.itemIconSource(
+                                modelData.itemId || 0,
+                                modelData.itemIndex || 0,
+                                modelData.identified)
+                            visible: (modelData.itemId || 0) > 0 || (modelData.itemIndex || 0) > 0
+                        }
 
                         Text {
-                            x: 4
-                            y: 2
-                            width: 126
+                            x: itemPurchaseWindow.shopIconSize + 10
+                            anchors.verticalCenter: parent.verticalCenter
+                            width: itemPurchaseWindow.qtyColX - (itemPurchaseWindow.shopIconSize + 14)
                             text: modelData.name
-                            color: "#1a1a1a"
-                            font.pixelSize: 11
+                            color: Theme.text
+                            font.pixelSize: Math.min(13, Math.max(11, itemPurchaseWindow.shopRowHeight - 8))
                             elide: Text.ElideRight
                         }
 
                         Text {
-                            x: 126
-                            y: 2
-                            width: 34
-                            text: modelData.quantity
-                            color: "#303030"
-                            font.pixelSize: 11
+                            x: itemPurchaseWindow.qtyColX
+                            anchors.verticalCenter: parent.verticalCenter
+                            width: itemPurchaseWindow.qtyColWidth
+                            text: "x" + modelData.quantity
+                            color: Theme.text
+                            font.pixelSize: Math.min(13, Math.max(11, itemPurchaseWindow.shopRowHeight - 8))
                             horizontalAlignment: Text.AlignHCenter
                         }
 
                         Text {
-                            x: parent.width - 64
-                            y: 2
-                            width: 56
+                            x: parent.width - itemPurchaseWindow.costColWidth - itemPurchaseWindow.costColMargin
+                            anchors.verticalCenter: parent.verticalCenter
+                            width: itemPurchaseWindow.costColWidth
                             text: modelData.cost
-                            color: "#1c3c62"
-                            font.pixelSize: 11
+                            color: Theme.accent
+                            font.pixelSize: Math.min(13, Math.max(11, itemPurchaseWindow.shopRowHeight - 8))
+                            font.bold: true
                             horizontalAlignment: Text.AlignRight
                         }
                     }
@@ -843,22 +966,34 @@ Item {
             }
         }
 
-        Text {
+        Rectangle {
             x: 10
-            y: height - 75
-            text: uiState.itemPurchaseData.totalLabel || ""
-            color: "#242424"
-            font.pixelSize: 11
-        }
+            y: itemPurchaseWindow.height - 58
+            width: itemPurchaseWindow.width - 20
+            height: 22
+            radius: 4
+            color: Theme.surfaceAlt
+            border.width: 1
+            border.color: Theme.border
 
-        Text {
-            x: 90
-            y: height - 75
-            width: 138
-            text: uiState.itemPurchaseTotal
-            color: "#1c3c62"
-            font.pixelSize: 11
-            horizontalAlignment: Text.AlignRight
+            Text {
+                x: 10
+                anchors.verticalCenter: parent.verticalCenter
+                text: uiState.itemPurchaseData.totalLabel || ""
+                color: Theme.textMuted
+                font.pixelSize: 11
+                font.bold: true
+            }
+
+            Text {
+                anchors.right: parent.right
+                anchors.rightMargin: 10
+                anchors.verticalCenter: parent.verticalCenter
+                text: uiState.itemPurchaseTotal
+                color: Theme.accent
+                font.pixelSize: 12
+                font.bold: true
+            }
         }
 
         Repeater {
@@ -870,55 +1005,71 @@ Item {
                 y: (modelData.y || 0) - uiState.itemPurchaseY
                 width: modelData.width || 0
                 height: modelData.height || 0
-                color: modelData.pressed ? "#aab9cd" : (modelData.hot ? "#c4d2e4" : "#dcdcdc")
+                radius: 4
+                color: modelData.pressed
+                    ? Theme.buttonBgPressed
+                    : (modelData.hot ? Theme.buttonBgHover : Theme.buttonBg)
                 border.width: 1
-                border.color: "#585858"
+                border.color: Theme.buttonBorder
 
                 Text {
                     anchors.centerIn: parent
                     text: modelData.label || ""
-                    color: "#181818"
+                    color: Theme.buttonText
                     font.pixelSize: 12
+                    font.bold: true
                 }
             }
         }
     }
 
     Rectangle {
+        id: itemSellWindow
         x: uiState.itemSellX
         y: uiState.itemSellY
         width: uiState.itemSellWidth
         height: uiState.itemSellHeight
-        color: "#ececec"
+        radius: 8
+        clip: true
+        color: Theme.background
         border.width: 1
-        border.color: "#484848"
+        border.color: Theme.borderStrong
         visible: uiState.itemSellVisible
+
+        readonly property int qtyColX: 132
+        readonly property int qtyColWidth: 36
+        readonly property int gainColWidth: 60
+        readonly property int gainColMargin: 8
+        readonly property int shopRowHeight: uiState.itemSellData.rowHeight || 20
+        readonly property int shopIconSize: Math.max(14, shopRowHeight - 4)
 
         Rectangle {
             x: 0
             y: 0
             width: parent.width
-            height: 17
-            color: "#52657b"
+            height: 22
+            color: Theme.accent
         }
 
         Text {
-            x: 6
-            y: 1
+            x: 10
+            y: 4
             text: uiState.itemSellData.title || ""
-            color: "#ffffff"
+            color: Theme.accentText
             font.pixelSize: 12
             font.bold: true
         }
 
         Rectangle {
             x: 8
-            y: 22
+            y: 26
             width: parent.width - 16
             height: parent.height - 80
-            color: "#f8f8f8"
+            color: Theme.surface
             border.width: 1
-            border.color: "#787878"
+            border.color: Theme.border
+            radius: 4
+            clip: true
 
             Column {
                 x: 1
@@ -928,34 +1079,39 @@ Item {
 
                 Rectangle {
                     width: parent.width
-                    height: 17
-                    color: "#dee5ed"
+                    height: 20
+                    color: Theme.surfaceAlt
 
                     Text {
-                        x: 4
-                        y: 2
+                        x: 26
+                        y: 3
+                        width: itemSellWindow.qtyColX - 30
                         text: uiState.itemSellData.nameLabel || ""
-                        color: "#1e1e1e"
+                        color: Theme.textMuted
                         font.pixelSize: 11
+                        font.bold: true
+                        elide: Text.ElideRight
                     }
 
                     Text {
-                        x: 126
-                        y: 2
-                        width: 34
+                        x: itemSellWindow.qtyColX
+                        y: 3
+                        width: itemSellWindow.qtyColWidth
                         text: uiState.itemSellData.quantityLabel || ""
-                        color: "#1e1e1e"
+                        color: Theme.textMuted
                         font.pixelSize: 11
+                        font.bold: true
                         horizontalAlignment: Text.AlignHCenter
                     }
 
                     Text {
-                        x: width - 64
-                        y: 2
-                        width: 56
+                        x: parent.width - itemSellWindow.gainColWidth - itemSellWindow.gainColMargin
+                        y: 3
+                        width: itemSellWindow.gainColWidth
                         text: uiState.itemSellData.amountLabel || ""
-                        color: "#1e1e1e"
+                        color: Theme.textMuted
                         font.pixelSize: 11
+                        font.bold: true
                         horizontalAlignment: Text.AlignRight
                     }
                 }
@@ -966,36 +1122,55 @@ Item {
                     delegate: Rectangle {
                         required property var modelData
                         width: parent.width
-                        height: 18
-                        color: modelData.selected ? "#bccce2" : (modelData.hover ? "#e2eaf4" : "transparent")
+                        height: itemSellWindow.shopRowHeight
+                        color: modelData.selected
+                            ? Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.28)
+                            : (modelData.hover
+                                ? Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.12)
+                                : "transparent")
+
+                        Image {
+                            x: 4
+                            anchors.verticalCenter: parent.verticalCenter
+                            width: itemSellWindow.shopIconSize
+                            height: itemSellWindow.shopIconSize
+                            fillMode: Image.PreserveAspectFit
+                            smooth: false
+                            source: root.itemIconSource(
+                                modelData.itemId || 0,
+                                modelData.itemIndex || 0,
+                                modelData.identified)
+                            visible: (modelData.itemId || 0) > 0 || (modelData.itemIndex || 0) > 0
+                        }
 
                         Text {
-                            x: 4
-                            y: 2
-                            width: 126
+                            x: itemSellWindow.shopIconSize + 10
+                            anchors.verticalCenter: parent.verticalCenter
+                            width: itemSellWindow.qtyColX - (itemSellWindow.shopIconSize + 14)
                             text: modelData.name
-                            color: "#1a1a1a"
-                            font.pixelSize: 11
+                            color: Theme.text
+                            font.pixelSize: Math.min(13, Math.max(11, itemSellWindow.shopRowHeight - 8))
                             elide: Text.ElideRight
                         }
 
                         Text {
-                            x: 126
-                            y: 2
-                            width: 34
-                            text: modelData.quantity
-                            color: "#303030"
-                            font.pixelSize: 11
+                            x: itemSellWindow.qtyColX
+                            anchors.verticalCenter: parent.verticalCenter
+                            width: itemSellWindow.qtyColWidth
+                            text: "x" + modelData.quantity
+                            color: Theme.text
+                            font.pixelSize: Math.min(13, Math.max(11, itemSellWindow.shopRowHeight - 8))
                             horizontalAlignment: Text.AlignHCenter
                         }
 
                         Text {
-                            x: parent.width - 64
-                            y: 2
-                            width: 56
+                            x: parent.width - itemSellWindow.gainColWidth - itemSellWindow.gainColMargin
+                            anchors.verticalCenter: parent.verticalCenter
+                            width: itemSellWindow.gainColWidth
                             text: modelData.gain
-                            color: "#1c3c62"
-                            font.pixelSize: 11
+                            color: Theme.accent
+                            font.pixelSize: Math.min(13, Math.max(11, itemSellWindow.shopRowHeight - 8))
+                            font.bold: true
                             horizontalAlignment: Text.AlignRight
                         }
                     }
@@ -1003,22 +1178,34 @@ Item {
             }
         }
 
-        Text {
+        Rectangle {
             x: 10
-            y: height - 75
-            text: uiState.itemSellData.totalLabel || ""
-            color: "#242424"
-            font.pixelSize: 11
-        }
+            y: itemSellWindow.height - 58
+            width: itemSellWindow.width - 20
+            height: 22
+            radius: 4
+            color: Theme.surfaceAlt
+            border.width: 1
+            border.color: Theme.border
 
-        Text {
-            x: 90
-            y: height - 75
-            width: 138
-            text: uiState.itemSellTotal
-            color: "#1c3c62"
-            font.pixelSize: 11
-            horizontalAlignment: Text.AlignRight
+            Text {
+                x: 10
+                anchors.verticalCenter: parent.verticalCenter
+                text: uiState.itemSellData.totalLabel || ""
+                color: Theme.textMuted
+                font.pixelSize: 11
+                font.bold: true
+            }
+
+            Text {
+                anchors.right: parent.right
+                anchors.rightMargin: 10
+                anchors.verticalCenter: parent.verticalCenter
+                text: uiState.itemSellTotal
+                color: Theme.accent
+                font.pixelSize: 12
+                font.bold: true
+            }
         }
 
         Repeater {
@@ -1030,15 +1217,19 @@ Item {
                 y: (modelData.y || 0) - uiState.itemSellY
                 width: modelData.width || 0
                 height: modelData.height || 0
-                color: modelData.pressed ? "#aab9cd" : (modelData.hot ? "#c4d2e4" : "#dcdcdc")
+                radius: 4
+                color: modelData.pressed
+                    ? Theme.buttonBgPressed
+                    : (modelData.hot ? Theme.buttonBgHover : Theme.buttonBg)
                 border.width: 1
-                border.color: "#585858"
+                border.color: Theme.buttonBorder
 
                 Text {
                     anchors.centerIn: parent
                     text: modelData.label || ""
-                    color: "#181818"
+                    color: Theme.buttonText
                     font.pixelSize: 12
+                    font.bold: true
                 }
             }
         }
@@ -1050,9 +1241,9 @@ Item {
         width: uiState.shortCutWidth
         height: uiState.shortCutHeight
         radius: 4
-        color: "#d0d0d0"
+        color: Theme.surfaceAlt
         border.width: 1
-        border.color: "#606060"
+        border.color: Theme.borderStrong
         visible: uiState.shortCutVisible
 
         Repeater {
@@ -1065,9 +1256,9 @@ Item {
                 y: 4
                 width: 24
                 height: 24
-                color: modelData.hover ? "#d0d8e8" : "#f0f0f0"
+                color: modelData.hover ? Theme.buttonBgHover : Theme.inputBg
                 border.width: 1
-                border.color: modelData.isSkill ? "#6a4fb0" : "#6a6a6a"
+                border.color: modelData.isSkill ? Theme.accent : Theme.border
 
                 Image {
                     id: shortCutIcon
@@ -1077,7 +1268,7 @@ Item {
                     smooth: false
                     source: modelData.isSkill
                         ? root.skillIconSource(modelData.skillId || 0)
-                        : root.itemIconSource(modelData.itemId || 0)
+                        : root.itemIconSource(modelData.itemId || 0, 0)
                     visible: modelData.occupied && source !== ""
                 }
 
@@ -1086,7 +1277,7 @@ Item {
                     width: parent.width - 4
                     text: modelData.occupied ? (modelData.isSkill ? "S" : "I") : ""
                     visible: !shortCutIcon.visible
-                    color: "#202020"
+                    color: Theme.text
                     font.pixelSize: 10
                     font.bold: true
                 }
@@ -1096,11 +1287,11 @@ Item {
                     anchors.rightMargin: 2
                     anchors.bottom: parent.bottom
                     text: modelData.count > 0 ? modelData.count : ""
-                    color: "#ffffff"
+                    color: Theme.accentText
                     font.pixelSize: 9
                     font.bold: true
                     style: Text.Outline
-                    styleColor: "#000000"
+                    styleColor: Theme.text
                 }
             }
         }
@@ -1110,7 +1301,7 @@ Item {
             y: 16
             width: 12
             text: uiState.shortCutPage
-            color: "#ffffff"
+            color: Theme.text
             font.pixelSize: 11
             font.bold: true
             style: Text.Outline
@@ -1124,10 +1315,10 @@ Item {
         y: uiState.basicInfoY
         width: uiState.basicInfoWidth
         height: uiState.basicInfoHeight
-        radius: 4
-        color: uiState.basicInfoMini ? "#ece7d8" : "#ede9df"
+        radius: 8
+        color: uiState.basicInfoMini ? Theme.surfaceAlt : Theme.background
         border.width: 1
-        border.color: "#6b675f"
+        border.color: Theme.border
         visible: uiState.basicInfoVisible
 
         Rectangle {
@@ -1136,16 +1327,16 @@ Item {
             width: parent.width - 2
             height: 16
             radius: 3
-            color: "#6e8194"
+            color: Theme.accent
             border.width: 1
-            border.color: "#4e5d6c"
+            border.color: Theme.borderStrong
         }
 
         Text {
             x: uiState.basicInfoMini ? 9 : 17
             y: 3
             text: uiState.basicInfoMini ? (uiState.basicInfoData.name || "") : "Basic Info"
-            color: "#ffffff"
+            color: Theme.accentText
             font.pixelSize: 12
             font.bold: true
         }
@@ -1160,15 +1351,15 @@ Item {
                 width: modelData.width || 0
                 height: modelData.height || 0
                 radius: 2
-                color: "#d7d2c5"
+                color: Theme.buttonBg
                 border.width: 1
-                border.color: "#7f7a70"
+                border.color: Theme.buttonBorder
                 visible: modelData.visible || false
 
                 Text {
                     anchors.centerIn: parent
                     text: modelData.label || ""
-                    color: "#000000"
+                    color: Theme.buttonText
                     font.pixelSize: 8
                     font.bold: true
                 }
@@ -1180,7 +1371,7 @@ Item {
             y: 18
             visible: uiState.basicInfoMini
             text: uiState.basicInfoData.miniHeaderText || ""
-            color: "#000000"
+            color: Theme.text
             font.pixelSize: 11
         }
 
@@ -1189,7 +1380,7 @@ Item {
             y: 33
             visible: uiState.basicInfoMini
             text: uiState.basicInfoData.miniStatusText || ""
-            color: "#000000"
+            color: Theme.text
             font.pixelSize: 11
         }
 
@@ -1198,7 +1389,7 @@ Item {
             y: 24
             visible: !uiState.basicInfoMini
             text: uiState.basicInfoData.name || ""
-            color: "#000000"
+            color: Theme.text
             font.pixelSize: 12
         }
 
@@ -1207,7 +1398,7 @@ Item {
             y: 38
             visible: !uiState.basicInfoMini
             text: uiState.basicInfoData.jobName || ""
-            color: "#000000"
+            color: Theme.text
             font.pixelSize: 12
         }
 
@@ -1217,16 +1408,16 @@ Item {
             width: 85
             height: 9
             visible: !uiState.basicInfoMini
-            color: "#403c3c"
+            color: Theme.inputBg
             border.width: 1
-            border.color: "#202020"
+            border.color: Theme.borderStrong
 
             Rectangle {
                 x: 1
                 y: 1
                 width: Math.max(0, (parent.width - 2) * ((uiState.basicInfoData.maxHp || 0) > 0 ? (uiState.basicInfoData.hp || 0) / uiState.basicInfoData.maxHp : 0))
                 height: parent.height - 2
-                color: ((uiState.basicInfoData.maxHp || 0) > 0 && (uiState.basicInfoData.hp || 0) * 100 < uiState.basicInfoData.maxHp * 25) ? "#d04848" : "#d06060"
+                color: Theme.hpFill
             }
         }
 
@@ -1236,16 +1427,16 @@ Item {
             width: 85
             height: 9
             visible: !uiState.basicInfoMini
-            color: "#403c3c"
+            color: Theme.inputBg
             border.width: 1
-            border.color: "#202020"
+            border.color: Theme.borderStrong
 
             Rectangle {
                 x: 1
                 y: 1
                 width: Math.max(0, (parent.width - 2) * ((uiState.basicInfoData.maxSp || 0) > 0 ? (uiState.basicInfoData.sp || 0) / uiState.basicInfoData.maxSp : 0))
                 height: parent.height - 2
-                color: "#4a78d8"
+                color: Theme.spFill
             }
         }
 
@@ -1254,7 +1445,7 @@ Item {
             y: 31
             visible: !uiState.basicInfoMini
             text: uiState.basicInfoData.hpText || ""
-            color: "#000000"
+            color: Theme.text
             font.pixelSize: 10
         }
 
@@ -1263,7 +1454,7 @@ Item {
             y: 52
             visible: !uiState.basicInfoMini
             text: uiState.basicInfoData.spText || ""
-            color: "#000000"
+            color: Theme.text
             font.pixelSize: 10
         }
 
@@ -1272,7 +1463,7 @@ Item {
             y: 72
             visible: !uiState.basicInfoMini
             text: uiState.basicInfoData.baseLevelText || ""
-            color: "#000000"
+            color: Theme.text
             font.pixelSize: 11
         }
 
@@ -1282,16 +1473,16 @@ Item {
             width: 102
             height: 6
             visible: !uiState.basicInfoMini
-            color: "#ffffff"
+            color: Theme.inputBg
             border.width: 1
-            border.color: "#808080"
+            border.color: Theme.border
 
             Rectangle {
                 x: 1
                 y: 1
                 width: Math.max(0, (parent.width - 2) * ((uiState.basicInfoData.expPercent || 0) / 100.0))
                 height: parent.height - 2
-                color: "#4fd17f"
+                color: Theme.expFill
             }
         }
 
@@ -1300,7 +1491,7 @@ Item {
             y: 84
             visible: !uiState.basicInfoMini
             text: uiState.basicInfoData.jobLevelText || ""
-            color: "#000000"
+            color: Theme.text
             font.pixelSize: 11
         }
 
@@ -1310,16 +1501,16 @@ Item {
             width: 102
             height: 6
             visible: !uiState.basicInfoMini
-            color: "#ffffff"
+            color: Theme.inputBg
             border.width: 1
-            border.color: "#808080"
+            border.color: Theme.border
 
             Rectangle {
                 x: 1
                 y: 1
                 width: Math.max(0, (parent.width - 2) * ((uiState.basicInfoData.jobExpPercent || 0) / 100.0))
                 height: parent.height - 2
-                color: "#6aa8ff"
+                color: Theme.spFill
             }
         }
 
@@ -1328,7 +1519,9 @@ Item {
             y: 103
             visible: !uiState.basicInfoMini
             text: uiState.basicInfoData.weightText || ""
-            color: ((uiState.basicInfoData.maxWeight || 0) > 0 && (uiState.basicInfoData.weight || 0) * 100 >= uiState.basicInfoData.maxWeight * 50) ? "#ff0000" : "#000000"
+            color: ((uiState.basicInfoData.maxWeight || 0) > 0 && (uiState.basicInfoData.weight || 0) * 100 >= uiState.basicInfoData.maxWeight * 50)
+                ? Theme.hpFill
+                : Theme.text
             font.pixelSize: 11
         }
 
@@ -1337,7 +1530,23 @@ Item {
             y: 103
             visible: !uiState.basicInfoMini
             text: uiState.basicInfoData.moneyText || ""
-            color: "#000000"
+            color: Theme.text
+            font.pixelSize: 11
+        }
+
+        Text {
+            x: 5
+            y: 118
+            visible: !uiState.basicInfoMini && (uiState.basicInfoData.cartActive || false)
+            text: "Cart : " + (uiState.basicInfoData.cartCurrentCount || 0)
+                + " / " + (uiState.basicInfoData.cartMaxCount || 0)
+                + "  (" + (uiState.basicInfoData.cartCurrentWeight || 0)
+                + " / " + (uiState.basicInfoData.cartMaxWeight || 0) + ")"
+            color: ((uiState.basicInfoData.cartMaxWeight || 0) > 0
+                    && (uiState.basicInfoData.cartCurrentWeight || 0) * 100
+                        >= (uiState.basicInfoData.cartMaxWeight || 0) * 90)
+                ? Theme.hpFill
+                : Theme.text
             font.pixelSize: 11
         }
 
@@ -1351,15 +1560,15 @@ Item {
                 width: modelData.width || 0
                 height: modelData.height || 0
                 radius: 3
-                color: "#d7d2c5"
+                color: Theme.buttonBg
                 border.width: 1
-                border.color: "#7f7a70"
+                border.color: Theme.buttonBorder
                 visible: modelData.visible || false
 
                 Text {
                     anchors.centerIn: parent
                     text: modelData.label || ""
-                    color: "#000000"
+                    color: Theme.buttonText
                     font.pixelSize: 8
                     font.bold: true
                 }
@@ -1372,10 +1581,10 @@ Item {
         y: uiState.statusY
         width: uiState.statusWidth
         height: uiState.statusHeight
-        radius: 4
-        color: uiState.statusMini ? "#ece7d8" : "#ede9df"
+        radius: 8
+        color: uiState.statusMini ? Theme.surfaceAlt : Theme.background
         border.width: 1
-        border.color: "#6b675f"
+        border.color: Theme.border
         visible: uiState.statusVisible
 
         Rectangle {
@@ -1384,16 +1593,16 @@ Item {
             width: parent.width - 2
             height: 16
             radius: 3
-            color: uiState.statusMini ? "#d5d0c2" : "#6e8194"
+            color: uiState.statusMini ? Theme.surface : Theme.accent
             border.width: 1
-            border.color: uiState.statusMini ? "#8b877b" : "#4e5d6c"
+            border.color: uiState.statusMini ? Theme.border : Theme.borderStrong
         }
 
         Text {
             x: 17
             y: 3
             text: uiState.statusData.title || ""
-            color: uiState.statusMini ? "#000000" : "#ffffff"
+            color: uiState.statusMini ? Theme.text : Theme.accentText
             font.pixelSize: 12
             font.bold: true
         }
@@ -1408,15 +1617,15 @@ Item {
                 width: modelData.width || 0
                 height: modelData.height || 0
                 radius: 2
-                color: "#d7d2c5"
+                color: Theme.buttonBg
                 border.width: 1
-                border.color: "#7f7a70"
+                border.color: Theme.buttonBorder
                 visible: modelData.visible || false
 
                 Text {
                     anchors.centerIn: parent
                     text: modelData.label || ""
-                    color: "#000000"
+                    color: Theme.buttonText
                     font.pixelSize: 8
                     font.bold: true
                 }
@@ -1428,7 +1637,7 @@ Item {
             y: 3
             visible: uiState.statusMini
             text: uiState.statusData.miniPointsText || ""
-            color: "#000000"
+            color: Theme.text
             font.pixelSize: 11
         }
 
@@ -1437,7 +1646,7 @@ Item {
             y: 17
             width: parent.width
             height: parent.height - 17
-            color: "#e7e2d6"
+            color: Theme.surface
             border.width: 0
             visible: !uiState.statusMini
 
@@ -1446,7 +1655,7 @@ Item {
                 y: 0
                 width: 20
                 height: parent.height
-                color: "#d3cdbf"
+                color: Theme.surfaceAlt
             }
 
             Repeater {
@@ -1458,15 +1667,15 @@ Item {
                     y: (modelData.y || 0) - uiState.statusY - 17
                     width: modelData.width || 0
                     height: modelData.height || 0
-                    color: modelData.active ? "#ebe7db" : "#c9c2b2"
+                    color: modelData.active ? Theme.surface : Theme.surfaceAlt
                     border.width: 1
-                    border.color: "#8c8578"
+                    border.color: modelData.active ? Theme.borderStrong : Theme.border
                     visible: modelData.visible || false
 
                     Text {
                         anchors.centerIn: parent
                         text: modelData.label || ""
-                        color: "#000000"
+                        color: Theme.text
                         font.pixelSize: 10
                         font.bold: modelData.active || false
                     }
@@ -1491,7 +1700,7 @@ Item {
                             x: 0
                             y: 0
                             text: modelData.label
-                            color: "#000000"
+                            color: Theme.text
                             font.pixelSize: 11
                             font.bold: true
                         }
@@ -1501,7 +1710,7 @@ Item {
                             y: 0
                             width: 34
                             text: modelData.value
-                            color: "#000000"
+                            color: Theme.text
                             font.pixelSize: 11
                         }
 
@@ -1512,14 +1721,14 @@ Item {
                             height: modelData.increaseHeight || 0
                             radius: 2
                             visible: modelData.canIncrease
-                            color: "#d8d8d8"
+                            color: Theme.buttonBg
                             border.width: 1
-                            border.color: "#7f7a70"
+                            border.color: Theme.buttonBorder
 
                             Text {
                                 anchors.centerIn: parent
                                 text: modelData.increaseLabel || ""
-                                color: "#000000"
+                                color: Theme.buttonText
                                 font.pixelSize: 8
                                 font.bold: true
                             }
@@ -1530,7 +1739,7 @@ Item {
                             y: 0
                             width: 10
                             text: modelData.cost > 0 ? modelData.cost : ""
-                            color: "#4a4a4a"
+                            color: Theme.textMuted
                             font.pixelSize: 10
                             horizontalAlignment: Text.AlignRight
                         }
@@ -1543,7 +1752,7 @@ Item {
                 y: 10
                 visible: uiState.statusPage === 0
                 text: "Atk"
-                color: "#000000"
+                color: Theme.text
                 font.pixelSize: 11
             }
 
@@ -1553,7 +1762,7 @@ Item {
                 width: 40
                 visible: uiState.statusPage === 0
                 text: uiState.statusData.attackText || ""
-                color: "#000000"
+                color: Theme.text
                 font.pixelSize: 11
                 horizontalAlignment: Text.AlignRight
             }
@@ -1563,7 +1772,7 @@ Item {
                 y: 26
                 visible: uiState.statusPage === 0
                 text: "Matk"
-                color: "#000000"
+                color: Theme.text
                 font.pixelSize: 11
             }
 
@@ -1573,7 +1782,7 @@ Item {
                 width: 40
                 visible: uiState.statusPage === 0
                 text: uiState.statusData.matkText || ""
-                color: "#000000"
+                color: Theme.text
                 font.pixelSize: 11
                 horizontalAlignment: Text.AlignRight
             }
@@ -1583,7 +1792,7 @@ Item {
                 y: 42
                 visible: uiState.statusPage === 0
                 text: "Hit"
-                color: "#000000"
+                color: Theme.text
                 font.pixelSize: 11
             }
 
@@ -1593,7 +1802,7 @@ Item {
                 width: 40
                 visible: uiState.statusPage === 0
                 text: (uiState.statusData.hit || 0).toString()
-                color: "#000000"
+                color: Theme.text
                 font.pixelSize: 11
                 horizontalAlignment: Text.AlignRight
             }
@@ -1603,7 +1812,7 @@ Item {
                 y: 58
                 visible: uiState.statusPage === 0
                 text: "Crit"
-                color: "#000000"
+                color: Theme.text
                 font.pixelSize: 11
             }
 
@@ -1613,7 +1822,7 @@ Item {
                 width: 40
                 visible: uiState.statusPage === 0
                 text: (uiState.statusData.critical || 0).toString()
-                color: "#000000"
+                color: Theme.text
                 font.pixelSize: 11
                 horizontalAlignment: Text.AlignRight
             }
@@ -1623,7 +1832,7 @@ Item {
                 y: 74
                 visible: uiState.statusPage === 0
                 text: "Pts"
-                color: "#000000"
+                color: Theme.text
                 font.pixelSize: 11
                 font.bold: true
             }
@@ -1634,7 +1843,7 @@ Item {
                 width: 30
                 visible: uiState.statusPage === 0
                 text: (uiState.statusData.statusPoint || 0).toString()
-                color: "#000000"
+                color: Theme.text
                 font.pixelSize: 11
                 font.bold: true
                 horizontalAlignment: Text.AlignRight
@@ -1645,7 +1854,7 @@ Item {
                 y: 10
                 visible: uiState.statusPage === 0
                 text: "Def"
-                color: "#000000"
+                color: Theme.text
                 font.pixelSize: 11
             }
 
@@ -1655,7 +1864,7 @@ Item {
                 width: 40
                 visible: uiState.statusPage === 0
                 text: uiState.statusData.itemDefText || ""
-                color: "#000000"
+                color: Theme.text
                 font.pixelSize: 11
                 horizontalAlignment: Text.AlignRight
             }
@@ -1665,7 +1874,7 @@ Item {
                 y: 26
                 visible: uiState.statusPage === 0
                 text: "Mdef"
-                color: "#000000"
+                color: Theme.text
                 font.pixelSize: 11
             }
 
@@ -1675,7 +1884,7 @@ Item {
                 width: 40
                 visible: uiState.statusPage === 0
                 text: uiState.statusData.itemMdefText || ""
-                color: "#000000"
+                color: Theme.text
                 font.pixelSize: 11
                 horizontalAlignment: Text.AlignRight
             }
@@ -1685,7 +1894,7 @@ Item {
                 y: 42
                 visible: uiState.statusPage === 0
                 text: "Flee"
-                color: "#000000"
+                color: Theme.text
                 font.pixelSize: 11
             }
 
@@ -1695,7 +1904,7 @@ Item {
                 width: 40
                 visible: uiState.statusPage === 0
                 text: uiState.statusData.fleeText || ""
-                color: "#000000"
+                color: Theme.text
                 font.pixelSize: 11
                 horizontalAlignment: Text.AlignRight
             }
@@ -1705,7 +1914,7 @@ Item {
                 y: 58
                 visible: uiState.statusPage === 0
                 text: "Aspd"
-                color: "#000000"
+                color: Theme.text
                 font.pixelSize: 11
             }
 
@@ -1715,7 +1924,7 @@ Item {
                 width: 40
                 visible: uiState.statusPage === 0
                 text: uiState.statusData.aspdText || ""
-                color: "#000000"
+                color: Theme.text
                 font.pixelSize: 11
                 horizontalAlignment: Text.AlignRight
             }
@@ -1730,7 +1939,7 @@ Item {
         height: uiState.chatWindowHeight
         radius: 14
         border.width: 1
-        border.color: "#7088a0b8"
+        border.color: Theme.borderStrong
         visible: uiState.chatWindowVisible
 
         readonly property var chatUi: uiState.chatWindowUi || ({})
@@ -1740,16 +1949,13 @@ Item {
         readonly property int scrollBarGap: scrollBarVisible ? 4 : 0
         readonly property int chatFontSize: chatUi.fontPixelSize || 13
         readonly property real chromeOpacity: root.chatChromeOpacity(chatUi)
-        color: root.rgbaColor(26, 31, 39, 0.78 * chromeOpacity)
+        color: Theme.background
 
         Rectangle {
             anchors.fill: parent
             radius: parent.radius
-            color: "transparent"
-            gradient: Gradient {
-                GradientStop { position: 0.0; color: root.rgbaColor(40, 49, 61, 0.88 * chatWindowChrome.chromeOpacity) }
-                GradientStop { position: 1.0; color: root.rgbaColor(18, 23, 29, 0.82 * chatWindowChrome.chromeOpacity) }
-            }
+            color: Theme.surfaceAlt
+            opacity: 0.35 + (0.25 * chatWindowChrome.chromeOpacity)
         }
 
         Rectangle {
@@ -1758,7 +1964,8 @@ Item {
             width: parent.width - 2
             height: 52
             radius: 13
-            color: root.rgbaColor(54, 67, 82, 0.64 * chatWindowChrome.chromeOpacity)
+            color: Theme.surfaceAlt
+            opacity: 0.55 + (0.15 * chatWindowChrome.chromeOpacity)
             border.width: 0
         }
 
@@ -1777,14 +1984,14 @@ Item {
                     width: Math.max(68, Math.floor((parent.width - ((parent.spacing || 0) * Math.max(0, ((parent.parent.chatUi.tabs || []).length || 1) - 1))) / Math.max(1, ((parent.parent.chatUi.tabs || []).length || 1))))
                     height: 34
                     radius: 10
-                    color: modelData.active ? root.rgbaColor(244, 247, 251, 0.96) : root.rgbaColor(68, 86, 105, 0.46 * chatWindowChrome.chromeOpacity)
+                    color: modelData.active ? Theme.surface : Theme.surfaceAlt
                     border.width: 1
-                    border.color: modelData.active ? root.rgbaColor(200, 211, 223, 0.96) : root.rgbaColor(117, 141, 164, 0.68 * chatWindowChrome.chromeOpacity)
+                    border.color: modelData.active ? Theme.borderStrong : Theme.border
 
                     Text {
                         anchors.centerIn: parent
                         text: modelData.label
-                        color: modelData.active ? "#16212b" : "#ebf1f7"
+                        color: modelData.active ? Theme.text : Theme.textMuted
                         font.family: "Segoe UI"
                         font.pixelSize: 13
                         font.bold: true
@@ -1799,14 +2006,14 @@ Item {
             width: 24
             height: 24
             radius: 8
-            color: parent.chatUi.configVisible ? root.rgbaColor(240, 244, 248, 0.98) : root.rgbaColor(66, 85, 103, 0.52 * parent.chromeOpacity)
+            color: parent.chatUi.configVisible ? Theme.buttonBgHover : Theme.buttonBg
             border.width: 1
-            border.color: parent.chatUi.configVisible ? root.rgbaColor(200, 210, 220, 0.98) : root.rgbaColor(100, 120, 143, 0.8 * parent.chromeOpacity)
+            border.color: parent.chatUi.configVisible ? Theme.borderStrong : Theme.buttonBorder
 
             Text {
                 anchors.centerIn: parent
                 text: "\u2699"
-                color: parent.parent.chatUi.configVisible ? "#1b2832" : "#edf3f8"
+                color: Theme.buttonText
                 font.family: "Segoe UI Symbol"
                 font.pixelSize: 15
             }
@@ -1818,9 +2025,9 @@ Item {
             width: parent.width - 20
             height: parent.height - 92
             radius: 12
-            color: root.rgbaColor(12, 16, 21, 0.68 * parent.chromeOpacity)
+            color: Theme.inputBg
             border.width: 1
-            border.color: root.rgbaColor(124, 141, 157, 0.32 * parent.chromeOpacity + 0.14)
+            border.color: Theme.border
             clip: true
 
             readonly property int chatTextWidth: width - 10 - parent.scrollBarWidth - parent.scrollBarGap
@@ -1828,11 +2035,8 @@ Item {
             Rectangle {
                 anchors.fill: parent
                 radius: 12
-                color: "transparent"
-                gradient: Gradient {
-                    GradientStop { position: 0.0; color: root.rgbaColor(47, 60, 74, 0.18 + 0.14 * chatWindowChrome.chromeOpacity) }
-                    GradientStop { position: 1.0; color: root.rgbaColor(17, 22, 25, 0.12 + 0.08 * chatWindowChrome.chromeOpacity) }
-                }
+                color: Theme.surface
+                opacity: 0.12 + (0.08 * chatWindowChrome.chromeOpacity)
             }
 
             Column {
@@ -1863,16 +2067,17 @@ Item {
                 y: 5
                 width: parent.scrollBarWidth
                 height: parent.height - 10
-                visible: parent.scrollBarVisible
+                readonly property var scrollBarModel: chatWindowChrome.scrollBar
+                visible: chatWindowChrome.scrollBarVisible
                 radius: 4
-                color: root.rgbaColor(72, 87, 102, 0.22 + 0.18 * chatWindowChrome.chromeOpacity)
+                color: Theme.scrollTrack
                 border.width: 1
-                border.color: root.rgbaColor(144, 160, 173, 0.30 + 0.18 * chatWindowChrome.chromeOpacity)
+                border.color: Theme.border
 
                 Rectangle {
-                    readonly property int totalLines: Math.max(1, parent.parent.scrollBar.totalLines || 0)
-                    readonly property int visibleLineCount: Math.max(1, parent.parent.scrollBar.visibleLineCount || 0)
-                    readonly property int firstVisibleLine: Math.max(0, parent.parent.scrollBar.firstVisibleLine || 0)
+                    readonly property int totalLines: Math.max(1, parent.scrollBarModel.totalLines || 0)
+                    readonly property int visibleLineCount: Math.max(1, parent.scrollBarModel.visibleLineCount || 0)
+                    readonly property int firstVisibleLine: Math.max(0, parent.scrollBarModel.firstVisibleLine || 0)
                     readonly property int thumbHeight: Math.max(18, Math.round(parent.height * visibleLineCount / totalLines))
                     readonly property int maxTravel: Math.max(0, parent.height - thumbHeight)
                     readonly property int scrollDenominator: Math.max(1, totalLines - visibleLineCount)
@@ -1881,7 +2086,7 @@ Item {
                     width: parent.width - 2
                     height: thumbHeight
                     radius: 3
-                    color: root.rgbaColor(238, 245, 249, 0.86)
+                    color: Theme.scrollThumb
                 }
             }
         }
@@ -1892,13 +2097,9 @@ Item {
             width: 126
             height: 28
             radius: 9
-            color: uiState.chatWindowWhisperInputActive
-                ? root.rgbaColor(247, 251, 255, 0.30 + 0.56 * parent.chromeOpacity)
-                : root.rgbaColor(214, 220, 228, 0.24 + 0.48 * parent.chromeOpacity)
+            color: uiState.chatWindowWhisperInputActive ? Theme.surface : Theme.inputBg
             border.width: 1
-            border.color: uiState.chatWindowWhisperInputActive
-                ? root.rgbaColor(196, 210, 222, 0.86)
-                : root.rgbaColor(151, 164, 179, 0.80)
+            border.color: uiState.chatWindowWhisperInputActive ? Theme.borderStrong : Theme.inputBorder
 
             Text {
                 x: 8
@@ -1910,7 +2111,7 @@ Item {
                         : "To"
                     return baseText + (uiState.chatWindowWhisperInputActive ? "_" : "")
                 }
-                color: uiState.chatWindowWhisperTargetText.length > 0 || uiState.chatWindowWhisperInputActive ? "#18222c" : "#657282"
+                color: uiState.chatWindowWhisperTargetText.length > 0 || uiState.chatWindowWhisperInputActive ? Theme.inputText : Theme.textMuted
                 font.family: "Segoe UI"
                 font.pixelSize: 13
                 elide: Text.ElideLeft
@@ -1923,20 +2124,16 @@ Item {
             width: parent.width - 154
             height: 28
             radius: 9
-            color: uiState.chatWindowMessageInputActive
-                ? root.rgbaColor(247, 251, 255, 0.30 + 0.56 * parent.chromeOpacity)
-                : root.rgbaColor(214, 220, 228, 0.24 + 0.48 * parent.chromeOpacity)
+            color: uiState.chatWindowMessageInputActive ? Theme.surface : Theme.inputBg
             border.width: 1
-            border.color: uiState.chatWindowMessageInputActive
-                ? root.rgbaColor(196, 210, 222, 0.86)
-                : root.rgbaColor(151, 164, 179, 0.80)
+            border.color: uiState.chatWindowMessageInputActive ? Theme.borderStrong : Theme.inputBorder
 
             Text {
                 x: 8
                 anchors.verticalCenter: parent.verticalCenter
                 width: parent.width - 16
                 text: uiState.chatWindowInputText + (uiState.chatWindowMessageInputActive ? "_" : "")
-                color: "#18222c"
+                color: Theme.inputText
                 font.family: "Segoe UI"
                 font.pixelSize: 13
                 elide: Text.ElideLeft
@@ -1951,9 +2148,9 @@ Item {
         width: uiState.chatWindowUi.configWidth || 0
         height: uiState.chatWindowUi.configHeight || 0
         radius: 14
-        color: "#eeedf2f7"
+        color: Theme.surface
         border.width: 1
-        border.color: "#8797a8"
+        border.color: Theme.borderStrong
 
         Rectangle {
             x: 1
@@ -1961,14 +2158,14 @@ Item {
             width: parent.width - 2
             height: 42
             radius: 13
-            color: "#364453"
+            color: Theme.accent
         }
 
         Text {
             x: 14
             y: 12
             text: "Chat Settings"
-            color: "#f4f7fb"
+            color: Theme.accentText
             font.family: "Segoe UI"
             font.pixelSize: 17
             font.bold: true
@@ -1978,7 +2175,7 @@ Item {
             x: 14
             y: 50
             text: "Tabs"
-            color: "#24313b"
+            color: Theme.text
             font.family: "Segoe UI"
             font.pixelSize: 12
             font.bold: true
@@ -1998,14 +2195,14 @@ Item {
                     width: parent.width
                     height: 28
                     radius: 8
-                    color: modelData.active ? "#cfd8e3" : "#f6f8fb"
+                    color: modelData.active ? Theme.buttonBgHover : Theme.surface
                     border.width: 1
-                    border.color: modelData.active ? "#8d9fb3" : "#c8d0d9"
+                    border.color: modelData.active ? Theme.borderStrong : Theme.border
 
                     Text {
                         anchors.centerIn: parent
                         text: modelData.label
-                        color: "#1a2630"
+                        color: Theme.text
                         font.family: "Segoe UI"
                         font.pixelSize: 12
                         font.bold: modelData.active
@@ -2018,7 +2215,7 @@ Item {
             x: 120
             y: 50
             text: "Font"
-            color: "#24313b"
+            color: Theme.text
             font.family: "Segoe UI"
             font.pixelSize: 12
             font.bold: true
@@ -2030,16 +2227,16 @@ Item {
             width: parent.width - 132
             height: 28
             radius: 8
-            color: "#ffffff"
+            color: Theme.inputBg
             border.width: 1
-            border.color: "#c8d0d9"
+            border.color: Theme.inputBorder
         }
 
         Text {
             x: 132
             y: 79
             text: "Size " + (uiState.chatWindowUi.fontPixelSize || 13)
-            color: "#1a2630"
+            color: Theme.inputText
             font.family: "Segoe UI"
             font.pixelSize: 12
             font.bold: true
@@ -2051,14 +2248,14 @@ Item {
             width: 28
             height: 28
             radius: 8
-            color: "#e6edf4"
+            color: Theme.buttonBg
             border.width: 1
-            border.color: "#b8c5d2"
+            border.color: Theme.buttonBorder
 
             Text {
                 anchors.centerIn: parent
                 text: "-"
-                color: "#24313b"
+                color: Theme.buttonText
                 font.family: "Segoe UI"
                 font.pixelSize: 16
                 font.bold: true
@@ -2071,14 +2268,14 @@ Item {
             width: 28
             height: 28
             radius: 8
-            color: "#e6edf4"
+            color: Theme.buttonBg
             border.width: 1
-            border.color: "#b8c5d2"
+            border.color: Theme.buttonBorder
 
             Text {
                 anchors.centerIn: parent
                 text: "+"
-                color: "#24313b"
+                color: Theme.buttonText
                 font.family: "Segoe UI"
                 font.pixelSize: 16
                 font.bold: true
@@ -2089,7 +2286,7 @@ Item {
             x: 120
             y: 112
             text: "Transparency"
-            color: "#24313b"
+            color: Theme.text
             font.family: "Segoe UI"
             font.pixelSize: 12
             font.bold: true
@@ -2101,16 +2298,16 @@ Item {
             width: parent.width - 132
             height: 28
             radius: 8
-            color: "#ffffff"
+            color: Theme.inputBg
             border.width: 1
-            border.color: "#c8d0d9"
+            border.color: Theme.inputBorder
         }
 
         Text {
             x: 132
             y: 135
             text: (uiState.chatWindowUi.windowOpacityPercent || 84) + "%"
-            color: "#1a2630"
+            color: Theme.inputText
             font.family: "Segoe UI"
             font.pixelSize: 12
             font.bold: true
@@ -2122,14 +2319,14 @@ Item {
             width: parent.width - 152
             height: 8
             radius: 4
-            color: "#cfd7df"
+            color: Theme.scrollTrack
             border.width: 0
 
             Rectangle {
                 width: Math.max(8, parent.width * (((uiState.chatWindowUi.windowOpacityPercent || 84) - 20) / 80))
                 height: parent.height
                 radius: 4
-                color: "#6485a6"
+                color: Theme.accent
             }
 
             Rectangle {
@@ -2138,9 +2335,9 @@ Item {
                 width: 14
                 height: 18
                 radius: 7
-                color: "#f7fbff"
+                color: Theme.surface
                 border.width: 1
-                border.color: "#8ba0b6"
+                border.color: Theme.borderStrong
             }
         }
 
@@ -2148,7 +2345,7 @@ Item {
             x: 120
             y: 192
             text: "Message Types"
-            color: "#24313b"
+            color: Theme.text
             font.family: "Segoe UI"
             font.pixelSize: 12
             font.bold: true
@@ -2170,14 +2367,14 @@ Item {
                     width: Math.floor((parent.width - 8) / 2)
                     height: 28
                     radius: 8
-                    color: modelData.enabled ? "#d6e8db" : "#f7f9fb"
+                    color: modelData.enabled ? Theme.accent : Theme.surface
                     border.width: 1
-                    border.color: modelData.enabled ? "#7ca28a" : "#c8d0d9"
+                    border.color: modelData.enabled ? Theme.borderStrong : Theme.border
 
                     Text {
                         anchors.centerIn: parent
                         text: modelData.label
-                        color: modelData.enabled ? "#1f4930" : "#2a3640"
+                        color: modelData.enabled ? Theme.accentText : Theme.text
                         font.family: "Segoe UI"
                         font.pixelSize: 12
                         font.bold: modelData.enabled
@@ -2192,14 +2389,14 @@ Item {
             width: 104
             height: 28
             radius: 8
-            color: "#e9eef4"
+            color: Theme.buttonBg
             border.width: 1
-            border.color: "#b8c5d2"
+            border.color: Theme.buttonBorder
 
             Text {
                 anchors.centerIn: parent
                 text: "Reset Tab"
-                color: "#24313b"
+                color: Theme.buttonText
                 font.family: "Segoe UI"
                 font.pixelSize: 12
                 font.bold: true
@@ -2241,9 +2438,9 @@ Item {
         width: uiState.minimapWidth
         height: uiState.minimapHeight
         radius: 9
-        color: "#d1d8e4"
+        color: Theme.background
         border.width: 1
-        border.color: "#394256"
+        border.color: Theme.borderStrong
         visible: uiState.minimapVisible
 
         Rectangle {
@@ -2252,7 +2449,7 @@ Item {
             width: parent.width - 2
             height: 16
             radius: 8
-            color: "#62729e"
+            color: Theme.accent
         }
 
         Rectangle {
@@ -2261,9 +2458,9 @@ Item {
             y: (uiState.minimapData.mapY || 0) - parent.y
             width: uiState.minimapData.mapWidth || 0
             height: uiState.minimapData.mapHeight || 0
-            color: "#12161d"
+            color: Theme.inputBg
             border.width: 1
-            border.color: "#485060"
+            border.color: Theme.border
             clip: true
 
             Image {
@@ -2329,7 +2526,7 @@ Item {
             y: 2
             width: Math.max(0, parent.width - 40)
             text: uiState.minimapData.title || ""
-            color: "#ffffff"
+            color: Theme.accentText
             font.pixelSize: 12
             font.bold: true
             elide: Text.ElideRight
@@ -2341,7 +2538,7 @@ Item {
             width: Math.max(0, uiState.minimapData.coordsWidth || 0)
             horizontalAlignment: Text.AlignRight
             text: uiState.minimapData.coordsText || ""
-            color: "#101010"
+            color: Theme.text
             font.pixelSize: 11
             elide: Text.ElideRight
         }
@@ -2352,14 +2549,14 @@ Item {
             width: Math.max(10, uiState.minimapData.closeWidth || 0)
             height: Math.max(10, uiState.minimapData.closeHeight || 0)
             radius: 2
-            color: uiState.minimapData.closePressed ? "#b8c7da" : "#dde4ef"
+            color: uiState.minimapData.closePressed ? Theme.buttonBgPressed : Theme.buttonBg
             border.width: 1
-            border.color: "#4d5662"
+            border.color: Theme.buttonBorder
 
             Text {
                 anchors.centerIn: parent
                 text: uiState.minimapData.closeLabel || ""
-                color: "#18202a"
+                color: Theme.buttonText
                 font.pixelSize: 10
                 font.bold: true
             }
@@ -2440,10 +2637,10 @@ Item {
         y: uiState.inventoryY
         width: uiState.inventoryWidth
         height: uiState.inventoryHeight
-        radius: 4
-        color: "#ede9df"
+        radius: 8
+        color: Theme.background
         border.width: 1
-        border.color: "#6b675f"
+        border.color: Theme.border
         visible: uiState.inventoryVisible
 
         Rectangle {
@@ -2452,16 +2649,16 @@ Item {
             width: parent.width - 2
             height: 16
             radius: 3
-            color: "#6e8194"
+            color: Theme.accent
             border.width: 1
-            border.color: "#4e5d6c"
+            border.color: Theme.borderStrong
         }
 
         Text {
             x: 17
             y: 3
             text: uiState.inventoryData.title || "Inventory"
-            color: "#ffffff"
+            color: Theme.accentText
             font.pixelSize: 12
             font.bold: true
         }
@@ -2476,15 +2673,15 @@ Item {
                 width: modelData.width || 0
                 height: modelData.height || 0
                 radius: 2
-                color: "#d7d2c5"
+                color: Theme.buttonBg
                 border.width: 1
-                border.color: "#7f7a70"
+                border.color: Theme.buttonBorder
                 visible: modelData.visible || false
 
                 Text {
                     anchors.centerIn: parent
                     text: modelData.label || ""
-                    color: "#000000"
+                    color: Theme.buttonText
                     font.pixelSize: 8
                     font.bold: true
                 }
@@ -2496,7 +2693,7 @@ Item {
             y: 17
             width: parent.width
             height: parent.height - 17
-            color: "#e7e2d6"
+            color: Theme.surface
             visible: !uiState.inventoryMini
 
             Repeater {
@@ -2508,15 +2705,15 @@ Item {
                     y: (modelData.y || 0) - uiState.inventoryY - 17
                     width: modelData.width || 0
                     height: modelData.height || 0
-                    color: modelData.active ? "#ebe7db" : "#c9c2b2"
+                    color: modelData.active ? Theme.surface : Theme.surfaceAlt
                     border.width: 1
-                    border.color: "#8c8578"
+                    border.color: Theme.buttonBorder
                     visible: modelData.visible || false
 
                     Text {
                         anchors.centerIn: parent
                         text: modelData.label || ""
-                        color: "#000000"
+                        color: Theme.text
                         font.pixelSize: 9
                         font.bold: modelData.active || false
                     }
@@ -2526,15 +2723,29 @@ Item {
             Repeater {
                 model: uiState.inventoryData.slots || []
 
-                delegate: Rectangle {
+                delegate: Item {
                     required property var modelData
                     x: modelData.x - uiState.inventoryX
                     y: modelData.y - uiState.inventoryY - 17
                     width: modelData.width
                     height: modelData.height
-                    color: modelData.hovered ? "#d7dff0" : "#f5f2ea"
-                    border.width: 1
-                    border.color: modelData.hovered ? "#7e95bf" : "#a69f91"
+
+                    Rectangle {
+                        x: 1
+                        y: 2
+                        width: parent.width
+                        height: parent.height
+                        radius: 6
+                        color: Qt.rgba(0, 0, 0, modelData.hovered ? 0.35 : 0.2)
+                        z: -1
+                    }
+
+                    Rectangle {
+                        anchors.fill: parent
+                        radius: 6
+                        color: modelData.hovered ? Theme.buttonBgHover : Theme.inputBg
+                        border.width: 1
+                        border.color: modelData.hovered ? Theme.accent : Theme.border
 
                     Image {
                         id: inventoryIcon
@@ -2544,7 +2755,9 @@ Item {
                         fillMode: Image.PreserveAspectFit
                         smooth: false
                         cache: false
-                        source: modelData.occupied && (modelData.itemId || 0) > 0 ? root.itemIconSource(modelData.itemId || 0) : ""
+                        source: modelData.occupied && ((modelData.itemId || 0) > 0 || (modelData.itemIndex || 0) > 0)
+                            ? root.itemIconSource(modelData.itemId || 0, modelData.itemIndex || 0)
+                            : ""
                         visible: source !== "" && status === Image.Ready
                     }
 
@@ -2552,7 +2765,7 @@ Item {
                         anchors.centerIn: parent
                         width: parent.width - 4
                         text: modelData.occupied ? modelData.label : ""
-                        color: "#000000"
+                        color: Theme.text
                         font.pixelSize: 9
                         horizontalAlignment: Text.AlignHCenter
                         elide: Text.ElideRight
@@ -2565,9 +2778,10 @@ Item {
                         anchors.bottom: parent.bottom
                         anchors.bottomMargin: 2
                         text: (modelData.count || 0) > 1 ? modelData.count : ""
-                        color: "#222e50"
+                        color: Theme.accent
                         font.pixelSize: 9
                         font.bold: true
+                    }
                     }
                 }
             }
@@ -2578,18 +2792,18 @@ Item {
                 width: uiState.inventoryData.scrollTrackWidth || 0
                 height: uiState.inventoryData.scrollTrackHeight || 0
                 visible: uiState.inventoryData.scrollBarVisible || false
-                color: "#e3e7ee"
+                color: Theme.scrollTrack
                 border.width: 1
-                border.color: "#a4adbd"
+                border.color: Theme.border
 
                 Rectangle {
                     x: (uiState.inventoryData.scrollThumbX || 0) - (uiState.inventoryData.scrollTrackX || 0)
                     y: (uiState.inventoryData.scrollThumbY || 0) - (uiState.inventoryData.scrollTrackY || 0)
                     width: uiState.inventoryData.scrollThumbWidth || 0
                     height: uiState.inventoryData.scrollThumbHeight || 0
-                    color: "#8192c7"
+                    color: Theme.scrollThumb
                     border.width: 1
-                    border.color: "#3f5684"
+                    border.color: Theme.borderStrong
                 }
             }
 
@@ -2598,16 +2812,16 @@ Item {
                 y: parent.height - height
                 width: parent.width
                 height: 21
-                color: "#ddd7ca"
+                color: Theme.surfaceAlt
                 border.width: 1
-                border.color: "#bcb4a7"
+                border.color: Theme.border
 
                 Text {
                     anchors.right: parent.right
                     anchors.rightMargin: 8
                     anchors.verticalCenter: parent.verticalCenter
                     text: (uiState.inventoryData.currentItemCount || 0) + " / " + (uiState.inventoryData.maxItemCount || 0)
-                    color: "#4a4a4a"
+                    color: Theme.textMuted
                     font.pixelSize: 10
                 }
             }
@@ -2753,7 +2967,7 @@ Item {
                         fillMode: Image.PreserveAspectFit
                         smooth: false
                         cache: false
-                        source: modelData.occupied && (modelData.itemId || 0) > 0 ? root.itemIconSource(modelData.itemId || 0) : ""
+                        source: modelData.occupied && (modelData.itemId || 0) > 0 ? root.itemIconSource(modelData.itemId || 0, 0) : ""
                         visible: source !== "" && status === Image.Ready
                     }
 
@@ -2853,10 +3067,10 @@ Item {
         y: uiState.equipY
         width: uiState.equipWidth
         height: uiState.equipHeight
-        radius: 4
-        color: "#ede9df"
+        radius: 8
+        color: Theme.background
         border.width: 1
-        border.color: "#6b675f"
+        border.color: Theme.border
         visible: uiState.equipVisible
 
         Rectangle {
@@ -2865,16 +3079,16 @@ Item {
             width: parent.width - 2
             height: 16
             radius: 3
-            color: "#6e8194"
+            color: Theme.accent
             border.width: 1
-            border.color: "#4e5d6c"
+            border.color: Theme.borderStrong
         }
 
         Text {
             x: 17
             y: 3
             text: uiState.equipData.title || ""
-            color: "#ffffff"
+            color: Theme.accentText
             font.pixelSize: 12
             font.bold: true
         }
@@ -2889,15 +3103,15 @@ Item {
                 width: modelData.width || 0
                 height: modelData.height || 0
                 radius: 2
-                color: "#d7d2c5"
+                color: Theme.buttonBg
                 border.width: 1
-                border.color: "#7f7a70"
+                border.color: Theme.buttonBorder
                 visible: modelData.visible || false
 
                 Text {
                     anchors.centerIn: parent
                     text: modelData.label || ""
-                    color: "#000000"
+                    color: Theme.buttonText
                     font.pixelSize: 8
                     font.bold: true
                 }
@@ -2909,7 +3123,7 @@ Item {
             y: 17
             width: parent.width
             height: parent.height - 17
-            color: "#e7e2d6"
+            color: Theme.surface
             visible: !uiState.equipMini
 
             Rectangle {
@@ -2917,9 +3131,9 @@ Item {
                 y: 15
                 width: Math.max(1, 182 - 98)
                 height: Math.max(1, parent.height - y - 12)
-                color: "#d8d0c2"
+                color: Theme.surfaceAlt
                 border.width: 1
-                border.color: "#9d9488"
+                border.color: Theme.border
 
                 Image {
                     id: equipPreviewImage
@@ -2945,17 +3159,35 @@ Item {
                     required property var modelData
                     x: modelData.x - uiState.equipX
                     y: modelData.y - uiState.equipY - 17
-                    width: modelData.leftColumn ? (modelData.width + 90) : (modelData.width + 60)
+                    width: modelData.width
                     height: modelData.height
+                    z: modelData.hovered ? 5 : 0
 
                     Rectangle {
-                        x: modelData.leftColumn ? 0 : width - modelData.width
-                        y: 0
+                        x: 1
+                        y: 2
                         width: modelData.width
                         height: modelData.height
-                        color: modelData.hovered ? "#d7dff0" : (modelData.occupied ? "#d7dff0" : "#f5f2ea")
+                        radius: 6
+                        color: Qt.rgba(0, 0, 0, modelData.hovered ? 0.35 : 0.22)
+                        z: -1
+                    }
+
+                    Rectangle {
+                        anchors.fill: parent
+                        radius: 6
+                        color: modelData.hovered ? Theme.buttonBgHover : (modelData.occupied ? Theme.buttonBgHover : Theme.inputBg)
                         border.width: 1
-                        border.color: modelData.hovered ? "#7e95bf" : (modelData.occupied ? "#7e95bf" : "#a69f91")
+                        border.color: modelData.hovered ? Theme.accent : (modelData.occupied ? Theme.accent : Theme.border)
+
+                        Text {
+                            anchors.centerIn: parent
+                            text: modelData.slotGlyph || ""
+                            color: Theme.textMuted
+                            font.pixelSize: Math.max(14, parent.height - 12)
+                            opacity: 0.55
+                            visible: !modelData.occupied
+                        }
 
                         Image {
                             id: equipIcon
@@ -2965,24 +3197,35 @@ Item {
                             fillMode: Image.PreserveAspectFit
                             smooth: false
                             cache: false
-                            source: modelData.occupied && (modelData.itemId || 0) > 0 ? root.itemIconSource(modelData.itemId || 0) : ""
+                            source: modelData.occupied && ((modelData.itemId || 0) > 0 || (modelData.itemIndex || 0) > 0)
+                                ? root.itemIconSource(modelData.itemId || 0, modelData.itemIndex || 0)
+                                : ""
                             visible: source !== "" && status === Image.Ready
                         }
                     }
 
-                    Text {
-                        x: modelData.leftColumn ? (modelData.width + 4) : 0
-                        y: 0
-                        width: width - modelData.width - 4
-                        height: parent.height
-                        text: modelData.occupied ? modelData.label : ""
-                        color: "#000000"
-                        font.pixelSize: 10
-                        font.bold: modelData.hovered
-                        horizontalAlignment: modelData.leftColumn ? Text.AlignLeft : Text.AlignRight
-                        verticalAlignment: Text.AlignVCenter
-                        elide: Text.ElideRight
-                        visible: modelData.occupied
+                    Rectangle {
+                        id: slotTooltip
+                        visible: modelData.hovered && (tooltipText.text.length > 0)
+                        width: tooltipText.implicitWidth + 10
+                        height: tooltipText.implicitHeight + 6
+                        x: modelData.leftColumn ? (modelData.width + 4) : -width - 4
+                        y: (modelData.height - height) / 2
+                        radius: 4
+                        color: Theme.surface
+                        border.width: 1
+                        border.color: Theme.border
+                        z: 10
+
+                        Text {
+                            id: tooltipText
+                            anchors.centerIn: parent
+                            text: modelData.occupied
+                                ? ((modelData.slotTypeName || "") + (modelData.label ? (": " + modelData.label) : ""))
+                                : (modelData.slotTypeName || "")
+                            color: Theme.text
+                            font.pixelSize: 10
+                        }
                     }
                 }
             }
@@ -2995,9 +3238,9 @@ Item {
         width: uiState.friendPartyWidth
         height: uiState.friendPartyHeight
         radius: 4
-        color: "#e9e1d2"
+        color: Theme.background
         border.width: 1
-        border.color: "#5c5243"
+        border.color: Theme.border
         visible: uiState.friendPartyVisible
 
         Rectangle {
@@ -3006,16 +3249,16 @@ Item {
             width: parent.width - 2
             height: 16
             radius: 3
-            color: "#5c6f60"
+            color: Theme.accent
             border.width: 1
-            border.color: "#3c4a3e"
+            border.color: Theme.borderStrong
         }
 
         Text {
             x: 10
             y: 2
             text: uiState.friendPartyData.title || "Friend / Party"
-            color: "#f8f8f0"
+            color: Theme.accentText
             font.pixelSize: 12
             font.bold: true
         }
@@ -3030,15 +3273,15 @@ Item {
                 width: modelData.width || 0
                 height: modelData.height || 0
                 radius: 2
-                color: "#d2c6b4"
+                color: Theme.buttonBg
                 border.width: 1
-                border.color: "#6e604a"
+                border.color: Theme.buttonBorder
                 visible: modelData.visible || false
 
                 Text {
                     anchors.centerIn: parent
                     text: modelData.label || ""
-                    color: "#222222"
+                    color: Theme.buttonText
                     font.pixelSize: 9
                     font.bold: true
                 }
@@ -3050,7 +3293,7 @@ Item {
             y: 17
             width: parent.width
             height: parent.height - 17
-            color: "#f5f0e5"
+            color: Theme.surface
 
             Repeater {
                 model: uiState.friendPartyData.tabs || []
@@ -3062,14 +3305,14 @@ Item {
                     width: modelData.width || 0
                     height: modelData.height || 0
                     radius: 3
-                    color: modelData.active ? "#fff7e9" : "#d6ccb8"
+                    color: modelData.active ? Theme.surfaceAlt : Theme.buttonBg
                     border.width: 1
-                    border.color: modelData.active ? "#7a623e" : "#978972"
+                    border.color: modelData.active ? Theme.borderStrong : Theme.buttonBorder
 
                     Text {
                         anchors.centerIn: parent
                         text: modelData.label || ""
-                        color: "#2a2a2a"
+                        color: Theme.text
                         font.pixelSize: 10
                         font.bold: true
                     }
@@ -3081,15 +3324,15 @@ Item {
                 y: 23
                 width: parent.width - 26
                 height: 18
-                color: "#e0d8c6"
+                color: Theme.surfaceAlt
                 border.width: 1
-                border.color: "#ab9e88"
+                border.color: Theme.border
 
                 Text {
                     x: 6
                     anchors.verticalCenter: parent.verticalCenter
                     text: "Name"
-                    color: "#4c3d25"
+                    color: Theme.text
                     font.pixelSize: 10
                     font.bold: true
                 }
@@ -3098,7 +3341,7 @@ Item {
                     x: 110
                     anchors.verticalCenter: parent.verticalCenter
                     text: (uiState.friendPartyData.currentTab || 0) === 0 ? "State" : "Role"
-                    color: "#4c3d25"
+                    color: Theme.text
                     font.pixelSize: 10
                     font.bold: true
                 }
@@ -3107,7 +3350,7 @@ Item {
                     x: 171
                     anchors.verticalCenter: parent.verticalCenter
                     text: (uiState.friendPartyData.currentTab || 0) === 0 ? "Memo" : "Map"
-                    color: "#4c3d25"
+                    color: Theme.text
                     font.pixelSize: 10
                     font.bold: true
                 }
@@ -3118,9 +3361,9 @@ Item {
                 y: 41
                 width: parent.width - 26
                 height: parent.height - 125
-                color: "#fcf9f2"
+                color: Theme.inputBg
                 border.width: 1
-                border.color: "#9e937c"
+                border.color: Theme.inputBorder
 
                 Repeater {
                     model: uiState.friendPartyData.rows || []
@@ -3131,7 +3374,7 @@ Item {
                         y: (modelData.y || 0) - uiState.friendPartyY - 58
                         width: modelData.width || 0
                         height: modelData.height || 0
-                        color: modelData.selected ? "#ebe2cd" : "#faf7ef"
+                        color: modelData.selected ? Theme.surfaceAlt : Theme.inputBg
 
                         Rectangle {
                             x: 3
@@ -3149,7 +3392,7 @@ Item {
                             width: 88
                             anchors.verticalCenter: parent.verticalCenter
                             text: modelData.name || ""
-                            color: "#1a1a1a"
+                            color: Theme.text
                             font.pixelSize: 10
                             elide: Text.ElideRight
                         }
@@ -3159,7 +3402,7 @@ Item {
                             width: 50
                             anchors.verticalCenter: parent.verticalCenter
                             text: modelData.status || ""
-                            color: "#424242"
+                            color: Theme.text
                             font.pixelSize: 10
                             elide: Text.ElideRight
                         }
@@ -3169,7 +3412,7 @@ Item {
                             width: parent.width - 175
                             anchors.verticalCenter: parent.verticalCenter
                             text: modelData.detail || ""
-                            color: "#5c5040"
+                            color: Theme.textMuted
                             font.pixelSize: 10
                             elide: Text.ElideRight
                         }
@@ -3181,9 +3424,9 @@ Item {
                     y: 1
                     width: 11
                     height: parent.height - 2
-                    color: "#e6dfd0"
+                    color: Theme.scrollTrack
                     border.width: 1
-                    border.color: "#a8997e"
+                    border.color: Theme.border
                     visible: uiState.friendPartyData.scrollBarVisible || false
 
                     Rectangle {
@@ -3191,9 +3434,9 @@ Item {
                         y: (uiState.friendPartyData.scrollThumbY || 0) - (uiState.friendPartyData.scrollTrackY || 0)
                         width: parent.width - 2
                         height: uiState.friendPartyData.scrollThumbHeight || 0
-                        color: "#97835e"
+                        color: Theme.scrollThumb
                         border.width: 1
-                        border.color: "#68563a"
+                        border.color: Theme.borderStrong
                     }
                 }
             }
@@ -3208,15 +3451,15 @@ Item {
                     width: modelData.width || 0
                     height: modelData.height || 0
                     radius: 3
-                    color: (modelData.active || false) ? "#d4e2ef" : "#ebe5d6"
+                    color: (modelData.active || false) ? Theme.buttonBgHover : Theme.buttonBg
                     border.width: 1
-                    border.color: "#796a4f"
+                    border.color: Theme.buttonBorder
                     visible: modelData.visible || false
 
                     Text {
                         anchors.centerIn: parent
                         text: modelData.label || ""
-                        color: "#1c1c1c"
+                        color: Theme.buttonText
                         font.pixelSize: 10
                         font.bold: true
                     }
@@ -3228,15 +3471,15 @@ Item {
                 y: parent.height - 43
                 width: parent.width - 20
                 height: 34
-                color: "#e8e2d5"
+                color: Theme.surfaceAlt
                 border.width: 1
-                border.color: "#b1a590"
+                border.color: Theme.border
 
                 Text {
                     x: 6
                     y: 4
                     text: uiState.friendPartyData.summaryTitle || ""
-                    color: "#443a2c"
+                    color: Theme.text
                     font.pixelSize: 10
                     font.bold: true
                 }
@@ -3246,7 +3489,7 @@ Item {
                     width: parent.width - 92
                     y: 4
                     text: uiState.friendPartyData.summaryValue || ""
-                    color: "#303030"
+                    color: Theme.text
                     font.pixelSize: 10
                     elide: Text.ElideRight
                 }
@@ -3256,7 +3499,7 @@ Item {
                     y: 18
                     width: parent.width - 12
                     text: uiState.friendPartyData.summarySecondaryValue || ""
-                    color: "#303030"
+                    color: Theme.text
                     font.pixelSize: 10
                     elide: Text.ElideRight
                 }
@@ -3270,9 +3513,9 @@ Item {
         width: uiState.partySetupWidth
         height: uiState.partySetupHeight
         radius: 4
-        color: "#e9e1d2"
+        color: Theme.background
         border.width: 1
-        border.color: "#5c5243"
+        border.color: Theme.border
         visible: uiState.partySetupVisible
 
         Rectangle {
@@ -3281,16 +3524,16 @@ Item {
             width: parent.width - 2
             height: 16
             radius: 3
-            color: "#5c6f60"
+            color: Theme.accent
             border.width: 1
-            border.color: "#3c4a3e"
+            border.color: Theme.borderStrong
         }
 
         Text {
             x: 10
             y: 2
             text: uiState.partySetupData.title || "Party Setup"
-            color: "#f8f8f0"
+            color: Theme.accentText
             font.pixelSize: 12
             font.bold: true
         }
@@ -3305,7 +3548,7 @@ Item {
                 width: modelData.width || 0
                 height: modelData.height || 0
                 text: modelData.text || ""
-                color: (modelData.header || false) ? "#4a3c26" : "#2e2e2e"
+                color: (modelData.header || false) ? Theme.accent : Theme.text
                 font.pixelSize: 10
                 font.bold: modelData.header || false
                 verticalAlignment: Text.AlignVCenter
@@ -3323,14 +3566,14 @@ Item {
                 width: modelData.width || 0
                 height: modelData.height || 0
                 radius: width / 2
-                color: (modelData.hovered || false) ? "#d4e2ef" : "#ebe5d6"
+                color: (modelData.hovered || false) ? Theme.buttonBgHover : Theme.buttonBg
                 border.width: 1
-                border.color: "#796a4f"
+                border.color: Theme.buttonBorder
 
                 Text {
                     anchors.centerIn: parent
                     text: "?"
-                    color: "#1c1c1c"
+                    color: Theme.buttonText
                     font.pixelSize: 10
                     font.bold: true
                 }
@@ -3343,17 +3586,17 @@ Item {
             width: uiState.partySetupData.nameFieldWidth || 0
             height: uiState.partySetupData.nameFieldHeight || 0
             color: (uiState.partySetupData.showNameEdit || false)
-                ? ((uiState.partySetupData.nameFocused || false) ? "#ffffc8" : "#f2f2f2")
+                ? ((uiState.partySetupData.nameFocused || false) ? Theme.accent : Theme.inputBg)
                 : "transparent"
             border.width: (uiState.partySetupData.showNameEdit || false) ? 1 : 0
-            border.color: "#000000"
+            border.color: Theme.inputBorder
 
             Text {
                 x: (uiState.partySetupData.showNameEdit || false) ? 6 : 0
                 width: parent.width - ((uiState.partySetupData.showNameEdit || false) ? 12 : 0)
                 anchors.verticalCenter: parent.verticalCenter
                 text: uiState.partySetupData.nameValue || ""
-                color: "#202020"
+                color: Theme.inputText
                 font.pixelSize: 11
                 elide: Text.ElideRight
             }
@@ -3374,16 +3617,16 @@ Item {
                     y: 2
                     width: 14
                     height: 14
-                    color: "#f7f3e9"
+                    color: Theme.inputBg
                     border.width: 1
-                    border.color: "#7e6f55"
+                    border.color: Theme.inputBorder
 
                     Rectangle {
                         x: 3
                         y: 3
                         width: 8
                         height: 8
-                        color: "#576f8a"
+                        color: Theme.accent
                         visible: modelData.selected || false
                     }
                 }
@@ -3393,7 +3636,7 @@ Item {
                     width: parent.width - 20
                     anchors.verticalCenter: parent.verticalCenter
                     text: modelData.label || ""
-                    color: "#2c2c2c"
+                    color: Theme.text
                     font.pixelSize: 10
                     elide: Text.ElideRight
                 }
@@ -3410,15 +3653,15 @@ Item {
                 width: modelData.width || 0
                 height: modelData.height || 0
                 radius: 3
-                color: (modelData.active || false) ? "#d4e2ef" : "#ebe5d6"
+                color: (modelData.active || false) ? Theme.buttonBgHover : Theme.buttonBg
                 border.width: 1
-                border.color: "#796a4f"
+                border.color: Theme.buttonBorder
                 visible: modelData.visible || false
 
                 Text {
                     anchors.centerIn: parent
                     text: modelData.label || ""
-                    color: "#1c1c1c"
+                    color: Theme.buttonText
                     font.pixelSize: 10
                     font.bold: true
                 }
@@ -3431,9 +3674,9 @@ Item {
             y: Math.max(4, Math.min(parent.height - height - 4, ((uiState.partySetupData.tooltipY || 0) - uiState.partySetupY) - height - 14))
             width: 248
             height: tooltipText.paintedHeight + 12
-            color: "#303030"
+            color: Theme.borderStrong
             border.width: 1
-            border.color: "#606060"
+            border.color: Theme.border
             z: 10
 
             Text {
@@ -3442,7 +3685,7 @@ Item {
                 y: 6
                 width: parent.width - 16
                 text: uiState.partySetupData.tooltipText || ""
-                color: "#ffffff"
+                color: Theme.accentText
                 font.pixelSize: 10
                 wrapMode: Text.WordWrap
             }
@@ -3455,9 +3698,9 @@ Item {
         width: uiState.partyInviteWidth
         height: uiState.partyInviteHeight
         radius: 4
-        color: "#e9e1d2"
+        color: Theme.background
         border.width: 1
-        border.color: "#5c5243"
+        border.color: Theme.border
         visible: uiState.partyInviteVisible
 
         Rectangle {
@@ -3466,9 +3709,9 @@ Item {
             width: parent.width - 2
             height: 16
             radius: 3
-            color: "#5c6f60"
+            color: Theme.accent
             border.width: 1
-            border.color: "#3c4a3e"
+            border.color: Theme.borderStrong
         }
 
         Rectangle {
@@ -3477,16 +3720,16 @@ Item {
             width: parent.width - 28
             height: 52
             radius: 2
-            color: "#efe8db"
+            color: Theme.surfaceAlt
             border.width: 1
-            border.color: "#a5967d"
+            border.color: Theme.border
         }
 
         Text {
             x: 10
             y: 2
             text: uiState.partyInviteData.title || "Party Invitation"
-            color: "#f8f8f0"
+            color: Theme.accentText
             font.pixelSize: 12
             font.bold: true
         }
@@ -3500,7 +3743,7 @@ Item {
             verticalAlignment: Text.AlignVCenter
             wrapMode: Text.WordWrap
             text: uiState.partyInviteData.bodyText || ((uiState.partyInviteData.messageLines || []).join("\n"))
-            color: "#383838"
+            color: Theme.text
             font.pixelSize: 11
         }
 
@@ -3514,14 +3757,14 @@ Item {
                 width: modelData.width || 0
                 height: modelData.height || 0
                 radius: 3
-                color: (modelData.active || false) ? "#d4e2ef" : "#ebe5d6"
+                color: (modelData.active || false) ? Theme.buttonBgHover : Theme.buttonBg
                 border.width: 1
-                border.color: "#796a4f"
+                border.color: Theme.buttonBorder
 
                 Text {
                     anchors.centerIn: parent
                     text: modelData.label || ""
-                    color: "#1c1c1c"
+                    color: Theme.buttonText
                     font.pixelSize: 10
                     font.bold: true
                 }
@@ -3534,10 +3777,10 @@ Item {
         y: uiState.skillListY
         width: uiState.skillListWidth
         height: uiState.skillListHeight
-        radius: 4
-        color: "#ede9df"
+        radius: 8
+        color: Theme.background
         border.width: 1
-        border.color: "#6b675f"
+        border.color: Theme.border
         visible: uiState.skillListVisible
 
         Rectangle {
@@ -3546,16 +3789,16 @@ Item {
             width: parent.width - 2
             height: 16
             radius: 3
-            color: "#6e8194"
+            color: Theme.accent
             border.width: 1
-            border.color: "#4e5d6c"
+            border.color: Theme.borderStrong
         }
 
         Text {
             x: 17
             y: 3
             text: uiState.skillListData.title || ""
-            color: "#ffffff"
+            color: Theme.accentText
             font.pixelSize: 12
             font.bold: true
         }
@@ -3570,15 +3813,15 @@ Item {
                 width: modelData.width || 0
                 height: modelData.height || 0
                 radius: 2
-                color: "#d7d2c5"
+                color: Theme.buttonBg
                 border.width: 1
-                border.color: "#7f7a70"
+                border.color: Theme.buttonBorder
                 visible: modelData.visible || false
 
                 Text {
                     anchors.centerIn: parent
                     text: modelData.label || ""
-                    color: "#000000"
+                    color: Theme.buttonText
                     font.pixelSize: 8
                     font.bold: true
                 }
@@ -3590,9 +3833,9 @@ Item {
             y: 17
             width: parent.width - 41
             height: parent.height - 67
-            color: "#ffffff"
+            color: Theme.inputBg
             border.width: 1
-            border.color: "#c4c0b5"
+            border.color: Theme.border
         }
 
         Rectangle {
@@ -3600,7 +3843,7 @@ Item {
             y: 17
             width: 41
             height: parent.height - 67
-            color: "#ddd7ca"
+            color: Theme.surfaceAlt
         }
 
         Repeater {
@@ -3615,9 +3858,9 @@ Item {
 
                 Rectangle {
                     anchors.fill: parent
-                    color: modelData.selected ? "#d7dff0" : (modelData.hovered ? "#ece8de" : "transparent")
+                    color: modelData.selected ? Theme.buttonBgHover : (modelData.hovered ? Theme.surfaceAlt : "transparent")
                     border.width: 1
-                    border.color: modelData.selected ? "#7e95bf" : (modelData.hovered ? "#b8b1a3" : "transparent")
+                    border.color: modelData.selected ? Theme.accent : (modelData.hovered ? Theme.border : "transparent")
                 }
 
                 Rectangle {
@@ -3625,9 +3868,9 @@ Item {
                     y: 1
                     width: 32
                     height: 32
-                    color: "#f5f2ea"
+                    color: Theme.inputBg
                     border.width: 1
-                    border.color: "#a69f91"
+                    border.color: Theme.border
 
                     Image {
                         anchors.fill: parent
@@ -3644,7 +3887,7 @@ Item {
                     y: 3
                     width: parent.width - 88
                     text: modelData.name
-                    color: "#000000"
+                    color: Theme.text
                     font.pixelSize: 11
                     elide: Text.ElideRight
                 }
@@ -3654,7 +3897,7 @@ Item {
                     y: 18
                     width: 80
                     text: modelData.levelText
-                    color: "#000000"
+                    color: Theme.text
                     font.pixelSize: 10
                 }
 
@@ -3663,7 +3906,7 @@ Item {
                     y: 18
                     width: parent.width - 198
                     text: modelData.rightText
-                    color: "#000000"
+                    color: Theme.text
                     font.pixelSize: 10
                     elide: Text.ElideRight
                 }
@@ -3674,14 +3917,14 @@ Item {
                     width: modelData.upgradeWidth
                     height: modelData.upgradeHeight
                     visible: modelData.upgradeVisible
-                    color: modelData.upgradePressed ? "#b9c7de" : "#d7dff0"
+                    color: modelData.upgradePressed ? Theme.buttonBgPressed : Theme.buttonBgHover
                     border.width: 1
-                    border.color: "#7e95bf"
+                    border.color: Theme.accent
 
                     Text {
                         anchors.centerIn: parent
                         text: uiState.skillListData.upgradeLabel || ""
-                        color: "#000000"
+                        color: Theme.buttonText
                         font.pixelSize: 12
                         font.bold: true
                     }
@@ -3695,18 +3938,18 @@ Item {
             width: uiState.skillListData.scrollTrackWidth || 0
             height: uiState.skillListData.scrollTrackHeight || 0
             visible: uiState.skillListData.scrollBarVisible || false
-            color: "#e3e7ee"
+            color: Theme.scrollTrack
             border.width: 1
-            border.color: "#a4adbd"
+            border.color: Theme.border
 
             Rectangle {
                 x: (uiState.skillListData.scrollThumbX || 0) - (uiState.skillListData.scrollTrackX || 0)
                 y: (uiState.skillListData.scrollThumbY || 0) - (uiState.skillListData.scrollTrackY || 0)
                 width: uiState.skillListData.scrollThumbWidth || 0
                 height: uiState.skillListData.scrollThumbHeight || 0
-                color: "#b4bccd"
+                color: Theme.scrollThumb
                 border.width: 1
-                border.color: "#788296"
+                border.color: Theme.borderStrong
             }
         }
 
@@ -3715,9 +3958,9 @@ Item {
             y: parent.height - 50
             width: parent.width
             height: 50
-            color: "#ddd7ca"
+            color: Theme.surfaceAlt
             border.width: 1
-            border.color: "#bcb4a7"
+            border.color: Theme.border
         }
 
         Text {
@@ -3739,14 +3982,14 @@ Item {
                 width: modelData.width
                 height: modelData.height
                 radius: 3
-                color: modelData.pressed ? "#b9c7de" : (modelData.hovered ? "#d7dff0" : "#e9e4d8")
+                color: modelData.pressed ? Theme.buttonBgPressed : (modelData.hovered ? Theme.buttonBgHover : Theme.buttonBg)
                 border.width: 1
-                border.color: "#8c8578"
+                border.color: Theme.buttonBorder
 
                 Text {
                     anchors.centerIn: parent
                     text: modelData.label
-                    color: "#000000"
+                    color: Theme.buttonText
                     font.pixelSize: 10
                 }
             }
@@ -3758,10 +4001,12 @@ Item {
         y: uiState.itemInfoY
         width: uiState.itemInfoWidth
         height: uiState.itemInfoHeight
+        readonly property var closeButtonData: root.asObject(uiState.itemInfoData.closeButton)
+        readonly property var graphicsButtonData: root.asObject(uiState.itemInfoData.graphicsButton)
         radius: 4
-        color: "#ede9df"
+        color: Theme.background
         border.width: 1
-        border.color: "#6b675f"
+        border.color: Theme.border
         visible: uiState.itemInfoVisible
         z: 40
 
@@ -3771,34 +4016,34 @@ Item {
             width: parent.width - 2
             height: 16
             radius: 3
-            color: "#6e8194"
+            color: Theme.accent
             border.width: 1
-            border.color: "#4e5d6c"
+            border.color: Theme.borderStrong
         }
 
         Text {
             x: 8
             y: 3
             text: uiState.itemInfoData.title || "Item Information"
-            color: "#ffffff"
+            color: Theme.accentText
             font.pixelSize: 12
             font.bold: true
         }
 
         Rectangle {
-            x: (uiState.itemInfoData.closeButton.x || 0) - uiState.itemInfoX
-            y: (uiState.itemInfoData.closeButton.y || 0) - uiState.itemInfoY
-            width: uiState.itemInfoData.closeButton.width || 0
-            height: uiState.itemInfoData.closeButton.height || 0
+            x: (parent.closeButtonData.x || 0) - uiState.itemInfoX
+            y: (parent.closeButtonData.y || 0) - uiState.itemInfoY
+            width: parent.closeButtonData.width || 0
+            height: parent.closeButtonData.height || 0
             radius: 2
-            color: (uiState.itemInfoData.closeButton.pressed || false) ? "#b9c7de" : ((uiState.itemInfoData.closeButton.hovered || false) ? "#d7dff0" : "#e7e2d6")
+            color: (parent.closeButtonData.pressed || false) ? Theme.buttonBgPressed : ((parent.closeButtonData.hovered || false) ? Theme.buttonBgHover : Theme.surface)
             border.width: 1
-            border.color: "#7f7a70"
+            border.color: Theme.buttonBorder
 
             Text {
                 anchors.centerIn: parent
-                text: uiState.itemInfoData.closeButton.label || "X"
-                color: "#000000"
+                text: parent.parent.closeButtonData.label || "X"
+                color: Theme.buttonText
                 font.pixelSize: 8
                 font.bold: true
             }
@@ -3809,9 +4054,9 @@ Item {
             y: 25
             width: 96
             height: 96
-            color: "#f5f2ea"
+            color: Theme.inputBg
             border.width: 1
-            border.color: "#a69f91"
+            border.color: Theme.border
 
             Image {
                 anchors.fill: parent
@@ -3820,25 +4065,25 @@ Item {
                 smooth: false
                 cache: false
                 source: (uiState.itemInfoData.previewUsesCollection || false)
-                    ? root.collectionImageSource(uiState.itemInfoData.itemId || 0, uiState.itemInfoData.identified)
-                    : root.itemIconSource(uiState.itemInfoData.itemId || 0, uiState.itemInfoData.identified)
+                    ? root.collectionImageSource(uiState.itemInfoData.itemId || 0, uiState.itemInfoData.itemIndex || 0, uiState.itemInfoData.identified)
+                    : root.itemIconSource(uiState.itemInfoData.itemId || 0, uiState.itemInfoData.itemIndex || 0, uiState.itemInfoData.identified)
             }
 
             Rectangle {
                 x: 4
                 y: 4
-                width: (uiState.itemInfoData.graphicsButton.width || 0)
-                height: (uiState.itemInfoData.graphicsButton.height || 0)
+                width: parent.parent.graphicsButtonData.width || 0
+                height: parent.parent.graphicsButtonData.height || 0
                 radius: 2
-                visible: uiState.itemInfoData.graphicsButton.visible || false
-                color: (uiState.itemInfoData.graphicsButton.pressed || false) ? "#b9c7de" : ((uiState.itemInfoData.graphicsButton.hovered || false) ? "#d7dff0" : "#e9e4d8")
+                visible: parent.parent.graphicsButtonData.visible || false
+                color: (parent.parent.graphicsButtonData.pressed || false) ? Theme.buttonBgPressed : ((parent.parent.graphicsButtonData.hovered || false) ? Theme.buttonBgHover : Theme.buttonBg)
                 border.width: 1
-                border.color: "#8c8578"
+                border.color: Theme.buttonBorder
 
                 Text {
                     anchors.centerIn: parent
-                    text: uiState.itemInfoData.graphicsButton.label || "View"
-                    color: "#000000"
+                    text: parent.parent.parent.graphicsButtonData.label || "View"
+                    color: Theme.buttonText
                     font.pixelSize: 9
                 }
             }
@@ -3849,7 +4094,7 @@ Item {
             y: 25
             width: parent.width - 120
             text: uiState.itemInfoData.name || ""
-            color: "#000000"
+            color: Theme.text
             font.pixelSize: 11
             font.bold: true
             elide: Text.ElideRight
@@ -3869,7 +4114,7 @@ Item {
                     required property var modelData
                     width: parent.width
                     text: modelData
-                    color: "#444444"
+                    color: Theme.textMuted
                     font.pixelSize: 10
                     elide: Text.ElideRight
                 }
@@ -3881,9 +4126,9 @@ Item {
             y: itemInfoDetailsColumn.y + itemInfoDetailsColumn.height + 4
             width: parent.width - 120
             height: parent.height - y - (((uiState.itemInfoData.slots || []).length > 0) ? 56 : 20)
-            text: root.roColorTextToRichText(uiState.itemInfoData.description || "")
+            text: root.roColorTextToRichText(uiState.itemInfoData.description || "", Theme.text)
             textFormat: Text.RichText
-            color: "#111111"
+            color: Theme.text
             font.pixelSize: 11
             wrapMode: Text.WordWrap
             verticalAlignment: Text.AlignTop
@@ -3899,10 +4144,10 @@ Item {
                 width: modelData.width || 0
                 height: modelData.height || 0
                 color: !(modelData.available || false)
-                    ? "#a6a6a6"
-                    : ((modelData.occupied || false) ? "#f5f2ea" : "#dfdfdf")
+                    ? Theme.overlayDim
+                    : ((modelData.occupied || false) ? Theme.inputBg : Theme.surfaceAlt)
                 border.width: 1
-                border.color: (modelData.occupied || false) ? "#868176" : "#7e7e7e"
+                border.color: Theme.border
 
                 Image {
                     anchors.fill: parent
@@ -3911,7 +4156,7 @@ Item {
                     smooth: false
                     cache: false
                     visible: modelData.occupied || false
-                    source: root.itemIconSource(modelData.itemId || 0)
+                    source: root.itemIconSource(modelData.itemId || 0, 0)
                 }
 
                 Rectangle {
@@ -3941,10 +4186,12 @@ Item {
         y: uiState.skillDescribeY
         width: uiState.skillDescribeWidth
         height: uiState.skillDescribeHeight
+        readonly property var closeButtonData: root.asObject(uiState.skillDescribeData.closeButton)
+        readonly property var descriptionScrollBarData: root.asObject(uiState.skillDescribeData.descriptionScrollBar)
         radius: 4
-        color: "#ede9df"
+        color: Theme.background
         border.width: 1
-        border.color: "#6b675f"
+        border.color: Theme.border
         visible: uiState.skillDescribeVisible
         z: 41
 
@@ -3954,34 +4201,34 @@ Item {
             width: parent.width - 2
             height: 16
             radius: 3
-            color: "#6e8194"
+            color: Theme.accent
             border.width: 1
-            border.color: "#4e5d6c"
+            border.color: Theme.borderStrong
         }
 
         Text {
             x: 8
             y: 3
             text: uiState.skillDescribeData.title || "Skill Information"
-            color: "#ffffff"
+            color: Theme.accentText
             font.pixelSize: 12
             font.bold: true
         }
 
         Rectangle {
-            x: (uiState.skillDescribeData.closeButton.x || 0) - uiState.skillDescribeX
-            y: (uiState.skillDescribeData.closeButton.y || 0) - uiState.skillDescribeY
-            width: uiState.skillDescribeData.closeButton.width || 0
-            height: uiState.skillDescribeData.closeButton.height || 0
+            x: (parent.closeButtonData.x || 0) - uiState.skillDescribeX
+            y: (parent.closeButtonData.y || 0) - uiState.skillDescribeY
+            width: parent.closeButtonData.width || 0
+            height: parent.closeButtonData.height || 0
             radius: 2
-            color: (uiState.skillDescribeData.closeButton.pressed || false) ? "#b9c7de" : ((uiState.skillDescribeData.closeButton.hovered || false) ? "#d7dff0" : "#e7e2d6")
+            color: (parent.closeButtonData.pressed || false) ? Theme.buttonBgPressed : ((parent.closeButtonData.hovered || false) ? Theme.buttonBgHover : Theme.surface)
             border.width: 1
-            border.color: "#7f7a70"
+            border.color: Theme.buttonBorder
 
             Text {
                 anchors.centerIn: parent
-                text: uiState.skillDescribeData.closeButton.label || "X"
-                color: "#000000"
+                text: parent.parent.closeButtonData.label || "X"
+                color: Theme.buttonText
                 font.pixelSize: 8
                 font.bold: true
             }
@@ -3992,9 +4239,9 @@ Item {
             y: 25
             width: 52
             height: 52
-            color: "#f5f2ea"
+            color: Theme.inputBg
             border.width: 1
-            border.color: "#a69f91"
+            border.color: Theme.border
 
             Image {
                 anchors.fill: parent
@@ -4011,7 +4258,7 @@ Item {
             y: 25
             width: parent.width - 76
             text: uiState.skillDescribeData.name || ""
-            color: "#000000"
+            color: Theme.text
             font.pixelSize: 11
             font.bold: true
             elide: Text.ElideRight
@@ -4030,7 +4277,7 @@ Item {
                     required property var modelData
                     width: parent.width
                     text: modelData
-                    color: "#444444"
+                    color: Theme.textMuted
                     font.pixelSize: 10
                     elide: Text.ElideRight
                 }
@@ -4050,8 +4297,9 @@ Item {
                 y: -(uiState.skillDescribeData.descriptionScrollOffset || 0)
                 width: parent.width
                 height: Math.max(implicitHeight, uiState.skillDescribeData.descriptionContentHeight || 0)
-                text: uiState.skillDescribeData.description || ""
-                color: "#111111"
+                text: root.roColorTextToRichText(uiState.skillDescribeData.description || "", Theme.text)
+                textFormat: Text.RichText
+                color: Theme.text
                 font.pixelSize: 10
                 wrapMode: Text.WordWrap
                 verticalAlignment: Text.AlignTop
@@ -4059,20 +4307,20 @@ Item {
         }
 
         Rectangle {
-            x: (uiState.skillDescribeData.descriptionScrollBar.trackX || 0) - uiState.skillDescribeX
-            y: (uiState.skillDescribeData.descriptionScrollBar.trackY || 0) - uiState.skillDescribeY
-            width: uiState.skillDescribeData.descriptionScrollBar.trackWidth || 0
-            height: uiState.skillDescribeData.descriptionScrollBar.trackHeight || 0
-            visible: uiState.skillDescribeData.descriptionScrollBar.visible || false
+            x: (parent.descriptionScrollBarData.trackX || 0) - uiState.skillDescribeX
+            y: (parent.descriptionScrollBarData.trackY || 0) - uiState.skillDescribeY
+            width: parent.descriptionScrollBarData.trackWidth || 0
+            height: parent.descriptionScrollBarData.trackHeight || 0
+            visible: parent.descriptionScrollBarData.visible || false
             color: "#e3e7ee"
             border.width: 1
             border.color: "#a4adbd"
 
             Rectangle {
-                x: (uiState.skillDescribeData.descriptionScrollBar.thumbX || 0) - (uiState.skillDescribeData.descriptionScrollBar.trackX || 0)
-                y: (uiState.skillDescribeData.descriptionScrollBar.thumbY || 0) - (uiState.skillDescribeData.descriptionScrollBar.trackY || 0)
-                width: uiState.skillDescribeData.descriptionScrollBar.thumbWidth || 0
-                height: uiState.skillDescribeData.descriptionScrollBar.thumbHeight || 0
+                x: (parent.parent.descriptionScrollBarData.thumbX || 0) - (parent.parent.descriptionScrollBarData.trackX || 0)
+                y: (parent.parent.descriptionScrollBarData.thumbY || 0) - (parent.parent.descriptionScrollBarData.trackY || 0)
+                width: parent.parent.descriptionScrollBarData.thumbWidth || 0
+                height: parent.parent.descriptionScrollBarData.thumbHeight || 0
                 color: "#b4bccd"
                 border.width: 1
                 border.color: "#788296"
@@ -4085,10 +4333,11 @@ Item {
         y: uiState.itemCollectionY
         width: uiState.itemCollectionWidth
         height: uiState.itemCollectionHeight
+        readonly property var closeButtonData: root.asObject(uiState.itemCollectionData.closeButton)
         radius: 4
-        color: "#ede9df"
+        color: Theme.background
         border.width: 1
-        border.color: "#6b675f"
+        border.color: Theme.border
         visible: uiState.itemCollectionVisible
         z: 42
 
@@ -4098,34 +4347,34 @@ Item {
             width: parent.width - 2
             height: 16
             radius: 3
-            color: "#6e8194"
+            color: Theme.accent
             border.width: 1
-            border.color: "#4e5d6c"
+            border.color: Theme.borderStrong
         }
 
         Text {
             x: 8
             y: 3
             text: uiState.itemCollectionData.title || "Card illustration"
-            color: "#ffffff"
+            color: Theme.accentText
             font.pixelSize: 12
             font.bold: true
         }
 
         Rectangle {
-            x: (uiState.itemCollectionData.closeButton.x || 0) - uiState.itemCollectionX
-            y: (uiState.itemCollectionData.closeButton.y || 0) - uiState.itemCollectionY
-            width: uiState.itemCollectionData.closeButton.width || 0
-            height: uiState.itemCollectionData.closeButton.height || 0
+            x: (parent.closeButtonData.x || 0) - uiState.itemCollectionX
+            y: (parent.closeButtonData.y || 0) - uiState.itemCollectionY
+            width: parent.closeButtonData.width || 0
+            height: parent.closeButtonData.height || 0
             radius: 2
-            color: (uiState.itemCollectionData.closeButton.pressed || false) ? "#b9c7de" : ((uiState.itemCollectionData.closeButton.hovered || false) ? "#d7dff0" : "#e7e2d6")
+            color: (parent.closeButtonData.pressed || false) ? Theme.buttonBgPressed : ((parent.closeButtonData.hovered || false) ? Theme.buttonBgHover : Theme.surface)
             border.width: 1
-            border.color: "#7f7a70"
+            border.color: Theme.buttonBorder
 
             Text {
                 anchors.centerIn: parent
-                text: uiState.itemCollectionData.closeButton.label || "X"
-                color: "#000000"
+                text: parent.parent.closeButtonData.label || "X"
+                color: Theme.buttonText
                 font.pixelSize: 8
                 font.bold: true
             }
@@ -4136,9 +4385,9 @@ Item {
             y: 25
             width: parent.width - 16
             height: parent.height - 33
-            color: "#f5f2ea"
+            color: Theme.inputBg
             border.width: 1
-            border.color: "#a69f91"
+            border.color: Theme.border
 
             Image {
                 anchors.fill: parent
@@ -4149,8 +4398,8 @@ Item {
                 source: (uiState.itemCollectionData.mainUsesIllust || false)
                     ? root.illustImageSource(uiState.itemCollectionData.itemId || 0)
                     : ((uiState.itemCollectionData.mainUsesCollection || false)
-                        ? root.collectionImageSource(uiState.itemCollectionData.itemId || 0)
-                        : root.itemIconSource(uiState.itemCollectionData.itemId || 0))
+                        ? root.collectionImageSource(uiState.itemCollectionData.itemId || 0, 0)
+                        : root.itemIconSource(uiState.itemCollectionData.itemId || 0, 0))
             }
         }
     }
@@ -4160,6 +4409,10 @@ Item {
         y: uiState.itemIdentifyY
         width: uiState.itemIdentifyWidth
         height: uiState.itemIdentifyHeight
+        readonly property var closeButtonData: root.asObject(uiState.itemIdentifyData.closeButton)
+        readonly property var scrollBarData: root.asObject(uiState.itemIdentifyData.scrollBar)
+        readonly property var okButtonData: root.asObject(uiState.itemIdentifyData.okButton)
+        readonly property var cancelButtonData: root.asObject(uiState.itemIdentifyData.cancelButton)
         radius: 4
         color: "#ede9df"
         border.width: 1
@@ -4188,18 +4441,18 @@ Item {
         }
 
         Rectangle {
-            x: (uiState.itemIdentifyData.closeButton.x || 0) - uiState.itemIdentifyX
-            y: (uiState.itemIdentifyData.closeButton.y || 0) - uiState.itemIdentifyY
-            width: uiState.itemIdentifyData.closeButton.width || 0
-            height: uiState.itemIdentifyData.closeButton.height || 0
+            x: (parent.closeButtonData.x || 0) - uiState.itemIdentifyX
+            y: (parent.closeButtonData.y || 0) - uiState.itemIdentifyY
+            width: parent.closeButtonData.width || 0
+            height: parent.closeButtonData.height || 0
             radius: 2
-            color: (uiState.itemIdentifyData.closeButton.pressed || false) ? "#b9c7de" : ((uiState.itemIdentifyData.closeButton.hovered || false) ? "#d7dff0" : "#e7e2d6")
+            color: (parent.closeButtonData.pressed || false) ? "#b9c7de" : ((parent.closeButtonData.hovered || false) ? "#d7dff0" : "#e7e2d6")
             border.width: 1
             border.color: "#7f7a70"
 
             Text {
                 anchors.centerIn: parent
-                text: uiState.itemIdentifyData.closeButton.label || "X"
+                text: parent.parent.closeButtonData.label || "X"
                 color: "#000000"
                 font.pixelSize: 8
                 font.bold: true
@@ -4253,7 +4506,7 @@ Item {
                             fillMode: Image.PreserveAspectFit
                             smooth: false
                             cache: false
-                            source: root.itemIconSource(modelData.itemId || 0, modelData.identified)
+                            source: root.itemIconSource(modelData.itemId || 0, 0, modelData.identified)
                         }
                     }
 
@@ -4282,20 +4535,20 @@ Item {
         }
 
         Rectangle {
-            x: (uiState.itemIdentifyData.scrollBar.trackX || 0) - uiState.itemIdentifyX
-            y: (uiState.itemIdentifyData.scrollBar.trackY || 0) - uiState.itemIdentifyY
-            width: uiState.itemIdentifyData.scrollBar.trackWidth || 0
-            height: uiState.itemIdentifyData.scrollBar.trackHeight || 0
-            visible: uiState.itemIdentifyData.scrollBar.visible || false
+            x: (parent.scrollBarData.trackX || 0) - uiState.itemIdentifyX
+            y: (parent.scrollBarData.trackY || 0) - uiState.itemIdentifyY
+            width: parent.scrollBarData.trackWidth || 0
+            height: parent.scrollBarData.trackHeight || 0
+            visible: parent.scrollBarData.visible || false
             color: "#e3e7ee"
             border.width: 1
             border.color: "#a4adbd"
 
             Rectangle {
-                x: (uiState.itemIdentifyData.scrollBar.thumbX || 0) - (uiState.itemIdentifyData.scrollBar.trackX || 0)
-                y: (uiState.itemIdentifyData.scrollBar.thumbY || 0) - (uiState.itemIdentifyData.scrollBar.trackY || 0)
-                width: uiState.itemIdentifyData.scrollBar.thumbWidth || 0
-                height: uiState.itemIdentifyData.scrollBar.thumbHeight || 0
+                x: (parent.parent.scrollBarData.thumbX || 0) - (parent.parent.scrollBarData.trackX || 0)
+                y: (parent.parent.scrollBarData.thumbY || 0) - (parent.parent.scrollBarData.trackY || 0)
+                width: parent.parent.scrollBarData.thumbWidth || 0
+                height: parent.parent.scrollBarData.thumbHeight || 0
                 color: "#b4bccd"
                 border.width: 1
                 border.color: "#788296"
@@ -4303,38 +4556,38 @@ Item {
         }
 
         Rectangle {
-            x: (uiState.itemIdentifyData.okButton.x || 0) - uiState.itemIdentifyX
-            y: (uiState.itemIdentifyData.okButton.y || 0) - uiState.itemIdentifyY
-            width: uiState.itemIdentifyData.okButton.width || 0
-            height: uiState.itemIdentifyData.okButton.height || 0
+            x: (parent.okButtonData.x || 0) - uiState.itemIdentifyX
+            y: (parent.okButtonData.y || 0) - uiState.itemIdentifyY
+            width: parent.okButtonData.width || 0
+            height: parent.okButtonData.height || 0
             radius: 3
-            color: !(uiState.itemIdentifyData.okButton.enabled || false)
+            color: !(parent.okButtonData.enabled || false)
                 ? "#d0d0d0"
-                : ((uiState.itemIdentifyData.okButton.pressed || false) ? "#b9c7de" : ((uiState.itemIdentifyData.okButton.hovered || false) ? "#d7dff0" : "#e9e4d8"))
+                : ((parent.okButtonData.pressed || false) ? "#b9c7de" : ((parent.okButtonData.hovered || false) ? "#d7dff0" : "#e9e4d8"))
             border.width: 1
             border.color: "#8c8578"
 
             Text {
                 anchors.centerIn: parent
-                text: uiState.itemIdentifyData.okButton.label || "OK"
+                text: parent.parent.okButtonData.label || "OK"
                 color: "#000000"
                 font.pixelSize: 10
             }
         }
 
         Rectangle {
-            x: (uiState.itemIdentifyData.cancelButton.x || 0) - uiState.itemIdentifyX
-            y: (uiState.itemIdentifyData.cancelButton.y || 0) - uiState.itemIdentifyY
-            width: uiState.itemIdentifyData.cancelButton.width || 0
-            height: uiState.itemIdentifyData.cancelButton.height || 0
+            x: (parent.cancelButtonData.x || 0) - uiState.itemIdentifyX
+            y: (parent.cancelButtonData.y || 0) - uiState.itemIdentifyY
+            width: parent.cancelButtonData.width || 0
+            height: parent.cancelButtonData.height || 0
             radius: 3
-            color: (uiState.itemIdentifyData.cancelButton.pressed || false) ? "#b9c7de" : ((uiState.itemIdentifyData.cancelButton.hovered || false) ? "#d7dff0" : "#e9e4d8")
+            color: (parent.cancelButtonData.pressed || false) ? "#b9c7de" : ((parent.cancelButtonData.hovered || false) ? "#d7dff0" : "#e9e4d8")
             border.width: 1
             border.color: "#8c8578"
 
             Text {
                 anchors.centerIn: parent
-                text: uiState.itemIdentifyData.cancelButton.label || "Cancel"
+                text: parent.parent.cancelButtonData.label || "Cancel"
                 color: "#000000"
                 font.pixelSize: 10
             }
@@ -4346,6 +4599,10 @@ Item {
         y: uiState.itemCompositionY
         width: uiState.itemCompositionWidth
         height: uiState.itemCompositionHeight
+        readonly property var closeButtonData: root.asObject(uiState.itemCompositionData.closeButton)
+        readonly property var scrollBarData: root.asObject(uiState.itemCompositionData.scrollBar)
+        readonly property var okButtonData: root.asObject(uiState.itemCompositionData.okButton)
+        readonly property var cancelButtonData: root.asObject(uiState.itemCompositionData.cancelButton)
         radius: 4
         color: "#ede9df"
         border.width: 1
@@ -4374,18 +4631,18 @@ Item {
         }
 
         Rectangle {
-            x: (uiState.itemCompositionData.closeButton.x || 0) - uiState.itemCompositionX
-            y: (uiState.itemCompositionData.closeButton.y || 0) - uiState.itemCompositionY
-            width: uiState.itemCompositionData.closeButton.width || 0
-            height: uiState.itemCompositionData.closeButton.height || 0
+            x: (parent.closeButtonData.x || 0) - uiState.itemCompositionX
+            y: (parent.closeButtonData.y || 0) - uiState.itemCompositionY
+            width: parent.closeButtonData.width || 0
+            height: parent.closeButtonData.height || 0
             radius: 2
-            color: (uiState.itemCompositionData.closeButton.pressed || false) ? "#b9c7de" : ((uiState.itemCompositionData.closeButton.hovered || false) ? "#d7dff0" : "#e7e2d6")
+            color: (parent.closeButtonData.pressed || false) ? "#b9c7de" : ((parent.closeButtonData.hovered || false) ? "#d7dff0" : "#e7e2d6")
             border.width: 1
             border.color: "#7f7a70"
 
             Text {
                 anchors.centerIn: parent
-                text: uiState.itemCompositionData.closeButton.label || "X"
+                text: parent.parent.closeButtonData.label || "X"
                 color: "#000000"
                 font.pixelSize: 8
                 font.bold: true
@@ -4439,7 +4696,7 @@ Item {
                             fillMode: Image.PreserveAspectFit
                             smooth: false
                             cache: false
-                            source: root.itemIconSource(modelData.itemId || 0, modelData.identified)
+                            source: root.itemIconSource(modelData.itemId || 0, 0, modelData.identified)
                         }
                     }
 
@@ -4468,20 +4725,20 @@ Item {
         }
 
         Rectangle {
-            x: (uiState.itemCompositionData.scrollBar.trackX || 0) - uiState.itemCompositionX
-            y: (uiState.itemCompositionData.scrollBar.trackY || 0) - uiState.itemCompositionY
-            width: uiState.itemCompositionData.scrollBar.trackWidth || 0
-            height: uiState.itemCompositionData.scrollBar.trackHeight || 0
-            visible: uiState.itemCompositionData.scrollBar.visible || false
+            x: (parent.scrollBarData.trackX || 0) - uiState.itemCompositionX
+            y: (parent.scrollBarData.trackY || 0) - uiState.itemCompositionY
+            width: parent.scrollBarData.trackWidth || 0
+            height: parent.scrollBarData.trackHeight || 0
+            visible: parent.scrollBarData.visible || false
             color: "#e3e7ee"
             border.width: 1
             border.color: "#a4adbd"
 
             Rectangle {
-                x: (uiState.itemCompositionData.scrollBar.thumbX || 0) - (uiState.itemCompositionData.scrollBar.trackX || 0)
-                y: (uiState.itemCompositionData.scrollBar.thumbY || 0) - (uiState.itemCompositionData.scrollBar.trackY || 0)
-                width: uiState.itemCompositionData.scrollBar.thumbWidth || 0
-                height: uiState.itemCompositionData.scrollBar.thumbHeight || 0
+                x: (parent.parent.scrollBarData.thumbX || 0) - (parent.parent.scrollBarData.trackX || 0)
+                y: (parent.parent.scrollBarData.thumbY || 0) - (parent.parent.scrollBarData.trackY || 0)
+                width: parent.parent.scrollBarData.thumbWidth || 0
+                height: parent.parent.scrollBarData.thumbHeight || 0
                 color: "#b4bccd"
                 border.width: 1
                 border.color: "#788296"
@@ -4489,38 +4746,38 @@ Item {
         }
 
         Rectangle {
-            x: (uiState.itemCompositionData.okButton.x || 0) - uiState.itemCompositionX
-            y: (uiState.itemCompositionData.okButton.y || 0) - uiState.itemCompositionY
-            width: uiState.itemCompositionData.okButton.width || 0
-            height: uiState.itemCompositionData.okButton.height || 0
+            x: (parent.okButtonData.x || 0) - uiState.itemCompositionX
+            y: (parent.okButtonData.y || 0) - uiState.itemCompositionY
+            width: parent.okButtonData.width || 0
+            height: parent.okButtonData.height || 0
             radius: 3
-            color: !(uiState.itemCompositionData.okButton.enabled || false)
+            color: !(parent.okButtonData.enabled || false)
                 ? "#d0d0d0"
-                : ((uiState.itemCompositionData.okButton.pressed || false) ? "#b9c7de" : ((uiState.itemCompositionData.okButton.hovered || false) ? "#d7dff0" : "#e9e4d8"))
+                : ((parent.okButtonData.pressed || false) ? "#b9c7de" : ((parent.okButtonData.hovered || false) ? "#d7dff0" : "#e9e4d8"))
             border.width: 1
             border.color: "#8c8578"
 
             Text {
                 anchors.centerIn: parent
-                text: uiState.itemCompositionData.okButton.label || "OK"
+                text: parent.parent.okButtonData.label || "OK"
                 color: "#000000"
                 font.pixelSize: 10
             }
         }
 
         Rectangle {
-            x: (uiState.itemCompositionData.cancelButton.x || 0) - uiState.itemCompositionX
-            y: (uiState.itemCompositionData.cancelButton.y || 0) - uiState.itemCompositionY
-            width: uiState.itemCompositionData.cancelButton.width || 0
-            height: uiState.itemCompositionData.cancelButton.height || 0
+            x: (parent.cancelButtonData.x || 0) - uiState.itemCompositionX
+            y: (parent.cancelButtonData.y || 0) - uiState.itemCompositionY
+            width: parent.cancelButtonData.width || 0
+            height: parent.cancelButtonData.height || 0
             radius: 3
-            color: (uiState.itemCompositionData.cancelButton.pressed || false) ? "#b9c7de" : ((uiState.itemCompositionData.cancelButton.hovered || false) ? "#d7dff0" : "#e9e4d8")
+            color: (parent.cancelButtonData.pressed || false) ? "#b9c7de" : ((parent.cancelButtonData.hovered || false) ? "#d7dff0" : "#e9e4d8")
             border.width: 1
             border.color: "#8c8578"
 
             Text {
                 anchors.centerIn: parent
-                text: uiState.itemCompositionData.cancelButton.label || "Cancel"
+                text: parent.parent.cancelButtonData.label || "Cancel"
                 color: "#000000"
                 font.pixelSize: 10
             }
@@ -4533,9 +4790,9 @@ Item {
         width: uiState.optionWidth
         height: uiState.optionHeight
         radius: 8
-        color: "#f4f7fc"
+        color: Theme.background
         border.width: 1
-        border.color: "#394256"
+        border.color: Theme.borderStrong
         visible: uiState.optionVisible
 
         Rectangle {
@@ -4544,7 +4801,7 @@ Item {
             width: parent.width
             height: 17
             radius: 8
-            color: "#62729e"
+            color: Theme.accent
             border.width: 0
         }
 
@@ -4553,14 +4810,14 @@ Item {
             y: 8
             width: parent.width
             height: 9
-            color: "#62729e"
+            color: Theme.accent
         }
 
         Text {
             x: 17
             y: 2
             text: uiState.optionData.title || ""
-            color: "#ffffff"
+            color: Theme.accentText
             font.pixelSize: 12
             font.bold: true
         }
@@ -4575,15 +4832,15 @@ Item {
                 width: modelData.width || 0
                 height: modelData.height || 0
                 radius: 4
-                color: "#f8faff"
+                color: Theme.buttonBg
                 border.width: 1
-                border.color: "#607096"
+                border.color: Theme.buttonBorder
                 visible: modelData.visible || false
 
                 Text {
                     anchors.centerIn: parent
                     text: modelData.label || ""
-                    color: "#28375c"
+                    color: Theme.buttonText
                     font.pixelSize: 9
                     font.bold: true
                 }
@@ -4595,9 +4852,9 @@ Item {
             y: (uiState.optionData.contentY || 0) - uiState.optionY
             width: uiState.optionData.contentWidth || 0
             height: uiState.optionData.contentHeight || 0
-            color: "#ffffff"
+            color: Theme.surface
             border.width: 1
-            border.color: "#a0abc2"
+            border.color: Theme.border
             visible: !(uiState.optionData.collapsed || false)
         }
 
@@ -4612,14 +4869,14 @@ Item {
                 height: modelData.height
                 radius: 6
                 visible: !(uiState.optionData.collapsed || false)
-                color: modelData.active ? "#ffffff" : "#dce4f1"
+                color: modelData.active ? Theme.surface : Theme.surfaceAlt
                 border.width: 1
-                border.color: modelData.active ? "#5f7096" : "#7a88a7"
+                border.color: modelData.active ? Theme.borderStrong : Theme.border
 
                 Text {
                     anchors.centerIn: parent
                     text: modelData.label
-                    color: "#000000"
+                    color: Theme.text
                     font.pixelSize: 11
                 }
             }
@@ -4642,9 +4899,9 @@ Item {
                     y: 0
                     width: modelData.width
                     height: modelData.height
-                    color: modelData.checked ? "#cfdaf0" : "#ffffff"
+                    color: modelData.checked ? Theme.accent : Theme.inputBg
                     border.width: 1
-                    border.color: "#7a88a7"
+                    border.color: Theme.border
                 }
 
                 Text {
@@ -4652,14 +4909,14 @@ Item {
                     anchors.leftMargin: modelData.width + 8
                     anchors.verticalCenter: parent.verticalCenter
                     text: modelData.label
-                    color: "#000000"
+                    color: Theme.text
                     font.pixelSize: 11
                 }
 
                 Text {
                     anchors.centerIn: optionToggleBox
                     text: modelData.checked ? "X" : ""
-                    color: "#28375c"
+                    color: Theme.accentText
                     font.pixelSize: 10
                     font.bold: true
                 }
@@ -4685,7 +4942,7 @@ Item {
                     y: -1
                     width: 56
                     text: modelData.label
-                    color: "#000000"
+                    color: Theme.text
                     font.pixelSize: 11
                     horizontalAlignment: Text.AlignRight
                 }
@@ -4695,9 +4952,9 @@ Item {
                     y: 4
                     width: parent.width
                     height: Math.max(1, parent.height - 8)
-                    color: "#b6c2db"
+                    color: Theme.surfaceAlt
                     border.width: 1
-                    border.color: "#6f7da0"
+                    border.color: Theme.border
                 }
 
                 Rectangle {
@@ -4706,9 +4963,9 @@ Item {
                     width: 8
                     height: parent.height + 4
                     radius: 4
-                    color: "#ffffff"
+                    color: Theme.surface
                     border.width: 1
-                    border.color: "#576588"
+                    border.color: Theme.borderStrong
                 }
 
                 Text {
@@ -4716,7 +4973,7 @@ Item {
                     y: -1
                     width: 42
                     text: modelData.valueText || ""
-                    color: "#000000"
+                    color: Theme.text
                     font.pixelSize: 11
                 }
             }
@@ -4733,15 +4990,15 @@ Item {
                 height: modelData.height
                 radius: 6
                 visible: !(uiState.optionData.collapsed || false)
-                color: "#f7faff"
+                color: Theme.surface
                 border.width: 1
-                border.color: "#b0bad0"
+                border.color: Theme.border
 
                 Text {
                     x: 8
                     y: 4
                     text: modelData.label
-                    color: "#000000"
+                    color: Theme.text
                     font.pixelSize: 11
                 }
 
@@ -4750,7 +5007,7 @@ Item {
                     y: 4
                     width: Math.max(0, parent.width - 170)
                     text: modelData.value
-                    color: "#000000"
+                    color: Theme.text
                     font.pixelSize: 11
                     elide: Text.ElideRight
                 }
@@ -4761,14 +5018,14 @@ Item {
                     width: modelData.prevWidth
                     height: modelData.prevHeight
                     radius: 4
-                    color: "#f8faff"
+                    color: Theme.buttonBg
                     border.width: 1
-                    border.color: "#607096"
+                    border.color: Theme.buttonBorder
 
                     Text {
                         anchors.centerIn: parent
                         text: modelData.prevLabel || ""
-                        color: "#28375c"
+                        color: Theme.buttonText
                         font.pixelSize: 10
                         font.bold: true
                     }
@@ -4780,14 +5037,14 @@ Item {
                     width: modelData.nextWidth
                     height: modelData.nextHeight
                     radius: 4
-                    color: "#f8faff"
+                    color: Theme.buttonBg
                     border.width: 1
-                    border.color: "#607096"
+                    border.color: Theme.buttonBorder
 
                     Text {
                         anchors.centerIn: parent
                         text: modelData.nextLabel || ""
-                        color: "#28375c"
+                        color: Theme.buttonText
                         font.pixelSize: 10
                         font.bold: true
                     }
@@ -4804,14 +5061,14 @@ Item {
             height: restartButtonData.height || 0
             radius: 4
             visible: restartButtonData.visible || false
-            color: "#f8faff"
+            color: Theme.buttonBg
             border.width: 1
-            border.color: "#607096"
+            border.color: Theme.buttonBorder
 
             Text {
                 anchors.centerIn: parent
                 text: optionRestartButton.restartButtonData.label || ""
-                color: "#28375c"
+                color: Theme.buttonText
                 font.pixelSize: 10
             }
         }
@@ -4825,14 +5082,14 @@ Item {
             height: applyButtonData.height || 0
             radius: 4
             visible: applyButtonData.visible || false
-            color: "#f8faff"
+            color: Theme.buttonBg
             border.width: 1
-            border.color: "#607096"
+            border.color: Theme.buttonBorder
 
             Text {
                 anchors.centerIn: parent
                 text: optionApplyButton.applyButtonData.label || ""
-                color: "#28375c"
+                color: Theme.buttonText
                 font.pixelSize: 10
             }
         }
@@ -4843,27 +5100,27 @@ Item {
         y: uiState.shopChoiceY
         width: uiState.shopChoiceWidth
         height: uiState.shopChoiceHeight
-        radius: 8
-        color: "#f4f1ea"
+        radius: 10
+        color: Theme.surface
         border.width: 1
-        border.color: "#7f7a70"
+        border.color: Theme.borderStrong
         visible: uiState.shopChoiceVisible
 
         Text {
             x: 12
             y: 10
             text: uiState.shopChoiceTitle
-            color: "#2a2a2a"
+            color: Theme.text
             font.pixelSize: 15
             font.bold: true
         }
 
         Text {
             x: 14
-            y: 28
+            y: 30
             width: parent.width - 28
             text: uiState.shopChoicePrompt
-            color: "#343434"
+            color: Theme.textMuted
             font.pixelSize: 12
             horizontalAlignment: Text.AlignHCenter
         }
@@ -4878,16 +5135,389 @@ Item {
                 width: modelData.width
                 height: modelData.height
                 radius: 4
-                color: modelData.pressed ? "#aab9cd" : (modelData.hot ? "#c4d2e4" : "#dcdcdc")
+                color: modelData.pressed
+                    ? Theme.buttonBgPressed
+                    : (modelData.hot ? Theme.buttonBgHover : Theme.buttonBg)
                 border.width: 1
-                border.color: "#585858"
+                border.color: Theme.buttonBorder
 
                 Text {
                     anchors.centerIn: parent
                     text: modelData.label
-                    color: "#181818"
+                    color: Theme.buttonText
                     font.pixelSize: 12
                 }
+            }
+        }
+    }
+
+    Rectangle {
+        id: controllerPanel
+        x: uiState.controllerX
+        y: uiState.controllerY
+        width: uiState.controllerWidth
+        height: uiState.controllerHeight
+        radius: 10
+        color: Theme.background
+        border.width: 1
+        border.color: Theme.borderStrong
+        visible: uiState.controllerVisible
+        clip: true
+
+        readonly property var _rows: uiState.controllerData.rows || []
+        readonly property var _tabs: uiState.controllerData.tabs || []
+        readonly property int _activeTab: uiState.controllerData.activeTab || 0
+        readonly property bool _gamepadTab: _activeTab === 1
+        readonly property bool _rebinding: {
+            var r = _rows;
+            for (var i = 0; i < r.length; ++i) {
+                if (r[i].rebinding) return true;
+            }
+            return false;
+        }
+        readonly property var _rebindingRow: {
+            var r = _rows;
+            for (var i = 0; i < r.length; ++i) {
+                if (r[i].rebinding) return r[i];
+            }
+            return null;
+        }
+
+        // Title strip
+        Rectangle {
+            x: 0
+            y: 0
+            width: parent.width
+            height: 32
+            radius: 10
+            color: Theme.accent
+            z: 0
+        }
+        Rectangle {
+            x: 0
+            y: 20
+            width: parent.width
+            height: 14
+            color: Theme.accent
+            z: 0
+        }
+        Text {
+            x: 16
+            y: 8
+            width: parent.width - 32
+            text: "Controller / Hotkeys"
+            color: Theme.accentText
+            font.pixelSize: 14
+            font.bold: true
+            z: 1
+        }
+        Text {
+            anchors.right: parent.right
+            anchors.rightMargin: 16
+            y: 10
+            text: (uiState.controllerData.connected ? "●  " : "○  ")
+                + (uiState.controllerData.connected ? "Connected" : "Disconnected")
+                + "   │   "
+                + (uiState.controllerData.controllerName || "No controller")
+                + "   │   Move: "
+                + (uiState.controllerData.moveModeText || "")
+            color: Theme.accentText
+            font.pixelSize: 11
+            z: 1
+        }
+
+        // Live controller / hint area (matches backend kHeaderH + kLiveH region: y=16..208)
+        Rectangle {
+            x: 16
+            y: 58
+            width: parent.width - 32
+            height: 150
+            radius: 8
+            color: Theme.surface
+            border.width: 1
+            border.color: Theme.border
+            z: 0
+
+            Text {
+                anchors.horizontalCenter: parent.horizontalCenter
+                y: 10
+                text: uiState.controllerData.connected
+                    ? "Live controller state"
+                    : "No controller detected"
+                color: Theme.textMuted
+                font.pixelSize: 11
+                font.bold: true
+            }
+
+            Text {
+                anchors.centerIn: parent
+                width: parent.width - 40
+                horizontalAlignment: Text.AlignHCenter
+                wrapMode: Text.WordWrap
+                text: uiState.controllerData.connected
+                    ? (uiState.controllerData.controllerName || "Controller")
+                      + "\n\nPress any button to see it light up here."
+                    : "Connect an Xbox, PlayStation, or other SDL-compatible\ncontroller to begin binding gamepad actions."
+                color: Theme.text
+                font.pixelSize: 12
+            }
+        }
+
+        // Movement-mode toggle row (matches backend click zone: y=212..236)
+        Rectangle {
+            x: 16
+            y: 212
+            width: parent.width - 32
+            height: 24
+            radius: 6
+            color: Theme.surfaceAlt
+            border.width: 1
+            border.color: Theme.borderStrong
+            z: 1
+
+            Text {
+                x: 10
+                anchors.verticalCenter: parent.verticalCenter
+                text: "Movement mode"
+                color: Theme.text
+                font.pixelSize: 11
+                font.bold: true
+            }
+
+            Rectangle {
+                anchors.right: parent.right
+                anchors.rightMargin: 8
+                anchors.verticalCenter: parent.verticalCenter
+                width: 180
+                height: 16
+                radius: 8
+                color: Theme.accent
+                Text {
+                    anchors.centerIn: parent
+                    text: (uiState.controllerData.moveModeText || "Cursor") + "   (click to switch)"
+                    color: Theme.accentText
+                    font.pixelSize: 10
+                    font.bold: true
+                }
+            }
+        }
+
+        // Tabs (use backend positions so clicks line up with Win32 hit-test)
+        Repeater {
+            model: controllerPanel._tabs
+
+            delegate: Rectangle {
+                required property var modelData
+                x: modelData.x
+                y: modelData.y
+                width: modelData.width
+                height: modelData.height + 4
+                radius: 6
+                color: modelData.active ? Theme.background : Theme.surfaceAlt
+                border.width: modelData.active ? 2 : 1
+                border.color: modelData.active ? Theme.accent : Theme.border
+                z: 2
+
+                Text {
+                    anchors.centerIn: parent
+                    text: (modelData.id === 1 ? "🎮  " : "⌨  ") + (modelData.label || "")
+                    color: modelData.active ? Theme.text : Theme.textMuted
+                    font.pixelSize: 12
+                    font.bold: modelData.active
+                }
+
+                Rectangle {
+                    visible: modelData.active
+                    anchors.bottom: parent.bottom
+                    x: 0
+                    width: parent.width
+                    height: 2
+                    color: Theme.background
+                    z: 3
+                }
+            }
+        }
+
+        // Bindings list background (starts at backend row y=266; leaves room for footer)
+        Rectangle {
+            x: 14
+            y: 262
+            width: parent.width - 28
+            height: parent.height - 262 - 32
+            radius: 6
+            color: Theme.surface
+            border.width: 1
+            border.color: Theme.border
+            z: 0
+        }
+
+        Text {
+            x: 20
+            y: 244
+            text: controllerPanel._gamepadTab ? "Controller bindings" : "Keyboard bindings"
+            color: Theme.text
+            font.pixelSize: 11
+            font.bold: true
+            z: 2
+        }
+        Text {
+            anchors.right: parent.right
+            anchors.rightMargin: 20
+            y: 244
+            text: controllerPanel._rows.length + " actions"
+            color: Theme.textMuted
+            font.pixelSize: 10
+            z: 2
+        }
+
+        Text {
+            x: 20
+            y: 280
+            visible: !controllerPanel._rows.length
+            text: controllerPanel._gamepadTab
+                ? "No gamepad actions available."
+                : "No bindings loaded."
+            color: Theme.textMuted
+            font.pixelSize: 11
+            z: 2
+        }
+
+        // Binding rows — use backend positions so visuals align with Win32 hit-testing
+        Repeater {
+            model: controllerPanel._rows
+
+            delegate: Rectangle {
+                required property int index
+                required property var modelData
+                x: modelData.x
+                y: modelData.y
+                width: modelData.width
+                height: modelData.height
+                radius: 3
+                color: modelData.rebinding
+                    ? Theme.accent
+                    : modelData.selected
+                        ? Theme.surfaceAlt
+                        : (index % 2 === 0 ? Theme.background : Theme.surface)
+                border.width: modelData.rebinding || modelData.selected ? 1 : 0
+                border.color: modelData.rebinding ? Theme.accent : Theme.borderStrong
+                z: 3
+
+                Text {
+                    x: 10
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: Math.floor(parent.width * 0.55) - 10
+                    elide: Text.ElideRight
+                    text: modelData.label || ""
+                    color: modelData.rebinding ? Theme.accentText : Theme.text
+                    font.pixelSize: 12
+                    font.bold: modelData.selected || modelData.rebinding
+                }
+
+                Rectangle {
+                    x: Math.floor(parent.width * 0.55)
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: Math.floor(parent.width * 0.45) - 12
+                    height: parent.height - 4
+                    radius: 3
+                    color: modelData.rebinding
+                        ? Theme.accentText
+                        : (modelData.selected ? Theme.background : "transparent")
+                    border.width: modelData.rebinding ? 0 : 1
+                    border.color: modelData.selected ? Theme.borderStrong : Theme.border
+                    opacity: modelData.rebinding ? 0.15 : 1.0
+
+                    Text {
+                        anchors.centerIn: parent
+                        width: parent.width - 12
+                        horizontalAlignment: Text.AlignHCenter
+                        elide: Text.ElideRight
+                        text: modelData.bindingText || "—"
+                        color: modelData.rebinding ? Theme.accentText : Theme.text
+                        font.pixelSize: 11
+                        font.bold: true
+                        font.family: "Consolas"
+                    }
+                }
+            }
+        }
+
+        // Footer hints
+        Rectangle {
+            x: 0
+            y: parent.height - 28
+            width: parent.width
+            height: 28
+            color: Theme.surfaceAlt
+            border.width: 1
+            border.color: Theme.border
+            z: 2
+
+            Text {
+                anchors.verticalCenter: parent.verticalCenter
+                x: 16
+                text: "Click / Enter: rebind    •    Esc: cancel / close    •    Del: reset defaults    •    Tab: switch tab    •    ↑↓: move"
+                color: Theme.textMuted
+                font.pixelSize: 10
+            }
+        }
+
+        // Rebinding overlay — dims the panel and shows a prominent prompt
+        Rectangle {
+            anchors.fill: parent
+            visible: controllerPanel._rebinding
+            color: Theme.overlayDim
+            opacity: 0.88
+            z: 10
+        }
+
+        Rectangle {
+            visible: controllerPanel._rebinding
+            anchors.horizontalCenter: parent.horizontalCenter
+            y: parent.height / 2 - 80
+            width: Math.min(parent.width - 60, 520)
+            height: 160
+            radius: 10
+            color: Theme.accent
+            border.width: 2
+            border.color: Theme.borderStrong
+            z: 11
+
+            Text {
+                anchors.horizontalCenter: parent.horizontalCenter
+                y: 16
+                text: controllerPanel._gamepadTab ? "Waiting for controller input" : "Waiting for key press"
+                color: Theme.accentText
+                font.pixelSize: 14
+                font.bold: true
+                opacity: 0.85
+            }
+
+            Text {
+                anchors.horizontalCenter: parent.horizontalCenter
+                y: 44
+                text: (controllerPanel._rebindingRow ? controllerPanel._rebindingRow.label : "") + "  →"
+                color: Theme.accentText
+                font.pixelSize: 18
+                font.bold: true
+            }
+
+            Text {
+                anchors.horizontalCenter: parent.horizontalCenter
+                y: 78
+                text: controllerPanel._gamepadTab ? "Press any button…" : "Press any key…"
+                color: Theme.accentText
+                font.pixelSize: 22
+                font.bold: true
+            }
+
+            Text {
+                anchors.horizontalCenter: parent.horizontalCenter
+                y: 124
+                text: "Esc to cancel"
+                color: Theme.accentText
+                font.pixelSize: 11
+                opacity: 0.75
             }
         }
     }
@@ -4898,9 +5528,9 @@ Item {
         width: uiState.serverPanelWidth
         height: uiState.serverPanelHeight
         radius: 8
-        color: "#f3f0e7"
+        color: Theme.background
         border.width: 1
-        border.color: "#787060"
+        border.color: Theme.border
         visible: uiState.serverSelectVisible
 
         Column {
@@ -4910,7 +5540,7 @@ Item {
 
             Text {
                 text: uiState.serverPanelData.title || ""
-                color: "#303030"
+                color: Theme.text
                 font.pixelSize: 14
                 font.bold: true
             }
@@ -4945,10 +5575,10 @@ Item {
                     height: 24
                     radius: 2
                     color: isSelected
-                        ? "#d6e7b8"
-                        : (isHovered ? "#ecefe5" : "#faf8f2")
+                        ? Theme.accent
+                        : (isHovered ? Theme.surfaceAlt : Theme.surface)
                     border.width: isSelected ? 2 : 1
-                    border.color: isSelected ? "#5e7f2b" : "#a0a0a0"
+                    border.color: isSelected ? Theme.borderStrong : Theme.border
                     clip: true
 
                     Rectangle {
@@ -4956,7 +5586,7 @@ Item {
                         anchors.top: parent.top
                         anchors.bottom: parent.bottom
                         width: isSelected ? 8 : 0
-                        color: "#6f9630"
+                        color: Theme.borderStrong
                         visible: isSelected
                     }
 
@@ -4966,7 +5596,7 @@ Item {
                         width: Math.max(1, parent.width - labelLeft - statusWidth - 12)
                         anchors.verticalCenter: parent.verticalCenter
                         text: labelText
-                        color: "#181818"
+                        color: isSelected ? Theme.accentText : Theme.text
                         font.pixelSize: 12
                         font.bold: isSelected
                         elide: Text.ElideRight
@@ -4980,7 +5610,7 @@ Item {
                         width: statusWidth
                         anchors.verticalCenter: parent.verticalCenter
                         text: detailText
-                        color: isSelected ? "#3f6111" : "#606060"
+                        color: isSelected ? Theme.accentText : Theme.textMuted
                         font.pixelSize: 12
                         font.bold: isSelected
                         textFormat: Text.PlainText
@@ -5007,7 +5637,13 @@ Item {
             fillMode: Image.Stretch
             smooth: false
             cache: false
-            source: parent.visible ? "image://openmidgard/loginpanel" : ""
+            source: parent.visible ? ("image://openmidgard/loginpanel?skin=" + encodeURIComponent(uiState.skinRevision || "0")) : ""
+        }
+
+        Rectangle {
+            anchors.fill: parent
+            color: Theme.background
+            opacity: darkTheme ? 0.44 : 0.10
         }
 
         Rectangle {
@@ -5015,9 +5651,9 @@ Item {
             y: 29
             width: 125
             height: 18
-            color: "#f2f2f2"
+            color: Theme.inputBg
             border.width: 1
-            border.color: uiState.loginPasswordFocused ? "#b0b0b0" : "#707070"
+            border.color: uiState.loginPasswordFocused ? Theme.inputBorder : Theme.borderStrong
         }
 
         Text {
@@ -5025,7 +5661,7 @@ Item {
             y: 31
             width: 112
             text: uiState.loginUserId + (!uiState.loginPasswordFocused && root.loginCaretVisible ? "|" : "")
-            color: "#202020"
+            color: Theme.inputText
             font.pixelSize: 12
             elide: Text.ElideRight
         }
@@ -5035,9 +5671,9 @@ Item {
             y: 61
             width: 125
             height: 18
-            color: "#f2f2f2"
+            color: Theme.inputBg
             border.width: 1
-            border.color: uiState.loginPasswordFocused ? "#707070" : "#b0b0b0"
+            border.color: uiState.loginPasswordFocused ? Theme.borderStrong : Theme.inputBorder
         }
 
         Text {
@@ -5045,7 +5681,7 @@ Item {
             y: 63
             width: 112
             text: uiState.loginPasswordMask + (uiState.loginPasswordFocused && root.loginCaretVisible ? "|" : "")
-            color: "#202020"
+            color: Theme.inputText
             font.pixelSize: 12
             elide: Text.ElideRight
         }
@@ -5055,14 +5691,14 @@ Item {
             y: 33
             width: 16
             height: 16
-            color: "#ffffff"
+            color: Theme.surface
             border.width: 1
-            border.color: "#404040"
+            border.color: Theme.borderStrong
 
             Text {
                 anchors.centerIn: parent
                 text: uiState.loginSaveAccountChecked ? "X" : ""
-                color: "#202020"
+                color: Theme.accent
                 font.pixelSize: 11
                 font.bold: true
             }
@@ -5072,7 +5708,7 @@ Item {
             x: 250
             y: 31
             text: uiState.loginPanelLabels.saveLabel || ""
-            color: "#303030"
+            color: Theme.text
             font.pixelSize: 11
         }
 
@@ -5086,14 +5722,14 @@ Item {
                 width: modelData.width || 0
                 height: modelData.height || 0
                 radius: 3
-                color: "#d8d0c4"
+                color: Theme.buttonBg
                 border.width: 1
-                border.color: "#6f6558"
+                border.color: Theme.buttonBorder
 
                 Text {
                     anchors.centerIn: parent
                     text: modelData.label || ""
-                    color: "#202020"
+                    color: Theme.buttonText
                     font.pixelSize: 11
                     font.bold: true
                 }
@@ -5118,6 +5754,12 @@ Item {
             source: parent.visible ? ("image://openmidgard/charselectpanel?rev=" + root.charSelectPanelKey()) : ""
         }
 
+        Rectangle {
+            anchors.fill: parent
+            color: Theme.background
+            opacity: darkTheme ? 0.40 : 0.08
+        }
+
         Repeater {
             model: uiState.charSelectSlots
 
@@ -5137,7 +5779,7 @@ Item {
                     smooth: false
                     cache: false
                     visible: modelData.selected
-                    source: visible ? "image://openmidgard/charselectslotselected" : ""
+                    source: visible ? ("image://openmidgard/charselectslotselected?skin=" + encodeURIComponent(uiState.skinRevision || "0")) : ""
                 }
             }
         }
@@ -5152,7 +5794,7 @@ Item {
                 width: modelData.width || 0
                 height: modelData.height || 0
                 text: modelData.text || ""
-                color: "#4b4b4b"
+                color: Theme.text
                 font.pixelSize: 11
             }
         }
@@ -5173,7 +5815,7 @@ Item {
                 Text {
                     anchors.centerIn: parent
                     text: modelData.label || ""
-                    color: "#5a5448"
+                    color: Theme.accent
                     font.pixelSize: 18
                     font.bold: true
                 }
@@ -5190,15 +5832,15 @@ Item {
                 width: modelData.width || 0
                 height: modelData.height || 0
                 radius: 3
-                color: "#d8d0c4"
+                color: Theme.buttonBg
                 border.width: 1
-                border.color: "#6f6558"
+                border.color: Theme.buttonBorder
                 visible: modelData.visible || false
 
                 Text {
                     anchors.centerIn: parent
                     text: modelData.label || ""
-                    color: "#202020"
+                    color: Theme.buttonText
                     font.pixelSize: 11
                     font.bold: true
                 }
@@ -5223,8 +5865,15 @@ Item {
             source: parent.visible
                 ? ("image://openmidgard/makecharpanel?rev="
                     + ((uiState.makeCharPanelData && uiState.makeCharPanelData.imageRevision) || 0)
-                    + "&buttons=" + root.makeCharPanelButtonsKey())
+                    + "&buttons=" + root.makeCharPanelButtonsKey()
+                    + "&skin=" + encodeURIComponent(uiState.skinRevision || "0"))
                 : ""
+        }
+
+        Rectangle {
+            anchors.fill: parent
+            color: Theme.background
+            opacity: darkTheme ? 0.34 : 0.06
         }
 
         Rectangle {
@@ -5232,9 +5881,9 @@ Item {
             y: 244
             width: 100
             height: 18
-            color: "#f2f2f2"
+            color: Theme.inputBg
             border.width: 1
-            border.color: uiState.makeCharNameFocused ? "#6a4c34" : "#909090"
+            border.color: uiState.makeCharNameFocused ? Theme.borderStrong : Theme.inputBorder
         }
 
         Text {
@@ -5242,7 +5891,7 @@ Item {
             y: 246
             width: 88
             text: uiState.makeCharName + (uiState.makeCharNameFocused && root.loginCaretVisible ? "|" : "")
-            color: "#202020"
+            color: Theme.inputText
             font.pixelSize: 12
             elide: Text.ElideRight
         }
@@ -5256,7 +5905,7 @@ Item {
                 y: (modelData.y || 0) - uiState.makeCharPanelY
                 width: 30
                 text: modelData.value !== undefined ? modelData.value : ""
-                color: "#3c2414"
+                color: Theme.text
                 font.pixelSize: 12
                 horizontalAlignment: Text.AlignHCenter
             }
@@ -5272,6 +5921,560 @@ Item {
                 width: modelData.width || 0
                 height: modelData.height || 0
             }
+        }
+    }
+
+    // Cart panel
+    Rectangle {
+        visible: (uiState.cartPanelData.visible || false)
+        x: uiState.cartPanelData.x || 0
+        y: uiState.cartPanelData.y || 0
+        width: uiState.cartPanelData.width || 180
+        height: uiState.cartPanelData.height || 240
+        radius: 4
+        color: Theme.background
+        border.width: 1
+        border.color: Theme.border
+        Rectangle {
+            x: 1; y: 1; width: parent.width - 2; height: 16
+            radius: 3
+            color: Theme.accent
+            border.width: 1
+            border.color: Theme.borderStrong
+            Text {
+                anchors.centerIn: parent
+                color: Theme.accentText
+                font.pixelSize: 11
+                text: (uiState.cartPanelData.title || "Cart")
+                    + " (" + (uiState.cartPanelData.currentCount || 0)
+                    + "/" + (uiState.cartPanelData.maxCount || 0) + ")"
+            }
+        }
+        Repeater {
+            model: uiState.cartPanelData.systemButtons || []
+            delegate: Rectangle {
+                required property var modelData
+                x: (modelData.x || 0) - (uiState.cartPanelData.x || 0)
+                y: (modelData.y || 0) - (uiState.cartPanelData.y || 0)
+                width: modelData.width || 13
+                height: modelData.height || 13
+                radius: 2
+                color: Theme.buttonBg
+                border.width: 1
+                border.color: Theme.buttonBorder
+                Text { anchors.centerIn: parent; text: modelData.label || ""; color: Theme.buttonText; font.pixelSize: 10; font.bold: true }
+            }
+        }
+        Text {
+            visible: !(uiState.cartPanelData.minimized || false)
+            x: 6; y: 20; font.pixelSize: 10; color: Theme.text
+            text: "Weight: " + (uiState.cartPanelData.currentWeight || 0)
+                + " / " + (uiState.cartPanelData.maxWeight || 0)
+        }
+        ListView {
+            visible: !(uiState.cartPanelData.minimized || false)
+            x: 6; y: 36
+            width: parent.width - 12
+            height: parent.height - 42
+            clip: true
+            model: uiState.cartPanelData.entries || []
+            delegate: Text {
+                required property var modelData
+                text: (modelData.label || "")
+                color: Theme.text
+                font.pixelSize: 10
+                height: 14
+            }
+        }
+    }
+
+    // Guild panel
+    Rectangle {
+        visible: (uiState.guildPanelData.visible || false)
+        x: uiState.guildPanelData.x || 0
+        y: uiState.guildPanelData.y || 0
+        width: uiState.guildPanelData.width || 300
+        height: uiState.guildPanelData.height || 280
+        radius: 4
+        color: Theme.background
+        border.width: 1
+        border.color: Theme.border
+        Rectangle {
+            x: 1; y: 1; width: parent.width - 2; height: 16
+            radius: 3
+            color: Theme.accent
+            border.width: 1
+            border.color: Theme.borderStrong
+            Text {
+                anchors.centerIn: parent
+                color: Theme.accentText
+                font.pixelSize: 11
+                text: (uiState.guildPanelData.title || "Guild")
+                    + " — " + (uiState.guildPanelData.guildName || "")
+            }
+        }
+        Repeater {
+            model: uiState.guildPanelData.systemButtons || []
+            delegate: Rectangle {
+                required property var modelData
+                x: (modelData.x || 0) - (uiState.guildPanelData.x || 0)
+                y: (modelData.y || 0) - (uiState.guildPanelData.y || 0)
+                width: modelData.width || 13
+                height: modelData.height || 13
+                radius: 2
+                color: Theme.buttonBg
+                border.width: 1
+                border.color: Theme.buttonBorder
+                Text { anchors.centerIn: parent; text: modelData.label || ""; color: Theme.buttonText; font.pixelSize: 10; font.bold: true }
+            }
+        }
+        // Info tab
+        Column {
+            x: 6; y: 20; spacing: 2
+            visible: !(uiState.guildPanelData.minimized || false) && (uiState.guildPanelData.activeTab || 0) === 0
+            Text { text: "Master: " + (uiState.guildPanelData.masterName || ""); color: Theme.text; font.pixelSize: 10 }
+            Text { text: "Guild ID: " + (uiState.guildPanelData.guildId || 0); color: Theme.text; font.pixelSize: 10 }
+            Text { text: "Emblem: " + (uiState.guildPanelData.emblemId || 0); color: Theme.text; font.pixelSize: 10 }
+            Text {
+                text: "Members: " + ((uiState.guildPanelData.members || []).length)
+                color: Theme.text; font.pixelSize: 10
+            }
+        }
+
+        // Members tab
+        ListView {
+            x: 6; y: 20
+            width: parent.width - 12
+            height: parent.height - 26
+            visible: !(uiState.guildPanelData.minimized || false) && (uiState.guildPanelData.activeTab || 0) === 1
+            clip: true
+            model: uiState.guildPanelData.members || []
+            delegate: Rectangle {
+                required property var modelData
+                width: ListView.view ? ListView.view.width : 0
+                height: 14
+                color: (modelData.online ? Theme.inputBg : Theme.surfaceAlt)
+                Text {
+                    x: 4
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: (modelData.online ? "●  " : "○  ")
+                        + (modelData.name || "")
+                        + "  Lv" + (modelData.level || 0)
+                        + "  [" + (modelData.positionId || 0) + "]"
+                    color: Theme.text
+                    font.pixelSize: 10
+                    elide: Text.ElideRight
+                }
+            }
+        }
+    }
+
+    // MailBox panel
+    Rectangle {
+        visible: (uiState.mailBoxPanelData.visible || false)
+        x: uiState.mailBoxPanelData.x || 0
+        y: uiState.mailBoxPanelData.y || 0
+        width: uiState.mailBoxPanelData.width || 320
+        height: uiState.mailBoxPanelData.height || 240
+        radius: 4
+        color: Theme.background
+        border.width: 1
+        border.color: Theme.border
+        Rectangle {
+            x: 1; y: 1; width: parent.width - 2; height: 16
+            radius: 3
+            color: Theme.accent
+            border.width: 1
+            border.color: Theme.borderStrong
+            Text {
+                anchors.centerIn: parent
+                color: Theme.accentText
+                font.pixelSize: 11
+                text: uiState.mailBoxPanelData.title || "Mailbox"
+            }
+        }
+        Repeater {
+            model: uiState.mailBoxPanelData.systemButtons || []
+            delegate: Rectangle {
+                required property var modelData
+                x: (modelData.x || 0) - (uiState.mailBoxPanelData.x || 0)
+                y: (modelData.y || 0) - (uiState.mailBoxPanelData.y || 0)
+                width: modelData.width || 13
+                height: modelData.height || 13
+                radius: 2
+                color: Theme.buttonBg
+                border.width: 1
+                border.color: Theme.buttonBorder
+                Text { anchors.centerIn: parent; text: modelData.label || ""; color: Theme.buttonText; font.pixelSize: 10; font.bold: true }
+            }
+        }
+        ListView {
+            visible: !(uiState.mailBoxPanelData.minimized || false)
+            x: 6; y: 20
+            width: parent.width - 12
+            height: parent.height - 26
+            clip: true
+            model: uiState.mailBoxPanelData.entries || []
+            delegate: Text {
+                required property var modelData
+                text: (modelData.isRead ? "  " : "* ")
+                    + (modelData.sender || "?") + " — " + (modelData.title || "")
+                color: Theme.text
+                font.pixelSize: 10
+                height: 14
+            }
+        }
+    }
+
+    // MailRead panel
+    Rectangle {
+        visible: (uiState.mailReadPanelData.visible || false)
+        x: uiState.mailReadPanelData.x || 0
+        y: uiState.mailReadPanelData.y || 0
+        width: uiState.mailReadPanelData.width || 320
+        height: uiState.mailReadPanelData.height || 280
+        radius: 4
+        color: Theme.background
+        border.width: 1
+        border.color: Theme.border
+        Rectangle {
+            x: 1; y: 1; width: parent.width - 2; height: 16
+            radius: 3
+            color: Theme.accent
+            border.width: 1
+            border.color: Theme.borderStrong
+            Text {
+                anchors.centerIn: parent
+                color: Theme.accentText
+                font.pixelSize: 11
+                text: uiState.mailReadPanelData.title || "Read Mail"
+            }
+        }
+        Repeater {
+            model: uiState.mailReadPanelData.systemButtons || []
+            delegate: Rectangle {
+                required property var modelData
+                x: (modelData.x || 0) - (uiState.mailReadPanelData.x || 0)
+                y: (modelData.y || 0) - (uiState.mailReadPanelData.y || 0)
+                width: modelData.width || 13
+                height: modelData.height || 13
+                radius: 2
+                color: Theme.buttonBg
+                border.width: 1
+                border.color: Theme.buttonBorder
+                Text { anchors.centerIn: parent; text: modelData.label || ""; color: Theme.buttonText; font.pixelSize: 10; font.bold: true }
+            }
+        }
+        Column {
+            visible: !(uiState.mailReadPanelData.minimized || false)
+            x: 6; y: 20; spacing: 3
+            Text { text: "From: " + (uiState.mailReadPanelData.sender || ""); color: Theme.text; font.pixelSize: 10 }
+            Text { text: "Subject: " + (uiState.mailReadPanelData.subject || ""); color: Theme.text; font.pixelSize: 10 }
+            Text {
+                text: "Zeny: " + (uiState.mailReadPanelData.zeny || 0)
+                    + "    Attach: item#" + (uiState.mailReadPanelData.attachItemId || 0)
+                    + " x" + (uiState.mailReadPanelData.attachAmount || 0)
+                color: Theme.text
+                font.pixelSize: 10
+            }
+            Text {
+                width: parent.parent.width - 12
+                wrapMode: Text.WordWrap
+                text: uiState.mailReadPanelData.body || ""
+                color: Theme.text
+                font.pixelSize: 10
+            }
+        }
+    }
+
+    // MailSend panel
+    Rectangle {
+        visible: (uiState.mailSendPanelData.visible || false)
+        x: uiState.mailSendPanelData.x || 0
+        y: uiState.mailSendPanelData.y || 0
+        width: uiState.mailSendPanelData.width || 320
+        height: uiState.mailSendPanelData.height || 280
+        radius: 4
+        color: Theme.background
+        border.width: 1
+        border.color: Theme.border
+        Rectangle {
+            x: 1; y: 1; width: parent.width - 2; height: 16
+            radius: 3
+            color: Theme.accent
+            border.width: 1
+            border.color: Theme.borderStrong
+            Text {
+                anchors.centerIn: parent
+                color: Theme.accentText
+                font.pixelSize: 11
+                text: uiState.mailSendPanelData.title || "Send Mail"
+            }
+        }
+        Repeater {
+            model: uiState.mailSendPanelData.systemButtons || []
+            delegate: Rectangle {
+                required property var modelData
+                x: (modelData.x || 0) - (uiState.mailSendPanelData.x || 0)
+                y: (modelData.y || 0) - (uiState.mailSendPanelData.y || 0)
+                width: modelData.width || 13
+                height: modelData.height || 13
+                radius: 2
+                color: Theme.buttonBg
+                border.width: 1
+                border.color: Theme.buttonBorder
+                Text { anchors.centerIn: parent; text: modelData.label || ""; color: Theme.buttonText; font.pixelSize: 10; font.bold: true }
+            }
+        }
+        Column {
+            visible: !(uiState.mailSendPanelData.minimized || false)
+            x: 6; y: 20; spacing: 3
+            Text { text: "To: " + (uiState.mailSendPanelData.recipient || ""); color: Theme.text; font.pixelSize: 10 }
+            Text { text: "Subject: " + (uiState.mailSendPanelData.subject || ""); color: Theme.text; font.pixelSize: 10 }
+            Text {
+                text: "Zeny: " + (uiState.mailSendPanelData.zeny || 0)
+                    + "    Attach inv#" + (uiState.mailSendPanelData.attachInventoryIndex || 0)
+                    + " x" + (uiState.mailSendPanelData.attachAmount || 0)
+                color: Theme.text
+                font.pixelSize: 10
+            }
+            Text {
+                width: parent.parent.width - 12
+                wrapMode: Text.WordWrap
+                text: uiState.mailSendPanelData.body || ""
+                color: Theme.text
+                font.pixelSize: 10
+            }
+        }
+    }
+
+    // Pet info panel
+    Rectangle {
+        visible: (uiState.petInfoPanelData.visible || false)
+        x: uiState.petInfoPanelData.x || 0
+        y: uiState.petInfoPanelData.y || 0
+        width: uiState.petInfoPanelData.width || 200
+        height: uiState.petInfoPanelData.height || 200
+        radius: 4
+        color: Theme.background
+        border.width: 1
+        border.color: Theme.border
+        Rectangle {
+            x: 1; y: 1; width: parent.width - 2; height: 16
+            radius: 3
+            color: Theme.accent
+            border.width: 1
+            border.color: Theme.borderStrong
+            Text {
+                anchors.centerIn: parent
+                color: Theme.accentText
+                font.pixelSize: 11
+                text: (uiState.petInfoPanelData.title || "Pet")
+                    + ": " + (uiState.petInfoPanelData.petName || "")
+            }
+        }
+        Repeater {
+            model: uiState.petInfoPanelData.systemButtons || []
+            delegate: Rectangle {
+                required property var modelData
+                x: (modelData.x || 0) - (uiState.petInfoPanelData.x || 0)
+                y: (modelData.y || 0) - (uiState.petInfoPanelData.y || 0)
+                width: modelData.width || 13
+                height: modelData.height || 13
+                radius: 2
+                color: Theme.buttonBg
+                border.width: 1
+                border.color: Theme.buttonBorder
+                Text { anchors.centerIn: parent; text: modelData.label || ""; color: Theme.buttonText; font.pixelSize: 10; font.bold: true }
+            }
+        }
+        Column {
+            visible: !(uiState.petInfoPanelData.minimized || false)
+            x: 6; y: 20; spacing: 2
+            Text { text: "Level: " + (uiState.petInfoPanelData.level || 0); color: Theme.text; font.pixelSize: 10 }
+            Text { text: "Fullness: " + (uiState.petInfoPanelData.fullness || 0); color: Theme.text; font.pixelSize: 10 }
+            Text { text: "Intimacy: " + (uiState.petInfoPanelData.intimacy || 0); color: Theme.text; font.pixelSize: 10 }
+            Text { text: "Item ID: " + (uiState.petInfoPanelData.itemId || 0); color: Theme.text; font.pixelSize: 10 }
+            Text { text: "Job: " + (uiState.petInfoPanelData.job || 0); color: Theme.text; font.pixelSize: 10 }
+        }
+    }
+
+    // Egg list panel
+    Rectangle {
+        visible: (uiState.eggListPanelData.visible || false)
+        x: uiState.eggListPanelData.x || 0
+        y: uiState.eggListPanelData.y || 0
+        width: uiState.eggListPanelData.width || 200
+        height: uiState.eggListPanelData.height || 240
+        radius: 4
+        color: Theme.background
+        border.width: 1
+        border.color: Theme.border
+        Rectangle {
+            x: 1; y: 1; width: parent.width - 2; height: 16
+            radius: 3
+            color: Theme.accent
+            border.width: 1
+            border.color: Theme.borderStrong
+            Text {
+                anchors.centerIn: parent
+                color: Theme.accentText
+                font.pixelSize: 11
+                text: uiState.eggListPanelData.title || "Pet Eggs"
+            }
+        }
+        Repeater {
+            model: uiState.eggListPanelData.systemButtons || []
+            delegate: Rectangle {
+                required property var modelData
+                x: (modelData.x || 0) - (uiState.eggListPanelData.x || 0)
+                y: (modelData.y || 0) - (uiState.eggListPanelData.y || 0)
+                width: modelData.width || 13
+                height: modelData.height || 13
+                radius: 2
+                color: Theme.buttonBg
+                border.width: 1
+                border.color: Theme.buttonBorder
+                Text { anchors.centerIn: parent; text: modelData.label || ""; color: Theme.buttonText; font.pixelSize: 10; font.bold: true }
+            }
+        }
+        ListView {
+            visible: !(uiState.eggListPanelData.minimized || false)
+            x: 6; y: 20
+            width: parent.width - 12
+            height: parent.height - 26
+            clip: true
+            model: uiState.eggListPanelData.eggItemIds || []
+            delegate: Text {
+                required property var modelData
+                text: "Egg #" + modelData
+                color: Theme.text
+                font.pixelSize: 10
+                height: 14
+            }
+        }
+    }
+
+    // Homun info panel
+    Rectangle {
+        visible: (uiState.homunInfoPanelData.visible || false)
+        x: uiState.homunInfoPanelData.x || 0
+        y: uiState.homunInfoPanelData.y || 0
+        width: uiState.homunInfoPanelData.width || 220
+        height: uiState.homunInfoPanelData.height || 220
+        radius: 4
+        color: Theme.background
+        border.width: 1
+        border.color: Theme.border
+        Rectangle {
+            x: 1; y: 1; width: parent.width - 2; height: 16
+            radius: 3
+            color: Theme.accent
+            border.width: 1
+            border.color: Theme.borderStrong
+            Text {
+                anchors.centerIn: parent
+                color: Theme.accentText
+                font.pixelSize: 11
+                text: (uiState.homunInfoPanelData.title || "Homunculus")
+                    + ": " + (uiState.homunInfoPanelData.homunName || "")
+            }
+        }
+        Repeater {
+            model: uiState.homunInfoPanelData.systemButtons || []
+            delegate: Rectangle {
+                required property var modelData
+                x: (modelData.x || 0) - (uiState.homunInfoPanelData.x || 0)
+                y: (modelData.y || 0) - (uiState.homunInfoPanelData.y || 0)
+                width: modelData.width || 13
+                height: modelData.height || 13
+                radius: 2
+                color: Theme.buttonBg
+                border.width: 1
+                border.color: Theme.buttonBorder
+                Text { anchors.centerIn: parent; text: modelData.label || ""; color: Theme.buttonText; font.pixelSize: 10; font.bold: true }
+            }
+        }
+        Column {
+            visible: !(uiState.homunInfoPanelData.minimized || false)
+            x: 6; y: 20; spacing: 2
+            Text { text: "Level: " + (uiState.homunInfoPanelData.level || 0); color: Theme.text; font.pixelSize: 10 }
+            Text {
+                text: "HP: " + (uiState.homunInfoPanelData.hp || 0)
+                    + " / " + (uiState.homunInfoPanelData.maxHp || 0)
+                color: Theme.text
+                font.pixelSize: 10
+            }
+            Text {
+                text: "SP: " + (uiState.homunInfoPanelData.sp || 0)
+                    + " / " + (uiState.homunInfoPanelData.maxSp || 0)
+                color: Theme.text
+                font.pixelSize: 10
+            }
+            Text { text: "Hunger: " + (uiState.homunInfoPanelData.hunger || 0); color: Theme.text; font.pixelSize: 10 }
+            Text { text: "Intimacy: " + (uiState.homunInfoPanelData.intimacy || 0); color: Theme.text; font.pixelSize: 10 }
+        }
+    }
+
+    // Merc info panel
+    Rectangle {
+        visible: (uiState.mercInfoPanelData.visible || false)
+        x: uiState.mercInfoPanelData.x || 0
+        y: uiState.mercInfoPanelData.y || 0
+        width: uiState.mercInfoPanelData.width || 220
+        height: uiState.mercInfoPanelData.height || 220
+        radius: 4
+        color: Theme.background
+        border.width: 1
+        border.color: Theme.border
+        Rectangle {
+            x: 1; y: 1; width: parent.width - 2; height: 16
+            radius: 3
+            color: Theme.accent
+            border.width: 1
+            border.color: Theme.borderStrong
+            Text {
+                anchors.centerIn: parent
+                color: Theme.accentText
+                font.pixelSize: 11
+                text: (uiState.mercInfoPanelData.title || "Mercenary")
+                    + ": " + (uiState.mercInfoPanelData.mercName || "")
+            }
+        }
+        Repeater {
+            model: uiState.mercInfoPanelData.systemButtons || []
+            delegate: Rectangle {
+                required property var modelData
+                x: (modelData.x || 0) - (uiState.mercInfoPanelData.x || 0)
+                y: (modelData.y || 0) - (uiState.mercInfoPanelData.y || 0)
+                width: modelData.width || 13
+                height: modelData.height || 13
+                radius: 2
+                color: Theme.buttonBg
+                border.width: 1
+                border.color: Theme.buttonBorder
+                Text { anchors.centerIn: parent; text: modelData.label || ""; color: Theme.buttonText; font.pixelSize: 10; font.bold: true }
+            }
+        }
+        Column {
+            visible: !(uiState.mercInfoPanelData.minimized || false)
+            x: 6; y: 20; spacing: 2
+            Text { text: "Level: " + (uiState.mercInfoPanelData.level || 0); color: Theme.text; font.pixelSize: 10 }
+            Text {
+                text: "HP: " + (uiState.mercInfoPanelData.hp || 0)
+                    + " / " + (uiState.mercInfoPanelData.maxHp || 0)
+                color: Theme.text
+                font.pixelSize: 10
+            }
+            Text {
+                text: "SP: " + (uiState.mercInfoPanelData.sp || 0)
+                    + " / " + (uiState.mercInfoPanelData.maxSp || 0)
+                color: Theme.text
+                font.pixelSize: 10
+            }
+            Text { text: "Faith: " + (uiState.mercInfoPanelData.faith || 0); color: Theme.text; font.pixelSize: 10 }
+            Text { text: "Calls: " + (uiState.mercInfoPanelData.calls || 0); color: Theme.text; font.pixelSize: 10 }
+            Text { text: "Expires: " + (uiState.mercInfoPanelData.expireTime || 0); color: Theme.text; font.pixelSize: 10 }
         }
     }
     }

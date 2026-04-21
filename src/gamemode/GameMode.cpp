@@ -11,6 +11,7 @@
 #include "GameModePacket.h"
 #include "pathfinder/PathFinder.h"
 #include "core/ClientInfoLocale.h"
+#include "core/ClientFeature.h"
 #include "core/File.h"
 #include "DebugLog.h"
 #include "render/DC.h"
@@ -699,6 +700,35 @@ void DrawBootstrapSceneTextQt(unsigned int* pixels,
     int groundHeight,
     int activeWidth,
     int activeHeight);
+#endif
+
+#if !RO_ENABLE_QT6_UI
+bool MeasureOverlayTextQt(const std::string& text, SIZE* outSize)
+{
+    if (!outSize || text.empty()) {
+        return false;
+    }
+
+    outSize->cx = static_cast<LONG>((text.size() * 8u) + 4u);
+    outSize->cy = 16;
+    return true;
+}
+
+void DrawOutlinedTextQtToOverlay(
+    unsigned int*,
+    int,
+    int,
+    int,
+    int,
+    int,
+    const std::string&,
+    COLORREF)
+{
+}
+
+void DrawBootstrapSceneTextQt(unsigned int*, int, int, const CGameMode&, const BootstrapWorldCache&, int, int, int, int, int, int)
+{
+}
 #endif
 
 inline unsigned int PackOverlayRgb(COLORREF color)
@@ -2420,6 +2450,83 @@ std::string LowercaseAscii(std::string value)
     return value;
 }
 
+struct EmotionCommandAlias {
+    const char* command;
+    int emotionType;
+};
+
+constexpr std::array<EmotionCommandAlias, 11> kEmotionCommandAliases = {{
+    { "!", 0 },
+    { "?", 1 },
+    { "omg", 0 },
+    { "ho", 2 },
+    { "lv", 3 },
+    { "swt", 4 },
+    { "ic", 5 },
+    { "an", 6 },
+    { "ag", 7 },
+    { "$", 8 },
+    { "...", 9 },
+}};
+
+bool TryParseEmotionType(const std::string& text, int& outEmotionType)
+{
+    if (text.empty()) {
+        return false;
+    }
+
+    int value = 0;
+    for (char ch : text) {
+        const unsigned char byte = static_cast<unsigned char>(ch);
+        if (!std::isdigit(byte)) {
+            return false;
+        }
+        value = value * 10 + static_cast<int>(byte - '0');
+        if (value > 255) {
+            return false;
+        }
+    }
+
+    if (value < 0 || value > 87) {
+        return false;
+    }
+
+    outEmotionType = value;
+    return true;
+}
+
+bool TryResolveEmotionCommand(const std::string& command, int& outEmotionType)
+{
+    if (command.size() < 2 || command[0] != '/') {
+        return false;
+    }
+
+    const std::string value = TrimAscii(command.substr(1));
+    if (value.empty()) {
+        return false;
+    }
+
+    if (value.rfind("emotion", 0) == 0) {
+        const std::string remainder = TrimAscii(value.substr(7));
+        if (TryParseEmotionType(remainder, outEmotionType)) {
+            return true;
+        }
+    }
+
+    if (value[0] == 'e' && value.size() > 1 && TryParseEmotionType(TrimAscii(value.substr(1)), outEmotionType)) {
+        return true;
+    }
+
+    for (const EmotionCommandAlias& alias : kEmotionCommandAliases) {
+        if (value == alias.command) {
+            outEmotionType = alias.emotionType;
+            return true;
+        }
+    }
+
+    return false;
+}
+
 ULONG_PTR EnsureGdiplusStarted();
 const char* UiKorPrefix();
 std::string ResolveDataPath(const std::string& fileName, const char* ext, const std::vector<std::string>& directPrefixes);
@@ -3110,9 +3217,14 @@ bool TrySelectPcTargetFromScreenPoint(CGameMode& mode, int screenX, int screenY)
     const bool isSelfTarget = hoveredActor == mode.m_world->m_player
         || hoveredActor->m_gid == g_session.m_gid
         || hoveredActor->m_gid == g_session.m_aid;
-    mode.m_selectedPcTargetGid = isSelfTarget
-        ? ResolveSelfSkillTargetId()
-        : hoveredActor->m_gid;
+    // Clicking on the player's own billboard must not swallow the click — if the
+    // user is clicking past/behind their character to walk there, an earlier
+    // pending-skill pass (TryRequestPendingSkillFromScreenPoint) already handles
+    // self-target skills. Falling through here lets the default walk handler run.
+    if (isSelfTarget) {
+        return false;
+    }
+    mode.m_selectedPcTargetGid = hoveredActor->m_gid;
     mode.m_lastMonGid = 0;
     mode.m_lastLockOnMonGid = 0;
     ClearAttackChaseHint(mode);
@@ -3516,6 +3628,11 @@ void DrawHoveredActorName(CGameMode& mode, HDC hdc)
     if (hoveredActor == mode.m_world->m_player || hoveredActor->m_gid == g_session.m_gid) {
             drawY += kPlayerVitalsBarHeight * 2 + kPlayerVitalsBorderThickness * 3 + kPlayerVitalsNameTopPadding - 10;
     }
+    if (IsWorldHoverBlockedByUi(labelX, drawY)
+        || IsWorldHoverBlockedByUi(drawX, drawY)
+        || IsWorldHoverBlockedByUi(drawX + textWidth, drawY)) {
+        return;
+    }
     DrawOutlinedScreenText(hdc, drawX, drawY, label.c_str(), ResolveHoverNameColor(hoveredActor));
 }
 
@@ -3553,6 +3670,11 @@ void DrawLockedTargetName(CGameMode& mode, HDC hdc)
     drawDc.GetTextExtentPoint32A(label.c_str(), static_cast<int>(label.size()), &textSize);
     const int drawX = labelX - (textSize.cx / 2);
     const int drawY = labelY + kHoverNameTextPadding + kHoverNameVerticalOffset;
+    if (IsWorldHoverBlockedByUi(labelX, drawY)
+        || IsWorldHoverBlockedByUi(drawX, drawY)
+        || IsWorldHoverBlockedByUi(drawX + textSize.cx, drawY)) {
+        return;
+    }
     DrawOutlinedScreenText(hdc, drawX, drawY, label.c_str(), ResolveHoverNameColor(actorIt->second));
 }
 
@@ -5221,6 +5343,43 @@ bool SendSitStandToggleRequest(CGameMode& mode)
         : false;
 }
 
+bool SendEmotionRequest(CGameMode& mode, int emotionType)
+{
+    if (emotionType < 0 || emotionType > 87) {
+        return false;
+    }
+    if (ro::net::GetPacketSize(PacketProfile::kReqEmotion) != 3
+        || ro::net::GetPacketSize(PacketProfile::kEmotion) != 7) {
+        return false;
+    }
+
+    PACKET_CZ_REQ_EMOTION packet{};
+    packet.PacketType = PacketProfile::kReqEmotion;
+    packet.EmotionType = static_cast<u8>(emotionType);
+
+    bool localPreview = false;
+#if defined(_DEBUG) || !defined(NDEBUG)
+    localPreview = ApplyLocalEmotionEffect(mode, emotionType);
+#endif
+
+    const bool sent = CRagConnection::instance()->SendPacket(
+        reinterpret_cast<const char*>(&packet),
+        static_cast<int>(sizeof(packet)));
+    if (sent) {
+        mode.m_reqEmotionTick = GetTickCount();
+        mode.m_isReqEmotion = 1;
+    }
+
+    const char* packetName = PacketProfile::GetOpcodeName(PacketProfile::kReqEmotion);
+    DbgLog("[GameMode] emotion request opcode=%s(0x%04X) type=%d sent=%d local=%d\n",
+        packetName ? packetName : "?",
+        PacketProfile::kReqEmotion,
+        emotionType,
+        sent ? 1 : 0,
+        localPreview ? 1 : 0);
+    return sent || localPreview;
+}
+
 bool SendTakeItemRequestPacket(u32 objectAid)
 {
     if (objectAid == 0) {
@@ -6261,6 +6420,230 @@ bool RequestCloseStorage()
         static_cast<int>(sizeof(packet)));
     DbgLog("[GameMode] storage close sent=%d\n", sent ? 1 : 0);
     return sent;
+}
+
+namespace {
+bool SendCartMovePacket(u16 opcode, u16 itemIndex, u32 amount)
+{
+    if (!IsFeatureEnabled(ClientFeature::Cart) || itemIndex == 0 || amount == 0) {
+        return false;
+    }
+    PACKET_CZ_MOVE_CART packet{};
+    packet.PacketType = opcode;
+    packet.ItemIndex = itemIndex;
+    packet.Count = amount;
+    return CRagConnection::instance()->SendPacket(
+        reinterpret_cast<const char*>(&packet),
+        static_cast<int>(sizeof(packet)));
+}
+
+bool SendRawPacketBytes(const void* data, int size)
+{
+    return CRagConnection::instance()->SendPacket(
+        reinterpret_cast<const char*>(data),
+        size);
+}
+} // namespace
+
+bool RequestMoveInventoryItemToCart(u16 itemIndex, u32 amount)
+{
+    if (!g_session.IsCartActive()) {
+        return false;
+    }
+    return SendCartMovePacket(PacketProfile::ActiveCartSend::kMoveBodyToCart, itemIndex, amount);
+}
+
+bool RequestMoveCartItemToInventory(u16 itemIndex, u32 amount)
+{
+    if (!g_session.IsCartActive()) {
+        return false;
+    }
+    return SendCartMovePacket(PacketProfile::ActiveCartSend::kMoveCartToBody, itemIndex, amount);
+}
+
+bool RequestMoveStorageItemToCart(u16 itemIndex, u32 amount)
+{
+    if (!g_session.IsCartActive() || !g_session.IsStorageOpen()) {
+        return false;
+    }
+    return SendCartMovePacket(PacketProfile::ActiveCartSend::kMoveStoreToCart, itemIndex, amount);
+}
+
+bool RequestMoveCartItemToStorage(u16 itemIndex, u32 amount)
+{
+    if (!g_session.IsCartActive() || !g_session.IsStorageOpen()) {
+        return false;
+    }
+    return SendCartMovePacket(PacketProfile::ActiveCartSend::kMoveCartToStore, itemIndex, amount);
+}
+
+bool RequestPetCommand(u8 command)
+{
+    if (!IsFeatureEnabled(ClientFeature::Pet) || !g_session.IsPetActive()) {
+        return false;
+    }
+#pragma pack(push, 1)
+    struct { u16 op; u8 cmd; } pkt { 0x01A1, command };
+#pragma pack(pop)
+    return SendRawPacketBytes(&pkt, sizeof(pkt));
+}
+
+bool RequestPetRename(const char* name)
+{
+    if (!IsFeatureEnabled(ClientFeature::Pet) || !name) {
+        return false;
+    }
+#pragma pack(push, 1)
+    struct { u16 op; char name[24]; } pkt { 0x01A5, {} };
+#pragma pack(pop)
+    std::strncpy(pkt.name, name, sizeof(pkt.name) - 1);
+    return SendRawPacketBytes(&pkt, sizeof(pkt));
+}
+
+bool RequestPetSelectEgg(u16 inventoryIndex)
+{
+    if (!IsFeatureEnabled(ClientFeature::Pet) || inventoryIndex == 0) {
+        return false;
+    }
+#pragma pack(push, 1)
+    struct { u16 op; u16 index; } pkt { 0x01A7, inventoryIndex };
+#pragma pack(pop)
+    return SendRawPacketBytes(&pkt, sizeof(pkt));
+}
+
+bool RequestHomunMenu(u8 type, u8 command)
+{
+    if (!IsFeatureEnabled(ClientFeature::Homunculus) || !g_session.IsHomunActive()) {
+        return false;
+    }
+#pragma pack(push, 1)
+    struct { u16 op; u8 type; u32 data; } pkt { 0x022D, type, command };
+#pragma pack(pop)
+    return SendRawPacketBytes(&pkt, sizeof(pkt));
+}
+
+bool RequestMercCommand(u8 command)
+{
+    if (!IsFeatureEnabled(ClientFeature::Mercenary) || !g_session.IsMercActive()) {
+        return false;
+    }
+#pragma pack(push, 1)
+    struct { u16 op; u8 cmd; } pkt { 0x029F, command };
+#pragma pack(pop)
+    return SendRawPacketBytes(&pkt, sizeof(pkt));
+}
+
+bool RequestMailOpenBox()
+{
+    if (!IsFeatureEnabled(ClientFeature::MailLegacy)) {
+        return false;
+    }
+#pragma pack(push, 1)
+    struct { u16 op; } pkt { 0x023F };
+#pragma pack(pop)
+    return SendRawPacketBytes(&pkt, sizeof(pkt));
+}
+
+bool RequestMailRead(u32 mailId)
+{
+    if (!IsFeatureEnabled(ClientFeature::MailLegacy) || mailId == 0) {
+        return false;
+    }
+#pragma pack(push, 1)
+    struct { u16 op; u32 mailId; } pkt { 0x0241, mailId };
+#pragma pack(pop)
+    return SendRawPacketBytes(&pkt, sizeof(pkt));
+}
+
+bool RequestMailGetAttachment(u32 mailId)
+{
+    if (!IsFeatureEnabled(ClientFeature::MailLegacy) || mailId == 0) {
+        return false;
+    }
+#pragma pack(push, 1)
+    struct { u16 op; u32 mailId; } pkt { 0x0243, mailId };
+#pragma pack(pop)
+    return SendRawPacketBytes(&pkt, sizeof(pkt));
+}
+
+bool RequestMailDelete(u32 mailId)
+{
+    if (!IsFeatureEnabled(ClientFeature::MailLegacy) || mailId == 0) {
+        return false;
+    }
+#pragma pack(push, 1)
+    struct { u16 op; u32 mailId; } pkt { 0x0244, mailId };
+#pragma pack(pop)
+    return SendRawPacketBytes(&pkt, sizeof(pkt));
+}
+
+bool RequestMailReturn(u32 mailId)
+{
+    if (!IsFeatureEnabled(ClientFeature::MailLegacy) || mailId == 0) {
+        return false;
+    }
+#pragma pack(push, 1)
+    struct { u16 op; u32 mailId; } pkt { 0x0246, mailId };
+#pragma pack(pop)
+    return SendRawPacketBytes(&pkt, sizeof(pkt));
+}
+
+bool RequestMailSend(const char* recipient, const char* subject, const char* body)
+{
+    if (!IsFeatureEnabled(ClientFeature::MailLegacy) || !recipient || !subject) {
+        return false;
+    }
+    const std::string bodyStr = body ? body : "";
+    // CZ_MAIL_SEND (0x0248): opcode(2) + packetLen(2) + receiveName(24) + header(40) + msg_len(1) + msg(variable)
+    const u16 bodyLen = static_cast<u16>((std::min<std::size_t>)(bodyStr.size(), 200));
+    const u16 packetLen = static_cast<u16>(2 + 2 + 24 + 40 + 1 + bodyLen);
+    std::vector<u8> buf(packetLen, 0);
+    *reinterpret_cast<u16*>(buf.data() + 0) = 0x0248;
+    *reinterpret_cast<u16*>(buf.data() + 2) = packetLen;
+    std::strncpy(reinterpret_cast<char*>(buf.data() + 4), recipient, 23);
+    std::strncpy(reinterpret_cast<char*>(buf.data() + 28), subject, 39);
+    buf[68] = static_cast<u8>(bodyLen);
+    if (bodyLen > 0) {
+        std::memcpy(buf.data() + 69, bodyStr.data(), bodyLen);
+    }
+    return SendRawPacketBytes(buf.data(), static_cast<int>(buf.size()));
+}
+
+bool RequestMailAddAttachment(u16 inventoryIndex, u32 amount)
+{
+    if (!IsFeatureEnabled(ClientFeature::MailLegacy) || inventoryIndex == 0 || amount == 0) {
+        return false;
+    }
+#pragma pack(push, 1)
+    struct { u16 op; u16 index; u32 count; } pkt { 0x0247, inventoryIndex, amount };
+#pragma pack(pop)
+    return SendRawPacketBytes(&pkt, sizeof(pkt));
+}
+
+bool RequestMailResetAttachment()
+{
+    if (!IsFeatureEnabled(ClientFeature::MailLegacy)) {
+        return false;
+    }
+#pragma pack(push, 1)
+    struct { u16 op; u16 type; } pkt { 0x0246, 0 };
+#pragma pack(pop)
+    return SendRawPacketBytes(&pkt, sizeof(pkt));
+}
+
+bool RequestGuildLeave(int guildId, const char* reason)
+{
+    if (!IsFeatureEnabled(ClientFeature::Guild) || !g_session.IsInGuild() || guildId == 0) {
+        return false;
+    }
+#pragma pack(push, 1)
+    struct { u16 op; u32 guildId; u32 accountId; u32 charId; char mes[40]; } pkt {
+        0x0159, static_cast<u32>(guildId), g_session.m_aid, g_session.m_gid, {} };
+#pragma pack(pop)
+    if (reason) {
+        std::strncpy(pkt.mes, reason, sizeof(pkt.mes) - 1);
+    }
+    return SendRawPacketBytes(&pkt, sizeof(pkt));
 }
 
 std::string NormalizePartyNameForPacket(const char* rawName)
@@ -9724,7 +10107,7 @@ void CGameMode::OnUpdate() {
     bool needsPreciseHover = false;
     if (m_view && !m_canRotateView && g_hMainWnd) {
         POINT cursorPos{};
-        if (GetCursorPos(&cursorPos) && ScreenToClient(g_hMainWnd, &cursorPos)) {
+        if (GetModeCursorClientPos(&cursorPos)) {
             ApplyEnemyCursorMagnet(*this, &cursorPos);
             const int prevMouseX = m_oldMouseX;
             const int prevMouseY = m_oldMouseY;
@@ -10018,6 +10401,10 @@ msgresult_t CGameMode::SendMsg(int msg, msgparam_t wparam, msgparam_t lparam, ms
             }
             return sent ? 1 : 0;
         }
+        int emotionType = -1;
+        if (TryResolveEmotionCommand(command, emotionType)) {
+            return SendEmotionRequest(*this, emotionType) ? 1 : 0;
+        }
         const bool sent = SendGlobalChatMessage(g_session.GetPlayerName(), text);
         if (sent) {
             ApplyLocalPlayerChatBubble(*this, text);
@@ -10085,6 +10472,29 @@ msgresult_t CGameMode::SendMsg(int msg, msgparam_t wparam, msgparam_t lparam, ms
     case GameMsg_RequestShopSellList:
         return RequestNpcShopSellList() ? 1 : 0;
 
+    case GameMsg_ShopAddSourceRow: {
+        const size_t sourceRow = static_cast<size_t>(wparam);
+        const int qty = static_cast<int>(lparam);
+        if (qty <= 0) {
+            return 0;
+        }
+        return g_session.AdjustNpcShopDealBySourceRow(sourceRow, qty) ? 1 : 0;
+    }
+
+    case GameMsg_ShopSetDealQty: {
+        const size_t dealRow = static_cast<size_t>(wparam);
+        if (dealRow >= g_session.m_shopDealRows.size()) {
+            return 0;
+        }
+        const int newQty = static_cast<int>(lparam);
+        const int currentQty = g_session.m_shopDealRows[dealRow].quantity;
+        const int delta = newQty - currentQty;
+        if (delta == 0) {
+            return 1;
+        }
+        return g_session.AdjustNpcShopDealByDealRow(dealRow, delta) ? 1 : 0;
+    }
+
     case GameMsg_RequestStorageStoreItem:
         return RequestMoveInventoryItemToStorage(static_cast<u16>(wparam), static_cast<u32>(lparam)) ? 1 : 0;
 
@@ -10094,11 +10504,33 @@ msgresult_t CGameMode::SendMsg(int msg, msgparam_t wparam, msgparam_t lparam, ms
     case GameMsg_RequestStorageClose:
         return RequestCloseStorage() ? 1 : 0;
 
+    case GameMsg_RequestCartMoveInventoryToCart:
+        return RequestMoveInventoryItemToCart(static_cast<u16>(wparam), static_cast<u32>(lparam)) ? 1 : 0;
+
+    case GameMsg_RequestCartMoveCartToInventory:
+        return RequestMoveCartItemToInventory(static_cast<u16>(wparam), static_cast<u32>(lparam)) ? 1 : 0;
+
+    case GameMsg_RequestCartMoveStorageToCart:
+        return RequestMoveStorageItemToCart(static_cast<u16>(wparam), static_cast<u32>(lparam)) ? 1 : 0;
+
+    case GameMsg_RequestCartMoveCartToStorage:
+        return RequestMoveCartItemToStorage(static_cast<u16>(wparam), static_cast<u32>(lparam)) ? 1 : 0;
+
     case GameMsg_RequestShortcutUpdate:
         return RequestShortcutSlotUpdate(static_cast<int>(wparam)) ? 1 : 0;
 
     case GameMsg_RequestShortcutUse:
         return RequestShortcutSlotUse(static_cast<int>(wparam)) ? 1 : 0;
+
+    case GameMsg_RequestEmotion:
+        return SendEmotionRequest(*this, static_cast<int>(wparam)) ? 1 : 0;
+
+    case GameMsg_ResetCamera:
+        if (m_view) {
+            m_view->ResetToDefaultOrientation();
+            return 1;
+        }
+        return 0;
 
     case GameMsg_RequestIdentifyInventoryItem:
         return RequestIdentifyInventoryItem(static_cast<s16>(wparam)) ? 1 : 0;

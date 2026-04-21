@@ -14,6 +14,7 @@
 #include "res/ImfRes.h"
 #include "res/PaletteRes.h"
 #include "res/Sprite.h"
+#include "UiSkin.h"
 #include "session/Session.h"
 #include "ui/UiScale.h"
 #include "ui/UIWindowMgr.h"
@@ -32,6 +33,7 @@
 #include <cctype>
 #include <cstdio>
 #include <cstring>
+#include <map>
 #include <vector>
 
 namespace {
@@ -330,17 +332,7 @@ shopui::BitmapPixels LoadFirstBitmapPixelsFromCandidates(const std::vector<std::
 
 std::string ResolveUiAssetPath(const char* fileName)
 {
-    if (!fileName || !*fileName) {
-        return {};
-    }
-
-    const std::vector<std::string> candidates = BuildUiAssetCandidates(fileName);
-    for (const std::string& candidate : candidates) {
-        if (g_fileMgr.IsDataExist(candidate.c_str())) {
-            return candidate;
-        }
-    }
-    return {};
+    return ui_skin::TryResolveUiAssetPath(fileName);
 }
 
 RECT MakeRect(int x, int y, int w, int h)
@@ -411,7 +403,10 @@ POINT GetPreviewLayerPoint(const UISelectCharWnd::PreviewState& preview,
     int curMotion,
     int headMotionIndex)
 {
-    POINT point = imfRes->GetPoint(resolvedLayer, preview.curAction, curMotion);
+    POINT point{ 0, 0 };
+    if (imfRes) {
+        point = imfRes->GetPoint(resolvedLayer, preview.curAction, curMotion);
+    }
     if (layerPriority != 1 || !motion || motion->attachInfo.empty()) {
         if (layerPriority < 2 || !motion || motion->attachInfo.empty()) {
             return point;
@@ -493,12 +488,26 @@ bool DrawPreviewLayer(HDC hdc, const UISelectCharWnd::PreviewState& preview, int
     CActRes* actRes = g_resMgr.GetAs<CActRes>(preview.actName[layerIndex].c_str());
     CSprRes* sprRes = g_resMgr.GetAs<CSprRes>(preview.sprName[layerIndex].c_str());
     CImfRes* imfRes = g_resMgr.GetAs<CImfRes>(preview.imfName.c_str());
-    if (!actRes || !sprRes || !imfRes) {
+    if (!actRes || !sprRes) {
+        static std::map<std::string, bool> loggedMissingPreviewResources;
+        const std::string key = preview.actName[layerIndex] + "|" + preview.sprName[layerIndex] + "|" + preview.imfName;
+        if (loggedMissingPreviewResources.insert(std::make_pair(key, true)).second) {
+            DbgLog("[SelectChar] preview resources missing act='%s' actExists=%d actRes=%p spr='%s' sprExists=%d sprRes=%p imf='%s' imfExists=%d imfRes=%p\n",
+                preview.actName[layerIndex].c_str(),
+                g_resMgr.IsExist(preview.actName[layerIndex].c_str()) ? 1 : 0,
+                actRes,
+                preview.sprName[layerIndex].c_str(),
+                g_resMgr.IsExist(preview.sprName[layerIndex].c_str()) ? 1 : 0,
+                sprRes,
+                preview.imfName.c_str(),
+                g_resMgr.IsExist(preview.imfName.c_str()) ? 1 : 0,
+                imfRes);
+        }
         return false;
     }
 
     const int layerMotion = (layerIndex == 0) ? preview.curMotion : preview.curMotion;
-    int resolvedLayer = imfRes->GetLayer(layerIndex, preview.curAction, layerMotion);
+    int resolvedLayer = imfRes ? imfRes->GetLayer(layerIndex, preview.curAction, layerMotion) : layerIndex;
     if (resolvedLayer < 0) {
         resolvedLayer = layerIndex;
     }
@@ -581,12 +590,26 @@ bool DrawPreviewLayerToArgb(unsigned int* pixels, int width, int height, const U
     CActRes* actRes = g_resMgr.GetAs<CActRes>(preview.actName[layerIndex].c_str());
     CSprRes* sprRes = g_resMgr.GetAs<CSprRes>(preview.sprName[layerIndex].c_str());
     CImfRes* imfRes = g_resMgr.GetAs<CImfRes>(preview.imfName.c_str());
-    if (!actRes || !sprRes || !imfRes) {
+    if (!actRes || !sprRes) {
+        static std::map<std::string, bool> loggedMissingPreviewResources;
+        const std::string key = preview.actName[layerIndex] + "|" + preview.sprName[layerIndex] + "|" + preview.imfName + "|qt";
+        if (loggedMissingPreviewResources.insert(std::make_pair(key, true)).second) {
+            DbgLog("[SelectChar] qt preview resources missing act='%s' actExists=%d actRes=%p spr='%s' sprExists=%d sprRes=%p imf='%s' imfExists=%d imfRes=%p\n",
+                preview.actName[layerIndex].c_str(),
+                g_resMgr.IsExist(preview.actName[layerIndex].c_str()) ? 1 : 0,
+                actRes,
+                preview.sprName[layerIndex].c_str(),
+                g_resMgr.IsExist(preview.sprName[layerIndex].c_str()) ? 1 : 0,
+                sprRes,
+                preview.imfName.c_str(),
+                g_resMgr.IsExist(preview.imfName.c_str()) ? 1 : 0,
+                imfRes);
+        }
         return false;
     }
 
     const int layerMotion = preview.curMotion;
-    int resolvedLayer = imfRes->GetLayer(layerIndex, preview.curAction, layerMotion);
+    int resolvedLayer = imfRes ? imfRes->GetLayer(layerIndex, preview.curAction, layerMotion) : layerIndex;
     if (resolvedLayer < 0) {
         resolvedLayer = layerIndex;
     }

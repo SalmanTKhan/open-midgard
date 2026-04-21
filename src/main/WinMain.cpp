@@ -12,6 +12,7 @@
 #include "WinMain.h"
 #include "Types.h"
 #include "core/SettingsIni.h"
+#include "core/ClientFeature.h"
 #include "core/Timer.h"
 #include "core/File.h"
 #include "gamemode/CursorRenderer.h"
@@ -42,6 +43,7 @@
 #include "res/ImfRes.h"
 #include "res/WorldRes.h"
 #include "audio/Audio.h"
+#include "input/Gamepad.h"
 #include "DebugLog.h"
 #include <windows.h>
 #include <mmsystem.h>
@@ -51,8 +53,10 @@
 #include <cstdio>
 #include <io.h>
 #include <algorithm>
+#include <filesystem>
 #include <objbase.h>
 #include <string>
+#include <vector>
 
 // ---------------------------------------------------------------------------
 // Window constants
@@ -91,6 +95,12 @@ static DWORD g_windowTitleFpsTick = 0;
 static unsigned int g_windowTitleFrameCount = 0;
 
 namespace {
+
+constexpr const char* kDataSettingsSection = "Data";
+constexpr const char* kLoggingSettingsSection = "Logging";
+constexpr const char* kRuntimeRootValueName = "RuntimeRoot";
+constexpr const char* kGrfRootValueName = "GrfRoot";
+constexpr const char* kConsoleLoggingValueName = "Console";
 
 constexpr int kCrashMiniDumpTypePrimary = 0x21065;
 constexpr int kCrashMiniDumpTypeFallback = 0x20000;
@@ -144,6 +154,195 @@ std::string GetExecutableDirectory()
     }
 
     return std::string(modulePath);
+}
+
+std::filesystem::path NormalizeRuntimeCandidate(std::filesystem::path candidate)
+{
+    if (candidate.empty()) {
+        return {};
+    }
+
+    return candidate;
+}
+
+bool HasAnyRuntimeAsset(const std::filesystem::path& root)
+{
+    if (root.empty()) {
+        return false;
+    }
+
+    std::error_code ec;
+    return std::filesystem::exists(root / "data.grf", ec)
+        || std::filesystem::exists(root / "sdata.grf", ec)
+        || std::filesystem::exists(root / "adata.grf", ec)
+        || std::filesystem::exists(root / "data_hp.grf", ec)
+        || std::filesystem::exists(root / "event.grf", ec)
+        || std::filesystem::exists(root / "fdata.grf", ec)
+        || std::filesystem::exists(root / "clientinfo.xml", ec)
+        || std::filesystem::exists(root / "sclientinfo.xml", ec)
+        || std::filesystem::exists(root / "System" / "clientinfo.xml", ec)
+        || std::filesystem::exists(root / "System" / "sclientinfo.xml", ec)
+        || std::filesystem::is_directory(root / "data", ec)
+        || std::filesystem::is_directory(root / "System", ec);
+}
+
+void AppendSearchCandidates(std::vector<std::filesystem::path>* outCandidates, const std::filesystem::path& start)
+{
+    if (!outCandidates || start.empty()) {
+        return;
+    }
+
+    std::error_code ec;
+    std::filesystem::path current = NormalizeRuntimeCandidate(start);
+    current = std::filesystem::weakly_canonical(current, ec);
+    if (ec) {
+        current = NormalizeRuntimeCandidate(start);
+    }
+
+    for (;;) {
+        if (current.empty()) {
+            break;
+        }
+
+        if (std::find(outCandidates->begin(), outCandidates->end(), current) == outCandidates->end()) {
+            outCandidates->push_back(current);
+        }
+
+        const std::filesystem::path parent = current.parent_path();
+        if (parent.empty() || parent == current) {
+            break;
+        }
+        current = parent;
+    }
+}
+
+std::filesystem::path LoadConfiguredPath(const char* environmentVariableName, const char* settingsKey)
+{
+    if (environmentVariableName) {
+        if (const char* overrideRoot = std::getenv(environmentVariableName)) {
+            if (*overrideRoot) {
+                return NormalizeRuntimeCandidate(std::filesystem::path(overrideRoot));
+            }
+        }
+    }
+
+    if (settingsKey) {
+        const std::string configuredRoot = LoadSettingsIniString(kDataSettingsSection, settingsKey, "");
+        if (!configuredRoot.empty()) {
+            return NormalizeRuntimeCandidate(std::filesystem::path(configuredRoot));
+        }
+    }
+
+    return {};
+}
+
+bool LoadConfiguredBool(const char* environmentVariableName, const char* settingsSection, const char* settingsKey)
+{
+    if (environmentVariableName) {
+        if (const char* value = std::getenv(environmentVariableName)) {
+            if (*value != '\0') {
+                return std::atoi(value) != 0;
+            }
+        }
+    }
+
+    if (settingsSection && settingsKey) {
+        return LoadSettingsIniInt(settingsSection, settingsKey, 0) != 0;
+    }
+
+    return false;
+}
+
+std::filesystem::path ResolveRuntimeRoot()
+{
+    std::vector<std::filesystem::path> candidates;
+
+#ifdef RO_DEV_DEPLOY_DIR
+    AppendSearchCandidates(&candidates, std::filesystem::path(RO_DEV_DEPLOY_DIR));
+#endif
+
+    AppendSearchCandidates(&candidates, LoadConfiguredPath("OPEN_MIDGARD_DATA_DIR", kRuntimeRootValueName));
+
+    std::error_code ec;
+    AppendSearchCandidates(&candidates, std::filesystem::current_path(ec));
+    const std::filesystem::path executableDirectory = NormalizeRuntimeCandidate(std::filesystem::path(GetExecutableDirectory()));
+    AppendSearchCandidates(&candidates, executableDirectory);
+
+    for (const std::filesystem::path& candidate : candidates) {
+        if (HasAnyRuntimeAsset(candidate)) {
+            return candidate;
+        }
+    }
+
+    if (!executableDirectory.empty()) {
+        return executableDirectory;
+    }
+    return std::filesystem::current_path(ec);
+}
+
+void ApplyRuntimeRoot(const std::filesystem::path& runtimeRoot)
+{
+    if (runtimeRoot.empty()) {
+        return;
+    }
+
+    std::error_code ec;
+    std::filesystem::current_path(runtimeRoot, ec);
+    const std::string runtimeRootString = runtimeRoot.string();
+    if (ec) {
+        DbgLog("[Runtime] Failed to switch runtime root to '%s' (%s).\n",
+            runtimeRootString.c_str(),
+            ec.message().c_str());
+        return;
+    }
+
+    DbgLog("[Runtime] Using runtime root '%s'.\n", runtimeRootString.c_str());
+}
+
+bool HasPakFile(const std::filesystem::path& root, const char* pakName)
+{
+    if (root.empty() || !pakName || !*pakName) {
+        return false;
+    }
+
+    std::error_code ec;
+    return std::filesystem::exists(root / pakName, ec);
+}
+
+void RegisterPak(const char* pakName, const std::filesystem::path& grfRoot)
+{
+    if (!pakName || !*pakName) {
+        return;
+    }
+
+    std::error_code ec;
+    const std::filesystem::path currentRoot = std::filesystem::current_path(ec);
+    if (!ec && HasPakFile(currentRoot, pakName)) {
+        g_fileMgr.AddPak(pakName);
+        return;
+    }
+
+    if (HasPakFile(grfRoot, pakName)) {
+        const std::string pakPath = (grfRoot / pakName).string();
+        DbgLog("[Runtime] Using GRF '%s' from '%s'.\n", pakName, pakPath.c_str());
+        g_fileMgr.AddPak(pakPath.c_str());
+        return;
+    }
+
+    g_fileMgr.AddPak(pakName);
+}
+
+void RegisterDefaultPakArchives(bool skipPrimaryDataGrf)
+{
+    const std::filesystem::path grfRoot = LoadConfiguredPath("OPEN_MIDGARD_GRF_DIR", kGrfRootValueName);
+    if (!skipPrimaryDataGrf) {
+        RegisterPak("data.grf", grfRoot);
+    }
+    RegisterPak("sdata.grf", grfRoot);
+    RegisterPak("adata.grf", grfRoot);
+    RegisterPak("data_hp.grf", grfRoot);
+    RegisterPak("event.grf", grfRoot);
+    RegisterPak("fdata.grf", grfRoot);
 }
 
 std::string BuildCrashArtifactStem()
@@ -498,6 +697,7 @@ bool RelaunchCurrentApplication()
 int ReadRegistry()
 {
     EnsureOpenMidgardIniDefaults();
+    LoadFeatureOverridesFromIni();
     ApplyConfiguredWindowSize();
     (void)GetConfiguredRenderBackend();
     return 1;
@@ -662,6 +862,19 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 
     case WM_KEYDOWN:
     case WM_SYSKEYDOWN:
+        // Swallow W/A/S/D so they don't reach the UI when not typing; the
+        // actual movement is fired from the per-frame poll in CModeMgr::Run
+        // so holding the key produces a steady walk rather than one hop.
+        if (!g_windowMgr.IsTextInputActive()) {
+            switch (wParam) {
+            case 'W': case 'w':
+            case 'S': case 's':
+            case 'A': case 'a':
+            case 'D': case 'd':
+                return 0;
+            default: break;
+            }
+        }
         g_windowMgr.OnKeyDown(static_cast<int>(wParam));
         return 0;
     }
@@ -737,17 +950,11 @@ bool InitApp(HINSTANCE hInstance, int nCmdShow)
 }
 
 // ---------------------------------------------------------------------------
-// CheckSystemMessage  –  Pump the Win32 message queue for one iteration
+// CheckSystemMessage — removed. The gamepad is now pumped from
+// CModeMgr::Run (src/gamemode/Mode.cpp) alongside OnRun each frame; this
+// helper was never invoked by the main loop and previously pretended to be
+// the gamepad tick source.
 // ---------------------------------------------------------------------------
-void CheckSystemMessage()
-{
-    MSG msg;
-    while (PeekMessageA(&msg, nullptr, 0, 0, PM_REMOVE))
-    {
-        TranslateMessage(&msg);
-        DispatchMessageA(&msg);
-    }
-}
 
 void SetWindowActiveMode(int active) { g_isAppActive = (active != 0); }
 bool GetWindowActiveMode()           { return g_isAppActive; }
@@ -822,6 +1029,11 @@ static bool InitClientSystems()
     g_renderer.Init();
     g_renderer.SetSize(renderW, renderH);
     InitializeQtUiRuntime(g_hMainWnd);
+
+    if (!gamepad::g_gamepad.Init()) {
+        DbgLog("[Gamepad] Initialization failed; continuing without controller support.\n");
+    }
+
     return true;
 }
 
@@ -831,15 +1043,8 @@ static bool InitClientSystems()
 int __stdcall WinMain(HINSTANCE hInstance, HINSTANCE /*hPrevInstance*/,
                        char* lpCmdLine, int nCmdShow)
 {
-    // Set CWD to the directory containing this exe so that relative paths
-    // like "data.grf" and "data\sprite\cursors.spr" resolve correctly
-    // regardless of how/where the process was launched.
-    {
-        char exePath[MAX_PATH] = {};
-        GetModuleFileNameA(nullptr, exePath, MAX_PATH);
-        char* lastSlash = std::strrchr(exePath, '\\');
-        if (lastSlash) { *lastSlash = '\0'; SetCurrentDirectoryA(exePath); }
-    }
+    ApplyRuntimeRoot(ResolveRuntimeRoot());
+    EnableDbgLogConsole(LoadConfiguredBool("OPEN_MIDGARD_LOG_CONSOLE", kLoggingSettingsSection, kConsoleLoggingValueName));
 
     // Install an unhandled exception filter that writes a minidump next to the executable.
     SetUnhandledExceptionFilter(WriteUnhandledCrashDump);
@@ -889,17 +1094,8 @@ int __stdcall WinMain(HINSTANCE hInstance, HINSTANCE /*hPrevInstance*/,
     }
 
     // Register PAK archives.
-    if (lpCmdLine && strstr(lpCmdLine, "/pc"))
-    {
-        // Offline / test mode: skip data.grf
-    }
-    else
-    {
-        g_fileMgr.AddPak("data.grf");
-    }
-    g_fileMgr.AddPak("data_hp.grf");
-    g_fileMgr.AddPak("event.grf");
-    g_fileMgr.AddPak("fdata.grf");
+    const bool offlineMode = lpCmdLine && strstr(lpCmdLine, "/pc");
+    RegisterDefaultPakArchives(offlineMode);
 
     // Initialise Winsock
     if (!CConnection::Startup())
@@ -930,6 +1126,9 @@ int __stdcall WinMain(HINSTANCE hInstance, HINSTANCE /*hPrevInstance*/,
     DbgLog("[Shutdown] CConnection::Cleanup start\n");
     CConnection::Cleanup();
     DbgLog("[Shutdown] CConnection::Cleanup done\n");
+    DbgLog("[Shutdown] Gamepad shutdown start\n");
+    gamepad::g_gamepad.Shutdown();
+    DbgLog("[Shutdown] Gamepad shutdown done\n");
     DbgLog("[Shutdown] UIWindowMgr::Reset start\n");
     g_windowMgr.Reset();
     DbgLog("[Shutdown] UIWindowMgr::Reset done\n");

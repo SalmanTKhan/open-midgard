@@ -30,6 +30,11 @@ bool CompositeQtUiMenuOverlay(void* bgraPixels, int width, int height, int pitch
 bool RenderQtUiMenuOverlayTexture(CTexture* texture, int width, int height);
 bool CompositeQtUiGameplayOverlay(CGameMode& mode, void* bgraPixels, int width, int height, int pitch);
 bool RenderQtUiGameplayOverlayTexture(CGameMode& mode, CTexture* texture, int width, int height);
+void NotifyQtUiRuntimeSkinChanged();
+void SetQtUiRuntimeThemeMode(const char* mode);
+const char* GetQtUiRuntimeThemeMode();
+std::uint32_t GetQtUiRuntimeThemeBackgroundArgb();
+std::uint32_t GetQtUiRuntimeThemeTextArgb();
 #else
 inline bool IsQtUiRuntimeCompiled() { return false; }
 inline bool IsQtUiRuntimeEnabled() { return false; }
@@ -42,4 +47,9 @@ inline bool CompositeQtUiMenuOverlay(void*, int, int, int) { return false; }
 inline bool RenderQtUiMenuOverlayTexture(CTexture*, int, int) { return false; }
 inline bool CompositeQtUiGameplayOverlay(CGameMode&, void*, int, int, int) { return false; }
 inline bool RenderQtUiGameplayOverlayTexture(CGameMode&, CTexture*, int, int) { return false; }
+inline void NotifyQtUiRuntimeSkinChanged() {}
+inline void SetQtUiRuntimeThemeMode(const char*) {}
+inline const char* GetQtUiRuntimeThemeMode() { return "light"; }
+inline std::uint32_t GetQtUiRuntimeThemeBackgroundArgb() { return 0xFFF3F0E7u; }
+inline std::uint32_t GetQtUiRuntimeThemeTextArgb() { return 0xFF1E1810u; }
 #endif

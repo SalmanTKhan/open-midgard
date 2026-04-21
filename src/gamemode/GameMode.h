@@ -52,6 +52,7 @@ struct ChatRoomInfo {
 struct GroundItemState {
     u32 objectId = 0;
     u32 itemId = 0;
+    std::string itemName;
     u16 amount = 0;
     u16 tileX = 0;
     u16 tileY = 0;
@@ -104,19 +105,29 @@ public:
         GameMsg_RequestShopSellList = 20024,
         GameMsg_RequestShortcutUpdate = 20025,
         GameMsg_RequestShortcutUse = 20026,
-            GameMsg_RequestStorageStoreItem = 20028,
-            GameMsg_RequestStorageWithdrawItem = 20029,
-            GameMsg_RequestStorageClose = 20030,
-            GameMsg_RequestIdentifyInventoryItem = 20031,
-                GameMsg_RequestComposeCardIntoEquipment = 20032,
-                GameMsg_RequestPlayerContextAction = 20033,
-                GameMsg_RequestCartOff = 20039,
-                GameMsg_RequestChangeCart = 20040,
-            GameMsg_RequestPartyCreate = 20034,
-            GameMsg_RequestPartyChangeOptions = 20035,
-            GameMsg_RequestPartyDisband = 20036,
-                GameMsg_RequestPartyInvite = 20037,
-                GameMsg_RequestPartyInviteReply = 20038,
+        GameMsg_RequestStorageStoreItem = 20028,
+        GameMsg_RequestStorageWithdrawItem = 20029,
+        GameMsg_RequestStorageClose = 20030,
+        GameMsg_RequestIdentifyInventoryItem = 20031,
+        GameMsg_RequestComposeCardIntoEquipment = 20032,
+        GameMsg_RequestEmotion = 20033,
+        GameMsg_RequestPlayerContextAction = 20034,
+        GameMsg_RequestPartyCreate = 20035,
+        GameMsg_RequestPartyChangeOptions = 20036,
+        GameMsg_RequestPartyDisband = 20037,
+        GameMsg_RequestPartyInvite = 20038,
+        GameMsg_RequestPartyInviteReply = 20039,
+        GameMsg_RequestCartMoveInventoryToCart = 20040,
+        GameMsg_RequestCartMoveCartToInventory = 20041,
+        GameMsg_RequestCartMoveStorageToCart = 20042,
+        GameMsg_RequestCartMoveCartToStorage = 20043,
+        GameMsg_ResetCamera = 20044,
+        GameMsg_RequestCartOff = 20045,
+        GameMsg_RequestChangeCart = 20046,
+        GameMsg_ShopAddSourceRow = 20047,
+        GameMsg_ShopSetDealQty = 20048,
+
+        GameMsg_RequestMoveDelta = 20100,
     };
 
     enum PlayerContextAction {

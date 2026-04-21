@@ -43,9 +43,64 @@ At a minimum you will need:
 - Git
 - A legally obtained Ragnarok Online data/runtime setup for testing
 
-For runtime asset discovery, the client looks for things like `data.grf`, `data/clientinfo.xml`, and `data/` near the executable or current working directory. You can also point it at a custom runtime root with:
+For runtime asset discovery, the client looks for things like `data.grf`, `sdata.grf`, `adata.grf`, `data/clientinfo.xml`, and `data/` near the executable or current working directory. You can also point it at a custom runtime root with:
 
 - `OPEN_MIDGARD_DATA_DIR=/path/to/runtime`
+
+You can persist the same setting in `open-midgard.ini`:
+
+```ini
+[Data]
+RuntimeRoot=E:\Ragnarok\Runtime
+```
+
+If your GRFs live outside the runtime root or executable directory, set a separate GRF search path:
+
+- `OPEN_MIDGARD_GRF_DIR=/path/to/grfs`
+
+Or in `open-midgard.ini`:
+
+```ini
+[Data]
+GrfRoot=E:\Ragnarok\Client
+```
+
+When `data.grf`, `sdata.grf`, `adata.grf`, `data_hp.grf`, `event.grf`, or `fdata.grf` are missing beside the executable, OpenMidgard now falls back to `GrfRoot` for those archives while still loading local `data\` overrides such as Sabine's alpha/beta client files. The runtime also understands the 2001 Alpha `data.grf` trailer/table layout used by Sabine-compatible Alpha client installs.
+
+Legacy UI skins can also be selected from the original Ragnarok-style skin folders beside the executable. OpenMidgard scans both `skin\` and `skins\`, and the Options window can switch the active skin at runtime.
+
+```ini
+[UI]
+Skin=default
+```
+
+OpenMidgard checks `<root>\<Skin>\...` first, then `<root>\default\...`, and finally the normal archive/data UI paths, where `<root>` is either `skin` or `skins`. That matches drop-in custom RO skin packs that provide assets such as `basic_interface\*.bmp`, `login_interface\*.bmp`, and related UI files.
+
+If `clientinfo.xml` / `sclientinfo.xml` are absent, OpenMidgard falls back to a direct account-server endpoint. It reads these sources in order of precedence:
+
+1. `OPEN_MIDGARD_AUTH_HOST`, `OPEN_MIDGARD_AUTH_PORT`, `OPEN_MIDGARD_PACKET_VERSION`
+2. `client.cfg` beside the executable or runtime root, using AppleClient-style keys such as `auth_host=127.0.0.1`, `auth_port=6900`, `packet_version=200`
+3. `open-midgard.ini`
+
+The older `[Packets]` keys used by some configs are not read by this branch. In practice, `PacketVersion=0` keeps the client on the packet_ver 23 map-send profile, so only `AuthHost` and `AuthPort` matter for the connection endpoint.
+
+```ini
+[Network]
+AuthHost=127.0.0.1
+AuthPort=6900
+PacketVersion=200
+```
+
+If you want live debug output in a console window while running the Windows client, enable:
+
+- `OPEN_MIDGARD_LOG_CONSOLE=1`
+
+Or in `open-midgard.ini`:
+
+```ini
+[Logging]
+Console=1
+```
 
 ## Building On Windows
 
@@ -177,7 +232,7 @@ After building, run:
 - Windows: `open-midgard.exe`
 - Linux/macOS: `open-midgard`
 
-Make sure your runtime directory contains the client data/GRF files and configuration files the client expects, or set `OPEN_MIDGARD_DATA_DIR` to point at them.
+Make sure your runtime directory contains the client data/configuration files the client expects, and set `OPEN_MIDGARD_DATA_DIR` or `[Data] RuntimeRoot` if they live elsewhere. If the GRFs are stored in a different directory, set `OPEN_MIDGARD_GRF_DIR` or `[Data] GrfRoot`.
 
 ## Project Goals
 

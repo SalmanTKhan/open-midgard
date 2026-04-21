@@ -11,6 +11,7 @@ class QtUiState : public QObject {
     Q_PROPERTY(QString backendName READ backendName NOTIFY backendNameChanged)
     Q_PROPERTY(QString modeName READ modeName NOTIFY modeNameChanged)
     Q_PROPERTY(QString wallpaperRevision READ wallpaperRevision NOTIFY wallpaperRevisionChanged)
+    Q_PROPERTY(QString skinRevision READ skinRevision NOTIFY skinRevisionChanged)
     Q_PROPERTY(QString renderPath READ renderPath NOTIFY renderPathChanged)
     Q_PROPERTY(QString architectureNote READ architectureNote NOTIFY architectureNoteChanged)
     Q_PROPERTY(QString loginStatus READ loginStatus NOTIFY loginStatusChanged)
@@ -18,6 +19,15 @@ class QtUiState : public QObject {
     Q_PROPERTY(QString lastInput READ lastInput NOTIFY lastInputChanged)
     Q_PROPERTY(double uiScale READ uiScale NOTIFY uiScaleChanged)
     Q_PROPERTY(QVariantMap debugOverlayData READ debugOverlayData NOTIFY debugOverlayDataChanged)
+    Q_PROPERTY(QVariantMap cartPanelData READ cartPanelData NOTIFY cartPanelDataChanged)
+    Q_PROPERTY(QVariantMap guildPanelData READ guildPanelData NOTIFY guildPanelDataChanged)
+    Q_PROPERTY(QVariantMap mailBoxPanelData READ mailBoxPanelData NOTIFY mailBoxPanelDataChanged)
+    Q_PROPERTY(QVariantMap mailReadPanelData READ mailReadPanelData NOTIFY mailReadPanelDataChanged)
+    Q_PROPERTY(QVariantMap mailSendPanelData READ mailSendPanelData NOTIFY mailSendPanelDataChanged)
+    Q_PROPERTY(QVariantMap petInfoPanelData READ petInfoPanelData NOTIFY petInfoPanelDataChanged)
+    Q_PROPERTY(QVariantMap eggListPanelData READ eggListPanelData NOTIFY eggListPanelDataChanged)
+    Q_PROPERTY(QVariantMap homunInfoPanelData READ homunInfoPanelData NOTIFY homunInfoPanelDataChanged)
+    Q_PROPERTY(QVariantMap mercInfoPanelData READ mercInfoPanelData NOTIFY mercInfoPanelDataChanged)
     Q_PROPERTY(bool serverSelectVisible READ serverSelectVisible NOTIFY serverSelectVisibleChanged)
     Q_PROPERTY(int serverPanelX READ serverPanelX NOTIFY serverPanelGeometryChanged)
     Q_PROPERTY(int serverPanelY READ serverPanelY NOTIFY serverPanelGeometryChanged)
@@ -259,6 +269,12 @@ class QtUiState : public QObject {
     Q_PROPERTY(int optionWidth READ optionWidth NOTIFY optionGeometryChanged)
     Q_PROPERTY(int optionHeight READ optionHeight NOTIFY optionGeometryChanged)
     Q_PROPERTY(QVariantMap optionData READ optionData NOTIFY optionDataChanged)
+    Q_PROPERTY(bool controllerVisible READ controllerVisible NOTIFY controllerVisibleChanged)
+    Q_PROPERTY(int controllerX READ controllerX NOTIFY controllerGeometryChanged)
+    Q_PROPERTY(int controllerY READ controllerY NOTIFY controllerGeometryChanged)
+    Q_PROPERTY(int controllerWidth READ controllerWidth NOTIFY controllerGeometryChanged)
+    Q_PROPERTY(int controllerHeight READ controllerHeight NOTIFY controllerGeometryChanged)
+    Q_PROPERTY(QVariantMap controllerData READ controllerData NOTIFY controllerDataChanged)
     Q_PROPERTY(bool minimapVisible READ minimapVisible NOTIFY minimapVisibleChanged)
     Q_PROPERTY(int minimapX READ minimapX NOTIFY minimapGeometryChanged)
     Q_PROPERTY(int minimapY READ minimapY NOTIFY minimapGeometryChanged)
@@ -286,6 +302,7 @@ public:
     const QString& backendName() const { return m_backendName; }
     const QString& modeName() const { return m_modeName; }
     const QString& wallpaperRevision() const { return m_wallpaperRevision; }
+    const QString& skinRevision() const { return m_skinRevision; }
     const QString& renderPath() const { return m_renderPath; }
     const QString& architectureNote() const { return m_architectureNote; }
     const QString& loginStatus() const { return m_loginStatus; }
@@ -293,6 +310,15 @@ public:
     const QString& lastInput() const { return m_lastInput; }
     double uiScale() const { return m_uiScale; }
     const QVariantMap& debugOverlayData() const { return m_debugOverlayData; }
+    const QVariantMap& cartPanelData() const { return m_cartPanelData; }
+    const QVariantMap& guildPanelData() const { return m_guildPanelData; }
+    const QVariantMap& mailBoxPanelData() const { return m_mailBoxPanelData; }
+    const QVariantMap& mailReadPanelData() const { return m_mailReadPanelData; }
+    const QVariantMap& mailSendPanelData() const { return m_mailSendPanelData; }
+    const QVariantMap& petInfoPanelData() const { return m_petInfoPanelData; }
+    const QVariantMap& eggListPanelData() const { return m_eggListPanelData; }
+    const QVariantMap& homunInfoPanelData() const { return m_homunInfoPanelData; }
+    const QVariantMap& mercInfoPanelData() const { return m_mercInfoPanelData; }
     bool serverSelectVisible() const { return m_serverSelectVisible; }
     int serverPanelX() const { return m_serverPanelX; }
     int serverPanelY() const { return m_serverPanelY; }
@@ -534,6 +560,12 @@ public:
     int optionWidth() const { return m_optionWidth; }
     int optionHeight() const { return m_optionHeight; }
     const QVariantMap& optionData() const { return m_optionData; }
+    bool controllerVisible() const { return m_controllerVisible; }
+    int controllerX() const { return m_controllerX; }
+    int controllerY() const { return m_controllerY; }
+    int controllerWidth() const { return m_controllerWidth; }
+    int controllerHeight() const { return m_controllerHeight; }
+    const QVariantMap& controllerData() const { return m_controllerData; }
     bool minimapVisible() const { return m_minimapVisible; }
     int minimapX() const { return m_minimapX; }
     int minimapY() const { return m_minimapY; }
@@ -574,6 +606,14 @@ public:
         }
         m_wallpaperRevision = value;
         emit wallpaperRevisionChanged();
+    }
+
+    void setSkinRevision(const QString& value) {
+        if (m_skinRevision == value) {
+            return;
+        }
+        m_skinRevision = value;
+        emit skinRevisionChanged();
     }
 
     void setRenderPath(const QString& value) {
@@ -630,6 +670,52 @@ public:
         }
         m_debugOverlayData = value;
         emit debugOverlayDataChanged();
+    }
+
+    void setCartPanelData(const QVariantMap& value) {
+        if (m_cartPanelData == value) return;
+        m_cartPanelData = value;
+        emit cartPanelDataChanged();
+    }
+    void setGuildPanelData(const QVariantMap& value) {
+        if (m_guildPanelData == value) return;
+        m_guildPanelData = value;
+        emit guildPanelDataChanged();
+    }
+    void setMailBoxPanelData(const QVariantMap& value) {
+        if (m_mailBoxPanelData == value) return;
+        m_mailBoxPanelData = value;
+        emit mailBoxPanelDataChanged();
+    }
+    void setMailReadPanelData(const QVariantMap& value) {
+        if (m_mailReadPanelData == value) return;
+        m_mailReadPanelData = value;
+        emit mailReadPanelDataChanged();
+    }
+    void setMailSendPanelData(const QVariantMap& value) {
+        if (m_mailSendPanelData == value) return;
+        m_mailSendPanelData = value;
+        emit mailSendPanelDataChanged();
+    }
+    void setPetInfoPanelData(const QVariantMap& value) {
+        if (m_petInfoPanelData == value) return;
+        m_petInfoPanelData = value;
+        emit petInfoPanelDataChanged();
+    }
+    void setEggListPanelData(const QVariantMap& value) {
+        if (m_eggListPanelData == value) return;
+        m_eggListPanelData = value;
+        emit eggListPanelDataChanged();
+    }
+    void setHomunInfoPanelData(const QVariantMap& value) {
+        if (m_homunInfoPanelData == value) return;
+        m_homunInfoPanelData = value;
+        emit homunInfoPanelDataChanged();
+    }
+    void setMercInfoPanelData(const QVariantMap& value) {
+        if (m_mercInfoPanelData == value) return;
+        m_mercInfoPanelData = value;
+        emit mercInfoPanelDataChanged();
     }
 
     void setServerSelectVisible(bool value) {
@@ -1846,6 +1932,34 @@ public:
         emit optionDataChanged();
     }
 
+    void setControllerVisible(bool value) {
+        if (m_controllerVisible == value) {
+            return;
+        }
+        m_controllerVisible = value;
+        emit controllerVisibleChanged();
+    }
+
+    void setControllerGeometry(int x, int y, int width, int height) {
+        if (m_controllerX == x && m_controllerY == y
+            && m_controllerWidth == width && m_controllerHeight == height) {
+            return;
+        }
+        m_controllerX = x;
+        m_controllerY = y;
+        m_controllerWidth = width;
+        m_controllerHeight = height;
+        emit controllerGeometryChanged();
+    }
+
+    void setControllerData(const QVariantMap& value) {
+        if (m_controllerData == value) {
+            return;
+        }
+        m_controllerData = value;
+        emit controllerDataChanged();
+    }
+
     void setMinimapVisible(bool value) {
         if (m_minimapVisible == value) {
             return;
@@ -1924,6 +2038,7 @@ signals:
     void backendNameChanged();
     void modeNameChanged();
     void wallpaperRevisionChanged();
+    void skinRevisionChanged();
     void renderPathChanged();
     void architectureNoteChanged();
     void loginStatusChanged();
@@ -1931,6 +2046,15 @@ signals:
     void lastInputChanged();
     void uiScaleChanged();
     void debugOverlayDataChanged();
+    void cartPanelDataChanged();
+    void guildPanelDataChanged();
+    void mailBoxPanelDataChanged();
+    void mailReadPanelDataChanged();
+    void mailSendPanelDataChanged();
+    void petInfoPanelDataChanged();
+    void eggListPanelDataChanged();
+    void homunInfoPanelDataChanged();
+    void mercInfoPanelDataChanged();
     void serverSelectVisibleChanged();
     void serverPanelGeometryChanged();
     void serverSelectionChanged();
@@ -2065,6 +2189,9 @@ signals:
     void optionVisibleChanged();
     void optionGeometryChanged();
     void optionDataChanged();
+    void controllerVisibleChanged();
+    void controllerGeometryChanged();
+    void controllerDataChanged();
     void minimapVisibleChanged();
     void minimapGeometryChanged();
     void minimapDataChanged();
@@ -2080,6 +2207,7 @@ private:
     QString m_backendName;
     QString m_modeName;
     QString m_wallpaperRevision;
+    QString m_skinRevision;
     QString m_renderPath;
     QString m_architectureNote;
     QString m_loginStatus;
@@ -2087,6 +2215,15 @@ private:
     QString m_lastInput;
     double m_uiScale = 1.0;
     QVariantMap m_debugOverlayData;
+    QVariantMap m_cartPanelData;
+    QVariantMap m_guildPanelData;
+    QVariantMap m_mailBoxPanelData;
+    QVariantMap m_mailReadPanelData;
+    QVariantMap m_mailSendPanelData;
+    QVariantMap m_petInfoPanelData;
+    QVariantMap m_eggListPanelData;
+    QVariantMap m_homunInfoPanelData;
+    QVariantMap m_mercInfoPanelData;
     bool m_serverSelectVisible = false;
     int m_serverPanelX = 0;
     int m_serverPanelY = 0;
@@ -2328,6 +2465,12 @@ private:
     int m_optionWidth = 0;
     int m_optionHeight = 0;
     QVariantMap m_optionData;
+    bool m_controllerVisible = false;
+    int m_controllerX = 0;
+    int m_controllerY = 0;
+    int m_controllerWidth = 0;
+    int m_controllerHeight = 0;
+    QVariantMap m_controllerData;
     bool m_minimapVisible = false;
     int m_minimapX = 0;
     int m_minimapY = 0;

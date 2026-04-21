@@ -1,19 +1,27 @@
 #include "UISkillDescribeWnd.h"
 
+#include "RoText.h"
+#include "qtui/QtUiRuntime.h"
 #include "UIWindowMgr.h"
 #include "session/Session.h"
 #include "skill/Skill.h"
 
 #if RO_ENABLE_QT6_UI
+#include <QAbstractTextDocumentLayout>
 #include <QColor>
 #include <QFont>
 #include <QImage>
 #include <QPainter>
+#include <QRectF>
 #include <QString>
+#include <QTextDocument>
+#include <QTextOption>
 #endif
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
+#include <cstdio>
 #include <sstream>
 
 namespace {
@@ -28,6 +36,12 @@ constexpr int kDescriptionScrollBarWidth = 10;
 constexpr int kDescriptionScrollBarGap = 4;
 constexpr int kDescriptionWheelStep = 24;
 
+COLORREF ThemeSkillDescriptionColor()
+{
+    const std::uint32_t argb = GetQtUiRuntimeThemeTextArgb();
+    return RGB((argb >> 16) & 0xFFu, (argb >> 8) & 0xFFu, argb & 0xFFu);
+}
+
 bool IsInsideRect(const RECT& rect, int x, int y)
 {
     return x >= rect.left && x < rect.right && y >= rect.top && y < rect.bottom;
@@ -40,30 +54,40 @@ bool IsHexDigit(char ch)
 
 std::string SanitizeRoText(const std::string& text)
 {
-    std::string out;
-    out.reserve(text.size());
-    for (size_t i = 0; i < text.size(); ++i) {
-        const char ch = text[i];
-        if (ch == '^' && i + 6 < text.size()) {
-            bool isColorCode = true;
-            for (size_t j = 1; j <= 6; ++j) {
-                if (!IsHexDigit(text[i + j])) {
-                    isColorCode = false;
-                    break;
-                }
-            }
-            if (isColorCode) {
-                i += 6;
-                continue;
-            }
-        }
-        if (ch == '\r') {
-            continue;
-        }
-        out.push_back(ch == '_' ? ' ' : ch);
-    }
-    return out;
+    return ro_text::Strip(text);
 }
+
+#if RO_ENABLE_QT6_UI
+QString BuildDescriptionHtml(const std::string& text, COLORREF defaultColor)
+{
+    char hex[8];
+    std::snprintf(hex, sizeof(hex), "#%02X%02X%02X",
+                  static_cast<int>(GetRValue(defaultColor)),
+                  static_cast<int>(GetGValue(defaultColor)),
+                  static_cast<int>(GetBValue(defaultColor)));
+    const std::string html = ro_text::ToHtml(text, hex);
+    return QString::fromLocal8Bit(html.c_str(), static_cast<int>(html.size()));
+}
+
+QFont BuildDescriptionFont()
+{
+    QFont font(QStringLiteral("MS Sans Serif"));
+    font.setPixelSize(11);
+    font.setStyleStrategy(QFont::NoAntialias);
+    return font;
+}
+
+void ConfigureDescriptionDocument(QTextDocument& document, int width, const std::string& text, COLORREF defaultColor)
+{
+    document.setDefaultFont(BuildDescriptionFont());
+    document.setDocumentMargin(0);
+    document.setTextWidth(width);
+    QTextOption option;
+    option.setWrapMode(QTextOption::WordWrap);
+    document.setDefaultTextOption(option);
+    document.setHtml(BuildDescriptionHtml(text, defaultColor));
+}
+#endif
 
 std::string ResolveSkillIconPath(const PLAYER_SKILL_INFO& skillInfo)
 {
@@ -100,12 +124,14 @@ void DrawWrappedTextRect(HDC hdc, const RECT& rect, const std::string& text, COL
         QPainter painter(&image);
         painter.setRenderHint(QPainter::Antialiasing, false);
         painter.setRenderHint(QPainter::TextAntialiasing, false);
-        QFont font(QStringLiteral("MS Sans Serif"));
-        font.setPixelSize(11);
-        font.setStyleStrategy(QFont::NoAntialias);
-        painter.setFont(font);
-        painter.setPen(QColor(GetRValue(color), GetGValue(color), GetBValue(color)));
-        painter.drawText(QRect(0, 0, width, height), Qt::AlignLeft | Qt::AlignTop | Qt::TextWordWrap, QString::fromLocal8Bit(text.c_str()));
+
+        QTextDocument document;
+        ConfigureDescriptionDocument(document, width, text, color);
+
+        QAbstractTextDocumentLayout::PaintContext ctx;
+        ctx.clip = QRectF(0, 0, width, height);
+        document.documentLayout()->draw(&painter, ctx);
+
         AlphaBlendArgbToHdc(hdc, rect.left, rect.top, width, height, pixels.data(), width, height);
         return;
     }
@@ -115,7 +141,8 @@ void DrawWrappedTextRect(HDC hdc, const RECT& rect, const std::string& text, COL
     RECT drawRect = rect;
     SetBkMode(hdc, TRANSPARENT);
     SetTextColor(hdc, color);
-    DrawTextA(hdc, text.c_str(), -1, &drawRect, DT_LEFT | DT_TOP | DT_WORDBREAK);
+    const std::string plain = ro_text::Strip(text);
+    DrawTextA(hdc, plain.c_str(), -1, &drawRect, DT_LEFT | DT_TOP | DT_WORDBREAK);
 #endif
 }
 
@@ -126,21 +153,18 @@ int MeasureWrappedTextHeight(HDC hdc, int width, const std::string& text)
     }
 
 #if RO_ENABLE_QT6_UI
-    QFont font(QStringLiteral("MS Sans Serif"));
-    font.setPixelSize(11);
-    font.setStyleStrategy(QFont::NoAntialias);
-    const QRect bounds = QFontMetrics(font).boundingRect(
-        QRect(0, 0, width, 16384),
-        Qt::AlignLeft | Qt::AlignTop | Qt::TextWordWrap,
-        QString::fromLocal8Bit(text.c_str()));
-    if (bounds.height() > 0) {
-        return bounds.height();
+    QTextDocument document;
+    ConfigureDescriptionDocument(document, width, text, ThemeSkillDescriptionColor());
+    const int measured = static_cast<int>(std::ceil(document.documentLayout()->documentSize().height()));
+    if (measured > 0) {
+        return measured;
     }
 #endif
 
 #if RO_PLATFORM_WINDOWS
     RECT calcRect{ 0, 0, width, 0 };
-    DrawTextA(hdc, text.c_str(), -1, &calcRect, DT_LEFT | DT_TOP | DT_WORDBREAK | DT_EDITCONTROL | DT_CALCRECT | DT_NOPREFIX);
+    const std::string plain = ro_text::Strip(text);
+    DrawTextA(hdc, plain.c_str(), -1, &calcRect, DT_LEFT | DT_TOP | DT_WORDBREAK | DT_EDITCONTROL | DT_CALCRECT | DT_NOPREFIX);
     return (std::max)(0, static_cast<int>(calcRect.bottom - calcRect.top));
 #else
     (void)hdc;
@@ -163,15 +187,16 @@ void DrawWrappedTextRectScrolled(HDC hdc, const RECT& rect, const std::string& t
         QPainter painter(&image);
         painter.setRenderHint(QPainter::Antialiasing, false);
         painter.setRenderHint(QPainter::TextAntialiasing, false);
-        QFont font(QStringLiteral("MS Sans Serif"));
-        font.setPixelSize(11);
-        font.setStyleStrategy(QFont::NoAntialias);
-        painter.setFont(font);
-        painter.setPen(QColor(GetRValue(color), GetGValue(color), GetBValue(color)));
-        painter.drawText(
-            QRect(0, -scrollOffset, width, (std::max)(height + scrollOffset, contentHeight)),
-            Qt::AlignLeft | Qt::AlignTop | Qt::TextWordWrap,
-            QString::fromLocal8Bit(text.c_str()));
+
+        QTextDocument document;
+        ConfigureDescriptionDocument(document, width, text, color);
+
+        const int fullHeight = (std::max)(height + scrollOffset, contentHeight);
+        painter.translate(0, -scrollOffset);
+        QAbstractTextDocumentLayout::PaintContext ctx;
+        ctx.clip = QRectF(0, 0, width, fullHeight);
+        document.documentLayout()->draw(&painter, ctx);
+
         AlphaBlendArgbToHdc(hdc, rect.left, rect.top, width, height, pixels.data(), width, height);
         return;
     }
@@ -184,7 +209,8 @@ void DrawWrappedTextRectScrolled(HDC hdc, const RECT& rect, const std::string& t
     RECT drawRect{ rect.left, rect.top - scrollOffset, rect.right, rect.top - scrollOffset + (std::max)(viewportHeight, contentHeight) };
     SetBkMode(hdc, TRANSPARENT);
     SetTextColor(hdc, color);
-    DrawTextA(hdc, text.c_str(), -1, &drawRect, DT_LEFT | DT_TOP | DT_WORDBREAK | DT_EDITCONTROL | DT_NOPREFIX);
+    const std::string plain = ro_text::Strip(text);
+    DrawTextA(hdc, plain.c_str(), -1, &drawRect, DT_LEFT | DT_TOP | DT_WORDBREAK | DT_EDITCONTROL | DT_NOPREFIX);
     RestoreDC(hdc, savedDc);
 #endif
 }
@@ -263,7 +289,7 @@ void UISkillDescribeWnd::OnDraw()
         hdc,
         descriptionLayout.viewportRect,
         BuildDescriptionText(),
-        RGB(16, 16, 16),
+        ThemeSkillDescriptionColor(),
         m_descriptionScrollOffset,
         descriptionLayout.contentHeight);
 
@@ -536,7 +562,7 @@ std::string UISkillDescribeWnd::BuildDescriptionText() const
             if (index > 0) {
                 text += '\n';
             }
-            text += SanitizeRoText(m_skillInfo.descriptionLines[index]);
+            text += m_skillInfo.descriptionLines[index];
         }
         return text;
     }

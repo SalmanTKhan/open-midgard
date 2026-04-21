@@ -1,9 +1,12 @@
 #include "UIBasicInfoWnd.h"
 
 #include "UIWindowMgr.h"
+#include "input/Gamepad.h"
 #include "core/File.h"
+#include "gamemode/CursorRenderer.h"
 #include "render/DC.h"
 #include "res/Bitmap.h"
+#include "UiSkin.h"
 #include "qtui/QtUiRuntime.h"
 #include "session/Session.h"
 #include "world/GameActor.h"
@@ -176,6 +179,23 @@ bool IsPointInRect(const RECT& rect, int x, int y)
     return x >= rect.left && x < rect.right && y >= rect.top && y < rect.bottom;
 }
 
+#if RO_HAS_GAMEPAD
+void SnapCursorToRectIfNeeded(const RECT& rect)
+{
+    if (!gamepad::g_gamepad.IsConnected()) {
+        return;
+    }
+
+    POINT cursorPos{};
+    if (GetModeCursorClientPos(&cursorPos)
+        && IsPointInRect(rect, cursorPos.x, cursorPos.y)) {
+        return;
+    }
+
+    SetModeCursorClientPos((rect.left + rect.right) / 2, (rect.top + rect.bottom) / 2);
+}
+#endif
+
 std::string ToLowerAscii(std::string value)
 {
     std::transform(value.begin(), value.end(), value.begin(), [](unsigned char ch) {
@@ -307,12 +327,7 @@ std::vector<std::string> BuildUiAssetCandidates(const char* fileName)
 
 std::string ResolveUiAssetPath(const char* fileName)
 {
-    for (const std::string& candidate : BuildUiAssetCandidates(fileName)) {
-        if (g_fileMgr.IsDataExist(candidate.c_str())) {
-            return candidate;
-        }
-    }
-    return NormalizeSlash(fileName ? fileName : "");
+    return ui_skin::ResolveUiAssetPath(fileName);
 }
 
 shopui::BitmapPixels LoadBitmapPixelsFromGameData(const std::string& path)
@@ -413,6 +428,13 @@ void UIBasicInfoWnd::SetShow(int show)
     if (show != 0) {
         EnsureCreated();
         LayoutChildren();
+#if RO_HAS_GAMEPAD
+        if (m_h == kMiniHeight) {
+            SnapCursorToRectIfNeeded(MakeBasicInfoRect(m_x, m_y, kBaseButtonX, kTopButtonY, kQtTopButtonWidth, kQtTopButtonHeight));
+        } else {
+            SnapCursorToRectIfNeeded(MakeBasicInfoRect(m_x, m_y, 207, 22, kQtMenuButtonWidth, kQtMenuButtonHeight));
+        }
+#endif
     }
 }
 
@@ -871,6 +893,11 @@ UIBasicInfoWnd::DisplayData UIBasicInfoWnd::BuildDisplayData() const
     data.jobName = NormalizeJobDisplayName(data.jobName);
     data.weight = 0;
     data.maxWeight = 0;
+    data.cartActive = g_session.IsCartActive();
+    data.cartCurrentCount = g_session.GetCartCurrentCount();
+    data.cartMaxCount = g_session.GetCartMaxCount();
+    data.cartCurrentWeight = g_session.GetCartCurrentWeight();
+    data.cartMaxWeight = g_session.GetCartMaxWeight();
     return data;
 }
 
@@ -908,6 +935,11 @@ unsigned long long UIBasicInfoWnd::BuildDisplayStateToken() const
     mixValue(static_cast<unsigned long long>(data.maxWeight));
     mixValue(static_cast<unsigned long long>(data.expPercent));
     mixValue(static_cast<unsigned long long>(data.jobExpPercent));
+    mixValue(static_cast<unsigned long long>(data.cartActive ? 1 : 0));
+    mixValue(static_cast<unsigned long long>(data.cartCurrentCount));
+    mixValue(static_cast<unsigned long long>(data.cartMaxCount));
+    mixValue(static_cast<unsigned long long>(data.cartCurrentWeight));
+    mixValue(static_cast<unsigned long long>(data.cartMaxWeight));
     return hash;
 }
 

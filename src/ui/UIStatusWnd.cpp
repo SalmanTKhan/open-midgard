@@ -8,6 +8,7 @@
 #include "main/WinMain.h"
 #include "qtui/QtUiRuntime.h"
 #include "res/Bitmap.h"
+#include "UiSkin.h"
 #include "session/Session.h"
 #include "world/GameActor.h"
 #include "world/World.h"
@@ -225,12 +226,7 @@ std::vector<std::string> BuildUiAssetCandidates(const char* fileName)
 
 std::string ResolveUiAssetPath(const char* fileName)
 {
-    for (const std::string& candidate : BuildUiAssetCandidates(fileName)) {
-        if (g_fileMgr.IsDataExist(candidate.c_str())) {
-            return candidate;
-        }
-    }
-    return NormalizeSlash(fileName ? fileName : "");
+    return ui_skin::ResolveUiAssetPath(fileName);
 }
 
 shopui::BitmapPixels LoadBitmapPixelsFromGameData(const std::string& path)

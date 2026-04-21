@@ -17,4 +17,13 @@ target_link_libraries(ro_main PUBLIC
     ro_network
     ro_core
     ro_cipher
+    ro_input
 )
+
+if(RO_HAS_GAMEPAD)
+    if(TARGET SDL3::SDL3)
+        target_link_libraries(ro_main PRIVATE SDL3::SDL3)
+    elseif(TARGET SDL3::SDL3-static)
+        target_link_libraries(ro_main PRIVATE SDL3::SDL3-static)
+    endif()
+endif()

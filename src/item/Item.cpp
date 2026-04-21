@@ -115,6 +115,118 @@ std::string ToLowerAscii(std::string value)
 	return value;
 }
 
+std::string TrimAsciiWhitespace(std::string value)
+{
+	while (!value.empty() && std::isspace(static_cast<unsigned char>(value.front()))) {
+		value.erase(value.begin());
+	}
+	while (!value.empty() && std::isspace(static_cast<unsigned char>(value.back()))) {
+		value.pop_back();
+	}
+	return value;
+}
+
+std::string MakeItemLookupKey(std::string value)
+{
+	return ToLowerAscii(TrimAsciiWhitespace(std::move(value)));
+}
+
+void RegisterItemLookupAlias(std::unordered_map<std::string, unsigned int>& lookup,
+	unsigned int itemId,
+	const std::string& value,
+	bool normalizeDisplay)
+{
+	if (itemId == 0 || value.empty()) {
+		return;
+	}
+
+	const std::string rawKey = MakeItemLookupKey(value);
+	if (!rawKey.empty()) {
+		lookup.emplace(rawKey, itemId);
+	}
+
+	if (normalizeDisplay) {
+		const std::string normalizedKey = MakeItemLookupKey(NormalizeDisplayToken(value));
+		if (!normalizedKey.empty()) {
+			lookup.emplace(normalizedKey, itemId);
+		}
+	}
+}
+
+void RegisterItemResourceAlias(std::unordered_map<std::string, std::string>& lookup,
+	const std::string& keySource,
+	const std::string& resourceName)
+{
+	if (keySource.empty() || resourceName.empty()) {
+		return;
+	}
+
+	const std::string rawKey = MakeItemLookupKey(keySource);
+	if (!rawKey.empty()) {
+		lookup.emplace(rawKey, resourceName);
+	}
+
+	const std::string normalizedKey = MakeItemLookupKey(NormalizeDisplayToken(keySource));
+	if (!normalizedKey.empty()) {
+		lookup.emplace(normalizedKey, resourceName);
+	}
+}
+
+void RegisterStringAlias(std::unordered_map<std::string, std::string>& lookup,
+	const std::string& keySource,
+	const std::string& value)
+{
+	if (keySource.empty() || value.empty()) {
+		return;
+	}
+
+	const std::string rawKey = MakeItemLookupKey(keySource);
+	if (!rawKey.empty()) {
+		lookup.emplace(rawKey, value);
+	}
+
+	const std::string normalizedKey = MakeItemLookupKey(NormalizeDisplayToken(keySource));
+	if (!normalizedKey.empty()) {
+		lookup.emplace(normalizedKey, value);
+	}
+}
+
+void RegisterIntegerAlias(std::unordered_map<std::string, int>& lookup,
+	const std::string& keySource,
+	int value)
+{
+	if (keySource.empty() || value < 0) {
+		return;
+	}
+
+	const std::string rawKey = MakeItemLookupKey(keySource);
+	if (!rawKey.empty()) {
+		lookup.emplace(rawKey, value);
+	}
+
+	const std::string normalizedKey = MakeItemLookupKey(NormalizeDisplayToken(keySource));
+	if (!normalizedKey.empty()) {
+		lookup.emplace(normalizedKey, value);
+	}
+}
+
+void RegisterLookupKey(std::unordered_set<std::string>& lookup, const std::string& keySource)
+{
+	if (keySource.empty()) {
+		return;
+	}
+
+	const std::string rawKey = MakeItemLookupKey(keySource);
+	if (!rawKey.empty()) {
+		lookup.insert(rawKey);
+	}
+
+	const std::string normalizedKey = MakeItemLookupKey(NormalizeDisplayToken(keySource));
+	if (!normalizedKey.empty()) {
+		lookup.insert(normalizedKey);
+	}
+}
+
 bool ParseHashPairLine(const std::string& line, unsigned int& outId, std::string& outValue)
 {
 	if (line.empty() || line[0] == '/' || line[0] == '#') {
@@ -137,6 +249,44 @@ bool ParseHashPairLine(const std::string& line, unsigned int& outId, std::string
 
 	outValue = line.substr(firstHash + 1, secondHash - firstHash - 1);
 	return true;
+}
+
+bool ParseLegacyItemNameLine(const std::string& line, std::string& outDisplayName, std::string& outResourceName)
+{
+	outDisplayName.clear();
+	outResourceName.clear();
+	if (line.empty() || line[0] == '/' || line[0] == '#') {
+		return false;
+	}
+
+	const size_t firstHash = line.find('#');
+	if (firstHash == std::string::npos || firstHash == 0) {
+		return false;
+	}
+	const size_t secondHash = line.find('#', firstHash + 1);
+	if (secondHash == std::string::npos || secondHash == firstHash + 1) {
+		return false;
+	}
+
+	outDisplayName = TrimAsciiWhitespace(line.substr(0, firstHash));
+	outResourceName = TrimAsciiWhitespace(line.substr(firstHash + 1, secondHash - firstHash - 1));
+	return !outDisplayName.empty() && !outResourceName.empty();
+}
+
+bool ParseLegacySingleValueLine(const std::string& line, std::string& outValue)
+{
+	outValue.clear();
+	if (line.empty() || line[0] == '/' || line[0] == '#') {
+		return false;
+	}
+
+	const size_t firstHash = line.find('#');
+	if (firstHash == std::string::npos || firstHash == 0) {
+		return false;
+	}
+
+	outValue = TrimAsciiWhitespace(line.substr(0, firstHash));
+	return !outValue.empty();
 }
 
 bool ParseHashIdLine(const std::string& line, unsigned int& outId)
@@ -275,27 +425,62 @@ unsigned int ITEM_INFO::GetItemId() const
 
 std::string ITEM_INFO::GetDisplayName() const
 {
-	return g_ttemmgr.GetDisplayName(GetItemId(), m_isIdentified != 0);
+	const unsigned int itemId = GetItemId();
+	if (itemId != 0) {
+		return g_ttemmgr.GetDisplayName(itemId, m_isIdentified != 0);
+	}
+	if (const std::string displayName = g_ttemmgr.FindDisplayNameByName(m_itemName); !displayName.empty()) {
+		return displayName;
+	}
+	return m_itemName;
 }
 
 std::string ITEM_INFO::GetEquipDisplayName() const
 {
-	return g_ttemmgr.GetEquipDisplayName(*this);
+	const unsigned int itemId = GetItemId();
+	if (itemId != 0) {
+		return g_ttemmgr.GetEquipDisplayName(*this);
+	}
+
+	std::string text;
+	if (m_refiningLevel > 0) {
+		text += "+";
+		text += std::to_string(m_refiningLevel);
+		text += " ";
+	}
+	const std::string displayName = GetDisplayName();
+	text += displayName.empty() ? m_itemName : displayName;
+	return text;
 }
 
 std::string ITEM_INFO::GetDescription() const
 {
-	return g_ttemmgr.GetDescription(GetItemId());
+	const unsigned int itemId = GetItemId();
+	if (itemId != 0) {
+		return g_ttemmgr.GetDescription(itemId);
+	}
+	return g_ttemmgr.FindDescriptionByName(m_itemName);
 }
 
 std::string ITEM_INFO::GetResourceName() const
 {
-	return g_ttemmgr.GetResourceName(GetItemId(), m_isIdentified != 0);
+	const unsigned int itemId = GetItemId();
+	if (itemId != 0) {
+		return g_ttemmgr.GetResourceName(itemId, m_isIdentified != 0);
+	}
+	if (!m_resourceName.empty()) {
+		return m_resourceName;
+	}
+	return m_itemName;
 }
 
 int ITEM_INFO::GetSlotCount() const
 {
-	return g_ttemmgr.GetSlotCount(GetItemId());
+	const unsigned int itemId = GetItemId();
+	if (itemId != 0) {
+		return g_ttemmgr.GetSlotCount(itemId);
+	}
+	return g_ttemmgr.FindSlotCountByName(m_itemName);
 }
 
 std::string ITEM_INFO::GetCardIllustName() const
@@ -316,6 +501,18 @@ void CItemMgr::EnsureLoaded()
 		return;
 	}
 
+	m_itemIdsByLookupKey.clear();
+	m_displayNamesByLookupKey.clear();
+	m_descriptionsByLookupKey.clear();
+	m_resourceNamesByLookupKey.clear();
+	m_slotCountsByLookupKey.clear();
+	m_visibleHeadgearResourceNamesByViewId.clear();
+	m_visibleHeadgearViewIdsByResourceName.clear();
+	m_cardPrefixNames.clear();
+	m_cardPostfixIds.clear();
+	m_cardItemIds.clear();
+	m_cardItemLookupKeys.clear();
+
 	LoadDisplayTable();
 	LoadResourceTable();
 	LoadDescriptionTable();
@@ -324,6 +521,23 @@ void CItemMgr::EnsureLoaded()
 	LoadCardPrefixTable();
 	LoadCardPostfixTable();
 	LoadCardItemTable();
+	for (const auto& entry : m_metadata) {
+		const unsigned int itemId = entry.first;
+		const ItemMetadata& metadata = entry.second;
+		RegisterItemLookupAlias(m_itemIdsByLookupKey, itemId, metadata.unidentifiedDisplayName, true);
+		RegisterItemLookupAlias(m_itemIdsByLookupKey, itemId, metadata.identifiedDisplayName, true);
+		RegisterItemLookupAlias(m_itemIdsByLookupKey, itemId, metadata.unidentifiedResourceName, false);
+		RegisterItemLookupAlias(m_itemIdsByLookupKey, itemId, metadata.identifiedResourceName, false);
+		RegisterStringAlias(m_displayNamesByLookupKey, metadata.unidentifiedDisplayName, metadata.unidentifiedDisplayName);
+		RegisterStringAlias(m_displayNamesByLookupKey, metadata.identifiedDisplayName, metadata.identifiedDisplayName);
+		RegisterStringAlias(m_descriptionsByLookupKey, metadata.unidentifiedDisplayName, metadata.description);
+		RegisterStringAlias(m_descriptionsByLookupKey, metadata.identifiedDisplayName, metadata.description);
+		RegisterItemResourceAlias(m_resourceNamesByLookupKey, metadata.unidentifiedDisplayName, metadata.unidentifiedResourceName);
+		RegisterItemResourceAlias(m_resourceNamesByLookupKey, metadata.identifiedDisplayName, metadata.identifiedResourceName);
+		RegisterIntegerAlias(m_slotCountsByLookupKey, metadata.unidentifiedDisplayName, metadata.slotCount);
+		RegisterIntegerAlias(m_slotCountsByLookupKey, metadata.identifiedDisplayName, metadata.slotCount);
+	}
+	LoadLegacyItemNameTable();
 	m_loaded = true;
 }
 
@@ -461,6 +675,86 @@ std::string CItemMgr::GetCardIllustName(unsigned int itemId)
 	return std::string();
 }
 
+unsigned int CItemMgr::FindItemIdByName(const std::string& name)
+{
+	EnsureLoaded();
+	if (name.empty()) {
+		return 0;
+	}
+
+	const auto exact = m_itemIdsByLookupKey.find(MakeItemLookupKey(name));
+	if (exact != m_itemIdsByLookupKey.end()) {
+		return exact->second;
+	}
+
+	const auto normalized = m_itemIdsByLookupKey.find(MakeItemLookupKey(NormalizeDisplayToken(name)));
+	return normalized != m_itemIdsByLookupKey.end() ? normalized->second : 0;
+}
+
+std::string CItemMgr::FindDisplayNameByName(const std::string& name)
+{
+	EnsureLoaded();
+	if (name.empty()) {
+		return std::string();
+	}
+
+	const auto exact = m_displayNamesByLookupKey.find(MakeItemLookupKey(name));
+	if (exact != m_displayNamesByLookupKey.end()) {
+		return exact->second;
+	}
+
+	const auto normalized = m_displayNamesByLookupKey.find(MakeItemLookupKey(NormalizeDisplayToken(name)));
+	return normalized != m_displayNamesByLookupKey.end() ? normalized->second : std::string();
+}
+
+std::string CItemMgr::FindDescriptionByName(const std::string& name)
+{
+	EnsureLoaded();
+	if (name.empty()) {
+		return std::string();
+	}
+
+	const auto exact = m_descriptionsByLookupKey.find(MakeItemLookupKey(name));
+	if (exact != m_descriptionsByLookupKey.end()) {
+		return exact->second;
+	}
+
+	const auto normalized = m_descriptionsByLookupKey.find(MakeItemLookupKey(NormalizeDisplayToken(name)));
+	return normalized != m_descriptionsByLookupKey.end() ? normalized->second : std::string();
+}
+
+std::string CItemMgr::FindResourceNameByName(const std::string& name)
+{
+	EnsureLoaded();
+	if (name.empty()) {
+		return std::string();
+	}
+
+	const auto exact = m_resourceNamesByLookupKey.find(MakeItemLookupKey(name));
+	if (exact != m_resourceNamesByLookupKey.end()) {
+		return exact->second;
+	}
+
+	const auto normalized = m_resourceNamesByLookupKey.find(MakeItemLookupKey(NormalizeDisplayToken(name)));
+	return normalized != m_resourceNamesByLookupKey.end() ? normalized->second : std::string();
+}
+
+int CItemMgr::FindSlotCountByName(const std::string& name)
+{
+	EnsureLoaded();
+	if (name.empty()) {
+		return 0;
+	}
+
+	const auto exact = m_slotCountsByLookupKey.find(MakeItemLookupKey(name));
+	if (exact != m_slotCountsByLookupKey.end()) {
+		return exact->second;
+	}
+
+	const auto normalized = m_slotCountsByLookupKey.find(MakeItemLookupKey(NormalizeDisplayToken(name)));
+	return normalized != m_slotCountsByLookupKey.end() ? normalized->second : 0;
+}
+
 int CItemMgr::GetVisibleHeadgearViewId(unsigned int itemId)
 {
 	EnsureLoaded();
@@ -548,6 +842,12 @@ bool CItemMgr::IsCardItem(unsigned int itemId)
 	return m_cardItemIds.find(itemId) != m_cardItemIds.end();
 }
 
+bool CItemMgr::IsCardItemName(const std::string& name)
+{
+	EnsureLoaded();
+	return m_cardItemLookupKeys.find(MakeItemLookupKey(name)) != m_cardItemLookupKeys.end();
+}
+
 bool CItemMgr::IsPostfixCard(unsigned int itemId)
 {
 	EnsureLoaded();
@@ -558,7 +858,7 @@ bool CItemMgr::LoadDisplayTable()
 {
 	const bool loadedUnidentified = ParsePairTable("num2itemdisplaynametable.txt", AssignUnidentifiedDisplayName);
 	const bool loadedIdentified = ParsePairTable("idnum2itemdisplaynametable.txt", AssignIdentifiedDisplayName);
-	return loadedUnidentified || loadedIdentified;
+	return loadedUnidentified || loadedIdentified || LoadLegacyDisplayTable();
 }
 
 bool CItemMgr::LoadResourceTable()
@@ -572,12 +872,12 @@ bool CItemMgr::LoadDescriptionTable()
 {
 	const bool loadedUnidentified = ParseDescriptionBlocks("num2itemdesctable.txt");
 	const bool loadedIdentified = ParseDescriptionBlocks("idnum2itemdesctable.txt");
-	return loadedUnidentified || loadedIdentified;
+	return loadedUnidentified || loadedIdentified || LoadLegacyDescriptionTable();
 }
 
 bool CItemMgr::LoadSlotCountTable()
 {
-	return ParseIntegerPairTable("itemSlotCountTable.txt", AssignSlotCount);
+	return ParseIntegerPairTable("itemSlotCountTable.txt", AssignSlotCount) || LoadLegacySlotCountTable();
 }
 
 bool CItemMgr::LoadCardIllustTable()
@@ -613,7 +913,163 @@ bool CItemMgr::LoadCardPostfixTable()
 
 bool CItemMgr::LoadCardItemTable()
 {
-	return ParseIdSetTable("carditemnametable.txt", m_cardItemIds);
+	if (ParseIdSetTable("carditemnametable.txt", m_cardItemIds)) {
+		return true;
+	}
+
+	std::string text;
+	if (!LoadTextFileFromGameData("carditemnametable.txt", text)) {
+		return false;
+	}
+
+	std::istringstream input(text);
+	std::string line;
+	bool loadedAny = false;
+	while (std::getline(input, line)) {
+		std::string itemName;
+		if (!ParseLegacySingleValueLine(TrimLine(line), itemName)) {
+			continue;
+		}
+		RegisterLookupKey(m_cardItemLookupKeys, itemName);
+		loadedAny = true;
+	}
+	return loadedAny;
+}
+
+bool CItemMgr::LoadLegacyDisplayTable()
+{
+	std::string text;
+	if (!LoadTextFileFromGameData("itemdisplaynametable.txt", text)) {
+		return false;
+	}
+
+	std::istringstream input(text);
+	std::string line;
+	bool loadedAny = false;
+	while (std::getline(input, line)) {
+		std::string keyName;
+		std::string displayName;
+		unsigned int unusedId = 0;
+		if (!ParseHashPairLine(TrimLine(line), unusedId, displayName)) {
+			const std::string trimmed = TrimLine(line);
+			const size_t firstHash = trimmed.find('#');
+			const size_t secondHash = firstHash == std::string::npos ? std::string::npos : trimmed.find('#', firstHash + 1);
+			if (firstHash == std::string::npos || secondHash == std::string::npos || firstHash == 0) {
+				continue;
+			}
+			keyName = TrimAsciiWhitespace(trimmed.substr(0, firstHash));
+			displayName = NormalizeDisplayToken(trimmed.substr(firstHash + 1, secondHash - firstHash - 1));
+		} else {
+			continue;
+		}
+		if (keyName.empty() || displayName.empty()) {
+			continue;
+		}
+		RegisterStringAlias(m_displayNamesByLookupKey, keyName, displayName);
+		loadedAny = true;
+	}
+	return loadedAny;
+}
+
+bool CItemMgr::LoadLegacyDescriptionTable()
+{
+	std::string text;
+	if (!LoadTextFileFromGameData("itemdesctable.txt", text)) {
+		return false;
+	}
+
+	std::istringstream input(text);
+	std::string line;
+	std::string currentItemName;
+	std::ostringstream description;
+	bool loadedAny = false;
+	while (std::getline(input, line)) {
+		line = TrimLine(line);
+		const std::string trimmed = TrimAsciiWhitespace(line);
+		if (trimmed.empty()) {
+			continue;
+		}
+
+		if (trimmed == "#") {
+			if (!currentItemName.empty()) {
+				RegisterStringAlias(m_descriptionsByLookupKey, currentItemName, description.str());
+				loadedAny = true;
+			}
+			currentItemName.clear();
+			description.str(std::string());
+			description.clear();
+			continue;
+		}
+
+		if (currentItemName.empty() && trimmed.back() == '#') {
+			currentItemName = TrimAsciiWhitespace(trimmed.substr(0, trimmed.size() - 1));
+			continue;
+		}
+
+		if (!description.str().empty()) {
+			description << "\n";
+		}
+		description << trimmed;
+	}
+
+	if (!currentItemName.empty() && !description.str().empty()) {
+		RegisterStringAlias(m_descriptionsByLookupKey, currentItemName, description.str());
+		loadedAny = true;
+	}
+
+	return loadedAny;
+}
+
+bool CItemMgr::LoadLegacySlotCountTable()
+{
+	std::string text;
+	if (!LoadTextFileFromGameData("itemslottable.txt", text)) {
+		return false;
+	}
+
+	std::istringstream input(text);
+	std::string line;
+	std::string currentItemName;
+	bool loadedAny = false;
+	while (std::getline(input, line)) {
+		std::string value;
+		if (!ParseLegacySingleValueLine(TrimLine(line), value)) {
+			continue;
+		}
+
+		if (currentItemName.empty()) {
+			currentItemName = value;
+			continue;
+		}
+
+		RegisterIntegerAlias(m_slotCountsByLookupKey, currentItemName, std::max(0, std::atoi(value.c_str())));
+		currentItemName.clear();
+		loadedAny = true;
+	}
+	return loadedAny;
+}
+
+bool CItemMgr::LoadLegacyItemNameTable()
+{
+	std::string text;
+	if (!LoadTextFileFromGameData("itemnametable.txt", text)) {
+		return false;
+	}
+
+	std::istringstream input(text);
+	std::string line;
+	bool loadedAny = false;
+	while (std::getline(input, line)) {
+		std::string displayName;
+		std::string resourceName;
+		if (!ParseLegacyItemNameLine(TrimLine(line), displayName, resourceName)) {
+			continue;
+		}
+		RegisterItemResourceAlias(m_resourceNamesByLookupKey, displayName, resourceName);
+		loadedAny = true;
+	}
+
+	return loadedAny;
 }
 
 bool CItemMgr::ParsePairTable(const char* fileName, void (*assignValue)(ItemMetadata&, std::string&&))

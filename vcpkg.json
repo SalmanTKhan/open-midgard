@@ -1,0 +1,7 @@
+{
+  "name": "open-midgard",
+  "version-string": "0.0.0",
+  "dependencies": [
+    "sdl3"
+  ]
+}

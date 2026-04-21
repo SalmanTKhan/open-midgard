@@ -27,6 +27,17 @@ target_link_libraries(ro_gamemode PUBLIC
     ro_ui
 )
 
+# Mode.cpp pumps the gamepad every frame, so the SDL3 include path needs
+# to propagate to ro_gamemode. ro_input isn't a link dep of ro_gamemode
+# today, but we can reach the SDL3 target directly.
+if(RO_HAS_GAMEPAD)
+    if(TARGET SDL3::SDL3)
+        target_link_libraries(ro_gamemode PRIVATE SDL3::SDL3)
+    elseif(TARGET SDL3::SDL3-static)
+        target_link_libraries(ro_gamemode PRIVATE SDL3::SDL3-static)
+    endif()
+endif()
+
 if(RO_ENABLE_QT6_UI)
     target_link_libraries(ro_gamemode PUBLIC
         Qt6::Core

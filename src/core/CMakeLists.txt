@@ -4,6 +4,7 @@ add_library(ro_core STATIC
     Timer.h     Timer.cpp
     Hash.h      Hash.cpp
     SettingsIni.h SettingsIni.cpp
+    ClientFeature.h ClientFeature.cpp
     GPak.h      GPak.cpp
     File.h      File.cpp
     Globals.h   Globals.cpp

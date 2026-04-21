@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <thread>
 #include <vector>
 #include "../DebugLog.h"
 
@@ -194,6 +195,81 @@ unsigned int SampleBilinearArgb(const unsigned int* data, int srcWidth, int srcH
     return EncodeArgb(alpha, red, green, blue);
 }
 
+// Integer-math bilinear upscale, parallelized over rows.
+// Previously did a 4-subsample supersample with per-pixel float math; that was
+// fine for one texture but catastrophic during map load, where hundreds of
+// textures go through this path. A single bilinear sample per output pixel in
+// integer arithmetic, spread across hardware threads, is an order of magnitude
+// faster with no visible quality difference for the pre-Renewal asset set.
+static void UpscaleBilinearRowRange(const unsigned int* srcData, int srcWidth, int srcHeight, int srcPitch,
+    int scale, int dstWidth, int dstRowStart, int dstRowEnd, unsigned int* dstBase)
+{
+    const int srcPitchBytes = srcPitch > 0 ? srcPitch : srcWidth * static_cast<int>(sizeof(unsigned int));
+    const int maxSrcX = srcWidth - 1;
+    const int maxSrcY = srcHeight - 1;
+
+    std::vector<int> colX0(dstWidth);
+    std::vector<int> colFx(dstWidth); // 0..255
+    for (int dx = 0; dx < dstWidth; ++dx) {
+        const float sx = ((static_cast<float>(dx) + 0.5f) / static_cast<float>(scale)) - 0.5f;
+        const float clamped = (std::max)(0.0f, (std::min)(static_cast<float>(maxSrcX), sx));
+        const int x0 = static_cast<int>(std::floor(clamped));
+        const float tx = clamped - static_cast<float>(x0);
+        colX0[dx] = x0;
+        colFx[dx] = static_cast<int>(tx * 256.0f + 0.5f);
+        if (colFx[dx] > 256) {
+            colFx[dx] = 256;
+        }
+    }
+
+    for (int dy = dstRowStart; dy < dstRowEnd; ++dy) {
+        const float sy = ((static_cast<float>(dy) + 0.5f) / static_cast<float>(scale)) - 0.5f;
+        const float clampedY = (std::max)(0.0f, (std::min)(static_cast<float>(maxSrcY), sy));
+        const int y0 = static_cast<int>(std::floor(clampedY));
+        const int y1 = (std::min)(maxSrcY, y0 + 1);
+        const int fy = (std::min)(256, (std::max)(0, static_cast<int>((clampedY - static_cast<float>(y0)) * 256.0f + 0.5f)));
+        const int ify = 256 - fy;
+
+        const unsigned int* row0 = reinterpret_cast<const unsigned int*>(
+            reinterpret_cast<const unsigned char*>(srcData) + static_cast<size_t>(y0) * static_cast<size_t>(srcPitchBytes));
+        const unsigned int* row1 = reinterpret_cast<const unsigned int*>(
+            reinterpret_cast<const unsigned char*>(srcData) + static_cast<size_t>(y1) * static_cast<size_t>(srcPitchBytes));
+
+        unsigned int* dstRow = dstBase + static_cast<size_t>(dy) * static_cast<size_t>(dstWidth);
+        for (int dx = 0; dx < dstWidth; ++dx) {
+            const int x0 = colX0[dx];
+            const int x1 = (std::min)(maxSrcX, x0 + 1);
+            const int fx = colFx[dx];
+            const int ifx = 256 - fx;
+
+            const unsigned int p00 = row0[x0];
+            const unsigned int p10 = row0[x1];
+            const unsigned int p01 = row1[x0];
+            const unsigned int p11 = row1[x1];
+
+            const int w00 = (ifx * ify) >> 8;
+            const int w10 = (fx * ify) >> 8;
+            const int w01 = (ifx * fy) >> 8;
+            const int w11 = (fx * fy) >> 8;
+
+            const unsigned int a = static_cast<unsigned int>(
+                (((p00 >> 24) & 0xFFu) * w00 + ((p10 >> 24) & 0xFFu) * w10 +
+                 ((p01 >> 24) & 0xFFu) * w01 + ((p11 >> 24) & 0xFFu) * w11) >> 8);
+            const unsigned int r = static_cast<unsigned int>(
+                (((p00 >> 16) & 0xFFu) * w00 + ((p10 >> 16) & 0xFFu) * w10 +
+                 ((p01 >> 16) & 0xFFu) * w01 + ((p11 >> 16) & 0xFFu) * w11) >> 8);
+            const unsigned int g = static_cast<unsigned int>(
+                (((p00 >> 8) & 0xFFu) * w00 + ((p10 >> 8) & 0xFFu) * w10 +
+                 ((p01 >> 8) & 0xFFu) * w01 + ((p11 >> 8) & 0xFFu) * w11) >> 8);
+            const unsigned int b = static_cast<unsigned int>(
+                ((p00 & 0xFFu) * w00 + (p10 & 0xFFu) * w10 +
+                 (p01 & 0xFFu) * w01 + (p11 & 0xFFu) * w11) >> 8);
+
+            dstRow[dx] = (a << 24) | (r << 16) | (g << 8) | b;
+        }
+    }
+}
+
 void BuildSupersampledUpscale(const unsigned int* srcData, int srcWidth, int srcHeight, int srcPitch,
     int scale, std::vector<unsigned int>* dstPixels)
 {
@@ -205,49 +281,40 @@ void BuildSupersampledUpscale(const unsigned int* srcData, int srcWidth, int src
     const int dstHeight = srcHeight * scale;
     dstPixels->resize(static_cast<size_t>(dstWidth) * static_cast<size_t>(dstHeight));
 
-    const float invScale = 1.0f / static_cast<float>(scale);
-    static constexpr float kSubsampleOffsets[4][2] = {
-        { -0.25f, -0.25f },
-        {  0.25f, -0.25f },
-        { -0.25f,  0.25f },
-        {  0.25f,  0.25f },
-    };
+    unsigned int threadCount = std::thread::hardware_concurrency();
+    if (threadCount == 0u) {
+        threadCount = 2u;
+    }
+    // Parallelize only when there's enough work to amortize thread spin-up.
+    const int rowsPerThread = 64;
+    unsigned int usedThreads = (std::min)(threadCount, static_cast<unsigned int>((dstHeight + rowsPerThread - 1) / rowsPerThread));
+    if (usedThreads < 1u) {
+        usedThreads = 1u;
+    }
 
-    for (int dstY = 0; dstY < dstHeight; ++dstY) {
-        unsigned int* dstRow = dstPixels->data() + static_cast<size_t>(dstY) * static_cast<size_t>(dstWidth);
-        const float baseY = ((static_cast<float>(dstY) + 0.5f) * invScale) - 0.5f;
-        for (int dstX = 0; dstX < dstWidth; ++dstX) {
-            const float baseX = ((static_cast<float>(dstX) + 0.5f) * invScale) - 0.5f;
+    if (usedThreads == 1u) {
+        UpscaleBilinearRowRange(srcData, srcWidth, srcHeight, srcPitch, scale,
+            dstWidth, 0, dstHeight, dstPixels->data());
+        return;
+    }
 
-            float accumAlpha = 0.0f;
-            float accumRed = 0.0f;
-            float accumGreen = 0.0f;
-            float accumBlue = 0.0f;
-            for (const float (&offset)[2] : kSubsampleOffsets) {
-                const unsigned int sample = SampleBilinearArgb(
-                    srcData,
-                    srcWidth,
-                    srcHeight,
-                    srcPitch,
-                    baseX + (offset[0] * invScale),
-                    baseY + (offset[1] * invScale));
-                float alpha = 0.0f;
-                float red = 0.0f;
-                float green = 0.0f;
-                float blue = 0.0f;
-                DecodeArgb(sample, &alpha, &red, &green, &blue);
-                accumAlpha += alpha;
-                accumRed += red;
-                accumGreen += green;
-                accumBlue += blue;
-            }
-
-            dstRow[dstX] = EncodeArgb(
-                accumAlpha * 0.25f,
-                accumRed * 0.25f,
-                accumGreen * 0.25f,
-                accumBlue * 0.25f);
+    std::vector<std::thread> workers;
+    workers.reserve(usedThreads - 1u);
+    const int chunk = (dstHeight + static_cast<int>(usedThreads) - 1) / static_cast<int>(usedThreads);
+    unsigned int* dstBase = dstPixels->data();
+    for (unsigned int t = 1u; t < usedThreads; ++t) {
+        const int start = static_cast<int>(t) * chunk;
+        const int end = (std::min)(dstHeight, start + chunk);
+        if (start >= end) {
+            break;
         }
+        workers.emplace_back(UpscaleBilinearRowRange, srcData, srcWidth, srcHeight, srcPitch,
+            scale, dstWidth, start, end, dstBase);
+    }
+    UpscaleBilinearRowRange(srcData, srcWidth, srcHeight, srcPitch, scale,
+        dstWidth, 0, (std::min)(dstHeight, chunk), dstBase);
+    for (auto& worker : workers) {
+        worker.join();
     }
 }
 

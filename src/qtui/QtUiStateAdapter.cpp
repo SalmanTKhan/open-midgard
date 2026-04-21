@@ -8,6 +8,7 @@
 #include "network/MapSendProfile.h"
 #include "network/Packet.h"
 #include "core/ClientInfoLocale.h"
+#include "core/SettingsIni.h"
 #include "gamemode/GameMode.h"
 #include "gamemode/PacketPadding.h"
 #include "gamemode/View.h"
@@ -30,9 +31,19 @@
 #include "ui/UIItemIdentifyWnd.h"
 #include "ui/UIItemInfoWnd.h"
 #include "ui/UIItemWnd.h"
+#include "ui/UIControllerWnd.h"
 #include "ui/UIMessengerGroupWnd.h"
 #include "ui/UIPartyOptionWnd.h"
 #include "ui/UIStorageWnd.h"
+#include "ui/UICartWnd.h"
+#include "ui/UIGuildWnd.h"
+#include "ui/UIMailBoxWnd.h"
+#include "ui/UIMailReadWnd.h"
+#include "ui/UIMailSendWnd.h"
+#include "ui/UIPetInfoWnd.h"
+#include "ui/UIEggListWnd.h"
+#include "ui/UIHomunInfoWnd.h"
+#include "ui/UIMercInfoWnd.h"
 #include "ui/UIItemPurchaseWnd.h"
 #include "ui/UIItemSellWnd.h"
 #include "ui/UIItemShopWnd.h"
@@ -236,6 +247,10 @@ void ClearGameplayUiState(QtUiState* state)
     state->setOptionVisible(false);
     state->setOptionGeometry(0, 0, 0, 0);
     state->setOptionData(QVariantMap{});
+
+    state->setControllerVisible(false);
+    state->setControllerGeometry(0, 0, 0, 0);
+    state->setControllerData(QVariantMap{});
 
     state->setMinimapVisible(false);
     state->setMinimapGeometry(0, 0, 0, 0);
@@ -1363,6 +1378,7 @@ void PopulateItemShopState(QtUiState* state)
     shopData.insert(QStringLiteral("quantityLabel"), QStringLiteral("Qty"));
     shopData.insert(QStringLiteral("priceLabel"), QStringLiteral("Price"));
     shopData.insert(QStringLiteral("showQuantity"), sellMode);
+    shopData.insert(QStringLiteral("rowHeight"), shopui::ShopRowHeight());
     state->setItemShopData(shopData);
 
     QVariantList rows;
@@ -1379,6 +1395,9 @@ void PopulateItemShopState(QtUiState* state)
         entry.insert(QStringLiteral("price"), g_session.GetNpcShopUnitPrice(row));
         entry.insert(QStringLiteral("selected"), g_session.m_shopSelectedSourceRow == rowIndex);
         entry.insert(QStringLiteral("hover"), shopWnd->GetHoverRow() == rowIndex);
+        entry.insert(QStringLiteral("itemId"), static_cast<uint>(row.itemInfo.GetItemId()));
+        entry.insert(QStringLiteral("itemIndex"), static_cast<uint>(row.itemInfo.m_itemIndex));
+        entry.insert(QStringLiteral("identified"), row.itemInfo.m_isIdentified != 0);
         rows.push_back(entry);
     }
     state->setItemShopRows(rows);
@@ -1410,6 +1429,7 @@ void PopulateItemPurchaseState(QtUiState* state)
     purchaseData.insert(QStringLiteral("quantityLabel"), QStringLiteral("Qty"));
     purchaseData.insert(QStringLiteral("amountLabel"), QStringLiteral("Cost"));
     purchaseData.insert(QStringLiteral("totalLabel"), QStringLiteral("Total"));
+    purchaseData.insert(QStringLiteral("rowHeight"), shopui::ShopRowHeight());
     state->setItemPurchaseData(purchaseData);
 
     QVariantList rows;
@@ -1426,6 +1446,9 @@ void PopulateItemPurchaseState(QtUiState* state)
         entry.insert(QStringLiteral("cost"), row.unitPrice * row.quantity);
         entry.insert(QStringLiteral("selected"), g_session.m_shopSelectedDealRow == rowIndex);
         entry.insert(QStringLiteral("hover"), purchaseWnd->GetHoverRow() == rowIndex);
+        entry.insert(QStringLiteral("itemId"), static_cast<uint>(row.itemInfo.GetItemId()));
+        entry.insert(QStringLiteral("itemIndex"), static_cast<uint>(row.itemInfo.m_itemIndex));
+        entry.insert(QStringLiteral("identified"), row.itemInfo.m_isIdentified != 0);
         rows.push_back(entry);
     }
     state->setItemPurchaseRows(rows);
@@ -1436,10 +1459,8 @@ void PopulateItemPurchaseState(QtUiState* state)
         const char* label;
     };
     const ButtonSpec specs[] = {
-        { 0, "Add" },
-        { 1, "Remove" },
-        { 2, "Buy" },
-        { 3, "Cancel" },
+        { 0, "Buy" },
+        { 1, "Cancel" },
     };
     for (const ButtonSpec& spec : specs) {
         QVariantMap button;
@@ -1484,6 +1505,7 @@ void PopulateItemSellState(QtUiState* state)
     sellData.insert(QStringLiteral("quantityLabel"), QStringLiteral("Qty"));
     sellData.insert(QStringLiteral("amountLabel"), QStringLiteral("Gain"));
     sellData.insert(QStringLiteral("totalLabel"), QStringLiteral("Total"));
+    sellData.insert(QStringLiteral("rowHeight"), shopui::ShopRowHeight());
     state->setItemSellData(sellData);
 
     QVariantList rows;
@@ -1500,6 +1522,9 @@ void PopulateItemSellState(QtUiState* state)
         entry.insert(QStringLiteral("gain"), row.unitPrice * row.quantity);
         entry.insert(QStringLiteral("selected"), g_session.m_shopSelectedDealRow == rowIndex);
         entry.insert(QStringLiteral("hover"), sellWnd->GetHoverRow() == rowIndex);
+        entry.insert(QStringLiteral("itemId"), static_cast<uint>(row.itemInfo.GetItemId()));
+        entry.insert(QStringLiteral("itemIndex"), static_cast<uint>(row.itemInfo.m_itemIndex));
+        entry.insert(QStringLiteral("identified"), row.itemInfo.m_isIdentified != 0);
         rows.push_back(entry);
     }
     state->setItemSellRows(rows);
@@ -1510,10 +1535,8 @@ void PopulateItemSellState(QtUiState* state)
         const char* label;
     };
     const ButtonSpec specs[] = {
-        { 0, "Add" },
-        { 1, "Remove" },
-        { 2, "Sell" },
-        { 3, "Cancel" },
+        { 0, "Sell" },
+        { 1, "Cancel" },
     };
     for (const ButtonSpec& spec : specs) {
         QVariantMap button;
@@ -1617,6 +1640,11 @@ void PopulateBasicInfoState(QtUiState* state)
         data.insert(QStringLiteral("maxWeight"), display.maxWeight);
         data.insert(QStringLiteral("expPercent"), display.expPercent);
         data.insert(QStringLiteral("jobExpPercent"), display.jobExpPercent);
+        data.insert(QStringLiteral("cartActive"), display.cartActive);
+        data.insert(QStringLiteral("cartCurrentCount"), display.cartCurrentCount);
+        data.insert(QStringLiteral("cartMaxCount"), display.cartMaxCount);
+        data.insert(QStringLiteral("cartCurrentWeight"), display.cartCurrentWeight);
+        data.insert(QStringLiteral("cartMaxWeight"), display.cartMaxWeight);
         data.insert(QStringLiteral("miniHeaderText"), FormatBasicInfoMiniHeaderText(display.level, jobName, display.expPercent));
         data.insert(QStringLiteral("miniStatusText"),
             FormatBasicInfoMiniStatusText(display.hp, display.maxHp, display.sp, display.maxSp, display.money));
@@ -2447,6 +2475,8 @@ void PopulateEquipState(QtUiState* state)
             entry.insert(QStringLiteral("leftColumn"), slot.leftColumn);
             entry.insert(QStringLiteral("itemId"), static_cast<uint>(slot.itemId));
             entry.insert(QStringLiteral("label"), ToQString(slot.label));
+            entry.insert(QStringLiteral("slotTypeName"), ToQString(slot.slotTypeName));
+            entry.insert(QStringLiteral("slotGlyph"), ToQString(slot.slotGlyph));
             equipSlots.push_back(entry);
         }
         data.insert(QStringLiteral("slots"), equipSlots);
@@ -3040,6 +3070,358 @@ void PopulateOptionState(QtUiState* state)
     state->setOptionData(data);
 }
 
+void PopulateControllerState(QtUiState* state)
+{
+    if (!state) {
+        return;
+    }
+
+    const UIControllerWnd* const controllerWnd = g_windowMgr.m_controllerWnd;
+    const bool visible = IsGameplayWindowVisible(state, controllerWnd);
+    state->setControllerVisible(visible);
+    if (!visible) {
+        state->setControllerGeometry(0, 0, 0, 0);
+        state->setControllerData(QVariantMap{});
+        return;
+    }
+
+    state->setControllerGeometry(controllerWnd->m_x, controllerWnd->m_y, controllerWnd->m_w, controllerWnd->m_h);
+
+    UIControllerWnd::DisplayData display{};
+    QVariantMap data;
+    if (controllerWnd->GetDisplayDataForQt(&display)) {
+        data.insert(QStringLiteral("activeTab"), display.activeTab);
+        data.insert(QStringLiteral("connected"), display.connected);
+        data.insert(QStringLiteral("controllerName"), ToQString(display.controllerName));
+        data.insert(QStringLiteral("controllerType"), ToQString(display.controllerType));
+        data.insert(QStringLiteral("moveModeText"), ToQString(display.moveModeText));
+
+        QVariantList tabs;
+        tabs.reserve(static_cast<qsizetype>(display.tabs.size()));
+        for (const UIControllerWnd::DisplayTab& tab : display.tabs) {
+            QVariantMap entry;
+            entry.insert(QStringLiteral("id"), tab.id);
+            entry.insert(QStringLiteral("x"), tab.x);
+            entry.insert(QStringLiteral("y"), tab.y);
+            entry.insert(QStringLiteral("width"), tab.width);
+            entry.insert(QStringLiteral("height"), tab.height);
+            entry.insert(QStringLiteral("active"), tab.active);
+            entry.insert(QStringLiteral("label"), ToQString(tab.label));
+            tabs.push_back(entry);
+        }
+        data.insert(QStringLiteral("tabs"), tabs);
+
+        QVariantList rows;
+        rows.reserve(static_cast<qsizetype>(display.rows.size()));
+        for (const UIControllerWnd::DisplayRow& row : display.rows) {
+            QVariantMap entry;
+            entry.insert(QStringLiteral("id"), row.id);
+            entry.insert(QStringLiteral("x"), row.x);
+            entry.insert(QStringLiteral("y"), row.y);
+            entry.insert(QStringLiteral("width"), row.width);
+            entry.insert(QStringLiteral("height"), row.height);
+            entry.insert(QStringLiteral("selected"), row.selected);
+            entry.insert(QStringLiteral("rebinding"), row.rebinding);
+            entry.insert(QStringLiteral("label"), ToQString(row.label));
+            entry.insert(QStringLiteral("bindingText"), ToQString(row.bindingText));
+            rows.push_back(entry);
+        }
+        data.insert(QStringLiteral("rows"), rows);
+    }
+    state->setControllerData(data);
+}
+
+void PopulateFeatureBackbonePanels(QtUiState* state)
+{
+    if (!state) {
+        return;
+    }
+
+    const auto appendSystemButtons = [](QVariantMap& data, bool minimized, const auto& sysButtons) {
+        data.insert(QStringLiteral("minimized"), minimized);
+        QVariantList list;
+        list.reserve(static_cast<int>(sysButtons.size()));
+        for (const auto& b : sysButtons) {
+            QVariantMap m;
+            m.insert(QStringLiteral("id"), b.id);
+            m.insert(QStringLiteral("x"), b.x);
+            m.insert(QStringLiteral("y"), b.y);
+            m.insert(QStringLiteral("width"), b.w);
+            m.insert(QStringLiteral("height"), b.h);
+            m.insert(QStringLiteral("label"), QString::fromUtf8(b.id == 0 ? "-" : "x"));
+            list.append(m);
+        }
+        data.insert(QStringLiteral("systemButtons"), list);
+    };
+
+    // Cart
+    {
+        QVariantMap data;
+        const UICartWnd* const wnd = g_windowMgr.m_cartWnd;
+        const bool visible = IsGameplayWindowVisible(state, wnd);
+        data.insert(QStringLiteral("visible"), visible);
+        if (visible) {
+            UICartWnd::DisplayData d{};
+            if (wnd->GetDisplayDataForQt(&d)) {
+                data.insert(QStringLiteral("title"), ToQString(d.title));
+                data.insert(QStringLiteral("currentCount"), d.currentCount);
+                data.insert(QStringLiteral("maxCount"), d.maxCount);
+                data.insert(QStringLiteral("currentWeight"), d.currentWeight);
+                data.insert(QStringLiteral("maxWeight"), d.maxWeight);
+                QVariantList entries;
+                entries.reserve(static_cast<int>(d.entries.size()));
+                for (const auto& e : d.entries) {
+                    QVariantMap row;
+                    row.insert(QStringLiteral("itemIndex"), static_cast<uint>(e.itemIndex));
+                    row.insert(QStringLiteral("itemId"), static_cast<uint>(e.itemId));
+                    row.insert(QStringLiteral("count"), e.count);
+                    row.insert(QStringLiteral("label"), ToQString(e.label));
+                    entries.append(row);
+                }
+                data.insert(QStringLiteral("entries"), entries);
+                appendSystemButtons(data, d.minimized, d.systemButtons);
+            }
+            data.insert(QStringLiteral("x"), wnd->m_x);
+            data.insert(QStringLiteral("y"), wnd->m_y);
+            data.insert(QStringLiteral("width"), wnd->m_w);
+            data.insert(QStringLiteral("height"), wnd->m_h);
+        }
+        state->setCartPanelData(data);
+    }
+
+    // Guild
+    {
+        QVariantMap data;
+        const UIGuildWnd* const wnd = g_windowMgr.m_guildWnd;
+        const bool visible = IsGameplayWindowVisible(state, wnd);
+        data.insert(QStringLiteral("visible"), visible);
+        if (visible) {
+            UIGuildWnd::DisplayData d{};
+            if (wnd->GetDisplayDataForQt(&d)) {
+                data.insert(QStringLiteral("title"), ToQString(d.title));
+                data.insert(QStringLiteral("guildName"), ToQString(d.guildName));
+                data.insert(QStringLiteral("masterName"), ToQString(d.masterName));
+                data.insert(QStringLiteral("guildId"), d.guildId);
+                data.insert(QStringLiteral("emblemId"), d.emblemId);
+                data.insert(QStringLiteral("activeTab"), d.activeTab);
+                appendSystemButtons(data, d.minimized, d.systemButtons);
+            }
+            QVariantList members;
+            for (const GUILD_MEMBER& m : g_session.GetGuildMembers()) {
+                QVariantMap row;
+                row.insert(QStringLiteral("name"), QString::fromUtf8(m.name));
+                row.insert(QStringLiteral("level"), m.level);
+                row.insert(QStringLiteral("job"), m.job);
+                row.insert(QStringLiteral("positionId"), m.positionId);
+                row.insert(QStringLiteral("online"), m.currentState == 0);
+                row.insert(QStringLiteral("memo"), QString::fromUtf8(m.memo));
+                members.append(row);
+            }
+            data.insert(QStringLiteral("members"), members);
+            data.insert(QStringLiteral("x"), wnd->m_x);
+            data.insert(QStringLiteral("y"), wnd->m_y);
+            data.insert(QStringLiteral("width"), wnd->m_w);
+            data.insert(QStringLiteral("height"), wnd->m_h);
+        }
+        state->setGuildPanelData(data);
+    }
+
+    // MailBox
+    {
+        QVariantMap data;
+        const UIMailBoxWnd* const wnd = g_windowMgr.m_mailBoxWnd;
+        const bool visible = IsGameplayWindowVisible(state, wnd);
+        data.insert(QStringLiteral("visible"), visible);
+        if (visible) {
+            UIMailBoxWnd::DisplayData d{};
+            if (wnd->GetDisplayDataForQt(&d)) {
+                data.insert(QStringLiteral("title"), ToQString(d.title));
+                data.insert(QStringLiteral("selectedIndex"), d.selectedIndex);
+                appendSystemButtons(data, d.minimized, d.systemButtons);
+                QVariantList entries;
+                entries.reserve(static_cast<int>(d.entries.size()));
+                for (const auto& e : d.entries) {
+                    QVariantMap row;
+                    row.insert(QStringLiteral("mailId"), static_cast<uint>(e.mailId));
+                    row.insert(QStringLiteral("title"), ToQString(e.title));
+                    row.insert(QStringLiteral("sender"), ToQString(e.sender));
+                    row.insert(QStringLiteral("isRead"), e.isRead);
+                    entries.append(row);
+                }
+                data.insert(QStringLiteral("entries"), entries);
+            }
+            data.insert(QStringLiteral("x"), wnd->m_x);
+            data.insert(QStringLiteral("y"), wnd->m_y);
+            data.insert(QStringLiteral("width"), wnd->m_w);
+            data.insert(QStringLiteral("height"), wnd->m_h);
+        }
+        state->setMailBoxPanelData(data);
+    }
+
+    // MailRead
+    {
+        QVariantMap data;
+        const UIMailReadWnd* const wnd = g_windowMgr.m_mailReadWnd;
+        const bool visible = IsGameplayWindowVisible(state, wnd);
+        data.insert(QStringLiteral("visible"), visible);
+        if (visible) {
+            UIMailReadWnd::DisplayData d{};
+            if (wnd->GetDisplayDataForQt(&d)) {
+                data.insert(QStringLiteral("title"), ToQString(d.title));
+                data.insert(QStringLiteral("subject"), ToQString(d.subject));
+                data.insert(QStringLiteral("sender"), ToQString(d.sender));
+                data.insert(QStringLiteral("body"), ToQString(d.body));
+                data.insert(QStringLiteral("mailId"), static_cast<uint>(d.mailId));
+                data.insert(QStringLiteral("zeny"), static_cast<uint>(d.zeny));
+                data.insert(QStringLiteral("attachItemId"), static_cast<uint>(d.attachItemId));
+                data.insert(QStringLiteral("attachAmount"), d.attachAmount);
+                appendSystemButtons(data, d.minimized, d.systemButtons);
+            }
+            data.insert(QStringLiteral("x"), wnd->m_x);
+            data.insert(QStringLiteral("y"), wnd->m_y);
+            data.insert(QStringLiteral("width"), wnd->m_w);
+            data.insert(QStringLiteral("height"), wnd->m_h);
+        }
+        state->setMailReadPanelData(data);
+    }
+
+    // MailSend
+    {
+        QVariantMap data;
+        const UIMailSendWnd* const wnd = g_windowMgr.m_mailSendWnd;
+        const bool visible = IsGameplayWindowVisible(state, wnd);
+        data.insert(QStringLiteral("visible"), visible);
+        if (visible) {
+            UIMailSendWnd::DisplayData d{};
+            if (wnd->GetDisplayDataForQt(&d)) {
+                data.insert(QStringLiteral("title"), ToQString(d.title));
+                data.insert(QStringLiteral("recipient"), ToQString(d.recipient));
+                data.insert(QStringLiteral("subject"), ToQString(d.subject));
+                data.insert(QStringLiteral("body"), ToQString(d.body));
+                data.insert(QStringLiteral("zeny"), static_cast<uint>(d.zeny));
+                data.insert(QStringLiteral("attachInventoryIndex"), static_cast<uint>(d.attachInventoryIndex));
+                data.insert(QStringLiteral("attachAmount"), d.attachAmount);
+                appendSystemButtons(data, d.minimized, d.systemButtons);
+            }
+            data.insert(QStringLiteral("x"), wnd->m_x);
+            data.insert(QStringLiteral("y"), wnd->m_y);
+            data.insert(QStringLiteral("width"), wnd->m_w);
+            data.insert(QStringLiteral("height"), wnd->m_h);
+        }
+        state->setMailSendPanelData(data);
+    }
+
+    // PetInfo
+    {
+        QVariantMap data;
+        const UIPetInfoWnd* const wnd = g_windowMgr.m_petInfoWnd;
+        const bool visible = IsGameplayWindowVisible(state, wnd);
+        data.insert(QStringLiteral("visible"), visible);
+        if (visible) {
+            UIPetInfoWnd::DisplayData d{};
+            if (wnd->GetDisplayDataForQt(&d)) {
+                data.insert(QStringLiteral("title"), ToQString(d.title));
+                data.insert(QStringLiteral("petName"), ToQString(d.petName));
+                data.insert(QStringLiteral("level"), d.level);
+                data.insert(QStringLiteral("fullness"), d.fullness);
+                data.insert(QStringLiteral("intimacy"), d.intimacy);
+                data.insert(QStringLiteral("itemId"), d.itemId);
+                data.insert(QStringLiteral("job"), d.job);
+                appendSystemButtons(data, d.minimized, d.systemButtons);
+            }
+            data.insert(QStringLiteral("x"), wnd->m_x);
+            data.insert(QStringLiteral("y"), wnd->m_y);
+            data.insert(QStringLiteral("width"), wnd->m_w);
+            data.insert(QStringLiteral("height"), wnd->m_h);
+        }
+        state->setPetInfoPanelData(data);
+    }
+
+    // EggList
+    {
+        QVariantMap data;
+        const UIEggListWnd* const wnd = g_windowMgr.m_eggListWnd;
+        const bool visible = IsGameplayWindowVisible(state, wnd);
+        data.insert(QStringLiteral("visible"), visible);
+        if (visible) {
+            UIEggListWnd::DisplayData d{};
+            if (wnd->GetDisplayDataForQt(&d)) {
+                data.insert(QStringLiteral("title"), ToQString(d.title));
+                data.insert(QStringLiteral("selectedIndex"), d.selectedIndex);
+                QVariantList eggs;
+                eggs.reserve(static_cast<int>(d.eggItemIds.size()));
+                for (int eggId : d.eggItemIds) {
+                    eggs.append(eggId);
+                }
+                data.insert(QStringLiteral("eggItemIds"), eggs);
+                appendSystemButtons(data, d.minimized, d.systemButtons);
+            }
+            data.insert(QStringLiteral("x"), wnd->m_x);
+            data.insert(QStringLiteral("y"), wnd->m_y);
+            data.insert(QStringLiteral("width"), wnd->m_w);
+            data.insert(QStringLiteral("height"), wnd->m_h);
+        }
+        state->setEggListPanelData(data);
+    }
+
+    // HomunInfo
+    {
+        QVariantMap data;
+        const UIHomunInfoWnd* const wnd = g_windowMgr.m_homunInfoWnd;
+        const bool visible = IsGameplayWindowVisible(state, wnd);
+        data.insert(QStringLiteral("visible"), visible);
+        if (visible) {
+            UIHomunInfoWnd::DisplayData d{};
+            if (wnd->GetDisplayDataForQt(&d)) {
+                data.insert(QStringLiteral("title"), ToQString(d.title));
+                data.insert(QStringLiteral("homunName"), ToQString(d.homunName));
+                data.insert(QStringLiteral("level"), d.level);
+                data.insert(QStringLiteral("hp"), d.hp);
+                data.insert(QStringLiteral("maxHp"), d.maxHp);
+                data.insert(QStringLiteral("sp"), d.sp);
+                data.insert(QStringLiteral("maxSp"), d.maxSp);
+                data.insert(QStringLiteral("hunger"), d.hunger);
+                data.insert(QStringLiteral("intimacy"), d.intimacy);
+                appendSystemButtons(data, d.minimized, d.systemButtons);
+            }
+            data.insert(QStringLiteral("x"), wnd->m_x);
+            data.insert(QStringLiteral("y"), wnd->m_y);
+            data.insert(QStringLiteral("width"), wnd->m_w);
+            data.insert(QStringLiteral("height"), wnd->m_h);
+        }
+        state->setHomunInfoPanelData(data);
+    }
+
+    // MercInfo
+    {
+        QVariantMap data;
+        const UIMercInfoWnd* const wnd = g_windowMgr.m_mercInfoWnd;
+        const bool visible = IsGameplayWindowVisible(state, wnd);
+        data.insert(QStringLiteral("visible"), visible);
+        if (visible) {
+            UIMercInfoWnd::DisplayData d{};
+            if (wnd->GetDisplayDataForQt(&d)) {
+                data.insert(QStringLiteral("title"), ToQString(d.title));
+                data.insert(QStringLiteral("mercName"), ToQString(d.mercName));
+                data.insert(QStringLiteral("level"), d.level);
+                data.insert(QStringLiteral("hp"), d.hp);
+                data.insert(QStringLiteral("maxHp"), d.maxHp);
+                data.insert(QStringLiteral("sp"), d.sp);
+                data.insert(QStringLiteral("maxSp"), d.maxSp);
+                data.insert(QStringLiteral("faith"), d.faith);
+                data.insert(QStringLiteral("calls"), d.calls);
+                data.insert(QStringLiteral("expireTime"), static_cast<uint>(d.expireTime));
+                appendSystemButtons(data, d.minimized, d.systemButtons);
+            }
+            data.insert(QStringLiteral("x"), wnd->m_x);
+            data.insert(QStringLiteral("y"), wnd->m_y);
+            data.insert(QStringLiteral("width"), wnd->m_w);
+            data.insert(QStringLiteral("height"), wnd->m_h);
+        }
+        state->setMercInfoPanelData(data);
+    }
+}
+
 void PopulateMinimapState(QtUiState* state)
 {
     if (!state) {
@@ -3503,6 +3885,17 @@ void QtUiStateAdapter::setLastInput(const QString& value)
     }
 }
 
+void QtUiStateAdapter::bumpSkinRevision()
+{
+    if (!m_state) {
+        return;
+    }
+    bool ok = false;
+    const qlonglong current = m_state->skinRevision().toLongLong(&ok);
+    const qlonglong next = (ok ? current : 0) + 1;
+    m_state->setSkinRevision(QString::number(next));
+}
+
 bool QtUiStateAdapter::syncMenu(RenderBackendType activeBackend,
     RenderBackendType nativeOverlayBackend)
 {
@@ -3605,7 +3998,9 @@ bool QtUiStateAdapter::syncGameplay(CGameMode& mode,
     PopulateItemIdentifyState(m_state);
     PopulateItemCompositionState(m_state);
     PopulateOptionState(m_state);
+    PopulateControllerState(m_state);
     PopulateMinimapState(m_state);
+    PopulateFeatureBackbonePanels(m_state);
     const int uiMouseX = UiScaleRawToLogicalCoordinate(mouseX);
     const int uiMouseY = UiScaleRawToLogicalCoordinate(mouseY);
     PopulateStatusIconsState(m_state, uiMouseX, uiMouseY);
@@ -3707,11 +4102,13 @@ bool QtUiStateAdapter::syncGameplay(CGameMode& mode,
                     mode.m_world->GetActorScreenMarker(viewMatrix, cameraLongitude, hoveredActor->m_gid, &anchorX, nullptr, &anchorY);
                     anchorY += kQtActorLabelVerticalOffset;
                 }
-                anchors.push_back(MakeCenteredAnchor(ToQString(ResolveActorLabel(mode, hoveredActor)),
-                    anchorX,
-                    anchorY,
-                    ResolveHoverBackground(hoveredActor),
-                    ResolveHoverForeground(hoveredActor)));
+                if (!g_windowMgr.HasWindowAtPoint(anchorX, anchorY)) {
+                    anchors.push_back(MakeCenteredAnchor(ToQString(ResolveActorLabel(mode, hoveredActor)),
+                        anchorX,
+                        anchorY,
+                        ResolveHoverBackground(hoveredActor),
+                        ResolveHoverForeground(hoveredActor)));
+                }
             }
         } else if (!blocksGameplayHover) {
             CItem* hoveredItem = nullptr;
@@ -3739,7 +4136,8 @@ bool QtUiStateAdapter::syncGameplay(CGameMode& mode,
                         nullptr,
                         &labelY)) {
                     const QString lockLabel = ToQString(ResolveActorLabel(mode, actorIt->second));
-                    if (!lockLabel.isEmpty()) {
+                    const int lockAnchorY = labelY + kQtActorLabelVerticalOffset;
+                    if (!lockLabel.isEmpty() && !g_windowMgr.HasWindowAtPoint(labelX, lockAnchorY)) {
                         anchors.push_back(MakeCenteredAnchor(QStringLiteral("▼"),
                             labelX - 6,
                             labelY - 24,
@@ -3750,11 +4148,53 @@ bool QtUiStateAdapter::syncGameplay(CGameMode& mode,
                             true));
                         anchors.push_back(MakeCenteredAnchor(lockLabel,
                             labelX,
-                            labelY + kQtActorLabelVerticalOffset,
+                            lockAnchorY,
                             ResolveHoverBackground(actorIt->second),
                             ResolveHoverForeground(actorIt->second)));
                     }
                 }
+            }
+        }
+
+        // Always-show-names toggle — render a label anchor for every visible actor
+        // in addition to the hovered/locked pair already appended above. Skip the
+        // hovered and locked ones so we don't draw duplicates in a different style.
+        if (LoadSettingsIniInt("OptionWnd", "AlwaysShowNames", 0) != 0) {
+            const u32 hoveredGid = hoveredActor ? hoveredActor->m_gid : 0u;
+            for (const auto& runtimeEntry : mode.m_runtimeActors) {
+                CGameActor* const actor = runtimeEntry.second;
+                if (!actor || !actor->m_isVisible) {
+                    continue;
+                }
+                if (actor->m_gid == hoveredGid || actor->m_gid == mode.m_lastLockOnMonGid) {
+                    continue;
+                }
+                if (actor->m_stateId == kGameActorDeathStateId) {
+                    continue;
+                }
+                const std::string labelText = ResolveActorLabel(mode, actor);
+                if (labelText.empty()) {
+                    continue;
+                }
+                int anchorX = 0;
+                int anchorY = 0;
+                if (actor == mode.m_world->m_player || actor->m_gid == g_session.m_gid) {
+                    if (!mode.m_world->GetPlayerScreenLabel(viewMatrix, cameraLongitude, &anchorX, &anchorY)) {
+                        continue;
+                    }
+                } else if (!mode.m_world->GetActorScreenMarker(viewMatrix, cameraLongitude, actor->m_gid,
+                               &anchorX, nullptr, &anchorY)) {
+                    continue;
+                }
+                const int labelY = anchorY + kQtActorLabelVerticalOffset;
+                if (g_windowMgr.HasWindowAtPoint(anchorX, labelY)) {
+                    continue;
+                }
+                anchors.push_back(MakeCenteredAnchor(ToQString(labelText),
+                    anchorX,
+                    labelY,
+                    ResolveHoverBackground(actor),
+                    ResolveHoverForeground(actor)));
             }
         }
     }

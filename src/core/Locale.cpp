@@ -2,7 +2,9 @@
 #include "../DebugLog.h"
 #include "Globals.h"
 #include "File.h"
+#include "SettingsIni.h"
 #include <fstream>
+#include <sstream>
 #include <vector>
 #include <string>
 #include <algorithm>
@@ -22,6 +24,27 @@ std::string ToLowerAscii(std::string value)
     });
     return value;
 }
+
+std::string TrimAscii(std::string value)
+{
+    auto first = std::find_if_not(value.begin(), value.end(), [](unsigned char ch) {
+        return std::isspace(ch) != 0;
+    });
+    auto last = std::find_if_not(value.rbegin(), value.rend(), [](unsigned char ch) {
+        return std::isspace(ch) != 0;
+    }).base();
+    if (first >= last) {
+        return {};
+    }
+    return std::string(first, last);
+}
+
+struct FallbackClientInfoConfig {
+    std::string host;
+    int port = 0;
+    int packetVersion = 0;
+    bool configured = false;
+};
 
 void AddUniqueLoadingScreen(const std::string& path)
 {
@@ -267,6 +290,160 @@ bool LoadClientInfoBytes(const char* fileName, std::vector<char>* outBuffer)
     return false;
 }
 
+void ApplyFallbackClientInfoConfig(const FallbackClientInfoConfig& config)
+{
+    const std::string host = config.host.empty() ? "127.0.0.1" : config.host;
+    const int port = config.port > 0 ? config.port : 6900;
+
+    g_accountAddr = host;
+    g_accountPort = std::to_string(port);
+    if (config.packetVersion > 0) {
+        g_version = config.packetVersion;
+    }
+
+    g_clientInfoConnections.clear();
+    ClientInfoConnection info;
+    info.display = host + ":" + std::to_string(port);
+    info.desc = "Fallback account endpoint";
+    info.address = host;
+    info.port = std::to_string(port);
+    info.version = g_version;
+    g_clientInfoConnections.push_back(info);
+    g_selectedClientInfoIndex = 0;
+
+    EnsureDefaultLoadingScreens();
+    s_dwAdminAID.clear();
+    s_dwYellowAID.clear();
+}
+
+void ParseFallbackClientInfoLine(const std::string& rawLine, FallbackClientInfoConfig* outConfig)
+{
+    if (!outConfig) {
+        return;
+    }
+
+    const std::string line = TrimAscii(rawLine);
+    if (line.empty()) {
+        return;
+    }
+    if (line[0] == '#' || (line.size() >= 2 && line[0] == '/' && line[1] == '/')) {
+        return;
+    }
+
+    const std::string::size_type equals = line.find('=');
+    if (equals == std::string::npos || equals == 0) {
+        return;
+    }
+
+    const std::string key = ToLowerAscii(TrimAscii(line.substr(0, equals)));
+    const std::string value = TrimAscii(line.substr(equals + 1));
+    if (value.empty()) {
+        return;
+    }
+
+    if (key == "auth_host" || key == "server_host") {
+        outConfig->host = value;
+        outConfig->configured = true;
+        return;
+    }
+    if (key == "auth_port" || key == "server_port") {
+        const int parsed = std::atoi(value.c_str());
+        if (parsed > 0) {
+            outConfig->port = parsed;
+            outConfig->configured = true;
+        }
+        return;
+    }
+    if (key == "packet_version") {
+        const int parsed = std::atoi(value.c_str());
+        if (parsed > 0) {
+            outConfig->packetVersion = parsed;
+            outConfig->configured = true;
+        }
+    }
+}
+
+bool LoadFallbackClientInfoConfigFromFile(FallbackClientInfoConfig* outConfig)
+{
+    if (!outConfig) {
+        return false;
+    }
+
+    std::vector<char> buffer;
+    if (!TryLoadExecutableRelativeFile("client.cfg", &buffer) && !LoadDiskFile("client.cfg", &buffer)) {
+        return false;
+    }
+
+    std::istringstream stream(std::string(buffer.begin(), buffer.end()));
+    std::string line;
+    while (std::getline(stream, line)) {
+        if (!line.empty() && line.back() == '\r') {
+            line.pop_back();
+        }
+        ParseFallbackClientInfoLine(line, outConfig);
+    }
+    return outConfig->configured;
+}
+
+void LoadFallbackClientInfoConfigFromSettings(FallbackClientInfoConfig* outConfig)
+{
+    if (!outConfig) {
+        return;
+    }
+
+    const std::string host = LoadSettingsIniString("Network", "AuthHost", "");
+    if (!host.empty()) {
+        outConfig->host = host;
+        outConfig->configured = true;
+    }
+
+    const int port = LoadSettingsIniInt("Network", "AuthPort", 0);
+    if (port > 0) {
+        outConfig->port = port;
+        outConfig->configured = true;
+    }
+
+    const int packetVersion = LoadSettingsIniInt("Network", "PacketVersion", 0);
+    if (packetVersion > 0) {
+        outConfig->packetVersion = packetVersion;
+        outConfig->configured = true;
+    }
+}
+
+void LoadFallbackClientInfoConfigFromEnvironment(FallbackClientInfoConfig* outConfig)
+{
+    if (!outConfig) {
+        return;
+    }
+
+    if (const char* host = std::getenv("OPEN_MIDGARD_AUTH_HOST")) {
+        if (*host) {
+            outConfig->host = host;
+            outConfig->configured = true;
+        }
+    }
+
+    if (const char* port = std::getenv("OPEN_MIDGARD_AUTH_PORT")) {
+        if (*port) {
+            const int parsed = std::atoi(port);
+            if (parsed > 0) {
+                outConfig->port = parsed;
+                outConfig->configured = true;
+            }
+        }
+    }
+
+    if (const char* packetVersion = std::getenv("OPEN_MIDGARD_PACKET_VERSION")) {
+        if (*packetVersion) {
+            const int parsed = std::atoi(packetVersion);
+            if (parsed > 0) {
+                outConfig->packetVersion = parsed;
+                outConfig->configured = true;
+            }
+        }
+    }
+}
+
 void ParseAidList(XMLElement* parent, std::vector<u32>* outList)
 {
     if (!outList) {
@@ -401,6 +578,27 @@ bool InitClientInfo(const char* fileName) {
            g_passwordEncrypt,
            g_passwordEncrypt2);
     return true;
+}
+
+bool InitFallbackClientInfo()
+{
+    FallbackClientInfoConfig config;
+    LoadFallbackClientInfoConfigFromSettings(&config);
+    const bool loadedClientCfg = LoadFallbackClientInfoConfigFromFile(&config);
+    LoadFallbackClientInfoConfigFromEnvironment(&config);
+    ApplyFallbackClientInfoConfig(config);
+    if (config.packetVersion <= 0) {
+        DbgLog("[ClientInfo] PacketVersion unset; using the packet_ver 23 map-send profile.\n");
+    }
+
+    DbgLog("[ClientInfo] Using fallback account endpoint %s:%s version=%d source=%s%s%s\n",
+        g_accountAddr.c_str(),
+        g_accountPort.c_str(),
+        g_version,
+        loadedClientCfg ? "client.cfg " : "",
+        config.configured ? "configured " : "",
+        (!loadedClientCfg && !config.configured) ? "default" : "");
+    return config.configured || loadedClientCfg;
 }
 
 XMLElement* GetClientInfo() {

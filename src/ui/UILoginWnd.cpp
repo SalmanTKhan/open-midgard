@@ -7,6 +7,7 @@
 #include "main/WinMain.h"
 #include "qtui/QtUiRuntime.h"
 #include "res/Bitmap.h"
+#include "UiSkin.h"
 #include "ui/UiScale.h"
 #include "ui/UIWindowMgr.h"
 #include "DebugLog.h"
@@ -285,89 +286,7 @@ void AddUniqueCandidate(std::vector<std::string>& out, const std::string& raw)
 
 std::vector<std::string> BuildWallpaperCandidates(const std::string& requestedWallpaper)
 {
-    std::vector<std::string> out;
-
-    // Legacy RO GRFs commonly store UI under a Korean-named folder. Keep raw
-    // byte escapes to match archive keys regardless of source-file encoding.
-    static const char* kUiKor =
-        "texture\\"
-        "\xC0\xAF\xC0\xFA\xC0\xCE\xC5\xCD\xC6\xE4\xC0\xCC\xBD\xBA"
-        "\\";
-
-    const char* directDefaults[] = {
-        "ad_title.png",
-        "ad_title.jpg",
-        "rag_title.jpg",
-        "title.bmp",
-        "title.jpg",
-        "login_background.jpg",
-        "login_background.bmp",
-        nullptr
-    };
-
-    std::vector<std::string> baseNames;
-    if (!requestedWallpaper.empty()) {
-        baseNames.push_back(requestedWallpaper);
-    }
-    for (int i = 0; directDefaults[i]; ++i) {
-        baseNames.push_back(directDefaults[i]);
-    }
-
-    const char* pathPrefixes[] = {
-        "data\\",
-        "data\\texture\\",
-        "data\\texture\\interface\\",
-        "data\\texture\\interface\\basic_interface\\",
-        "data\\texture\\login_interface\\",
-        "data\\texture\\\xC0\xAF\xC0\xFA\xC0\xCE\xC5\xCD\xC6\xE4\xC0\xCC\xBD\xBA\\",
-        "data\\texture\\\xC0\xAF\xC0\xFA\xC0\xCE\xC5\xCD\xC6\xE4\xC0\xCC\xBD\xBA\\basic_interface\\",
-        "data\\texture\\\xC0\xAF\xC0\xFA\xC0\xCE\xC5\xCD\xC6\xE4\xC0\xCC\xBD\xBA\\login_interface\\",
-        "",
-        "texture\\",
-        "texture\\interface\\",
-        "texture\\interface\\basic_interface\\",
-        "texture\\login_interface\\",
-        "ui\\",
-        kUiKor,
-        "texture\\\xC0\xAF\xC0\xFA\xC0\xCE\xC5\xCD\xC6\xE4\xC0\xCC\xBD\xBA\\basic_interface\\",
-        "texture\\\xC0\xAF\xC0\xFA\xC0\xCE\xC5\xCD\xC6\xE4\xC0\xCC\xBD\xBA\\login_interface\\",
-        nullptr
-    };
-
-    for (const std::string& baseRaw : baseNames) {
-        std::string base = NormalizeSlash(baseRaw);
-        if (base.empty()) {
-            continue;
-        }
-
-        std::string filenameOnly = base;
-        const size_t slashPos = filenameOnly.find_last_of('\\');
-        if (slashPos != std::string::npos && slashPos + 1 < filenameOnly.size()) {
-            filenameOnly = filenameOnly.substr(slashPos + 1);
-        }
-
-        const bool hasExtension = filenameOnly.find('.') != std::string::npos;
-        std::vector<std::string> nameForms;
-        nameForms.push_back(base);
-        if (filenameOnly != base) {
-            nameForms.push_back(filenameOnly);
-        }
-
-        if (!hasExtension) {
-            nameForms.push_back(filenameOnly + ".bmp");
-            nameForms.push_back(filenameOnly + ".jpg");
-            nameForms.push_back(filenameOnly + ".png");
-            nameForms.push_back(filenameOnly + ".tga");
-        }
-
-        for (const std::string& nameForm : nameForms) {
-            for (int i = 0; pathPrefixes[i]; ++i) {
-                AddUniqueCandidate(out, std::string(pathPrefixes[i]) + nameForm);
-            }
-        }
-    }
-
-    return out;
+    return ui_skin::BuildWallpaperCandidates(requestedWallpaper);
 }
 
 std::vector<std::string> BuildUiAssetCandidates(const char* fileName)
@@ -484,17 +403,7 @@ shopui::BitmapPixels LoadFirstBitmapPixelsFromCandidates(const std::vector<std::
 
 std::string ResolveUiAssetPath(const char* fileName)
 {
-    if (!fileName || !*fileName) {
-        return {};
-    }
-
-    const std::vector<std::string> candidates = BuildUiAssetCandidates(fileName);
-    for (const std::string& candidate : candidates) {
-        if (g_fileMgr.IsDataExist(candidate.c_str())) {
-            return candidate;
-        }
-    }
-    return {};
+    return ui_skin::TryResolveUiAssetPath(fileName);
 }
 
 } // namespace
@@ -969,7 +878,12 @@ void UILoginWnd::OnDraw()
         rcPanel.bottom = rcPanel.top + m_uiAssets[UiPanel].height;
         DrawBitmapPixelsStretched(drawDC, m_uiAssets[UiPanel], rcPanel);
     } else {
-        HBRUSH panelBg = CreateSolidBrush(RGB(235, 235, 228));
+        const std::uint32_t themeArgb = GetQtUiRuntimeThemeBackgroundArgb();
+        const COLORREF panelColor = RGB(
+            static_cast<BYTE>((themeArgb >> 16) & 0xFF),
+            static_cast<BYTE>((themeArgb >> 8) & 0xFF),
+            static_cast<BYTE>(themeArgb & 0xFF));
+        HBRUSH panelBg = CreateSolidBrush(panelColor);
         FillRect(drawDC, &rcPanel, panelBg);
         DeleteObject(panelBg);
         FrameRect(drawDC, &rcPanel, (HBRUSH)GetStockObject(BLACK_BRUSH));

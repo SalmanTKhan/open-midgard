@@ -3,6 +3,7 @@
 #include "audio/Audio.h"
 #include "core/File.h"
 #include "core/SettingsIni.h"
+#include "UiSkin.h"
 #include "DebugLog.h"
 #include "main/WinMain.h"
 #include "qtui/QtUiRuntime.h"
@@ -30,6 +31,8 @@ namespace {
 
 HDC g_sharedUiDrawDC = nullptr;
 constexpr char kUiWindowSection[] = "UIWindows";
+bool g_uiButtonSoundResolved = false;
+std::string g_uiButtonSoundPath;
 
 class ScopedUiDrawTarget {
 public:
@@ -204,35 +207,18 @@ int ScoreUiButtonSoundCandidate(const std::string& path)
 
 std::string ResolveUiButtonSoundPath()
 {
-    static bool s_resolved = false;
-    static std::string s_cachedPath;
-    if (s_resolved) {
-        return s_cachedPath;
+    if (g_uiButtonSoundResolved) {
+        return g_uiButtonSoundPath;
     }
-    s_resolved = true;
+    g_uiButtonSoundResolved = true;
 
-    const std::array<const char*, 14> directCandidates = {
-        "data\\wav\\\xB9\xF6\xC6\xB0\xBC\xD2\xB8\xAE.wav",
-        "wav\\\xB9\xF6\xC6\xB0\xBC\xD2\xB8\xAE.wav",
-        "wav\\click.wav",
-        "data\\wav\\click.wav",
-        "wav\\button.wav",
-        "data\\wav\\button.wav",
-        "wav\\btnok.wav",
-        "data\\wav\\btnok.wav",
-        "wav\\btn_ok.wav",
-        "data\\wav\\btn_ok.wav",
-        "wav\\ok.wav",
-        "data\\wav\\ok.wav",
-        "wav\\enter.wav",
-        "data\\wav\\enter.wav"
-    };
+    const std::vector<std::string> directCandidates = ui_skin::BuildUiButtonSoundCandidates();
 
-    for (const char* candidate : directCandidates) {
-        if (g_fileMgr.IsDataExist(candidate)) {
-            s_cachedPath = candidate;
-            DbgLog("[UI] button sound resolved direct: %s\n", s_cachedPath.c_str());
-            return s_cachedPath;
+    for (const std::string& candidate : directCandidates) {
+        if (g_fileMgr.IsDataExist(candidate.c_str())) {
+            g_uiButtonSoundPath = candidate;
+            DbgLog("[UI] button sound resolved direct: %s\n", g_uiButtonSoundPath.c_str());
+            return g_uiButtonSoundPath;
         }
     }
 
@@ -244,16 +230,16 @@ std::string ResolveUiButtonSoundPath()
         const int score = ScoreUiButtonSoundCandidate(name);
         if (score > bestScore) {
             bestScore = score;
-            s_cachedPath = NormalizeSlashUi(name);
+            g_uiButtonSoundPath = NormalizeSlashUi(name);
         }
     }
 
-    if (!s_cachedPath.empty()) {
-        DbgLog("[UI] button sound resolved scored=%d path=%s\n", bestScore, s_cachedPath.c_str());
+    if (!g_uiButtonSoundPath.empty()) {
+        DbgLog("[UI] button sound resolved scored=%d path=%s\n", bestScore, g_uiButtonSoundPath.c_str());
     } else {
         DbgLog("[UI] button sound unresolved\n");
     }
-    return s_cachedPath;
+    return g_uiButtonSoundPath;
 }
 
 bool IsPointInsideWindow(const UIWindow* window, int x, int y)
@@ -264,6 +250,12 @@ bool IsPointInsideWindow(const UIWindow* window, int x, int y)
 }
 
 } // namespace
+
+void ResetUiButtonSoundPathCache()
+{
+    g_uiButtonSoundResolved = false;
+    g_uiButtonSoundPath.clear();
+}
 
 UIWindow::UIWindow() 
     : m_parent(nullptr), m_x(0), m_y(0), m_w(0), m_h(0), 

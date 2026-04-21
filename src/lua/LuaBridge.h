@@ -58,6 +58,7 @@ private:
     lua_State* m_state;
     mutable std::recursive_mutex m_mutex;
     std::vector<std::string> m_loadedScripts;
+    std::unordered_set<std::string> m_missingScripts;
     std::unordered_map<int, LuaSkillEffectInfo> m_skillEffectInfoCache;
     std::unordered_set<int> m_missingSkillEffectInfoIds;
     std::string m_lastError;

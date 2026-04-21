@@ -1,11 +1,15 @@
 // Skill.cpp - Skill data and usage logic
 #include "Skill.h"
 
+#include "../core/File.h"
+
 #include <algorithm>
 #include <cctype>
 #include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <sstream>
 #include <vector>
 
 namespace {
@@ -47,9 +51,32 @@ std::string ToLowerAscii(std::string value)
     return value;
 }
 
-bool ReadLines(const std::filesystem::path& path, std::vector<std::string>& outLines)
+void SplitIntoLines(const char* data, size_t size, std::vector<std::string>& outLines)
 {
-    outLines.clear();
+    std::string line;
+    line.reserve(64);
+    for (size_t i = 0; i < size; ++i) {
+        const char ch = data[i];
+        if (ch == '\n') {
+            if (!line.empty() && line.back() == '\r') {
+                line.pop_back();
+            }
+            outLines.push_back(std::move(line));
+            line.clear();
+            continue;
+        }
+        line.push_back(ch);
+    }
+    if (!line.empty()) {
+        if (line.back() == '\r') {
+            line.pop_back();
+        }
+        outLines.push_back(std::move(line));
+    }
+}
+
+bool ReadLinesFromFilesystem(const std::filesystem::path& path, std::vector<std::string>& outLines)
+{
     std::ifstream stream(path, std::ios::binary);
     if (!stream) {
         return false;
@@ -62,8 +89,25 @@ bool ReadLines(const std::filesystem::path& path, std::vector<std::string>& outL
         }
         outLines.push_back(line);
     }
-
     return true;
+}
+
+bool ReadLines(const std::string& relativeName, const std::filesystem::path& fsPath, std::vector<std::string>& outLines)
+{
+    outLines.clear();
+
+    // Prefer game data archive (data.grf) — this is where the real client looks.
+    int size = 0;
+    unsigned char* bytes = g_fileMgr.GetData(relativeName.c_str(), &size);
+    if (bytes && size > 0) {
+        SplitIntoLines(reinterpret_cast<const char*>(bytes), static_cast<size_t>(size), outLines);
+        delete[] bytes;
+        return true;
+    }
+    delete[] bytes;
+
+    // Fallback to on-disk Ref/GRF-Content for dev workflows without a .grf mounted.
+    return ReadLinesFromFilesystem(fsPath, outLines);
 }
 
 std::filesystem::path GetSkillDataRoot()
@@ -174,7 +218,7 @@ bool CSkillMgr::BuildSkillIdMapFromNameTable()
 void CSkillMgr::LoadSkillDisplayNames()
 {
     std::vector<std::string> lines;
-    if (!ReadLines(GetSkillDataRoot() / "skillnametable.txt", lines)) {
+    if (!ReadLines("data\\skillnametable.txt", GetSkillDataRoot() / "skillnametable.txt", lines)) {
         return;
     }
 
@@ -203,7 +247,7 @@ void CSkillMgr::LoadSkillDisplayNames()
 void CSkillMgr::LoadSkillDescriptions()
 {
     std::vector<std::string> lines;
-    if (!ReadLines(GetSkillDataRoot() / "skilldesctable.txt", lines)) {
+    if (!ReadLines("data\\skilldesctable.txt", GetSkillDataRoot() / "skilldesctable.txt", lines)) {
         return;
     }
 
@@ -248,7 +292,7 @@ void CSkillMgr::LoadSkillDescriptions()
 void CSkillMgr::LoadSkillLevelSpCosts()
 {
     std::vector<std::string> lines;
-    if (!ReadLines(GetSkillDataRoot() / "leveluseskillspamount.txt", lines)) {
+    if (!ReadLines("data\\leveluseskillspamount.txt", GetSkillDataRoot() / "leveluseskillspamount.txt", lines)) {
         return;
     }
 

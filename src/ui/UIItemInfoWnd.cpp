@@ -407,7 +407,7 @@ void UIItemInfoWnd::StoreInfo()
 void UIItemInfoWnd::SetItemInfo(const ITEM_INFO& item, int preferredX, int preferredY)
 {
     m_item = item;
-    m_hasItem = item.GetItemId() != 0;
+    m_hasItem = item.GetItemId() != 0 || !item.m_itemName.empty();
     RefreshPreviewAndSlots();
 
     Resize(kWindowWidth, m_hasItem ? GetDesiredWindowHeight() : kWindowHeight);
@@ -432,6 +432,7 @@ bool UIItemInfoWnd::GetDisplayDataForQt(DisplayData* outData) const
     }
 
     outData->title = BuildTitle();
+    outData->itemIndex = m_item.m_itemIndex;
     outData->itemId = m_item.GetItemId();
     outData->identified = m_item.m_isIdentified != 0;
     outData->name = BuildDisplayName();
@@ -574,7 +575,7 @@ bool UIItemInfoWnd::HasViewButton() const
 {
     return m_hasItem
         && m_item.m_isIdentified != 0
-        && g_ttemmgr.IsCardItem(m_item.GetItemId())
+        && (g_ttemmgr.IsCardItem(m_item.GetItemId()) || g_ttemmgr.IsCardItemName(m_item.m_itemName))
         && !m_item.GetCardIllustName().empty();
 }
 
@@ -608,7 +609,9 @@ std::vector<std::string> UIItemInfoWnd::BuildDetailLines() const
     if (m_item.m_isIdentified == 0) {
         return out;
     }
-    if (m_item.m_num > 1 && !g_ttemmgr.IsCardItem(m_item.GetItemId())) {
+    if (m_item.m_num > 1
+        && !g_ttemmgr.IsCardItem(m_item.GetItemId())
+        && !g_ttemmgr.IsCardItemName(m_item.m_itemName)) {
         out.push_back("Quantity: " + std::to_string(m_item.m_num));
     }
     if (m_item.m_refiningLevel > 0) {

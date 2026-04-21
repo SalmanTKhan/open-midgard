@@ -23,16 +23,17 @@ public:
     int GetHoverButton() const;
     int GetPressedButton() const;
     bool GetButtonRectForQt(int buttonId, RECT* outRect) const;
+    void OnRBtnDown(int x, int y) override;
 
 private:
     enum ButtonId {
         ButtonNone = -1,
-        ButtonAdd = 0,
-        ButtonRemove = 1,
-        ButtonConfirm = 2,
-        ButtonCancel = 3,
+        ButtonConfirm = 0,
+        ButtonCancel = 1,
+        ButtonCount = 2,
     };
 
+    void PromptDealAmount(int rowIndex);
     RECT GetListRect() const;
     int GetVisibleRowCount() const;
     int GetMaxViewOffset() const;

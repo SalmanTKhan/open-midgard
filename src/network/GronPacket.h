@@ -10,6 +10,8 @@ constexpr s16 kVariablePacketSize = -1;
 
 // Initialize the known packet-size tables for the supported receive profiles.
 void InitializePacketSize();
+void ReloadPacketSizeForVersion(int clientVersion);
+void ReloadPacketSizeForVersion(int clientVersion);
 
 // Returns:
 //  > 0  fixed packet byte length

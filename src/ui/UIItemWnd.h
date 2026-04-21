@@ -32,6 +32,7 @@ public:
         bool occupied = false;
         bool hovered = false;
         int count = 0;
+        unsigned int itemIndex = 0;
         unsigned int itemId = 0;
         std::string label;
         std::string tooltip;

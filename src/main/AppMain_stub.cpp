@@ -6,10 +6,12 @@
 #include "core/DllMgr.h"
 #include "core/File.h"
 #include "core/SettingsIni.h"
+#include "core/ClientFeature.h"
 #include "core/Timer.h"
 #include "gamemode/CursorRenderer.h"
 #include "gamemode/GameMode.h"
 #include "gamemode/Mode.h"
+#include "input/Gamepad.h"
 #include "lua/LuaBridge.h"
 #include "network/Connection.h"
 #include "qtui/QtPlatformWindow.h"
@@ -44,6 +46,10 @@
 #endif
 
 namespace {
+
+constexpr const char* kDataSettingsSection = "Data";
+constexpr const char* kRuntimeRootValueName = "RuntimeRoot";
+constexpr const char* kGrfRootValueName = "GrfRoot";
 
 constexpr unsigned int WM_MOUSEMOVE = 0x0200u;
 constexpr unsigned int WM_LBUTTONDOWN = 0x0201u;
@@ -129,6 +135,8 @@ bool HasAnyRuntimeAsset(const std::filesystem::path& root)
 
     std::error_code ec;
     return std::filesystem::exists(root / "data.grf", ec)
+        || std::filesystem::exists(root / "sdata.grf", ec)
+        || std::filesystem::exists(root / "adata.grf", ec)
         || std::filesystem::exists(root / "data_hp.grf", ec)
         || std::filesystem::exists(root / "event.grf", ec)
         || std::filesystem::exists(root / "fdata.grf", ec)
@@ -170,6 +178,72 @@ void AppendSearchCandidates(std::vector<std::filesystem::path>* outCandidates, c
     }
 }
 
+std::filesystem::path LoadConfiguredPath(const char* environmentVariableName, const char* settingsKey)
+{
+    if (environmentVariableName) {
+        if (const char* overrideRoot = std::getenv(environmentVariableName)) {
+            if (*overrideRoot) {
+                return NormalizeRuntimeCandidate(std::filesystem::path(overrideRoot));
+            }
+        }
+    }
+
+    if (settingsKey) {
+        const std::string configuredRoot = LoadSettingsIniString(kDataSettingsSection, settingsKey, "");
+        if (!configuredRoot.empty()) {
+            return NormalizeRuntimeCandidate(std::filesystem::path(configuredRoot));
+        }
+    }
+
+    return {};
+}
+
+bool HasPakFile(const std::filesystem::path& root, const char* pakName)
+{
+    if (root.empty() || !pakName || !*pakName) {
+        return false;
+    }
+
+    std::error_code ec;
+    return std::filesystem::exists(root / pakName, ec);
+}
+
+void RegisterPak(const char* pakName, const std::filesystem::path& grfRoot)
+{
+    if (!pakName || !*pakName) {
+        return;
+    }
+
+    std::error_code ec;
+    const std::filesystem::path currentRoot = std::filesystem::current_path(ec);
+    if (!ec && HasPakFile(currentRoot, pakName)) {
+        g_fileMgr.AddPak(pakName);
+        return;
+    }
+
+    if (HasPakFile(grfRoot, pakName)) {
+        const std::string pakPath = (grfRoot / pakName).string();
+        DbgLog("[Runtime] Using GRF '%s' from '%s'.\n", pakName, pakPath.c_str());
+        g_fileMgr.AddPak(pakPath.c_str());
+        return;
+    }
+
+    g_fileMgr.AddPak(pakName);
+}
+
+void RegisterDefaultPakArchives(bool skipPrimaryDataGrf)
+{
+    const std::filesystem::path grfRoot = LoadConfiguredPath("OPEN_MIDGARD_GRF_DIR", kGrfRootValueName);
+    if (!skipPrimaryDataGrf) {
+        RegisterPak("data.grf", grfRoot);
+    }
+    RegisterPak("sdata.grf", grfRoot);
+    RegisterPak("adata.grf", grfRoot);
+    RegisterPak("data_hp.grf", grfRoot);
+    RegisterPak("event.grf", grfRoot);
+    RegisterPak("fdata.grf", grfRoot);
+}
+
 std::filesystem::path ResolveRuntimeRoot()
 {
     std::vector<std::filesystem::path> candidates;
@@ -178,11 +252,7 @@ std::filesystem::path ResolveRuntimeRoot()
     AppendSearchCandidates(&candidates, std::filesystem::path(RO_DEV_DEPLOY_DIR));
 #endif
 
-    if (const char* overrideRoot = std::getenv("OPEN_MIDGARD_DATA_DIR")) {
-        if (*overrideRoot) {
-            AppendSearchCandidates(&candidates, std::filesystem::path(overrideRoot));
-        }
-    }
+    AppendSearchCandidates(&candidates, LoadConfiguredPath("OPEN_MIDGARD_DATA_DIR", kRuntimeRootValueName));
 
     std::error_code ec;
     AppendSearchCandidates(&candidates, std::filesystem::current_path(ec));
@@ -314,6 +384,7 @@ bool InitClientSystems()
     g_renderer.Init();
     g_renderer.SetSize(GetRenderDevice().GetRenderWidth(), GetRenderDevice().GetRenderHeight());
     InitializeQtUiRuntime(g_hMainWnd);
+    gamepad::g_gamepad.Init();
     return true;
 }
 
@@ -368,6 +439,7 @@ bool InitApp(HINSTANCE, int)
 int ReadRegistry()
 {
     EnsureOpenMidgardIniDefaults();
+    LoadFeatureOverridesFromIni();
     ApplyConfiguredWindowSize();
     (void)GetConfiguredRenderBackend();
     return 1;
@@ -497,11 +569,6 @@ LRESULT CALLBACK WindowProc(HWND, UINT msg, WPARAM wParam, LPARAM lParam)
 void ExitApp()
 {
     g_modeMgr.Quit();
-}
-
-void CheckSystemMessage()
-{
-    RoQtProcessEvents();
 }
 
 void SetWindowActiveMode(int active)
@@ -635,10 +702,7 @@ int main(int argc, char** argv)
         DbgLog("%s", CDllMgr::GetLastLoadReport().c_str());
     }
 
-    g_fileMgr.AddPak("data.grf");
-    g_fileMgr.AddPak("data_hp.grf");
-    g_fileMgr.AddPak("event.grf");
-    g_fileMgr.AddPak("fdata.grf");
+    RegisterDefaultPakArchives(false);
 
     if (!CConnection::Startup()) {
         return 1;
@@ -654,6 +718,7 @@ int main(int argc, char** argv)
     g_modeMgr.Run(0, "");
 
     CConnection::Cleanup();
+    gamepad::g_gamepad.Shutdown();
     g_windowMgr.Reset();
     g_buabridge.Shutdown();
     GetRenderDevice().Shutdown();

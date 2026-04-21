@@ -53,11 +53,11 @@ constexpr float kNearPlane = 10.0f;
 constexpr float kGroundSubmitNearPlane = 80.0f;
 constexpr float kAttrTileDepthBias = 0.0010f;
 constexpr float kPlayerBillboardWorldHeightScale = 2.0f;
-constexpr float kPlayerBillboardDepthWorldBiasScale = 0.35f;
-constexpr float kPlayerBillboardDepthWorldBiasMin = 0.75f;
-constexpr float kPlayerBillboardDepthWorldBiasMax = 3.0f;
+constexpr float kPlayerBillboardDepthWorldBiasScale = 0.05f;
+constexpr float kPlayerBillboardDepthWorldBiasMin = 0.05f;
+constexpr float kPlayerBillboardDepthWorldBiasMax = 0.35f;
 constexpr float kPlayerBillboardDepthHeightBiasFactor = 0.45f;
-constexpr float kPlayerBillboardTopDepthForwardBiasScale = 0.85f;
+constexpr float kPlayerBillboardTopDepthForwardBiasScale = 0.0f;
 constexpr int kActorLabelBaseYOffset = 4;
 constexpr int kPlayerLabelBaseYOffset = 22;
 constexpr int kActorSpeechBubbleHeadGapPx = 26;
@@ -116,6 +116,7 @@ constexpr float kGroundCullWidthFactor = 6.0f;
 constexpr float kGroundCullHeightFactor = 6.0f;
 constexpr int kGroundCullMarginTiles = 14;
 constexpr int kJobWarpNpc = 0x2D;
+constexpr int kJobWarpNpcCompat = 0x20;
 constexpr int kJobWarpPortal = 0x80;
 constexpr int kJobPreWarpPortal = 0x81;
 constexpr float kActorShadowPixelRatioScale = 0.14285715f;
@@ -287,7 +288,8 @@ bool IsPortalLikeEffect(const C3dWorldRes::effectSrcInfo& effect)
 
 bool IsPortalActorJob(int job)
 {
-    return job == kJobWarpNpc
+    return job == kJobWarpNpcCompat
+        || job == kJobWarpNpc
         || job == kJobWarpPortal
         || job == kJobPreWarpPortal;
 }
@@ -2679,7 +2681,7 @@ u32 ResolveBackgroundActorUpdateInterval(const C3dActor& actor,
 
 bool RenderCachedBillboard(const CWorld::BillboardScreenEntry& entry)
 {
-    constexpr float kBillboardDepthBias = 0.0005f;
+    constexpr float kBillboardDepthBias = 0.0001f;
 
     CPc* actor = entry.actor;
     if (!actor || !actor->m_isVisible || !actor->m_billboardTexture) {
@@ -2881,7 +2883,6 @@ bool BuildBillboardRenderEntry(CPc* actor,
     const float u1 = rightPixels / textureWidth;
     const float v1 = bottomPixels / textureHeight;
 
-    const float minRenderOow = (std::min)(projectedDepthTop.oow, projectedDepthBottom.oow);
     for (int index = 0; index < 4; ++index) {
         const tlvertex3d& projected = projectedRenderVerts[index];
         outEntry->renderX[index] = projected.x;
@@ -2901,7 +2902,7 @@ bool BuildBillboardRenderEntry(CPc* actor,
 
     outEntry->actor = actor;
     outEntry->screenY = projectedBase.y;
-    outEntry->depthKey = minRenderOow;
+    outEntry->depthKey = projectedBase.oow;
     outEntry->left = renderMinX;
     outEntry->top = renderMinY;
     outEntry->right = renderMaxX;
@@ -5927,7 +5928,7 @@ void CWorld::RenderActors(const matrix& viewMatrix, float cameraLongitude)
 
         const int desiredEffectId = pc->m_job == kJobPreWarpPortal
             ? kRagEffectReadyPortal
-            : ((pc->m_job == kJobWarpPortal || pc->m_job == kJobWarpNpc) ? 321 : kRagEffectPortal);
+            : ((pc->m_job == kJobWarpPortal || pc->m_job == kJobWarpNpcCompat || pc->m_job == kJobWarpNpc) ? 321 : kRagEffectPortal);
 
         for (CRagEffect* effect : pc->m_effectList) {
             if (effect && effect->GetEffectType() == desiredEffectId) {
@@ -6428,7 +6429,7 @@ bool CWorld::HasWarpAtAttrCell(int attrX, int attrY) const
             return false;
         }
 
-        const float radius = pc->m_job == kJobWarpNpc ? 6.5f : 5.0f;
+        const float radius = (pc->m_job == kJobWarpNpcCompat || pc->m_job == kJobWarpNpc) ? 6.5f : 5.0f;
         return DoesWorldPositionCoverAttrCell(*m_attr, pc->m_pos, radius, attrX, attrY);
     };
 

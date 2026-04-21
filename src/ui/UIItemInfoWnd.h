@@ -36,6 +36,7 @@ public:
 
     struct DisplayData {
         std::string title;
+        unsigned int itemIndex = 0;
         unsigned int itemId = 0;
         bool identified = false;
         std::string name;

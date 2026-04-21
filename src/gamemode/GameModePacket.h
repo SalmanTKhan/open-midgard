@@ -52,6 +52,7 @@ void CleanupPendingActorDespawns(CGameMode& mode);
 void ApplyPendingLocalCartState(CGameMode& mode);
 void PrimeLocalCartStateFromEffectState(int effectState);
 bool IsKnownLocalCartActive();
+bool ApplyLocalEmotionEffect(CGameMode& mode, int emotionType);
 
 void SetPendingDisconnectAction(PendingDisconnectAction action);
 PendingDisconnectAction GetPendingDisconnectAction();

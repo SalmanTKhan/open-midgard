@@ -1,6 +1,8 @@
 #include "UISayDialogWnd.h"
 
 #include "NpcDialogColoredText.h"
+#include "input/Gamepad.h"
+#include "gamemode/CursorRenderer.h"
 #include "render/DC.h"
 #include "UIWindowMgr.h"
 #include "gamemode/GameMode.h"
@@ -70,6 +72,29 @@ RECT MakeRect(int left, int top, int width, int height)
 {
     RECT rect{ left, top, left + width, top + height };
     return rect;
+}
+
+void SnapCursorToRect(const RECT& rect)
+{
+#if RO_HAS_GAMEPAD
+    if (!gamepad::g_gamepad.IsConnected()) {
+        return;
+    }
+
+    POINT cursorPos{};
+    if (GetModeCursorClientPos(&cursorPos)) {
+        if (cursorPos.x >= rect.left && cursorPos.x < rect.right
+            && cursorPos.y >= rect.top && cursorPos.y < rect.bottom) {
+            return;
+        }
+    }
+
+    const int centerX = (rect.left + rect.right) / 2;
+    const int centerY = (rect.top + rect.bottom) / 2;
+    SetModeCursorClientPos(centerX, centerY);
+#else
+    (void)rect;
+#endif
 }
 
 std::string NormalizeDialogNewlines(const std::string& text)
@@ -338,6 +363,7 @@ void UISayDialogWnd::ShowNext(u32 npcId)
     m_hoverAction = false;
     m_pressAction = false;
     SetShow(1);
+    SnapCursorToRect(GetActionRect());
     Invalidate();
 }
 
@@ -348,6 +374,7 @@ void UISayDialogWnd::ShowClose(u32 npcId)
     m_hoverAction = false;
     m_pressAction = false;
     SetShow(1);
+    SnapCursorToRect(GetActionRect());
     Invalidate();
 }
 

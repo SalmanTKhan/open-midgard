@@ -1,6 +1,8 @@
 #include "UINpcMenuWnd.h"
 
 #include "NpcDialogColoredText.h"
+#include "input/Gamepad.h"
+#include "gamemode/CursorRenderer.h"
 #include "render/DC.h"
 #include "UIWindowMgr.h"
 #include "gamemode/GameMode.h"
@@ -78,6 +80,21 @@ RECT MakeRect(int left, int top, int width, int height)
 {
     RECT rect{ left, top, left + width, top + height };
     return rect;
+}
+
+void SnapCursorToRect(const RECT& rect)
+{
+#if RO_HAS_GAMEPAD
+    if (!gamepad::g_gamepad.IsConnected()) {
+        return;
+    }
+
+    const int centerX = (rect.left + rect.right) / 2;
+    const int centerY = (rect.top + rect.bottom) / 2;
+    SetModeCursorClientPos(centerX, centerY);
+#else
+    (void)rect;
+#endif
 }
 
 #if RO_ENABLE_QT6_UI
@@ -337,6 +354,11 @@ void UINpcMenuWnd::SetMenu(u32 npcId,
     Resize(kMenuWidth, GetNpcMenuHeightForOptionCount(static_cast<int>(m_options.size())));
     Move(m_x, m_y);
     SetShow(1);
+    if (m_selectedIndex >= 0 && m_selectedIndex < static_cast<int>(m_options.size())) {
+        SnapCursorToRect(GetOptionRect(m_selectedIndex));
+    } else {
+        SnapCursorToRect(GetOkRect());
+    }
     Invalidate();
 }
 
