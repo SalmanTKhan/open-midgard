@@ -12,11 +12,13 @@ build64/
 build-linux-local/
 build-linux-make/
 build-linux-qt-vulkan/
+build-macos/
 build-mingw-direct/
 build-mingw-preset-debug/
 build-mingw-preset/
 build-mingw-qt/
 build-mingw-qt-ninja/
+build-noqt/
 build-wsl-perm-test/
 build-wsl-smoke/
 
@@ -26,5 +28,5 @@ tools/
 build_output*.txt
 *.ps1
 *.py
-/screenshots
-/build-noqt
+
+screenshots/
