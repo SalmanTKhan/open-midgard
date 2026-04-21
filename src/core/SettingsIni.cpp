@@ -96,6 +96,16 @@ std::filesystem::path GetExecutableDirectoryInternal()
 #endif
 }
 
+std::filesystem::path GetIniDirectoryOverrideInternal()
+{
+    if (const char* overrideRoot = std::getenv("OPEN_MIDGARD_DATA_DIR")) {
+        if (*overrideRoot) {
+            return std::filesystem::path(overrideRoot);
+        }
+    }
+    return {};
+}
+
 bool LoadIniDocument(const std::filesystem::path& path, IniDocument* document)
 {
     if (!document) {
@@ -223,6 +233,10 @@ bool LoadDocumentWithDefaults(IniDocument* document, bool* changed)
 
 std::filesystem::path GetOpenMidgardIniPath()
 {
+    const std::filesystem::path overrideDirectory = GetIniDirectoryOverrideInternal();
+    if (!overrideDirectory.empty()) {
+        return overrideDirectory / "open-midgard.ini";
+    }
     return GetExecutableDirectoryInternal() / "open-midgard.ini";
 }
 
