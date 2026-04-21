@@ -370,6 +370,20 @@ int ReadRegistry()
 
 LRESULT CALLBACK WindowProc(HWND, UINT msg, WPARAM wParam, LPARAM lParam)
 {
+    switch (msg)
+    {
+    case WM_MOUSEMOVE:
+    case WM_LBUTTONDOWN:
+    case WM_LBUTTONUP:
+    case WM_RBUTTONDOWN:
+    case WM_RBUTTONUP:
+    case WM_MOUSEWHEEL:
+        UpdateModeCursorClientPos(GetLParamX(lParam), GetLParamY(lParam));
+        break;
+    default:
+        break;
+    }
+
     if (HandleQtUiRuntimeWindowMessage(msg, wParam, lParam)) {
         return 0;
     }
