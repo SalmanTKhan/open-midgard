@@ -77,6 +77,16 @@ constexpr u32 kActorNameRequestCooldownMs = 1000;
 constexpr int kEmotionMsgEffectType = 18;
 constexpr const char* kEmotionSpritePath = "data\\sprite\\\xC0\xCC\xC6\xD1\xC6\xAE\\emotion.spr";
 constexpr const char* kEmotionActPath = "data\\sprite\\\xC0\xCC\xC6\xD1\xC6\xAE\\emotion.act";
+constexpr float kEmotionSpriteStandingYOffset = 22.0f;
+constexpr float kEmotionSpriteSittingYOffset = 18.0f;
+constexpr float kEmotionSpriteOffsetX = -1.0f;
+constexpr float kEmotionSpriteOffsetZ = 1.0f;
+constexpr float kEmotionSpriteZoom = 1.75f;
+
+float ResolveEmotionSpriteYOffset(const CGameActor& actor)
+{
+    return actor.m_isSitting != 0 ? kEmotionSpriteSittingYOffset : kEmotionSpriteStandingYOffset;
+}
 
 PendingDisconnectAction g_pendingDisconnectAction = PendingDisconnectAction::None;
 u32 g_lastLocalLevelUpEffectId = 0;
@@ -169,11 +179,12 @@ void SpawnEmotionEffect(CGameActor& actor, int emotionType)
     effect->m_spriteActionIndex = emotionType;
     effect->m_spriteMotionIndex = 0;
     effect->m_pos = actor.m_pos;
+    effect->m_pos.x += kEmotionSpriteOffsetX;
+    effect->m_pos.z += kEmotionSpriteOffsetZ;
+    effect->m_pos.y -= ResolveEmotionSpriteYOffset(actor);
     effect->m_orgPos = effect->m_pos;
-    effect->m_pos.y -= 20.0f;
-    effect->m_orgPos.y = effect->m_pos.y;
-    effect->m_zoom = 1.0f;
-    effect->m_orgZoom = 1.0f;
+    effect->m_zoom = kEmotionSpriteZoom;
+    effect->m_orgZoom = kEmotionSpriteZoom;
     effect->m_alpha = 255;
     effect->m_colorArgb = 0xFFFFFFFFu;
     effect->m_isVisible = 1;

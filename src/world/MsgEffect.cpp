@@ -46,7 +46,20 @@ constexpr float kAttachedActorRenderLagMs = 110.0f;
 constexpr float kAttachedActorRenderLagMinMs = 70.0f;
 constexpr float kAttachedActorRenderLagMaxMs = 220.0f;
 constexpr float kAttachedActorTrailSampleMs = 45.0f;
+constexpr float kEmotionSpriteStandingYOffset = 22.0f;
+constexpr float kEmotionSpriteSittingYOffset = 18.0f;
+constexpr float kEmotionSpriteOffsetX = -1.0f;
+constexpr float kEmotionSpriteOffsetZ = 1.0f;
+constexpr float kEmotionSpriteZoom = 1.75f;
 constexpr int kEmotionMsgEffectType = 18;
+
+float ResolveEmotionSpriteYOffset(const CGameActor* actor)
+{
+    if (actor && actor->m_isSitting != 0) {
+        return kEmotionSpriteSittingYOffset;
+    }
+    return kEmotionSpriteStandingYOffset;
+}
 
 bool ShouldTraceAttachedCartEffect(const CMsgEffect& effect)
 {
@@ -1953,9 +1966,10 @@ u8 CMsgEffect::OnProcess()
     }
     case kEmotionMsgEffectType: {
         if (m_masterActor) {
-            m_pos.x = m_masterActor->m_pos.x;
-            m_pos.z = m_masterActor->m_pos.z;
-            m_pos.y = m_masterActor->m_pos.y - 20.0f;
+            m_pos.x = m_masterActor->m_pos.x + kEmotionSpriteOffsetX;
+            m_pos.z = m_masterActor->m_pos.z + kEmotionSpriteOffsetZ;
+            m_pos.y = m_masterActor->m_pos.y - ResolveEmotionSpriteYOffset(m_masterActor);
+            m_orgPos = m_pos;
         }
 
         const int motionCount = ResolveMsgSpriteMotionCountForEffect(*this, m_spriteActionIndex);
@@ -1974,7 +1988,8 @@ u8 CMsgEffect::OnProcess()
         m_spriteMotionIndex = nextMotionIndex;
         m_lastProcessedSpriteMotionIndex = nextMotionIndex;
         m_alpha = 255;
-        m_zoom = m_orgZoom;
+        m_zoom = kEmotionSpriteZoom;
+        m_orgZoom = kEmotionSpriteZoom;
         if (stateCount >= static_cast<float>(motionCount)) {
             m_isDisappear = 1;
         }

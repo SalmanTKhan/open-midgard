@@ -32,16 +32,16 @@
     },
     {
       "name": "mingw-qt-x64",
-      "displayName": "MinGW Qt x64",
-      "generator": "MinGW Makefiles",
+      "displayName": "MinGW Qt x64 (Ninja)",
+      "generator": "Ninja",
       "binaryDir": "${sourceDir}/build-mingw-preset",
       "environment": {
-        "PATH": "C:/Qt/Tools/mingw1310_64/bin;C:/Qt/6.11.0/mingw_64/bin;$penv{PATH}"
+        "PATH": "C:/Qt/Tools/Ninja;C:/Qt/Tools/mingw1310_64/bin;C:/Qt/6.11.0/mingw_64/bin;$penv{PATH}"
       },
       "cacheVariables": {
         "CMAKE_C_COMPILER": "C:/Qt/Tools/mingw1310_64/bin/gcc.exe",
         "CMAKE_CXX_COMPILER": "C:/Qt/Tools/mingw1310_64/bin/g++.exe",
-        "CMAKE_MAKE_PROGRAM": "C:/Qt/Tools/mingw1310_64/bin/mingw32-make.exe",
+        "CMAKE_MAKE_PROGRAM": "C:/Qt/Tools/Ninja/ninja.exe",
         "CMAKE_CXX_STANDARD": "17",
         "CMAKE_CXX_STANDARD_REQUIRED": "ON",
         "CMAKE_CXX_EXTENSIONS": "OFF",
@@ -55,16 +55,16 @@
     },
     {
       "name": "mingw-qt-x64-debug",
-      "displayName": "MinGW Qt x64 Debug",
-      "generator": "MinGW Makefiles",
+      "displayName": "MinGW Qt x64 Debug (Ninja)",
+      "generator": "Ninja",
       "binaryDir": "${sourceDir}/build-mingw-preset-debug",
       "environment": {
-        "PATH": "C:/Qt/Tools/mingw1310_64/bin;C:/Qt/6.11.0/mingw_64/bin;$penv{PATH}"
+        "PATH": "C:/Qt/Tools/Ninja;C:/Qt/Tools/mingw1310_64/bin;C:/Qt/6.11.0/mingw_64/bin;$penv{PATH}"
       },
       "cacheVariables": {
         "CMAKE_C_COMPILER": "C:/Qt/Tools/mingw1310_64/bin/gcc.exe",
         "CMAKE_CXX_COMPILER": "C:/Qt/Tools/mingw1310_64/bin/g++.exe",
-        "CMAKE_MAKE_PROGRAM": "C:/Qt/Tools/mingw1310_64/bin/mingw32-make.exe",
+        "CMAKE_MAKE_PROGRAM": "C:/Qt/Tools/Ninja/ninja.exe",
         "CMAKE_BUILD_TYPE": "Debug",
         "CMAKE_C_FLAGS_DEBUG": "-g3 -O0 -fno-omit-frame-pointer",
         "CMAKE_CXX_FLAGS_DEBUG": "-g3 -O0 -fno-omit-frame-pointer",
