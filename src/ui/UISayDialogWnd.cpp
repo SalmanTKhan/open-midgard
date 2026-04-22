@@ -9,8 +9,13 @@
 #include "gamemode/Mode.h"
 #include "main/WinMain.h"
 #include "qtui/QtUiRuntime.h"
+#include "TextScale.h"
+#include "ui/UINewChatWnd.h"
 
 #include <windows.h>
+
+#include <algorithm>
+#include <cmath>
 
 #if RO_ENABLE_QT6_UI
 #include <QFont>
@@ -26,17 +31,55 @@ constexpr int kDialogWidth = 360;
 constexpr int kDialogHeight = 160;
 constexpr int kBorder = 1;
 constexpr int kPadding = 10;
+constexpr int kHeaderHeight = 26;
+constexpr int kHeaderInnerPadding = 7;
 constexpr int kButtonWidth = 68;
 constexpr int kButtonHeight = 22;
 constexpr int kCornerRadius = 10;
+constexpr int kBodyFontMin = 11;
+constexpr int kBodyFontMax = 32;
+constexpr int kScrollWheelStep = 24;
 
-HFONT GetNpcDialogFont()
+int GetNpcDialogBodyFontPixelSize()
+{
+    const UINewChatWnd* const chatWnd = g_windowMgr.m_chatWnd;
+    const int fontSize = chatWnd ? chatWnd->GetFontPixelSize() : 13;
+    const int scaledFontSize = static_cast<int>(std::lround(static_cast<double>(fontSize) * GetConfiguredTextScaleFactor()));
+    return std::clamp(scaledFontSize, kBodyFontMin, kBodyFontMax);
+}
+
+HFONT GetNpcDialogBodyFont()
 {
     static HFONT s_font = nullptr;
-    if (!s_font) {
-        s_font = CreateFontA(-13, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+    static int s_fontPixelSize = 0;
+    const int desiredPixelSize = GetNpcDialogBodyFontPixelSize();
+    if (!s_font || s_fontPixelSize != desiredPixelSize) {
+        if (s_font) {
+            DeleteObject(s_font);
+            s_font = nullptr;
+        }
+        s_font = CreateFontA(-desiredPixelSize, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
             DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
             NONANTIALIASED_QUALITY, DEFAULT_PITCH | FF_DONTCARE, "MS Sans Serif");
+        s_fontPixelSize = desiredPixelSize;
+    }
+    return s_font;
+}
+
+HFONT GetNpcDialogHeaderFont()
+{
+    static HFONT s_font = nullptr;
+    static int s_fontPixelSize = 0;
+    const int desiredPixelSize = std::clamp(GetNpcDialogBodyFontPixelSize() + 2, 13, 40);
+    if (!s_font || s_fontPixelSize != desiredPixelSize) {
+        if (s_font) {
+            DeleteObject(s_font);
+            s_font = nullptr;
+        }
+        s_font = CreateFontA(-desiredPixelSize, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
+            DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+            NONANTIALIASED_QUALITY, DEFAULT_PITCH | FF_DONTCARE, "MS Sans Serif");
+        s_fontPixelSize = desiredPixelSize;
     }
     return s_font;
 }
@@ -254,6 +297,16 @@ bool UISayDialogWnd::GetActionRectForQt(RECT* outRect) const
     return true;
 }
 
+int UISayDialogWnd::GetScrollOffset() const
+{
+    return m_scrollOffset;
+}
+
+int UISayDialogWnd::GetScrollContentHeight() const
+{
+    return m_scrollContentHeight;
+}
+
 RECT UISayDialogWnd::GetActionRect() const
 {
     return MakeRect(m_x + m_w - kPadding - kButtonWidth,
@@ -266,9 +319,9 @@ RECT UISayDialogWnd::GetTextRect() const
 {
     const int bottomInset = (m_actionButton == ActionButton::None) ? kPadding : (kPadding + kButtonHeight + 8);
     return MakeRect(m_x + kPadding,
-        m_y + kPadding,
+        m_y + kHeaderHeight + kPadding,
         m_w - kPadding * 2,
-        m_h - kPadding - bottomInset);
+        m_h - kHeaderHeight - kPadding - bottomInset);
 }
 
 bool UISayDialogWnd::IsPointInRect(const RECT& rect, int x, int y) const
@@ -292,6 +345,26 @@ void UISayDialogWnd::StopDragging()
     }
     m_isDragging = 0;
     StoreInfo();
+}
+
+void UISayDialogWnd::ClampScrollOffset()
+{
+    const int textRectHeight = static_cast<int>(GetTextRect().bottom - GetTextRect().top);
+    const int viewportHeight = m_scrollViewportHeight > 0
+        ? m_scrollViewportHeight
+        : (std::max)(0, textRectHeight);
+    const int maxScrollOffset = (std::max)(0, m_scrollContentHeight - viewportHeight);
+    m_scrollOffset = std::clamp(m_scrollOffset, 0, maxScrollOffset);
+}
+
+void UISayDialogWnd::AdjustScrollOffset(int delta)
+{
+    const int oldOffset = m_scrollOffset;
+    m_scrollOffset += delta;
+    ClampScrollOffset();
+    if (m_scrollOffset != oldOffset) {
+        Invalidate();
+    }
 }
 
 void UISayDialogWnd::DrawActionButton(HDC hdc, const RECT& rect) const
@@ -328,13 +401,29 @@ void UISayDialogWnd::OnDraw()
 
     RECT outer = MakeRect(m_x, m_y, m_w, m_h);
     RECT inner = MakeRect(m_x + kBorder, m_y + kBorder, m_w - 2 * kBorder, m_h - 2 * kBorder);
-    FillRoundedRect(hdc, outer, RGB(130, 130, 130), RGB(130, 130, 130), kCornerRadius);
-    FillRoundedRect(hdc, inner, RGB(248, 248, 248), RGB(224, 224, 224), kCornerRadius - 2);
+    RECT header = MakeRect(m_x + kBorder, m_y + kBorder, m_w - 2 * kBorder, kHeaderHeight);
+    RECT body = MakeRect(m_x + kBorder, m_y + kBorder + kHeaderHeight, m_w - 2 * kBorder, m_h - (kBorder * 2) - kHeaderHeight);
+    FillRoundedRect(hdc, outer, RGB(42, 39, 36), RGB(20, 18, 16), kCornerRadius);
+    FillRoundedRect(hdc, inner, RGB(58, 55, 50), RGB(34, 31, 28), kCornerRadius - 2);
+    FillRoundedRect(hdc, body, RGB(46, 43, 39), RGB(38, 35, 31), kCornerRadius - 3);
+    FillRoundedRect(hdc, header, RGB(94, 87, 74), RGB(70, 63, 52), kCornerRadius - 3);
 
-    HFONT oldFont = static_cast<HFONT>(SelectObject(hdc, GetNpcDialogFont()));
+    HFONT bodyFont = GetNpcDialogBodyFont();
+    HFONT oldFont = static_cast<HFONT>(SelectObject(hdc, bodyFont));
     RECT textRect = GetTextRect();
     SetBkMode(hdc, TRANSPARENT);
     DrawNpcSayDialogColoredText(hdc, textRect, BuildDisplayText());
+
+    RECT titleRect = MakeRect(m_x + kHeaderInnerPadding, m_y + kBorder + 2, m_w - (kHeaderInnerPadding * 2), kHeaderHeight - 4);
+    const char* titleText = "NPC";
+    HFONT oldBodyFont = static_cast<HFONT>(SelectObject(hdc, GetNpcDialogHeaderFont()));
+#if RO_ENABLE_QT6_UI
+    DrawDialogUiText(hdc, titleRect, titleText, RGB(255, 255, 255), Qt::AlignLeft | Qt::AlignVCenter);
+#else
+    SetTextColor(hdc, RGB(255, 255, 255));
+    DrawTextA(hdc, titleText, -1, &titleRect, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+#endif
+    SelectObject(hdc, oldBodyFont);
 
     if (m_actionButton != ActionButton::None) {
         DrawActionButton(hdc, GetActionRect());
@@ -352,6 +441,9 @@ void UISayDialogWnd::AppendText(u32 npcId, const std::string& text)
         m_clearOnNextText = false;
     }
     m_textLines.push_back(NormalizeDialogNewlines(text));
+    m_scrollOffset = 0;
+    m_scrollContentHeight = 0;
+    m_scrollViewportHeight = 0;
     SetShow(1);
     Invalidate();
 }
@@ -397,7 +489,28 @@ void UISayDialogWnd::HideConversation()
     m_clearOnNextText = false;
     m_hoverAction = false;
     m_pressAction = false;
+    m_scrollOffset = 0;
+    m_scrollContentHeight = 0;
+    m_scrollViewportHeight = 0;
     SetShow(0);
+}
+
+void UISayDialogWnd::SetScrollMetrics(int contentHeight, int viewportHeight)
+{
+    const int clampedHeight = (std::max)(0, contentHeight);
+    const int clampedViewportHeight = (std::max)(0, viewportHeight);
+    if (m_scrollContentHeight == clampedHeight && m_scrollViewportHeight == clampedViewportHeight) {
+        return;
+    }
+    m_scrollContentHeight = clampedHeight;
+    m_scrollViewportHeight = clampedViewportHeight;
+    ClampScrollOffset();
+    Invalidate();
+}
+
+void UISayDialogWnd::SetScrollContentHeight(int contentHeight)
+{
+    SetScrollMetrics(contentHeight, m_scrollViewportHeight);
 }
 
 std::string UISayDialogWnd::BuildDisplayText() const
@@ -433,6 +546,27 @@ bool UISayDialogWnd::HandleKeyDown(int virtualKey)
     }
 
     return true;
+}
+
+void UISayDialogWnd::OnWheel(int delta)
+{
+    if (m_show == 0 || m_scrollContentHeight <= 0) {
+        return;
+    }
+
+    const int textRectHeight = static_cast<int>(GetTextRect().bottom - GetTextRect().top);
+    const int viewportHeight = m_scrollViewportHeight > 0
+        ? m_scrollViewportHeight
+        : (std::max)(0, textRectHeight);
+    if (m_scrollContentHeight <= viewportHeight) {
+        return;
+    }
+
+    if (delta > 0) {
+        AdjustScrollOffset(-kScrollWheelStep);
+    } else if (delta < 0) {
+        AdjustScrollOffset(kScrollWheelStep);
+    }
 }
 
 void UISayDialogWnd::OnLBtnDown(int x, int y)

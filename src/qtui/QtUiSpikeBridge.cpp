@@ -15,6 +15,8 @@
 #include "session/Session.h"
 #include "skill/Skill.h"
 #include "ui/UiScale.h"
+#include "ui/TextScale.h"
+#include "QtUiState.h"
 #include "ui/UIEquipWnd.h"
 #include "ui/UILoginWnd.h"
 #include "ui/UIMakeCharWnd.h"
@@ -1616,6 +1618,20 @@ private:
         m_engine->addImageProvider(QStringLiteral("openmidgard"), new QtUiImageProvider());
         m_engine->rootContext()->setContextProperty(QStringLiteral("uiState"), m_stateAdapter->stateObject());
         m_engine->rootContext()->setContextProperty(QStringLiteral("Theme"), m_theme);
+
+        if (auto* uiStateObj = qobject_cast<QtUiState*>(m_stateAdapter->stateObject())) {
+            QObject::connect(uiStateObj, &QtUiState::textScaleCycleRequested,
+                uiStateObj, [uiStateObj](int direction) {
+                    const int current = GetConfiguredTextScalePercent();
+                    int next = current + (direction >= 0 ? kTextScaleStepPercent : -kTextScaleStepPercent);
+                    next = ClampTextScalePercent(next);
+                    if (next == current) {
+                        return;
+                    }
+                    SaveConfiguredTextScalePercent(next);
+                    uiStateObj->setTextScale(static_cast<double>(next) / 100.0);
+                });
+        }
 
         QQmlComponent component(m_engine, QUrl(QStringLiteral("qrc:/qtui/qml/GameOverlay.qml")));
         if (component.isError()) {

@@ -18,6 +18,7 @@
 #include "session/Session.h"
 #include "skill/Skill.h"
 #include "ui/UiScale.h"
+#include "ui/TextScale.h"
 #include "ui/UILoginWnd.h"
 #include "ui/UILoadingWnd.h"
 #include "ui/UIMakeCharWnd.h"
@@ -71,11 +72,16 @@
 #include "world/World.h"
 
 #include <QChar>
+#include <QAbstractTextDocumentLayout>
 #include <QFont>
 #include <QFontMetrics>
+#include <QTextDocument>
+#include <QTextOption>
 #include <QStringList>
 #include <QVariantMap>
 
+#include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <string>
 #include <vector>
@@ -125,6 +131,7 @@ void ClearGameplayUiState(QtUiState* state)
     state->setSayDialogVisible(false);
     state->setSayDialogGeometry(0, 0, 0, 0);
     state->setSayDialogText(QString());
+    state->setSayDialogScrollMetrics(0, 0);
     state->setSayDialogAction(false, QString(), false, false);
     state->setSayDialogActionButton(QVariantMap{});
 
@@ -420,6 +427,36 @@ QString NpcColorCodesToHtml(const std::string& value)
     }
     html += QStringLiteral("</span>");
     return html;
+}
+
+QFont BuildSayDialogFont(int pixelSize)
+{
+    QFont font(QStringLiteral("Segoe UI"));
+    font.setPixelSize(pixelSize);
+    font.setStyleStrategy(QFont::NoAntialias);
+    return font;
+}
+
+void ConfigureSayDialogDocument(QTextDocument& document, int width, const QString& text, int pixelSize)
+{
+    document.setDefaultFont(BuildSayDialogFont(pixelSize));
+    document.setDocumentMargin(0);
+    document.setTextWidth(width);
+    QTextOption option;
+    option.setWrapMode(QTextOption::WordWrap);
+    document.setDefaultTextOption(option);
+    document.setHtml(text);
+}
+
+int MeasureSayDialogContentHeight(const QString& text, int width, int pixelSize)
+{
+    if (width <= 0 || text.isEmpty()) {
+        return 0;
+    }
+
+    QTextDocument document;
+    ConfigureSayDialogDocument(document, width, text, pixelSize);
+    return static_cast<int>(std::ceil(document.documentLayout()->documentSize().height()));
 }
 
 QString ResolveShortcutSlotLabel(const SHORTCUT_SLOT* slot)
@@ -1241,19 +1278,63 @@ void PopulateSayDialogState(QtUiState* state)
         return;
     }
 
-    const UISayDialogWnd* const dialogWnd = g_windowMgr.m_sayDialogWnd;
+    UISayDialogWnd* const dialogWnd = g_windowMgr.m_sayDialogWnd;
     const bool visible = IsGameplayWindowVisible(state, dialogWnd);
     state->setSayDialogVisible(visible);
     if (!visible) {
         state->setSayDialogGeometry(0, 0, 0, 0);
+        state->setSayDialogTitle(QString());
         state->setSayDialogText(QString());
+        state->setSayDialogFontPixelSize(13);
+        state->setSayDialogScrollMetrics(0, 0);
         state->setSayDialogAction(false, QString(), false, false);
         state->setSayDialogActionButton(QVariantMap{});
         return;
     }
 
     state->setSayDialogGeometry(dialogWnd->m_x, dialogWnd->m_y, dialogWnd->m_w, dialogWnd->m_h);
-    state->setSayDialogText(NpcColorCodesToHtml(dialogWnd->GetDisplayText()));
+    const int baseFontPixelSize = g_windowMgr.m_chatWnd ? g_windowMgr.m_chatWnd->GetFontPixelSize() : 13;
+    state->setSayDialogFontPixelSize(baseFontPixelSize);
+
+    const std::string rawDialogText = dialogWnd->GetDisplayText();
+    QString dialogTitle = QStringLiteral("NPC");
+    QString dialogBody = ToQString(rawDialogText);
+    if (!dialogBody.isEmpty() && dialogBody.startsWith(QLatin1Char('['))) {
+        const int closeIndex = dialogBody.indexOf(QLatin1Char(']'));
+        if (closeIndex > 1) {
+            dialogTitle = dialogBody.mid(1, closeIndex - 1).trimmed();
+            int bodyStart = closeIndex + 1;
+            while (bodyStart < dialogBody.size()
+                && (dialogBody.at(bodyStart) == QLatin1Char(' ')
+                    || dialogBody.at(bodyStart) == QLatin1Char('\n')
+                    || dialogBody.at(bodyStart) == QLatin1Char('\r'))) {
+                ++bodyStart;
+            }
+            dialogBody = dialogBody.mid(bodyStart);
+            if (dialogTitle.isEmpty()) {
+                dialogTitle = QStringLiteral("NPC");
+            }
+        }
+    }
+    state->setSayDialogTitle(dialogTitle);
+    state->setSayDialogText(dialogBody);
+
+    const double textScale = GetConfiguredTextScaleFactor();
+    const int bodyFontPixelSize = (std::max)(1, static_cast<int>(std::lround(static_cast<double>(baseFontPixelSize) * textScale)));
+    const int headerFontPixelSize = (std::max)(13, static_cast<int>(std::lround(static_cast<double>((std::max)(13, baseFontPixelSize + 3)) * textScale)));
+    const int headerHeight = (std::max)(24, headerFontPixelSize + 10);
+    const int bodyHeight = (std::max)(24, dialogWnd->m_h - headerHeight - (dialogWnd->HasActionButton() ? 38 : 16));
+    const int viewportHeight = (std::max)(0, bodyHeight - 16);
+    const int bodyTextWidth = (std::max)(0, dialogWnd->m_w - 40);
+    const int scrollBarReserve = 12;
+
+    const QString dialogHtml = NpcColorCodesToHtml(dialogBody.toStdString());
+    const int contentHeight = (std::max)(
+        MeasureSayDialogContentHeight(dialogHtml, bodyTextWidth, bodyFontPixelSize),
+        MeasureSayDialogContentHeight(dialogHtml, (std::max)(0, bodyTextWidth - scrollBarReserve), bodyFontPixelSize));
+    dialogWnd->SetScrollMetrics(contentHeight, viewportHeight);
+    state->setSayDialogScrollMetrics(dialogWnd->GetScrollOffset(), contentHeight);
+
     state->setSayDialogAction(
         dialogWnd->HasActionButton(),
         dialogWnd->IsNextAction() ? QStringLiteral("Next") : QStringLiteral("Close"),
@@ -1586,6 +1667,7 @@ void PopulateShortCutState(QtUiState* state)
         QVariantMap slotEntry;
         slotEntry.insert(QStringLiteral("index"), slotIndex);
         slotEntry.insert(QStringLiteral("hover"), shortCutWnd->GetHoverSlot() == slotIndex);
+        slotEntry.insert(QStringLiteral("keybindLabel"), QStringLiteral("F%1").arg(slotIndex + 1));
 
         const SHORTCUT_SLOT* slot = g_session.GetShortcutSlotByVisibleIndex(slotIndex);
         if (slot && slot->id != 0) {
@@ -3971,6 +4053,7 @@ bool QtUiStateAdapter::syncMenu(RenderBackendType activeBackend,
     m_state->setLoginStatus(loginStatus);
     m_state->setChatPreview(chatPreview);
     m_state->setUiScale(static_cast<double>(GetConfiguredUiScaleFactor()));
+    m_state->setTextScale(static_cast<double>(GetConfiguredTextScaleFactor()));
     m_state->setDebugOverlayData(BuildDebugOverlayData(
         backendName,
         modeName,
@@ -4013,6 +4096,7 @@ bool QtUiStateAdapter::syncGameplay(CGameMode& mode,
     m_state->setLoginStatus(loginStatus);
     m_state->setChatPreview(chatPreview);
     m_state->setUiScale(static_cast<double>(GetConfiguredUiScaleFactor()));
+    m_state->setTextScale(static_cast<double>(GetConfiguredTextScaleFactor()));
     m_state->setDebugOverlayData(BuildDebugOverlayData(
         backendName,
         modeName,

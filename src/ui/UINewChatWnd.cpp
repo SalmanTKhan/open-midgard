@@ -2,6 +2,7 @@
 
 #include "UIWindowMgr.h"
 #include "UiScale.h"
+#include "TextScale.h"
 #include "core/SettingsIni.h"
 #include "gamemode/GameMode.h"
 #include "gamemode/Mode.h"
@@ -184,6 +185,12 @@ struct ChatLayoutRects {
 int ClampChatFontPixelSize(int value)
 {
     return std::clamp(value, kChatFontSizeMin, kChatFontSizeMax);
+}
+
+int GetEffectiveChatFontPixelSize(int baseFontPixelSize)
+{
+    const int scaledPixelSize = static_cast<int>(std::lround(static_cast<double>(baseFontPixelSize) * GetConfiguredTextScaleFactor()));
+    return (std::max)(1, scaledPixelSize);
 }
 
 bool PointInRectXY(const RECT& rc, int x, int y)
@@ -1124,11 +1131,12 @@ void UINewChatWnd::RefreshVisibleLines(u32 nowTick)
         const int reservedScrollbarWidth = scrollState.visible ? (kChatScrollbarWidth + kChatScrollbarGap) : 0;
         const int textWidth = (layout.history.right - layout.history.left) - 8 - reservedScrollbarWidth;
         const int availableHeight = layout.history.bottom - layout.history.top - 8;
+        const int effectiveFontPixelSize = GetEffectiveChatFontPixelSize(m_fontPixelSize);
         const int endExclusive = (std::max)(0, static_cast<int>(filteredLines.size()) - m_scrollLineOffset);
         int usedHeight = 0;
         int firstVisibleIndex = endExclusive;
         for (int index = endExclusive - 1; index >= 0; --index) {
-            const int measured = MeasureWrappedTextHeight(filteredLines[static_cast<size_t>(index)]->text, textWidth, m_fontPixelSize);
+            const int measured = MeasureWrappedTextHeight(filteredLines[static_cast<size_t>(index)]->text, textWidth, effectiveFontPixelSize);
             const int blockHeight = measured + ((usedHeight > 0) ? kChatMessageGap : 0);
             if (usedHeight + blockHeight > availableHeight) {
                 break;

@@ -117,6 +117,7 @@ private:
         DragMode_Window,
         DragMode_BgmSlider,
         DragMode_SoundSlider,
+        DragMode_TextScaleSlider,
         DragMode_GuiScaleSlider,
     };
 
@@ -169,6 +170,7 @@ private:
     RECT GetShopRowHeightNextButtonRect() const;
     RECT GetBgmSliderRect() const;
     RECT GetSoundSliderRect() const;
+    RECT GetTextScaleSliderRect() const;
     RECT GetGuiScaleSliderRect() const;
     RECT GetAudioToggleRect(int toggleIndex) const;
     RECT GetGameToggleRect(int toggleIndex) const;
@@ -199,6 +201,7 @@ private:
     void CycleGraphicsSetting(GraphicsRowId rowId, int direction);
     std::string GetGraphicsRowValue(GraphicsRowId rowId) const;
     void SaveGraphicsPreferences() const;
+    void SetTextScalePercent(int percent);
     bool HasPendingUiScaleApply() const;
     void ApplyPendingUiScale();
     void DiscardPendingUiScale();
@@ -224,6 +227,7 @@ private:
     int m_soundVolume;
     int m_bgmEnabled;
     int m_soundEnabled;
+    int m_textScalePercent;
     int m_noCtrl;
     int m_attackSnap;
     int m_skillSnap;

@@ -509,24 +509,105 @@ Item {
         border.color: Theme.borderStrong
         visible: uiState.sayDialogVisible
 
+        readonly property string dialogTitle: uiState.sayDialogTitle || "NPC"
+        readonly property real textScale: Math.max(0.75, uiState.textScale || 1.0)
+        readonly property int bodyFontSize: Math.round((uiState.sayDialogFontPixelSize || 13) * textScale)
+        readonly property int headerFontSize: Math.round(Math.max(13, (uiState.sayDialogFontPixelSize || 13) + 3) * textScale)
+        readonly property int headerHeight: Math.max(24, headerFontSize + 10)
+        readonly property int actionButtonInset: 2
+
+        Rectangle {
+            x: 1
+            y: 1
+            width: parent.width - 2
+            height: parent.headerHeight
+            radius: 9
+            color: Theme.accent
+        }
+
         Text {
-            x: 10
-            y: 10
-            width: parent.width - 20
-            height: uiState.sayDialogHasAction ? (parent.height - 10 - 10 - 22 - 8) : (parent.height - 20)
-            text: uiState.sayDialogText
-            textFormat: Text.RichText
-            color: Theme.text
-            font.pixelSize: 12
-            wrapMode: Text.WordWrap
-            verticalAlignment: Text.AlignTop
+            x: 12
+            y: Math.max(2, (parent.headerHeight - parent.headerFontSize) / 2 - 1)
+            width: parent.width - 24
+            text: parent.dialogTitle
+            color: Theme.accentText
+            font.family: "Segoe UI"
+            font.pixelSize: parent.headerFontSize
+            font.bold: true
+            elide: Text.ElideRight
         }
 
         Rectangle {
-            x: (uiState.sayDialogActionButton.x || 0) - uiState.sayDialogX
-            y: (uiState.sayDialogActionButton.y || 0) - uiState.sayDialogY
-            width: uiState.sayDialogActionButton.width || 0
-            height: uiState.sayDialogActionButton.height || 0
+            x: 10
+            y: parent.headerHeight + 6
+            width: parent.width - 20
+            height: Math.max(24, parent.height - parent.headerHeight - (uiState.sayDialogHasAction ? 38 : 16))
+            radius: 8
+            color: Theme.surfaceAlt
+            border.width: 1
+            border.color: Theme.border
+            clip: true
+
+            readonly property int contentHeight: Math.max(0, uiState.sayDialogContentHeight || 0)
+            readonly property int viewportHeight: Math.max(0, height - 16)
+            readonly property int scrollOffset: Math.max(0, uiState.sayDialogScrollOffset || 0)
+            readonly property bool scrollBarVisible: contentHeight > viewportHeight
+            readonly property int scrollBarWidth: scrollBarVisible ? 8 : 0
+            readonly property int scrollBarGap: scrollBarVisible ? 4 : 0
+            readonly property int textWidth: Math.max(0, width - 20 - (scrollBarVisible ? (scrollBarWidth + scrollBarGap) : 0))
+
+            Item {
+                x: 10
+                y: 8
+                width: parent.width - 20
+                height: parent.height - 16
+                clip: true
+
+                Text {
+                    x: 0
+                    y: -parent.parent.scrollOffset
+                    width: parent.parent.textWidth
+                    text: root.roColorTextToRichText(uiState.sayDialogText, Theme.text)
+                    textFormat: Text.RichText
+                    color: Theme.text
+                    font.family: "Segoe UI"
+                    font.pixelSize: parent.parent.parent.bodyFontSize
+                    wrapMode: Text.WordWrap
+                    verticalAlignment: Text.AlignTop
+                }
+            }
+
+            Rectangle {
+                x: parent.width - scrollBarWidth - 4
+                y: 5
+                width: scrollBarWidth
+                height: parent.height - 10
+                visible: parent.scrollBarVisible
+                radius: 4
+                color: Theme.scrollTrack
+                border.width: 1
+                border.color: Theme.border
+
+                Rectangle {
+                    readonly property int contentHeight: Math.max(1, parent.parent.contentHeight)
+                    readonly property int thumbHeight: Math.max(18, Math.round(parent.height * parent.parent.viewportHeight / contentHeight))
+                    readonly property int maxTravel: Math.max(0, parent.height - thumbHeight)
+                    readonly property int scrollRange: Math.max(1, contentHeight - parent.parent.viewportHeight)
+                    x: 1
+                    y: Math.round(maxTravel * parent.parent.scrollOffset / scrollRange)
+                    width: parent.width - 2
+                    height: thumbHeight
+                    radius: 3
+                    color: Theme.scrollThumb
+                }
+            }
+        }
+
+        Rectangle {
+            x: (uiState.sayDialogActionButton.x || 0) - uiState.sayDialogX + parent.actionButtonInset
+            y: (uiState.sayDialogActionButton.y || 0) - uiState.sayDialogY + parent.actionButtonInset
+            width: Math.max(0, (uiState.sayDialogActionButton.width || 0) - (parent.actionButtonInset * 2))
+            height: Math.max(0, (uiState.sayDialogActionButton.height || 0) - (parent.actionButtonInset * 2))
             visible: uiState.sayDialogActionButton.visible || false
             radius: 4
             color: (uiState.sayDialogActionButton.pressed || false)
@@ -1283,6 +1364,19 @@ Item {
                 }
 
                 Text {
+                    anchors.left: parent.left
+                    anchors.leftMargin: 2
+                    anchors.top: parent.top
+                    anchors.topMargin: 1
+                    text: modelData.keybindLabel || ""
+                    color: Theme.accentText
+                    font.pixelSize: 8
+                    font.bold: true
+                    style: Text.Outline
+                    styleColor: "#000000"
+                }
+
+                Text {
                     anchors.right: parent.right
                     anchors.rightMargin: 2
                     anchors.bottom: parent.bottom
@@ -1947,7 +2041,7 @@ Item {
         readonly property bool scrollBarVisible: scrollBar.visible || false
         readonly property int scrollBarWidth: scrollBarVisible ? 8 : 0
         readonly property int scrollBarGap: scrollBarVisible ? 4 : 0
-        readonly property int chatFontSize: chatUi.fontPixelSize || 13
+        readonly property int chatFontSize: Math.round((chatUi.fontPixelSize || 13) * Math.max(0.75, uiState.textScale || 1.0))
         readonly property real chromeOpacity: root.chatChromeOpacity(chatUi)
         color: Theme.background
 
@@ -1962,7 +2056,7 @@ Item {
             x: 1
             y: 1
             width: parent.width - 2
-            height: 52
+            height: 50
             radius: 13
             color: Theme.surfaceAlt
             opacity: 0.55 + (0.15 * chatWindowChrome.chromeOpacity)
@@ -1971,8 +2065,8 @@ Item {
 
         Row {
             x: 10
-            y: 10
-            height: 34
+            y: 11
+            height: 30
             width: parent.width - 54
             spacing: 6
 
@@ -1982,7 +2076,7 @@ Item {
                 delegate: Rectangle {
                     required property var modelData
                     width: Math.max(68, Math.floor((parent.width - ((parent.spacing || 0) * Math.max(0, ((parent.parent.chatUi.tabs || []).length || 1) - 1))) / Math.max(1, ((parent.parent.chatUi.tabs || []).length || 1))))
-                    height: 34
+                    height: 30
                     radius: 10
                     color: modelData.active ? Theme.surface : Theme.surfaceAlt
                     border.width: 1
@@ -1993,7 +2087,7 @@ Item {
                         text: modelData.label
                         color: modelData.active ? Theme.text : Theme.textMuted
                         font.family: "Segoe UI"
-                        font.pixelSize: 13
+                        font.pixelSize: 12
                         font.bold: true
                     }
                 }
@@ -2002,9 +2096,9 @@ Item {
 
         Rectangle {
             x: parent.width - 34
-            y: 15
-            width: 24
-            height: 24
+            y: 16
+            width: 20
+            height: 20
             radius: 8
             color: parent.chatUi.configVisible ? Theme.buttonBgHover : Theme.buttonBg
             border.width: 1
@@ -2015,8 +2109,21 @@ Item {
                 text: "\u2699"
                 color: Theme.buttonText
                 font.family: "Segoe UI Symbol"
-                font.pixelSize: 15
+                font.pixelSize: 12
             }
+        }
+
+        Text {
+            x: parent.width - 54
+            y: 4
+            width: 14
+            height: 14
+            text: "\u2197"
+            color: Theme.textMuted
+            font.family: "Segoe UI Symbol"
+            font.pixelSize: 11
+            horizontalAlignment: Text.AlignHCenter
+            verticalAlignment: Text.AlignVCenter
         }
 
         Rectangle {
@@ -2025,9 +2132,9 @@ Item {
             width: parent.width - 20
             height: parent.height - 92
             radius: 12
-            color: Theme.inputBg
+            color: Theme.surfaceAlt
             border.width: 1
-            border.color: Theme.border
+            border.color: Theme.borderStrong
             clip: true
 
             readonly property int chatTextWidth: width - 10 - parent.scrollBarWidth - parent.scrollBarGap
@@ -2035,8 +2142,8 @@ Item {
             Rectangle {
                 anchors.fill: parent
                 radius: 12
-                color: Theme.surface
-                opacity: 0.12 + (0.08 * chatWindowChrome.chromeOpacity)
+                color: Qt.darker(Theme.background, 1.25)
+                opacity: 0.45 + (0.25 * chatWindowChrome.chromeOpacity)
             }
 
             Column {

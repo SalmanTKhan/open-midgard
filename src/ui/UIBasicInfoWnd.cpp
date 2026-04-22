@@ -790,7 +790,7 @@ bool UIBasicInfoWnd::GetQtMenuButtonDisplayForQt(int index, QtButtonDisplay* out
     }
 
     static const std::array<const char*, 8> kMenuLabels = {
-        "ST", "OP", "IT", "EQ", "SK", "MP", "CM", "FR"
+        "Status", "Options", "Items", "Equipment", "Skills", "Map", "Community", "Friends"
     };
 
     out->id = kMenuButtonIds[static_cast<size_t>(index)];

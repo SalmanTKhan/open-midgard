@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <cmath>
 #include <QObject>
 #include <QString>
@@ -18,6 +19,7 @@ class QtUiState : public QObject {
     Q_PROPERTY(QString chatPreview READ chatPreview NOTIFY chatPreviewChanged)
     Q_PROPERTY(QString lastInput READ lastInput NOTIFY lastInputChanged)
     Q_PROPERTY(double uiScale READ uiScale NOTIFY uiScaleChanged)
+    Q_PROPERTY(double textScale READ textScale NOTIFY textScaleChanged)
     Q_PROPERTY(QVariantMap debugOverlayData READ debugOverlayData NOTIFY debugOverlayDataChanged)
     Q_PROPERTY(QVariantMap cartPanelData READ cartPanelData NOTIFY cartPanelDataChanged)
     Q_PROPERTY(QVariantMap guildPanelData READ guildPanelData NOTIFY guildPanelDataChanged)
@@ -93,7 +95,11 @@ class QtUiState : public QObject {
     Q_PROPERTY(int sayDialogY READ sayDialogY NOTIFY sayDialogGeometryChanged)
     Q_PROPERTY(int sayDialogWidth READ sayDialogWidth NOTIFY sayDialogGeometryChanged)
     Q_PROPERTY(int sayDialogHeight READ sayDialogHeight NOTIFY sayDialogGeometryChanged)
+    Q_PROPERTY(QString sayDialogTitle READ sayDialogTitle NOTIFY sayDialogTitleChanged)
     Q_PROPERTY(QString sayDialogText READ sayDialogText NOTIFY sayDialogTextChanged)
+    Q_PROPERTY(int sayDialogFontPixelSize READ sayDialogFontPixelSize NOTIFY sayDialogFontPixelSizeChanged)
+    Q_PROPERTY(int sayDialogScrollOffset READ sayDialogScrollOffset NOTIFY sayDialogScrollChanged)
+    Q_PROPERTY(int sayDialogContentHeight READ sayDialogContentHeight NOTIFY sayDialogScrollChanged)
     Q_PROPERTY(bool sayDialogHasAction READ sayDialogHasAction NOTIFY sayDialogActionChanged)
     Q_PROPERTY(QString sayDialogActionLabel READ sayDialogActionLabel NOTIFY sayDialogActionChanged)
     Q_PROPERTY(bool sayDialogActionHovered READ sayDialogActionHovered NOTIFY sayDialogActionChanged)
@@ -311,6 +317,7 @@ public:
     const QString& chatPreview() const { return m_chatPreview; }
     const QString& lastInput() const { return m_lastInput; }
     double uiScale() const { return m_uiScale; }
+    double textScale() const { return m_textScale; }
     const QVariantMap& debugOverlayData() const { return m_debugOverlayData; }
     const QVariantMap& cartPanelData() const { return m_cartPanelData; }
     const QVariantMap& guildPanelData() const { return m_guildPanelData; }
@@ -386,7 +393,11 @@ public:
     int sayDialogY() const { return m_sayDialogY; }
     int sayDialogWidth() const { return m_sayDialogWidth; }
     int sayDialogHeight() const { return m_sayDialogHeight; }
+    const QString& sayDialogTitle() const { return m_sayDialogTitle; }
     const QString& sayDialogText() const { return m_sayDialogText; }
+    int sayDialogFontPixelSize() const { return m_sayDialogFontPixelSize; }
+    int sayDialogScrollOffset() const { return m_sayDialogScrollOffset; }
+    int sayDialogContentHeight() const { return m_sayDialogContentHeight; }
     bool sayDialogHasAction() const { return m_sayDialogHasAction; }
     const QString& sayDialogActionLabel() const { return m_sayDialogActionLabel; }
     bool sayDialogActionHovered() const { return m_sayDialogActionHovered; }
@@ -666,6 +677,19 @@ public:
         }
         m_uiScale = value;
         emit uiScaleChanged();
+    }
+
+    void setTextScale(double value) {
+        const double clamped = std::max(0.75, std::min(1.75, value));
+        if (std::abs(m_textScale - clamped) < 0.0001) {
+            return;
+        }
+        m_textScale = clamped;
+        emit textScaleChanged();
+    }
+
+    Q_INVOKABLE void cycleTextScale(int direction) {
+        emit textScaleCycleRequested(direction);
     }
 
     void setDebugOverlayData(const QVariantMap& value) {
@@ -1062,6 +1086,33 @@ public:
         }
         m_sayDialogText = value;
         emit sayDialogTextChanged();
+    }
+
+    void setSayDialogTitle(const QString& value) {
+        if (m_sayDialogTitle == value) {
+            return;
+        }
+        m_sayDialogTitle = value;
+        emit sayDialogTitleChanged();
+    }
+
+    void setSayDialogFontPixelSize(int value) {
+        if (m_sayDialogFontPixelSize == value) {
+            return;
+        }
+        m_sayDialogFontPixelSize = value;
+        emit sayDialogFontPixelSizeChanged();
+    }
+
+    void setSayDialogScrollMetrics(int scrollOffset, int contentHeight) {
+        const int clampedOffset = (std::max)(0, scrollOffset);
+        const int clampedHeight = (std::max)(0, contentHeight);
+        if (m_sayDialogScrollOffset == clampedOffset && m_sayDialogContentHeight == clampedHeight) {
+            return;
+        }
+        m_sayDialogScrollOffset = clampedOffset;
+        m_sayDialogContentHeight = clampedHeight;
+        emit sayDialogScrollChanged();
     }
 
     void setSayDialogAction(bool hasAction,
@@ -2065,6 +2116,8 @@ signals:
     void chatPreviewChanged();
     void lastInputChanged();
     void uiScaleChanged();
+    void textScaleChanged();
+    void textScaleCycleRequested(int direction);
     void debugOverlayDataChanged();
     void cartPanelDataChanged();
     void guildPanelDataChanged();
@@ -2110,7 +2163,10 @@ signals:
     void npcMenuOptionsChanged();
     void sayDialogVisibleChanged();
     void sayDialogGeometryChanged();
+    void sayDialogTitleChanged();
     void sayDialogTextChanged();
+    void sayDialogFontPixelSizeChanged();
+    void sayDialogScrollChanged();
     void sayDialogActionChanged();
     void npcInputVisibleChanged();
     void npcInputGeometryChanged();
@@ -2236,6 +2292,7 @@ private:
     QString m_chatPreview;
     QString m_lastInput;
     double m_uiScale = 1.0;
+    double m_textScale = 1.0;
     QVariantMap m_debugOverlayData;
     QVariantMap m_cartPanelData;
     QVariantMap m_guildPanelData;
@@ -2311,7 +2368,11 @@ private:
     int m_sayDialogY = 0;
     int m_sayDialogWidth = 0;
     int m_sayDialogHeight = 0;
+    QString m_sayDialogTitle;
     QString m_sayDialogText;
+    int m_sayDialogFontPixelSize = 13;
+    int m_sayDialogScrollOffset = 0;
+    int m_sayDialogContentHeight = 0;
     bool m_sayDialogHasAction = false;
     QString m_sayDialogActionLabel;
     bool m_sayDialogActionHovered = false;
