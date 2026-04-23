@@ -55,10 +55,11 @@ constexpr u16 kTickSend = 0x001A;
 constexpr u16 kWalkToXY = 0x0021;
 constexpr u16 kActionRequest = 0x0025;
 constexpr u16 kGlobalMessage = 0x0027;
-constexpr u16 kGetCharNameRequest = 0x002F;
-constexpr u16 kChangeDir = 0x0036;
-constexpr u16 kTakeItem = 0x003A;
-constexpr u16 kDropItem = 0x003D;
+    constexpr u16 kGetCharNameRequest = 0x002F;
+    constexpr u16 kWhisper = 0x0031;
+    constexpr u16 kChangeDir = 0x0036;
+    constexpr u16 kTakeItem = 0x003A;
+    constexpr u16 kDropItem = 0x003D;
 constexpr u16 kUseItem = 0x0042;
 constexpr u16 kEquipItem = 0x0044;
 constexpr u16 kUnequipItem = 0x0046;
@@ -100,15 +101,24 @@ constexpr u16 kDeleteCharacter = PacketVer23LoginChain::kDeleteCharacter;
 constexpr u16 kNotifyError = PacketVer23LoginChain::kNotifyError;
 }
 
-namespace LegacyMapServerSend {
+namespace PacketVer300MapServerSend {
 constexpr u16 kWantToConnection = 0x0072;
 constexpr u16 kNotifyActorInit = 0x007D;
 constexpr u16 kTickSend = 0x007E;
 constexpr u16 kWalkToXY = 0x0085;
-constexpr u16 kGetCharNameRequest = 0x0094;
-constexpr u16 kWhisper = 0x0096;
-constexpr u16 kGlobalMessage = 0x008C;
+constexpr u16 kActionRequest = 0x0089;
+constexpr u16 kGlobalMessage = 0x008B;
+    constexpr u16 kGetCharNameRequest = 0x0093;
+    constexpr u16 kWhisper = 0x0095;
+    constexpr u16 kChangeDir = 0x009A;
+    constexpr u16 kTakeItem = 0x009E;
+    constexpr u16 kDropItem = 0x00A1;
+constexpr u16 kUseItem = 0x00A6;
+constexpr u16 kEquipItem = 0x00A8;
+constexpr u16 kUnequipItem = 0x00AA;
 constexpr u16 kSkillUp = 0x0112;
+constexpr u16 kUseSkillToId = 0x0113;
+constexpr u16 kUseSkillToPos = 0x0116;
 }
 
 namespace PacketVer22MapServerSend {
@@ -164,6 +174,17 @@ constexpr u16 kGetCharNameRequest = 0x008C;
 constexpr u16 kWhisper = 0x0096;
 constexpr u16 kGlobalMessage = 0x00F3;
 constexpr u16 kNotifyActorInit = 0x007D;
+}
+
+namespace LegacyMapServerSend {
+constexpr u16 kWantToConnection = EarlyMapServerSend::kWantToConnection;
+constexpr u16 kSkillUp = PacketVer22MapServerSend::kSkillUp;
+constexpr u16 kWalkToXY = PacketVer22MapServerSend::kWalkToXY;
+constexpr u16 kTickSend = PacketVer22MapServerSend::kTickSend;
+constexpr u16 kNotifyActorInit = PacketVer22MapServerSend::kNotifyActorInit;
+constexpr u16 kGetCharNameRequest = PacketVer22MapServerSend::kGetCharNameRequest;
+constexpr u16 kWhisper = PacketVer22MapServerSend::kWhisper;
+constexpr u16 kGlobalMessage = PacketVer22MapServerSend::kGlobalMessage;
 }
 
 namespace ActiveMapServerSend {
@@ -281,9 +302,34 @@ inline u16 GetNpcNextClickOpcode()
     return 0x00B9;
 }
 
+// CZ_RESTART opcode varies per Sabine packet table:
+//   Alpha:  0x004D
+//   Beta1:  0x004E (0x004D is reused for ZC_LONGPAR_CHANGE)
+//   Beta2+: 0x00B2
+// Sending 0x00B2 unconditionally is silently rejected by older servers because
+// that opcode maps to a completely unrelated CZ_USE_SKILL_TOGROUND packet there.
+inline u16 GetRestartOpcode()
+{
+    if (UsesAlphaMapServerSendProfile()) {
+        return 0x004D;
+    }
+    if (UsesEarlyMapServerSendProfile()) {
+        return 0x004E;
+    }
+    return 0x00B2;
+}
+
 inline u16 GetTakeItemOpcode()
 {
     return UsesEarlyMapServerSendProfile() ? EarlyMapServerSend::kTakeItem : ActiveMapServerSend::kTakeItem;
+}
+
+// Alpha/Beta1 quit opcode is CZ_REQUEST_QUIT (0x001E, 2 bytes). Sabine's packet
+// table has no entry for the modern 0x018A, so sending it crashes its framer.
+constexpr u16 kEarlyQuitGame = 0x001E;
+inline u16 GetQuitGameOpcode()
+{
+    return UsesEarlyMapServerSendProfile() ? kEarlyQuitGame : static_cast<u16>(PACKETID_CZ_QUITGAME);
 }
 
 inline u16 GetDropItemOpcode()
@@ -408,16 +454,16 @@ inline const char* GetOpcodeName(u16 packetId)
     case 0x0054: return UsesEarlyMapServerSendProfile() && !UsesAlphaMapServerSendProfile() ? "CZ_CHOOSE_MENU" : "CZ_REQ_NEXT_SCRIPT";
     case 0x0055: return UsesEarlyMapServerSendProfile() && !UsesAlphaMapServerSendProfile() ? "CZ_REQ_NEXT_SCRIPT" : "CZ_REQ_STATUS";
     case 0x0056: return UsesEarlyMapServerSendProfile() && !UsesAlphaMapServerSendProfile() ? "CZ_REQ_STATUS" : "CZ_STATUS_CHANGE";
-    case 0x0057: return UsesEarlyMapServerSendProfile() && !UsesAlphaMapServerSendProfile() ? "CZ_STATUS_CHANGE" : "ZC_STATUS_CHANGE_ACK";
-    case 0x0058: return UsesEarlyMapServerSendProfile() && !UsesAlphaMapServerSendProfile() ? "ZC_STATUS_CHANGE_ACK" : "ZC_STATUS";
-    case 0x0059: return UsesEarlyMapServerSendProfile() && !UsesAlphaMapServerSendProfile() ? "ZC_STATUS" : "ZC_STATUS_CHANGE";
-    case 0x005A: return UsesEarlyMapServerSendProfile() && !UsesAlphaMapServerSendProfile() ? "ZC_STATUS_CHANGE" : "CZ_REQ_EMOTION";
-    case 0x005B: return UsesEarlyMapServerSendProfile() && !UsesAlphaMapServerSendProfile() ? "CZ_REQ_EMOTION" : "ZC_EMOTION";
-    case 0x005C: return UsesEarlyMapServerSendProfile() && !UsesAlphaMapServerSendProfile() ? "ZC_EMOTION" : "CZ_REQ_USER_COUNT";
-    case 0x005D: return UsesEarlyMapServerSendProfile() && !UsesAlphaMapServerSendProfile() ? "CZ_REQ_USER_COUNT" : "ZC_USER_COUNT";
-    case 0x005E: return UsesEarlyMapServerSendProfile() && !UsesAlphaMapServerSendProfile() ? "ZC_USER_COUNT" : "ZC_SPRITE_CHANGE";
-    case 0x005F: return UsesEarlyMapServerSendProfile() && !UsesAlphaMapServerSendProfile() ? "ZC_SPRITE_CHANGE" : "ZC_SELECT_DEALTYPE";
-    case 0x0060: return UsesEarlyMapServerSendProfile() && !UsesAlphaMapServerSendProfile() ? "ZC_SELECT_DEALTYPE" : "CZ_ACK_SELECT_DEALTYPE";
+    case 0x0057: return "ZC_STATUS_CHANGE_ACK";
+    case 0x0058: return "ZC_STATUS";
+    case 0x0059: return "ZC_STATUS_CHANGE";
+    case 0x005A: return "CZ_REQ_EMOTION";
+    case 0x005B: return "ZC_EMOTION";
+    case 0x005C: return "CZ_REQ_USER_COUNT";
+    case 0x005D: return "ZC_USER_COUNT";
+    case 0x005E: return "ZC_SPRITE_CHANGE";
+    case 0x005F: return "ZC_SELECT_DEALTYPE";
+    case 0x0060: return "CZ_ACK_SELECT_DEALTYPE";
     case 0x0085: return "CZ_CHANGE_DIRECTION";
     case 0x0089: return "CZ_REQUEST_TIME";
     case 0x008C: return "CZ_REQNAME";
@@ -697,6 +743,11 @@ struct PACKET_CZ_CHANGE_DIRECTION2 {
 struct PACKET_CZ_CHANGE_DIRECTION_LEGACY {
     u16 PacketType;    // 0x009B for legacy packet_ver 5 family
     u16 HeadDir;
+    u8  Dir;
+};
+
+struct PACKET_CZ_CHANGE_DIRECTION_BETA1 {
+    u16 PacketType;    // 0x0036 for packet_ver 200/100 family
     u8  Dir;
 };
 
@@ -1057,6 +1108,7 @@ static_assert(sizeof(PACKET_CZ_REQUEST_MOVE2) == 8, "PACKET_CZ_REQUEST_MOVE2 siz
 static_assert(sizeof(PACKET_CZ_REQUEST_MOVE_LEGACY) == 5, "PACKET_CZ_REQUEST_MOVE_LEGACY size mismatch");
 static_assert(sizeof(PACKET_CZ_CHANGE_DIRECTION2) == 11, "PACKET_CZ_CHANGE_DIRECTION2 size mismatch");
 static_assert(sizeof(PACKET_CZ_CHANGE_DIRECTION_LEGACY) == 5, "PACKET_CZ_CHANGE_DIRECTION_LEGACY size mismatch");
+static_assert(sizeof(PACKET_CZ_CHANGE_DIRECTION_BETA1) == 3, "PACKET_CZ_CHANGE_DIRECTION_BETA1 size mismatch");
 static_assert(sizeof(PACKET_CZ_REQNAME2) == 11, "PACKET_CZ_REQNAME2 size mismatch");
 static_assert(sizeof(PACKET_CZ_REQNAME_LEGACY) == 6, "PACKET_CZ_REQNAME_LEGACY size mismatch");
 static_assert(sizeof(PACKET_CZ_ACTION_REQUEST_PACKETVER22) == 19, "PACKET_CZ_ACTION_REQUEST_PACKETVER22 size mismatch");

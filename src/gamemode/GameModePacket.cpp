@@ -127,7 +127,7 @@ void SendActorNameRequestIfNeeded(CGameMode& mode, u32 gid)
     }
 
     bool sent = false;
-    if (ro::net::IsLegacyMapGameplaySendProfile()) {
+    if (ro::net::IsPacketVer200MapGameplaySendProfile() || ro::net::IsLegacyMapGameplaySendProfile()) {
         PACKET_CZ_REQNAME_LEGACY packet{};
         packet.PacketType = profile.getCharNameRequest;
         packet.GID = gid;
@@ -915,6 +915,20 @@ void HandleIgnorePacket(CGameMode&, const PacketView&)
 {
 }
 
+void HandleRestartAck(CGameMode& mode, const PacketView& packet)
+{
+    if (!packet.data || packet.packetLength < 3) {
+        return;
+    }
+    const u8 type = packet.data[2];
+    DbgLog("[GameMode] ZC_RESTART_ACK type=%u (0=respawn, 1=charSelect)\n",
+        static_cast<unsigned int>(type));
+    if (type == 0) {
+        mode.m_isPlayerDead = 0;
+        mode.m_isOnQuest = 0;
+    }
+}
+
 void ApplySelfStatusIconPacket(int statusType, u32 actorId, bool active, u32 remainingMs)
 {
     const bool matchesLocalPlayer = actorId != 0
@@ -1440,6 +1454,11 @@ void HandleAttackFailureForDistance(CGameMode& mode, const PacketView& packet)
     mode.m_attackChaseSourceCellY = sourceY;
     mode.m_attackChaseRange = attackRange;
     mode.m_hasAttackChaseHint = 1;
+
+    // [DBG-attack-desync] Server rejected attack for distance; these tiles are authoritative.
+    DbgLog("[DBG-attack-desync] hint-from-server tgt=%u srvSrc=%d,%d srvTgt=%d,%d range=%d sess=%d,%d\n",
+        targetGid, sourceX, sourceY, targetX, targetY, attackRange,
+        g_session.m_playerPosX, g_session.m_playerPosY);
 }
 
 u16 ClampToU16(u32 value)
@@ -3175,19 +3194,8 @@ void UpdateStatusSummaryFromPacket00BD(CGameMode& mode, const PacketView& packet
     InvalidateStatusWindows();
 }
 
-void HandleSelfStatusParam(CGameMode& mode, const PacketView& packet)
+void HandleSelfStatusParamCore(CGameMode& mode, u32 statusType, u32 value)
 {
-    if (!packet.data || packet.packetLength < 8) {
-        return;
-    }
-
-    const u32 statusType = static_cast<u32>(packet.data[2])
-        | (static_cast<u32>(packet.data[3]) << 8);
-    const u32 value = static_cast<u32>(packet.data[4])
-        | (static_cast<u32>(packet.data[5]) << 8)
-        | (static_cast<u32>(packet.data[6]) << 16)
-        | (static_cast<u32>(packet.data[7]) << 24);
-
     u32 previousValue = 0;
     bool hadPreviousValue = false;
     if (statusType == kStatusBaseLevel || statusType == kStatusJobLevel) {
@@ -3250,6 +3258,36 @@ void HandleSelfStatusParam(CGameMode& mode, const PacketView& packet)
             }
         }
     }
+}
+
+void HandleSelfStatusParam(CGameMode& mode, const PacketView& packet)
+{
+    if (!packet.data || packet.packetLength < 8) {
+        return;
+    }
+
+    const u32 statusType = static_cast<u32>(packet.data[2])
+        | (static_cast<u32>(packet.data[3]) << 8);
+    const u32 value = static_cast<u32>(packet.data[4])
+        | (static_cast<u32>(packet.data[5]) << 8)
+        | (static_cast<u32>(packet.data[6]) << 16)
+        | (static_cast<u32>(packet.data[7]) << 24);
+
+    HandleSelfStatusParamCore(mode, statusType, value);
+}
+
+void HandleSelfStatusParamLegacy(CGameMode& mode, const PacketView& packet)
+{
+    if (!packet.data || packet.packetLength < 6) {
+        return;
+    }
+
+    const u32 statusType = static_cast<u32>(packet.data[2])
+        | (static_cast<u32>(packet.data[3]) << 8);
+    const u32 value = static_cast<u32>(packet.data[4])
+        | (static_cast<u32>(packet.data[5]) << 8);
+
+    HandleSelfStatusParamCore(mode, statusType, value);
 }
 
 void HandleSelfStatInfo(CGameMode& mode, const PacketView& packet)
@@ -4826,7 +4864,9 @@ void HandleActorActionNotify(CGameMode& mode, const PacketView& packet)
     }
 
     const bool isNotifyAct2 = ro::net::IsActiveActorActionNotifyExtendedPacket(packet.packetId);
-    const size_t minLength = isNotifyAct2 ? 33u : 29u;
+    // Non-extended minimum is 27 (Beta1/Alpha layout, no leftDamage field).
+    // Modern eAthena adds leftDamage at +27 making it 29 bytes; PV23 extended is 33.
+    const size_t minLength = isNotifyAct2 ? 33u : 27u;
     if (packet.packetLength < minLength) {
         return;
     }
@@ -4843,9 +4883,12 @@ void HandleActorActionNotify(CGameMode& mode, const PacketView& packet)
         ? ReadLE16(packet.data + 26)
         : ReadLE16(packet.data + 24);
     const u8 actionType = packet.data[isNotifyAct2 ? 28 : 26];
+    // leftDamage is only present in modern (>= 29 bytes) and extended packets.
     const int leftDamage = isNotifyAct2
         ? static_cast<int>(ReadLE32(packet.data + 29))
-        : static_cast<int>(static_cast<int16_t>(ReadLE16(packet.data + 27)));
+        : (packet.packetLength >= 29u
+            ? static_cast<int>(static_cast<int16_t>(ReadLE16(packet.data + 27)))
+            : 0);
 
     if (attackMT == 0) {
         attackMT = kDefaultAttackMotionTime;
@@ -4878,6 +4921,19 @@ void HandleActorActionNotify(CGameMode& mode, const PacketView& packet)
         : nullptr;
     if (!sourceActor) {
         return;
+    }
+
+    // [DBG-hit-anim] Target resolution + force-state snapshot for missing-hurt-animation bug.
+    if (dstGid != 0 && IsAttackNotifyType(actionType)) {
+        DbgLog("[DBG-hit-anim] notify src=%u dst=%u tgtResolved=%d tgtPc=%d tgtIsPlayer=%d forceSt=%d,%d,%d stateId=%d\n",
+            srcGid, dstGid,
+            targetActor ? 1 : 0,
+            targetActor ? targetActor->m_isPc : -1,
+            (mode.m_world && targetActor == static_cast<CGameActor*>(mode.m_world->m_player)) ? 1 : 0,
+            targetActor ? targetActor->m_isForceState : -1,
+            targetActor ? targetActor->m_isForceState2 : -1,
+            targetActor ? targetActor->m_isForceState3 : -1,
+            targetActor ? targetActor->m_stateId : -1);
     }
 
     DbgLog("[GameMode] act notify stage=resolved src=%u dst=%u srcPtr=%p dstPtr=%p srcPc=%d dstPc=%d srcLocal=%d srcCPc=%d dstCPc=%d\n",
@@ -6552,6 +6608,25 @@ void SeedMoveOnlyRemotePcAppearance(CGameActor* actor)
     pcActor->m_accessory3 = 0;
 }
 
+// Reverse-map a Beta1/Alpha compressed monster display class ID to the modern
+// monster ID used by the rest of the client (IsMonsterLikeJob, sprite resolution, etc.).
+// Leaves NPC/player class IDs unchanged.
+static int UnpackEarlyMonsterDisplayId(int displayId, ro::net::PacketVersionId profileId)
+{
+    if (profileId == ro::net::PacketVersionId::PacketVer200) {
+        // Beta1: monsters 1001-1087 compressed to display IDs 103-189 (monsterId - 898)
+        if (displayId >= 103 && displayId <= 189) {
+            return displayId + 898;
+        }
+    } else if (profileId == ro::net::PacketVersionId::PacketVer100) {
+        // Alpha: monsters 1001-1046 compressed to display IDs 65-110 (monsterId - 936)
+        if (displayId >= 65 && displayId <= 110) {
+            return displayId + 936;
+        }
+    }
+    return displayId;
+}
+
 bool DecodeActorIdleOrSpawnPacket(const PacketView& packet, RuntimeActorState& outState)
 {
     if (!packet.data) {
@@ -6559,6 +6634,57 @@ bool DecodeActorIdleOrSpawnPacket(const PacketView& packet, RuntimeActorState& o
     }
 
     const ro::net::MapReceiveProfile& receiveProfile = ro::net::GetActiveMapReceiveProfile();
+
+    if (receiveProfile.id == ro::net::PacketVersionId::PacketVer200) {
+        if (packet.packetId == receiveProfile.actorSpawnLegacyNpc) {
+            if (packet.packetLength < 25u) {
+                LogActorPacketSample("short beta1 npc spawn packet", packet);
+                return false;
+            }
+
+            outState = {};
+            outState.packetId = packet.packetId;
+            outState.objectType = 0; // Not strictly object type in beta1, but handled by GID
+            outState.gid = ReadLE32(packet.data + 2);
+            outState.speed = ReadLE16(packet.data + 6);
+            outState.bodyState = ReadLE16(packet.data + 8);
+            outState.healthState = ReadLE16(packet.data + 10);
+            outState.effectState = ReadLE16(packet.data + 12);
+            outState.job = UnpackEarlyMonsterDisplayId(packet.data[15], receiveProfile.id);
+            outState.sex = packet.data[16];
+            DecodePosDir(packet.data + 17, outState.tileX, outState.tileY, outState.dir);
+            outState.hasPosition = true;
+            outState.positionIsFixed = true;
+            outState.hairStyle = packet.data[22];
+            outState.weapon = packet.data[23];
+            outState.headTop = packet.data[24];
+            return true;
+        }
+        else if (packet.packetId == receiveProfile.actorSpawnLegacyIdle || packet.packetId == receiveProfile.actorSpawnLegacySpawn) {
+            if (packet.packetLength < 26u) {
+                LogActorPacketSample("short beta1 player idle/spawn packet", packet);
+                return false;
+            }
+
+            outState = {};
+            outState.packetId = packet.packetId;
+            outState.objectType = 0;
+            outState.gid = ReadLE32(packet.data + 2);
+            outState.speed = ReadLE16(packet.data + 6);
+            outState.bodyState = ReadLE16(packet.data + 8);
+            outState.healthState = ReadLE16(packet.data + 10);
+            outState.effectState = ReadLE16(packet.data + 12);
+            outState.job = UnpackEarlyMonsterDisplayId(packet.data[15], receiveProfile.id);
+            outState.sex = packet.data[16];
+            DecodePosDir(packet.data + 17, outState.tileX, outState.tileY, outState.dir);
+            outState.hasPosition = true;
+            outState.positionIsFixed = true;
+            outState.hairStyle = packet.data[22];
+            outState.weapon = packet.data[23];
+            outState.headTop = packet.data[24];
+            return true;
+        }
+    }
 
     if (packet.packetId == receiveProfile.actorSpawnLegacyNpc) {
         if (packet.packetLength < 42u) {
@@ -8545,6 +8671,10 @@ void HandleActorSetPosition(CGameMode& mode, const PacketView& packet)
     mode.m_aidList[gid] = GetTickCount();
     mode.m_actorPosList[gid] = CellPos{x, y};
     if (IsLocalPlayerActor(mode, gid)) {
+        // [DBG-attack-desync] Server-forced position "snap" for local player.
+        DbgLog("[DBG-attack-desync] SNAP 0x0088 local gid=%u from=%d,%d to=%d,%d wasMoving=%d\n",
+            gid, g_session.m_playerPosX, g_session.m_playerPosY, x, y,
+            (mode.m_world && mode.m_world->m_player) ? mode.m_world->m_player->m_isMoving : -1);
         g_session.SetPlayerPosDir(x, y, g_session.m_playerDir);
         mode.m_attackChaseSourceCellX = x;
         mode.m_attackChaseSourceCellY = y;
@@ -8589,6 +8719,11 @@ void HandleActorVanish(CGameMode& mode, const PacketView& packet)
             if (IsLocalPlayerActor(mode, gid)) {
                 mode.m_isOnQuest = 1;
                 mode.m_isPlayerDead = 1;
+                mode.m_lastLockOnMonGid = 0;
+                mode.m_lastAttackRequestTick = 0;
+                if (UIWindow* chooseWnd = g_windowMgr.MakeWindow(UIWindowMgr::WID_CHOOSEWND)) {
+                    chooseWnd->SetShow(1);
+                }
             }
 
             DbgLog("[GameMode] death vanish gid=%u self=%d despawnAt=%u\n",
@@ -8843,7 +8978,23 @@ void HandleActorNameAck(CGameMode& mode, const PacketView& packet)
     }
 
     const u32 gid = ReadLE32(packet.data + 2);
-    std::string name = ExtractFixedPacketString(packet, 6, 24);
+
+    // In Alpha/Beta1 the packet prepends a 24-byte secName field (originally
+    // used for account display; also carries monster HP in later Sabine builds)
+    // before the actual character name.  Modern eAthena (>= Beta2) drops it.
+    //   Alpha/Beta1: [secName 24] [targetName 24]  — name starts at offset 30
+    //   PV23+:       [targetName 24] ...            — name starts at offset 6
+    const auto& rp = ro::net::GetActiveMapReceiveProfile();
+    const bool hasSecNamePrefix = (rp.id == ro::net::PacketVersionId::PacketVer200
+        || rp.id == ro::net::PacketVersionId::PacketVer100);
+    const size_t nameOffset = hasSecNamePrefix ? 30u : 6u;
+    const size_t nameSize   = 24u;
+
+    if (packet.packetLength < nameOffset + nameSize) {
+        return;
+    }
+
+    std::string name = ExtractFixedPacketString(packet, nameOffset, nameSize);
     if (gid == 0 || name.empty()) {
         return;
     }
@@ -9003,7 +9154,7 @@ void RegisterDefaultGameModePacketHandlers(CGameModePacketRouter& router)
     RegisterHandlerIfValid(router, receiveProfile.actorMoveLegacy, HandleActorMoveSkeleton);
     router.Register(0x0080, HandleActorVanish);
     router.Register(0x0086, HandleActorMoveUpdate);
-    router.Register(0x0087, HandleSelfMoveAck);
+    RegisterHandlerIfValid(router, receiveProfile.selfMoveAck, HandleSelfMoveAck);
     RegisterHandlerIfValid(router, receiveProfile.actorActionNotifyBasic, HandleActorActionNotify);
     RegisterHandlerIfValid(router, receiveProfile.actorSetPositionBasic, HandleActorSetPosition);
     RegisterHandlerIfValid(router, receiveProfile.actorSetPositionHighJump, HandleActorSetPosition);
@@ -9198,6 +9349,67 @@ void RegisterDefaultGameModePacketHandlers(CGameModePacketRouter& router)
     RegisterHandlerIfValid(router, receiveProfile.actorMoveVariableRobe, HandleActorMoveSkeleton);
     RegisterHandlerIfValid(router, receiveProfile.actorSpawnVariableIdleRobe, HandleActorSpawnSkeleton);
     RegisterHandlerIfValid(router, receiveProfile.actorSpawnVariableSpawnRobe, HandleActorSpawnSkeleton);
+
+    // Sabine Beta1 handlers: all Alpha opcodes >= 0x0027 shift +1; opcodes in the
+    // 0x009C-0x00AA Alpha range shift +3 (see GronPacket.cpp ApplyPacketVer200Overrides).
+    // Opcodes already wired via MapReceiveProfile fields (actorSpawn*, actorMove*, etc.)
+    // are not repeated here — only extras not covered by a profile field.
+    if (receiveProfile.id == ro::net::PacketVersionId::PacketVer200) {
+        // --- Opcodes < 0x0027: unchanged from Alpha ---
+        router.Register(0x001C, HandleActorVanish);          // ZC_NOTIFY_VANISH        (alpha 0x001C)
+        router.Register(0x0022, HandleActorMoveSkeleton);    // ZC_NOTIFY_MOVE          (alpha 0x0022)
+        router.Register(0x0024, HandleIgnorePacket);         // ZC_STOPMOVE             (alpha 0x0024)
+
+        // --- Opcodes shifted +1 from Alpha (0x0027-0x009B → 0x0028-0x009C) ---
+        router.Register(0x0029, HandleNotifyChat);           // ZC_NOTIFY_CHAT          (alpha 0x0028)
+        router.Register(0x002A, HandleNotifyPlayerChat);     // ZC_NOTIFY_PLAYERCHAT    (alpha 0x0029)
+        router.Register(0x0034, HandleIgnorePacket);         // ZC_ACK_WHISPER          (alpha 0x0033)
+        router.Register(0x0038, HandleActorDirection);       // ZC_CHANGE_DIRECTION     (alpha 0x0037)
+        router.Register(0x003D, HandleGroundItemDisappear);  // ZC_ITEM_DISAPPEAR       (alpha 0x003C)
+        router.Register(0x0046, HandleIgnorePacket);         // ZC_REQ_WEAR_EQUIP_ACK   (alpha 0x0045)
+        router.Register(0x0048, HandleIgnorePacket);         // ZC_REQ_TAKEOFF_EQUIP_ACK(alpha 0x0047)
+        router.Register(0x004A, HandleIgnorePacket);         // ZC_REQ_ITEM_EXPL_ACK    (alpha 0x0048; var)
+
+        // Stat parameters — critical for HP/SP/weight display:
+        router.Register(0x004C, HandleSelfStatusParamLegacy); // ZC_PAR_CHANGE       (alpha 0x004B; 6 bytes)
+        router.Register(0x004D, HandleSelfStatusParam);       // ZC_LONGPAR_CHANGE   (alpha 0x004C; 8 bytes)
+
+        router.Register(0x004F, HandleRestartAck);           // ZC_RESTART_ACK          (alpha 0x004E)
+
+        // NPC dialog at Beta1 opcodes (alpha 0x004F-0x0052 → beta1 0x0050-0x0053):
+        router.Register(0x0050, HandleNpcDialogText);        // ZC_SAY_DIALOG           (alpha 0x004F; var)
+        router.Register(0x0051, HandleNpcDialogNext);        // ZC_WAIT_DIALOG          (alpha 0x0050)
+        router.Register(0x0052, HandleNpcDialogClose);       // ZC_CLOSE_DIALOG         (alpha 0x0051)
+        router.Register(0x0053, HandleNpcDialogMenu);        // ZC_MENU_LIST            (alpha 0x0052; var)
+
+        // Inventory: Beta1 uses string item names (not numeric IDs). The PV23
+        // BuildEquip/NormalInventoryItem parser would produce garbage — ignore until
+        // a Beta1-specific item parser is implemented.
+        router.Register(0x003F, HandleIgnorePacket);         // ZC_NORMAL_ITEMLIST       (alpha 0x003E; var)
+        router.Register(0x0040, HandleIgnorePacket);         // ZC_EQUIPMENT_ITEMLIST    (alpha 0x003F; var)
+
+        // Status summary — byte layout identical to PV23 ZC_STATUS (0x00BD), reuse handler:
+        router.Register(0x0058, HandleIgnorePacket);         // ZC_STATUS_CHANGE_ACK     (alpha 0x0057)
+        router.Register(0x0059, HandleInitialStatusSummary); // ZC_STATUS 44 bytes       (alpha 0x0058)
+
+        // Misc:
+        router.Register(0x005C, HandleIgnorePacket);         // ZC_EMOTION               (alpha 0x005B)
+        router.Register(0x005E, HandleIgnorePacket);         // ZC_USER_COUNT            (alpha 0x005D)
+        router.Register(0x005F, HandleActorSpriteChange);    // ZC_SPRITE_CHANGE         (alpha 0x005E)
+
+        // Skills (alpha 0x00A7-0x00A8 → beta1 0x00AA-0x00AB after +3 shift):
+        router.Register(0x00AA, HandleIgnorePacket);         // ZC_SKILLINFO_UPDATE      (alpha 0x00A7; 9 bytes)
+        router.Register(0x00AB, HandlePlayerSkillList);      // ZC_SKILLINFO_LIST        (alpha 0x00A8; var)
+
+        // Hardcoded PV23 handlers 0x00B5 (HandleNpcDialogNext) and 0x00B6
+        // (HandleNpcDialogClose) collide with Beta1's ZC_STATE_CHANGE and ZC_USE_SKILL.
+        // Re-register after those hardcoded lines to restore correct dispatch:
+        router.Register(0x00B5, HandleActorStateChange);     // ZC_STATE_CHANGE (beta1 new at 0x00B5)
+        router.Register(0x00B6, HandleSkillNoDamageNotify);  // ZC_USE_SKILL    (beta1 new at 0x00B6)
+
+        // Stream-alignment guard from live Beta1 capture:
+        router.Register(0x0502, HandleIgnorePacket);
+    }
 }
 
 void NoteLocalHideSkillRequest(u16 skillId, u32 targetGid)

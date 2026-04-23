@@ -21,6 +21,15 @@ if(NOT DEFINED CMAKE_TOOLCHAIN_FILE AND NOT DEFINED ENV{CMAKE_TOOLCHAIN_FILE})
     unset(_ro_vcpkg_candidates)
 endif()
 
+# Overlay triplets: force libvpx to build statically on x64-mingw-dynamic so
+# ffmpeg[vpx] (pulled in by ro_capture) links. See the file itself for the
+# full rationale. Setting VCPKG_OVERLAY_TRIPLETS before project() is what the
+# vcpkg toolchain expects.
+if(NOT DEFINED VCPKG_OVERLAY_TRIPLETS AND NOT DEFINED ENV{VCPKG_OVERLAY_TRIPLETS})
+    set(VCPKG_OVERLAY_TRIPLETS "${CMAKE_CURRENT_SOURCE_DIR}/cmake/vcpkg-triplets"
+        CACHE STRING "Project-local vcpkg triplet overlays")
+endif()
+
 project(OpenMidgard VERSION 2008.0 LANGUAGES C CXX)
 
 if(NOT WIN32)
@@ -51,6 +60,7 @@ option(RO_ENABLE_NATIVE_D3D11 "Enable the native Direct3D 11 backend when suppor
 option(RO_ENABLE_NATIVE_D3D12 "Enable the native Direct3D 12 backend when supported" ON)
 option(RO_LOG_VULKAN_STATS "Log vulkan performance stats" OFF)
 option(RO_ENABLE_GAMEPAD "Enable SDL3-based gamepad/controller support" ON)
+option(RO_ENABLE_CAPTURE "Enable in-game screenshot (WebP) and recording (WebM)" ON)
 set(RO_QT_ROOT "" CACHE PATH "Compiler-compatible Qt 6 kit root (for example C:/Qt/6.11.0/msvc2022_64)")
 set(RO_QT_WINDEPLOYQT_EXECUTABLE "" CACHE FILEPATH "Path to the matching windeployqt.exe")
 
@@ -138,6 +148,7 @@ else()
     message(STATUS "Gamepad support  : disabled")
 endif()
 add_compile_definitions(RO_HAS_GAMEPAD=${RO_HAS_GAMEPAD})
+add_compile_definitions(RO_ENABLE_CAPTURE=$<BOOL:${RO_ENABLE_CAPTURE}>)
 
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/src)
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
@@ -203,6 +214,9 @@ add_subdirectory(src/world)
 add_subdirectory(src/render)
 add_subdirectory(src/render3d)
 add_subdirectory(src/ui)
+if(RO_ENABLE_CAPTURE)
+    add_subdirectory(src/capture)
+endif()
 if(RO_ENABLE_QT6_UI)
     add_subdirectory(src/qtui)
 endif()
@@ -268,6 +282,10 @@ if(RO_ENABLE_QT6_UI)
     target_link_libraries(open_midgard PRIVATE ro_qtui)
 endif()
 
+if(RO_ENABLE_CAPTURE)
+    target_link_libraries(open_midgard PRIVATE ro_capture)
+endif()
+
 if(MSVC)
     # ddraw.h can auto-link ddraw.lib via pragma; we resolve DirectDraw dynamically.
     target_link_options(open_midgard PRIVATE /NODEFAULTLIB:ddraw.lib)
@@ -280,6 +298,20 @@ endif()
 
 ro_add_qt_runtime_deploy(open_midgard "$<TARGET_FILE_DIR:open_midgard>")
 
+# Copy vcpkg runtime DLLs (FFmpeg, libwebp, SDL3) next to the build-tree exe.
+# applocal.ps1 already does this on MSVC; this is a belt-and-braces pass for
+# MinGW configs where dumpbin-based detection is unreliable, and it mirrors the
+# same set into the dev-deploy folder below.
+if(WIN32 AND DEFINED VCPKG_INSTALLED_DIR AND DEFINED VCPKG_TARGET_TRIPLET)
+    add_custom_command(TARGET open_midgard POST_BUILD
+        COMMAND ${CMAKE_COMMAND}
+            -DRO_VCPKG_BIN_DIR=${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/$<IF:$<CONFIG:Debug>,debug/bin,bin>
+            -DRO_DEPLOY_DIR=$<TARGET_FILE_DIR:open_midgard>
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/DeployVcpkgRuntime.cmake"
+        COMMENT "Copying vcpkg runtime DLLs next to open-midgard.exe"
+    )
+endif()
+
 if(RO_ENABLE_DEV_DEPLOY)
     add_custom_command(TARGET open_midgard POST_BUILD
         COMMAND ${CMAKE_COMMAND}
@@ -289,4 +321,13 @@ if(RO_ENABLE_DEV_DEPLOY)
         COMMENT "Copying executable to local OldRO folder"
     )
     ro_add_qt_runtime_deploy(open_midgard "D:/Spel/OldRO")
+    if(WIN32 AND DEFINED VCPKG_INSTALLED_DIR AND DEFINED VCPKG_TARGET_TRIPLET)
+        add_custom_command(TARGET open_midgard POST_BUILD
+            COMMAND ${CMAKE_COMMAND}
+                -DRO_VCPKG_BIN_DIR=${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/$<IF:$<CONFIG:Debug>,debug/bin,bin>
+                -DRO_DEPLOY_DIR=D:/Spel/OldRO
+                -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/DeployVcpkgRuntime.cmake"
+            COMMENT "Copying vcpkg runtime DLLs to dev-deploy folder"
+        )
+    endif()
 endif()

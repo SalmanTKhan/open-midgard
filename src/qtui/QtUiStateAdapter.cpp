@@ -1,6 +1,9 @@
 #include "QtUiStateAdapter.h"
 
 #include "QtUiState.h"
+#if RO_ENABLE_CAPTURE
+#include "capture/FrameCapture.h"
+#endif
 
 #include "QtUiStatusIconCatalog.h"
 
@@ -347,6 +350,31 @@ QString FormatBasicInfoMiniStatusText(int hp, int maxHp, int sp, int maxSp, int 
 QString FormatCharacterSlotLevelText(int level)
 {
     return QStringLiteral("Lv. %1").arg(level);
+}
+
+QVariantMap BuildCaptureStatusData()
+{
+    QVariantMap data;
+#if RO_ENABLE_CAPTURE
+    const capture::Status s = capture::GetStatus();
+    data.insert(QStringLiteral("recording"), s.recording);
+    if (!s.recording) {
+        return data;
+    }
+    data.insert(QStringLiteral("elapsedMillis"),
+                static_cast<qulonglong>(s.elapsedMillis));
+    data.insert(QStringLiteral("encodedFrames"),
+                static_cast<qulonglong>(s.encodedFrames));
+    data.insert(QStringLiteral("droppedFrames"),
+                static_cast<qulonglong>(s.droppedFrames));
+    data.insert(QStringLiteral("estimatedBytes"),
+                static_cast<qulonglong>(s.estimatedBytes));
+    data.insert(QStringLiteral("outputWidth"),  s.outputWidth);
+    data.insert(QStringLiteral("outputHeight"), s.outputHeight);
+#else
+    data.insert(QStringLiteral("recording"), false);
+#endif
+    return data;
 }
 
 QVariantMap BuildDebugOverlayData(const QString& backendName,
@@ -3763,7 +3791,7 @@ void SendActorNameRequest(CGameMode& mode, u32 gid)
     }
 
     bool sent = false;
-    if (ro::net::IsLegacyMapGameplaySendProfile()) {
+    if (ro::net::IsPacketVer200MapGameplaySendProfile() || ro::net::IsLegacyMapGameplaySendProfile()) {
         PACKET_CZ_REQNAME_LEGACY packet{};
         packet.PacketType = ro::net::GetActiveMapGameplaySendProfile().getCharNameRequest;
         packet.GID = gid;
@@ -4061,6 +4089,7 @@ bool QtUiStateAdapter::syncMenu(RenderBackendType activeBackend,
         loginStatus,
         chatPreview,
         lastInput));
+    m_state->setCaptureStatus(BuildCaptureStatusData());
     PopulateLoginPanelState(m_state);
     PopulateCharSelectState(m_state);
     PopulateMakeCharState(m_state);
@@ -4104,6 +4133,7 @@ bool QtUiStateAdapter::syncGameplay(CGameMode& mode,
         loginStatus,
         chatPreview,
         lastInput));
+    m_state->setCaptureStatus(BuildCaptureStatusData());
     PopulateLoginPanelState(m_state);
     PopulateCharSelectState(m_state);
     PopulateMakeCharState(m_state);

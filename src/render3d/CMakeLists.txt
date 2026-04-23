@@ -64,3 +64,7 @@ elseif(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
 endif()
 
 target_compile_definitions(ro_render3d PUBLIC RO_HAS_VULKAN=${RO_HAS_VULKAN})
+
+if(RO_ENABLE_CAPTURE)
+    target_link_libraries(ro_render3d PRIVATE ro_capture)
+endif()

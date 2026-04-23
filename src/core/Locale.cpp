@@ -11,11 +11,18 @@
 #include <cctype>
 #include <cstdlib>
 #include <cstring>
+#include <initializer_list>
 
 namespace {
 
 std::vector<ClientInfoConnection> g_clientInfoConnections;
 int g_selectedClientInfoIndex = 0;
+int g_clientInfoStateGeneration = 0;
+
+void BumpClientInfoStateGeneration()
+{
+    ++g_clientInfoStateGeneration;
+}
 
 std::string ToLowerAscii(std::string value)
 {
@@ -97,6 +104,22 @@ std::string GetChildContents(XMLElement* element, const char* childName)
         return {};
     }
     return child->GetContents();
+}
+
+std::string GetChildContentsAny(XMLElement* element, std::initializer_list<const char*> childNames)
+{
+    if (!element) {
+        return {};
+    }
+
+    for (const char* childName : childNames) {
+        const std::string value = GetChildContents(element, childName);
+        if (!value.empty()) {
+            return value;
+        }
+    }
+
+    return {};
 }
 
 bool EqualsIgnoreCase(const std::string& left, const char* right)
@@ -314,6 +337,7 @@ void ApplyFallbackClientInfoConfig(const FallbackClientInfoConfig& config)
     EnsureDefaultLoadingScreens();
     s_dwAdminAID.clear();
     s_dwYellowAID.clear();
+    BumpClientInfoStateGeneration();
 }
 
 void ParseFallbackClientInfoLine(const std::string& rawLine, FallbackClientInfoConfig* outConfig)
@@ -467,6 +491,21 @@ void ParseAidList(XMLElement* parent, std::vector<u32>* outList)
     outList->erase(std::unique(outList->begin(), outList->end()), outList->end());
 }
 
+void StoreConnectionOverrideIfPresent(ClientInfoConnection* info,
+                                      XMLElement* connection,
+                                      const char* key,
+                                      std::initializer_list<const char*> childNames)
+{
+    if (!info || !connection || !key) {
+        return;
+    }
+
+    const std::string value = TrimAscii(GetChildContentsAny(connection, childNames));
+    if (!value.empty()) {
+        info->runtimeOverrides[ToLowerAscii(key)] = value;
+    }
+}
+
 void ParseClientInfoConnections(XMLElement* clientInfo)
 {
     g_clientInfoConnections.clear();
@@ -491,6 +530,29 @@ void ParseClientInfoConnections(XMLElement* clientInfo)
         if (!langType.empty()) {
             info.langType = std::atoi(langType.c_str());
         }
+
+        StoreConnectionOverrideIfPresent(&info, connection, "clientprofile",
+            { "clientprofile", "ClientProfile", "profile", "Profile" });
+        StoreConnectionOverrideIfPresent(&info, connection, "charlistreceivelayout",
+            { "charlistreceivelayout", "CharListReceiveLayout" });
+        StoreConnectionOverrideIfPresent(&info, connection, "mapsendprofile",
+            { "mapsendprofile", "MapSendProfile" });
+        StoreConnectionOverrideIfPresent(&info, connection, "mapgameplaysendprofile",
+            { "mapgameplaysendprofile", "MapGameplaySendProfile" });
+        StoreConnectionOverrideIfPresent(&info, connection, "zoneconnectprofile",
+            { "zoneconnectprofile", "ZoneConnectProfile" });
+        StoreConnectionOverrideIfPresent(&info, connection, "accountloginpacket",
+            { "accountloginpacket", "AccountLoginPacket" });
+        StoreConnectionOverrideIfPresent(&info, connection, "clientdateoverride",
+            { "clientdateoverride", "ClientDateOverride" });
+        StoreConnectionOverrideIfPresent(&info, connection, "clienthashoverridemd5",
+            { "clienthashoverridemd5", "ClientHashOverrideMd5" });
+        StoreConnectionOverrideIfPresent(&info, connection, "clienthashsourceexe",
+            { "clienthashsourceexe", "ClientHashSourceExe" });
+        StoreConnectionOverrideIfPresent(&info, connection, "clienttypeoverride",
+            { "clienttypeoverride", "ClientTypeOverride" });
+        StoreConnectionOverrideIfPresent(&info, connection, "clientversionoverride",
+            { "clientversionoverride", "ClientVersionOverride" });
 
         g_clientInfoConnections.push_back(info);
     }
@@ -644,6 +706,8 @@ void SelectClientInfo(int connectionIndex) {
     } else {
         s_dwYellowAID = s_dwAdminAID;
     }
+
+    BumpClientInfoStateGeneration();
 }
 
 void SelectClientInfo2(int connectionIndex, int subConnectionIndex) {
@@ -674,6 +738,67 @@ int GetClientInfoConnectionCount()
 int GetSelectedClientInfoIndex()
 {
     return g_selectedClientInfoIndex;
+}
+
+int GetClientInfoStateGeneration()
+{
+    return g_clientInfoStateGeneration;
+}
+
+const ClientInfoConnection* GetSelectedClientInfoConnection()
+{
+    if (g_selectedClientInfoIndex < 0
+        || g_selectedClientInfoIndex >= static_cast<int>(g_clientInfoConnections.size())) {
+        return nullptr;
+    }
+
+    return &g_clientInfoConnections[static_cast<size_t>(g_selectedClientInfoIndex)];
+}
+
+bool TryLoadSelectedClientInfoSettingString(const char* key, std::string* value)
+{
+    if (!key || !*key || !value) {
+        return false;
+    }
+
+    const ClientInfoConnection* connection = GetSelectedClientInfoConnection();
+    if (!connection) {
+        return false;
+    }
+
+    const auto found = connection->runtimeOverrides.find(ToLowerAscii(key));
+    if (found == connection->runtimeOverrides.end()) {
+        return false;
+    }
+
+    *value = found->second;
+    return true;
+}
+
+bool TryLoadSelectedClientInfoSettingInt(const char* key, int* value)
+{
+    if (!key || !*key || !value) {
+        return false;
+    }
+
+    std::string rawValue;
+    if (!TryLoadSelectedClientInfoSettingString(key, &rawValue)) {
+        return false;
+    }
+
+    const std::string trimmedValue = TrimAscii(rawValue);
+    if (trimmedValue.empty()) {
+        return false;
+    }
+
+    char* end = nullptr;
+    const long parsed = std::strtol(trimmedValue.c_str(), &end, 10);
+    if (end == trimmedValue.c_str() || (end && *end != '\0')) {
+        return false;
+    }
+
+    *value = static_cast<int>(parsed);
+    return true;
 }
 
 bool IsGravityAid(unsigned int aid)

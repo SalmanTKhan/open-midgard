@@ -32,6 +32,7 @@ struct DefaultIniValue {
 constexpr DefaultIniValue kDefaultIniValues[] = {
     { "Data", "RuntimeRoot", "" },
     { "Data", "GrfRoot", "" },
+    { "Client", "Profile", "auto" },
     { "Logging", "Console", "0" },
     { "Network", "AuthHost", "" },
     { "Network", "AuthPort", "0" },

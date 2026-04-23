@@ -20,6 +20,8 @@ constexpr int kVkHome = 0x24;
 constexpr int kVkSpace = 0x20;
 constexpr int kVkF1 = 0x70;
 constexpr int kVkF12 = 0x7B;
+constexpr int kVkSnapshot = 0x2C;  // Print Screen
+constexpr int kVkOemQuestion = 0xBF;  // '/?' key, used as free default for QuestToggle
 constexpr int kVkPageUp = 0x21;
 constexpr int kVkPageDown = 0x22;
 constexpr int kVkInsert = 0x2D;
@@ -66,9 +68,11 @@ constexpr KeyboardActionInfo kKeyboardActions[] = {
     { KeyboardAction::SkillToggle,            "SkillToggle",           { static_cast<int>('S'), false, true, false } },
     { KeyboardAction::StatusToggle,           "StatusToggle",          { static_cast<int>('A'), false, true, false } },
     { KeyboardAction::MapToggle,              "MapToggle",             { kVkTab, false, true, false } },
-    { KeyboardAction::QuestToggle,            "QuestToggle",           { kVkF12, false, false, false } },
+    { KeyboardAction::QuestToggle,            "QuestToggle",           { kVkOemQuestion, false, false, false } },
     { KeyboardAction::HotbarPagePrev,         "HotbarPagePrev",        { kVkPageUp, false, false, false } },
     { KeyboardAction::HotbarPageNext,         "HotbarPageNext",        { kVkPageDown, false, false, false } },
+    { KeyboardAction::CaptureScreenshot,      "CaptureScreenshot",     { kVkSnapshot, false, false, false } },
+    { KeyboardAction::ToggleRecording,        "ToggleRecording",       { kVkF12, false, false, false } },
 };
 
 #if RO_HAS_GAMEPAD
@@ -162,6 +166,8 @@ bool TryParseKeyToken(const std::string& token, int* outVirtualKey)
     if (lowered == "delete" || lowered == "del") { *outVirtualKey = kVkDelete; return true; }
     if (lowered == "pageup") { *outVirtualKey = kVkPageUp; return true; }
     if (lowered == "pagedown") { *outVirtualKey = kVkPageDown; return true; }
+    if (lowered == "printscreen" || lowered == "prtsc" || lowered == "snapshot") { *outVirtualKey = kVkSnapshot; return true; }
+    if (lowered == "/" || lowered == "slash") { *outVirtualKey = kVkOemQuestion; return true; }
     if (lowered == "left") { *outVirtualKey = kVkLeft; return true; }
     if (lowered == "right") { *outVirtualKey = kVkRight; return true; }
     if (lowered == "up") { *outVirtualKey = kVkUp; return true; }
@@ -202,6 +208,8 @@ std::string KeyTokenName(int virtualKey)
     case kVkDelete: return "Delete";
     case kVkPageUp: return "PageUp";
     case kVkPageDown: return "PageDown";
+    case kVkSnapshot: return "PrintScreen";
+    case kVkOemQuestion: return "/";
     case kVkLeft: return "Left";
     case kVkRight: return "Right";
     case kVkUp: return "Up";

@@ -17,12 +17,15 @@
 #include "ui/UiScale.h"
 #include "ui/TextScale.h"
 #include "QtUiState.h"
+#include "ui/UIControllerWnd.h"
 #include "ui/UIEquipWnd.h"
+#include "ui/UIEmotionWnd.h"
 #include "ui/UILoginWnd.h"
 #include "ui/UIMakeCharWnd.h"
 #include "ui/UIMinimapWnd.h"
 #include "ui/UINewChatWnd.h"
 #include "ui/UINotifyLevelUpWnd.h"
+#include "ui/UIOptionWnd.h"
 #include "ui/UISelectCharWnd.h"
 #include "ui/UISelectServerWnd.h"
 #include "ui/UIShopCommon.h"
@@ -726,6 +729,13 @@ bool HasFrontMenuUiVisible()
         || (g_windowMgr.m_makeCharWnd && g_windowMgr.m_makeCharWnd->m_show != 0);
 }
 
+bool HasGameplayKeyboardUiVisible()
+{
+    return (g_windowMgr.m_controllerWnd && g_windowMgr.m_controllerWnd->m_show != 0)
+        || (g_windowMgr.m_optionWnd && g_windowMgr.m_optionWnd->m_show != 0)
+        || (g_windowMgr.m_emotionWnd && g_windowMgr.m_emotionWnd->m_show != 0);
+}
+
 bool IsEnabledInEnvironment()
 {
     static bool logged = false;
@@ -1156,6 +1166,13 @@ public:
 
         switch (msg) {
         case WM_MOUSEMOVE:
+            if (g_windowMgr.m_controllerWnd
+                && g_windowMgr.m_controllerWnd->m_show != 0
+                && (g_windowMgr.m_captureWindow == g_windowMgr.m_controllerWnd
+                    || g_windowMgr.HasWindowAtPoint(GetUiLogicalX(lParam), GetUiLogicalY(lParam)))) {
+                g_windowMgr.OnMouseMove(GetUiLogicalX(lParam), GetUiLogicalY(lParam));
+                return true;
+            }
             if (g_windowMgr.m_selectServerWnd && g_windowMgr.m_selectServerWnd->m_show != 0) {
                 g_windowMgr.m_selectServerWnd->OnMouseMove(
                     GetUiLogicalX(lParam),
@@ -1191,6 +1208,12 @@ public:
             [[fallthrough]];
 
         case WM_LBUTTONDOWN:
+            if (g_windowMgr.m_controllerWnd
+                && g_windowMgr.m_controllerWnd->m_show != 0
+                && g_windowMgr.HasWindowAtPoint(GetUiLogicalX(lParam), GetUiLogicalY(lParam))) {
+                g_windowMgr.OnLBtnDown(GetUiLogicalX(lParam), GetUiLogicalY(lParam));
+                return true;
+            }
             if (g_windowMgr.m_makeCharWnd
                 && g_windowMgr.m_makeCharWnd->m_show != 0
                 && g_windowMgr.m_makeCharWnd->HandleQtMouseDown(
@@ -1255,6 +1278,13 @@ public:
             return false;
 
         case WM_LBUTTONUP:
+            if (g_windowMgr.m_controllerWnd
+                && g_windowMgr.m_controllerWnd->m_show != 0
+                && (g_windowMgr.m_captureWindow == g_windowMgr.m_controllerWnd
+                    || g_windowMgr.HasWindowAtPoint(GetUiLogicalX(lParam), GetUiLogicalY(lParam)))) {
+                g_windowMgr.OnLBtnUp(GetUiLogicalX(lParam), GetUiLogicalY(lParam));
+                return true;
+            }
             if (m_menuPointerCaptureTarget == MenuPointerCaptureTarget::MakeChar) {
                 if (g_windowMgr.m_makeCharWnd
                     && g_windowMgr.m_makeCharWnd->m_show != 0) {
@@ -1312,6 +1342,15 @@ public:
             return false;
 
         case WM_MOUSEWHEEL:
+            if (g_windowMgr.m_controllerWnd
+                && g_windowMgr.m_controllerWnd->m_show != 0
+                && (g_windowMgr.m_captureWindow == g_windowMgr.m_controllerWnd
+                    || g_windowMgr.HasWindowAtPoint(GetUiLogicalX(lParam), GetUiLogicalY(lParam)))) {
+                return g_windowMgr.OnWheel(
+                    GetUiLogicalX(lParam),
+                    GetUiLogicalY(lParam),
+                    GetWheelDelta(wParam));
+            }
             if (!HasFrontMenuUiVisible()
                 && g_windowMgr.m_chatWnd
                 && g_windowMgr.m_chatWnd->m_show != 0
@@ -1332,7 +1371,7 @@ public:
 
         case WM_KEYDOWN:
         case WM_SYSKEYDOWN:
-            if (HasFrontMenuUiVisible()) {
+            if (HasFrontMenuUiVisible() || HasGameplayKeyboardUiVisible()) {
                 g_windowMgr.OnKeyDown(static_cast<int>(wParam));
                 return true;
             }

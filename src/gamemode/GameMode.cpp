@@ -2355,7 +2355,7 @@ void DrawGameplayFallbackToWindow(
 bool RequestReturnToCharSelect()
 {
     PACKET_CZ_RESTART packet{};
-    packet.PacketType = PACKETID_CZ_RESTART;
+    packet.PacketType = PacketProfile::GetRestartOpcode();
     packet.Type = 1;
 
     SetPendingDisconnectAction(PendingDisconnectAction::ReturnToCharSelect);
@@ -2371,7 +2371,7 @@ bool RequestReturnToCharSelect()
 bool RequestReturnToSavePoint()
 {
     PACKET_CZ_RESTART packet{};
-    packet.PacketType = PACKETID_CZ_RESTART;
+    packet.PacketType = PacketProfile::GetRestartOpcode();
     packet.Type = 0;
 
     return CRagConnection::instance()->SendPacket(
@@ -2381,12 +2381,21 @@ bool RequestReturnToSavePoint()
 
 void RequestExitToWindows()
 {
-    PACKET_CZ_QUITGAME packet{};
-    packet.PacketType = PACKETID_CZ_QUITGAME;
-    packet.Type = 0;
-    CRagConnection::instance()->SendPacket(
-        reinterpret_cast<const char*>(&packet),
-        static_cast<int>(sizeof(packet)));
+    const u16 quitOp = PacketProfile::GetQuitGameOpcode();
+    if (quitOp == PacketProfile::kEarlyQuitGame) {
+        // Alpha/Beta1 CZ_REQUEST_QUIT carries no payload — opcode only, 2 bytes.
+        u16 earlyQuit = quitOp;
+        CRagConnection::instance()->SendPacket(
+            reinterpret_cast<const char*>(&earlyQuit),
+            static_cast<int>(sizeof(earlyQuit)));
+    } else {
+        PACKET_CZ_QUITGAME packet{};
+        packet.PacketType = quitOp;
+        packet.Type = 0;
+        CRagConnection::instance()->SendPacket(
+            reinterpret_cast<const char*>(&packet),
+            static_cast<int>(sizeof(packet)));
+    }
     CRagConnection::instance()->Disconnect();
     g_modeMgr.Quit();
 }
@@ -2965,7 +2974,7 @@ void SendActorNameRequest(CGameMode& mode, u32 gid)
 
     const ro::net::MapGameplaySendProfile& profile = ro::net::GetActiveMapGameplaySendProfile();
     bool sent = false;
-    if (ro::net::IsLegacyMapGameplaySendProfile()) {
+    if (ro::net::IsPacketVer200MapGameplaySendProfile() || ro::net::IsLegacyMapGameplaySendProfile()) {
         PACKET_CZ_REQNAME_LEGACY packet{};
         packet.PacketType = profile.getCharNameRequest;
         packet.GID = gid;
@@ -4339,7 +4348,7 @@ bool SendTimeSyncRequest(CGameMode& mode, bool syncNow)
 
     const ro::net::MapGameplaySendProfile& profile = ro::net::GetActiveMapGameplaySendProfile();
     bool sent = false;
-    if (ro::net::IsLegacyMapGameplaySendProfile()) {
+    if (ro::net::IsPacketVer200MapGameplaySendProfile() || ro::net::IsLegacyMapGameplaySendProfile()) {
         PACKET_CZ_TICKSEND_LEGACY packet{};
         packet.PacketType = profile.tickSend;
         packet.ClientTick = now;
@@ -4652,11 +4661,21 @@ bool IsValidMoveCell(const CGameMode& mode,
     return CanFindMovePath(mode, sourceTileX, sourceTileY, requestedTileX, requestedTileY, candidateTileX, candidateTileY);
 }
 
+bool IsLocalPlayerDead()
+{
+    const CGameMode* gameMode = g_modeMgr.GetCurrentGameMode();
+    return gameMode && gameMode->m_isPlayerDead != 0;
+}
+
 bool SendMoveRequestPacket(int dstX, int dstY)
 {
+    if (IsLocalPlayerDead()) {
+        DbgLog("[GameMode] move request blocked: player dead\n");
+        return false;
+    }
     const ro::net::MapGameplaySendProfile& profile = ro::net::GetActiveMapGameplaySendProfile();
     bool sent = false;
-    if (ro::net::IsLegacyMapGameplaySendProfile()) {
+    if (ro::net::IsPacketVer200MapGameplaySendProfile() || ro::net::IsLegacyMapGameplaySendProfile()) {
         PACKET_CZ_REQUEST_MOVE_LEGACY packet{};
         packet.PacketType = profile.walkToXY;
         if (!EncodeMoveDestination(dstX, dstY, packet.Dest)) {
@@ -4694,7 +4713,14 @@ bool SendChangeDirRequestPacket(u8 headDir, u8 dir)
 {
     const ro::net::MapGameplaySendProfile& profile = ro::net::GetActiveMapGameplaySendProfile();
     bool sent = false;
-    if (ro::net::IsLegacyMapGameplaySendProfile()) {
+    if (ro::net::IsPacketVer200MapGameplaySendProfile()) {
+        PACKET_CZ_CHANGE_DIRECTION_BETA1 packet{};
+        packet.PacketType = profile.changeDir;
+        packet.Dir = static_cast<u8>(dir & 7);
+        sent = CRagConnection::instance()->SendPacket(
+            reinterpret_cast<const char*>(&packet),
+            static_cast<int>(sizeof(packet)));
+    } else if (ro::net::IsLegacyMapGameplaySendProfile()) {
         PACKET_CZ_CHANGE_DIRECTION_LEGACY packet{};
         packet.PacketType = profile.changeDir;
         packet.HeadDir = static_cast<u16>(headDir);
@@ -5294,6 +5320,11 @@ bool SendActionRequestPacket(u32 targetGid, u8 action)
     if ((targetGid == 0) && (action == kActionRequestSingleAttack || action == kActionRequestContinuousAttack)) {
         return false;
     }
+    if (IsLocalPlayerDead()) {
+        DbgLog("[GameMode] action request blocked: player dead tgt=%u action=%u\n",
+            targetGid, static_cast<unsigned int>(action));
+        return false;
+    }
 
     const ro::net::MapGameplaySendProfile& profile = ro::net::GetActiveMapGameplaySendProfile();
     std::array<u8, sizeof(PACKET_CZ_ACTION_REQUEST_PACKETVER22)> packetBuffer{};
@@ -5615,6 +5646,11 @@ bool SendUseSkillToIdPacket(u16 skillId, u16 skillLevel, u32 targetGid)
     if (skillId == 0 || skillLevel == 0 || targetGid == 0) {
         return false;
     }
+    if (IsLocalPlayerDead()) {
+        DbgLog("[GameMode] useskilltoid blocked: player dead skillId=%u\n",
+            static_cast<unsigned int>(skillId));
+        return false;
+    }
 
     std::array<u8, sizeof(PACKET_CZ_USESKILLTOID_PACKETVER22)> packetBuffer{};
     int packetLength = 0;
@@ -5650,6 +5686,11 @@ bool SendUseSkillToPosPacket(u16 skillId, u16 skillLevel, int cellX, int cellY)
     if (cellX < 0 || cellY < 0 || cellX > 0xFFFF || cellY > 0xFFFF) {
         return false;
     }
+    if (IsLocalPlayerDead()) {
+        DbgLog("[GameMode] useskilltopos blocked: player dead skillId=%u\n",
+            static_cast<unsigned int>(skillId));
+        return false;
+    }
 
     const ro::net::MapGameplaySendProfile& profile = ro::net::GetActiveMapGameplaySendProfile();
     PACKET_CZ_USESKILLTOPOS packet{};
@@ -5674,6 +5715,11 @@ bool SendUseSkillToPosPacket(u16 skillId, u16 skillLevel, int cellX, int cellY)
 bool SendUseSkillMapPacket(u16 skillId, const char* mapName)
 {
     if (skillId == 0 || !mapName || *mapName == '\0') {
+        return false;
+    }
+    if (IsLocalPlayerDead()) {
+        DbgLog("[GameMode] useskillmap blocked: player dead skillId=%u\n",
+            static_cast<unsigned int>(skillId));
         return false;
     }
 
@@ -6147,7 +6193,7 @@ bool RequestNpcContact(u32 npcId)
     }
 
     PACKET_CZ_CONTACTNPC packet{};
-    packet.PacketType = PacketProfile::LegacyNpcScriptSend::kContactNpc;
+    packet.PacketType = PacketProfile::GetNpcContactOpcode();
     packet.NpcId = npcId;
     packet.Type = 1;
 
@@ -6167,7 +6213,7 @@ bool RequestNpcMenuSelection(u32 npcId, u8 choice)
     }
 
     PACKET_CZ_NPC_SELECTMENU packet{};
-    packet.PacketType = PacketProfile::LegacyNpcScriptSend::kSelectMenu;
+    packet.PacketType = PacketProfile::GetNpcChooseMenuOpcode();
     packet.NpcId = npcId;
     packet.Choice = choice;
 
@@ -6188,7 +6234,7 @@ bool RequestNpcNext(u32 npcId)
     }
 
     PACKET_CZ_NPC_NEXT_CLICK packet{};
-    packet.PacketType = PacketProfile::LegacyNpcScriptSend::kNextClick;
+    packet.PacketType = PacketProfile::GetNpcNextClickOpcode();
     packet.NpcId = npcId;
 
     const bool sent = CRagConnection::instance()->SendPacket(
@@ -6204,6 +6250,9 @@ bool RequestNpcInputNumber(u32 npcId, u32 value)
 {
     if (npcId == 0) {
         return false;
+    }
+    if (PacketProfile::UsesEarlyMapServerSendProfile()) {
+        return false;  // CZ_INPUT_EDITDLG doesn't exist in Alpha/Beta1 protocol
     }
 
     PACKET_CZ_NPC_INPUT_NUMBER packet{};
@@ -6225,6 +6274,9 @@ bool RequestNpcInputString(u32 npcId, const char* text)
 {
     if (npcId == 0 || !text || *text == '\0') {
         return false;
+    }
+    if (PacketProfile::UsesEarlyMapServerSendProfile()) {
+        return false;  // CZ_INPUT_EDITDLGSTR doesn't exist in Alpha/Beta1 protocol
     }
 
     const size_t textLen = std::strlen(text);
@@ -6254,6 +6306,9 @@ bool RequestNpcCloseDialog(u32 npcId)
 {
     if (npcId == 0) {
         return false;
+    }
+    if (PacketProfile::UsesEarlyMapServerSendProfile()) {
+        return false;  // CZ_CLOSE_DIALOG doesn't exist in Alpha/Beta1 protocol
     }
 
     PACKET_CZ_NPC_CLOSE_DIALOG packet{};
@@ -6877,6 +6932,7 @@ bool TryRequestAttackFromScreenPoint(CGameMode& mode, int screenX, int screenY)
 
     mode.m_lastMonGid = hoveredActor->m_gid;
     mode.m_lastLockOnMonGid = hoveredActor->m_gid;
+    DbgLog("[DBG-lockon] SET gid=%u\n", hoveredActor->m_gid);
     mode.m_isAutoMoveClickOn = 0;
     ClearPickupIntent(mode);
     mode.m_lastMoveRequestCellX = -1;
@@ -6887,6 +6943,8 @@ bool TryRequestAttackFromScreenPoint(CGameMode& mode, int screenX, int screenY)
     mode.m_lastMoveRequestTick = 0;
     mode.m_lastAttackRequestTick = 0;
     ClearAttackChaseHint(mode);
+    mode.m_attackChaseTargetGid = hoveredActor->m_gid;
+    mode.m_hasAttackChaseHint = 1;
     ClearSkillChase(mode);
     return true;
 }
@@ -7087,11 +7145,18 @@ void PumpSkillChaseRequest(CGameMode& mode)
 
 void PumpAttackChaseRequest(CGameMode& mode)
 {
-    if (!mode.m_world || !mode.m_world->m_player || mode.m_lastLockOnMonGid == 0) {
+    if (!mode.m_world || !mode.m_world->m_player) {
+        return;
+    }
+    if (mode.m_lastLockOnMonGid == 0) {
         return;
     }
 
     if (mode.m_hasSkillChase || HasPendingSkillUse(mode)) {
+        static u32 s_skillChaseSkipLogged = 0;
+        if (++s_skillChaseSkipLogged <= 8) {
+            DbgLog("[DBG-lockon] pump-skip reason=skillChase gid=%u\n", mode.m_lastLockOnMonGid);
+        }
         return;
     }
 
@@ -7101,6 +7166,7 @@ void PumpAttackChaseRequest(CGameMode& mode)
 
     const auto targetIt = mode.m_runtimeActors.find(mode.m_lastLockOnMonGid);
     if (targetIt == mode.m_runtimeActors.end() || !targetIt->second) {
+        DbgLog("[DBG-lockon] CLEAR reason=targetMissing gid=%u\n", mode.m_lastLockOnMonGid);
         mode.m_lastLockOnMonGid = 0;
         mode.m_lastAttackRequestTick = 0;
         ClearAttackChaseHint(mode);
@@ -7109,18 +7175,51 @@ void PumpAttackChaseRequest(CGameMode& mode)
 
     CGameActor* target = targetIt->second;
     if (!target->m_isVisible) {
+        static u32 s_invisSkipLogged = 0;
+        if (++s_invisSkipLogged <= 8) {
+            DbgLog("[DBG-lockon] pump-skip reason=targetInvisible gid=%u\n", mode.m_lastLockOnMonGid);
+        }
         return;
     }
 
     const u32 now = GetTickCount();
     const int attackRange = (std::max)(1, mode.m_attackChaseRange);
-    if (IsAttackTargetWithinRange(mode, *target, attackRange)) {
+    const bool inRange = IsAttackTargetWithinRange(mode, *target, attackRange);
+
+    // [DBG-attack-desync] Diagnostic for stale-position attack bug. Remove once root cause confirmed.
+    {
+        int resSrcX = -1, resSrcY = -1;
+        ResolveAttackChaseSourceTile(mode, &resSrcX, &resSrcY);
+        int tgtTileX = -1, tgtTileY = -1;
+        WorldToAttrCell(mode.m_world, target->m_pos.x, target->m_pos.z, &tgtTileX, &tgtTileY);
+        const auto tgtCellIt = mode.m_actorPosList.find(target->m_gid);
+        const int tgtServerX = tgtCellIt != mode.m_actorPosList.end() ? tgtCellIt->second.x : -1;
+        const int tgtServerY = tgtCellIt != mode.m_actorPosList.end() ? tgtCellIt->second.y : -1;
+        const CPlayer* player = mode.m_world ? mode.m_world->m_player : nullptr;
+        DbgLog("[DBG-attack-desync] pump sess=%d,%d resolvedSrc=%d,%d moving=%d pathSize=%u moveDst=%d,%d tgtGid=%u tgtWorldTile=%d,%d tgtSrvTile=%d,%d range=%d inRange=%d hint=%d hintSrc=%d,%d\n",
+            g_session.m_playerPosX, g_session.m_playerPosY,
+            resSrcX, resSrcY,
+            player ? player->m_isMoving : -1,
+            player ? static_cast<unsigned int>(player->m_path.m_cells.size()) : 0u,
+            player ? player->m_moveDestX : -1,
+            player ? player->m_moveDestY : -1,
+            target->m_gid,
+            tgtTileX, tgtTileY,
+            tgtServerX, tgtServerY,
+            attackRange,
+            inRange ? 1 : 0,
+            mode.m_hasAttackChaseHint ? 1 : 0,
+            mode.m_attackChaseSourceCellX, mode.m_attackChaseSourceCellY);
+    }
+
+    if (inRange) {
         if (mode.m_lastAttackRequestTick != 0 && now - mode.m_lastAttackRequestTick < kAttackRetryIntervalMs) {
             return;
         }
 
         if (SendAttackRequestPacket(target->m_gid, kActionRequestContinuousAttack)) {
             mode.m_lastAttackRequestTick = now;
+            DbgLog("[DBG-attack-desync] SENT in-range attack tgt=%u\n", target->m_gid);
         }
         return;
     }
@@ -7134,6 +7233,7 @@ void PumpAttackChaseRequest(CGameMode& mode)
     if (mode.m_lastAttackRequestTick == 0 || now - mode.m_lastAttackRequestTick >= kAttackRetryIntervalMs) {
         if (SendAttackRequestPacket(target->m_gid, kActionRequestContinuousAttack)) {
             mode.m_lastAttackRequestTick = now;
+            DbgLog("[DBG-attack-desync] SENT out-of-range attack tgt=%u\n", target->m_gid);
         }
     }
 

@@ -27,3 +27,7 @@ if(RO_HAS_GAMEPAD)
         target_link_libraries(ro_main PRIVATE SDL3::SDL3-static)
     endif()
 endif()
+
+if(RO_ENABLE_CAPTURE)
+    target_link_libraries(ro_main PRIVATE ro_capture)
+endif()

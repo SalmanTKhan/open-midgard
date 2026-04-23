@@ -6,6 +6,7 @@
 #include "core/ClientInfoLocale.h"
 #include "gamemode/GameMode.h"
 #include "gamemode/Mode.h"
+#include "network/MapSendProfile.h"
 #include "main/WinMain.h"
 #include "DebugLog.h"
 #include "render/DC.h"
@@ -595,7 +596,17 @@ void ApplyQueuedHitReaction(CGameActor& actor, const WBA& hitInfo)
         }
     }
 
+    // [DBG-hit-anim] Pre/post SetState snapshot. `suppressed=1` means the force-state guard blocked the hurt animation.
+    const int prevStateId = actor.m_stateId;
+    const bool forceGuard = (actor.m_isForceState || actor.m_isForceState2 || actor.m_isForceState3) != 0;
     actor.SetState(kHitReactionStateId);
+    DbgLog("[DBG-hit-anim] apply gid=%u pc=%d wasState=%d forceSt=%d,%d,%d suppressed=%d newState=%d dmg=%d\n",
+        actor.m_gid, actor.m_isPc,
+        prevStateId,
+        actor.m_isForceState, actor.m_isForceState2, actor.m_isForceState3,
+        forceGuard ? 1 : 0,
+        actor.m_stateId,
+        hitInfo.damage);
 }
 
 bool IsPortalFallbackJob(int job)
@@ -3188,6 +3199,26 @@ bool DrawPcBillboard(BillboardComposeSurface& bitmap,
 
 bool ResolveNonPcSpritePaths(int job, char* actPath, char* sprPath)
 {
+    // Alpha/Beta1 compress monster IDs into a small byte range to fit in the
+    // one-byte DisplayClassId field. Reverse-map to the modern monster ID so
+    // the standard monster sprite path (job >= 1000) logic works correctly.
+    //
+    // Sabine's formulas (CharacterClasses.cs):
+    //   Beta1 monsters 1001-1087 → displayId = monsterId - 898  (range 103-189)
+    //   Alpha monsters 1001-1046 → displayId = monsterId - 936  (range 65-110)
+    //
+    // NPC display IDs in Beta1 top out at 97, leaving 98-102 as a gap before
+    // monsters start at 103. Alpha NPC IDs top out at 62 with monsters at 65+.
+    {
+        using ro::net::PacketVersionId;
+        const auto& rp = ro::net::GetActiveMapReceiveProfile();
+        if (rp.id == PacketVersionId::PacketVer200 && job >= 103 && job <= 189) {
+            job = job + 898;  // e.g., 110 → 1008 (Pupa)
+        } else if (rp.id == PacketVersionId::PacketVer100 && job >= 65 && job <= 110) {
+            job = job + 936;  // e.g., 66 → 1002 (Poring)
+        }
+    }
+
     const char* const jobName = g_session.GetJobName(job);
     if (!actPath || !sprPath) {
         return false;

@@ -1,4 +1,7 @@
 #include "UIWindowMgr.h"
+#if RO_ENABLE_CAPTURE
+#include "capture/FrameCapture.h"
+#endif
 #include "UILoadingWnd.h"
 #include "UINewChatWnd.h"
 #include "UIBasicInfoWnd.h"
@@ -2557,6 +2560,20 @@ bool UIWindowMgr::HandleHotkeyBeforeFocusedUi(int virtualKey, bool isAltDown, bo
     const auto match = [&](hotkeys::KeyboardAction action) {
         return hotkeys::bindings::MatchKeyboardBinding(action, virtualKey, isAltDown, isCtrlDown, isShiftDown);
     };
+
+#if RO_ENABLE_CAPTURE
+    // Capture hotkeys run before every other handler — Print Screen and F12
+    // must fire even when a modal UI has keyboard focus, so troubleshooting
+    // clips can include the exact state that triggered the report.
+    if (match(hotkeys::KeyboardAction::CaptureScreenshot)) {
+        capture::RequestScreenshot();
+        return true;
+    }
+    if (match(hotkeys::KeyboardAction::ToggleRecording)) {
+        capture::ToggleRecording();
+        return true;
+    }
+#endif
 
     const bool controllerWindowVisible = m_controllerWnd && m_controllerWnd->m_show != 0;
     if (controllerWindowVisible && !match(hotkeys::KeyboardAction::ToggleControllerWindow)) {

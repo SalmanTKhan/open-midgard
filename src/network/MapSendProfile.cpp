@@ -1,6 +1,7 @@
 #include "MapSendProfile.h"
 
 #include "Packet.h"
+#include "core/ClientInfoLocale.h"
 #include "core/SettingsIni.h"
 #include "DebugLog.h"
 #include "gamemode/PacketPadding.h"
@@ -8,11 +9,25 @@
 #include <algorithm>
 #include <cctype>
 #include <cstring>
-#include <mutex>
 #include <string>
 
 namespace ro::net {
 namespace {
+
+enum class ClientProfilePreset {
+    Auto,
+    PacketVer23,
+    PacketVer22,
+    Legacy0072,
+    SabineAlpha, // 100
+    SabineBeta1, // 200
+    SabineBeta2, // 300
+    SabineEP3,   // 400
+    SabineEP3_2, // 500
+    SabineEP4,   // 600
+    SabineEP8,   // 700
+    SabineBEP5,  // 800
+};
 
 bool MatchesPacketId(u16 packetId, std::initializer_list<u16> ids)
 {
@@ -63,6 +78,16 @@ ZonePacketProfile MakePacketVer23ZoneProfile()
     };
 }
 
+ZonePacketProfile MakePacketVer100ZoneProfile()
+{
+    return {
+        PacketVersionId::PacketVer22,
+        "packetver100",
+        PacketProfile::EarlyMapServerSend::kWantToConnection,
+        ZoneConnectPacketLayout::Compact19,
+    };
+}
+
 ZonePacketProfile MakePacketVer22ZoneProfile()
 {
     return {
@@ -72,6 +97,38 @@ ZonePacketProfile MakePacketVer22ZoneProfile()
         ZoneConnectPacketLayout::Legacy26,
     };
 }
+
+ZonePacketProfile MakePacketVer200ZoneProfile()
+{
+    return {
+        PacketVersionId::PacketVer22,
+        "packetver200",
+        // Beta1 keeps the early 200-era 0x000E zone-entry opcode with the compact 19-byte layout.
+        PacketProfile::EarlyMapServerSend::kWantToConnection,
+        ZoneConnectPacketLayout::Compact19,
+    };
+}
+
+ZonePacketProfile MakePacketVer300ZoneProfile()
+{
+    return {
+        PacketVersionId::PacketVer300,
+        "packetver300",
+        0x0072, // CZ_ENTER shifted by 100
+        ZoneConnectPacketLayout::Compact19,
+    };
+}
+
+ZonePacketProfile MakePacketVer400ZoneProfile()
+{
+    return {
+        PacketVersionId::PacketVer400,
+        "packetver400",
+        0x0072,
+        ZoneConnectPacketLayout::Compact19,
+    };
+}
+
 
 ZonePacketProfile MakeLegacy72ZoneProfile()
 {
@@ -153,6 +210,39 @@ MapGameplaySendProfile MakePacketVer22Profile()
     };
 }
 
+MapGameplaySendProfile MakePacketVer200Profile()
+{
+    // Beta1 shifts all Alpha opcodes >= 0x0027 by +1 (ZC_NOTIFY_ACT_POSITION insertion).
+    // EarlyMapServerSend constants use Alpha opcodes; fields below 0x0027 are reused
+    // directly; fields >= 0x0027 use the corrected Beta1 value (+1).
+    return {
+        MapGameplaySendProfileId::PacketVer200,
+        "packetver200",
+        PacketProfile::EarlyMapServerSend::kActionRequest,     // 0x0025 — unchanged
+        PacketProfile::EarlyMapServerSend::kUseSkillToId,      // 0x00AF — beta1 new (appended)
+        PacketProfile::EarlyCartSend::kCartOff,
+        PacketProfile::PacketVer23MapServerSend::kChangeCart,
+        PacketProfile::EarlyMapServerSend::kUseSkillToPos,     // 0x00B2 — beta1 new (appended)
+        PacketProfile::PacketVer23MapServerSend::kUseSkillMap,
+        0x0043,                                                 // CZ_USE_ITEM      (alpha 0x0042 +1)
+        0x003B,                                                 // CZ_ITEM_PICKUP   (alpha 0x003A +1)
+        0x003E,                                                 // CZ_ITEM_THROW    (alpha 0x003D +1)
+        PacketProfile::PacketVer23MapServerSend::kItemCompositionList,
+        PacketProfile::PacketVer23MapServerSend::kItemComposition,
+        PacketProfile::PacketVer23MapServerSend::kItemIdentify,
+        PacketProfile::EarlyMapServerSend::kSkillUp,           // 0x00AE — beta1 new (appended)
+        0x0045,                                                 // CZ_REQ_WEAR_EQUIP    (alpha 0x0044 +1)
+        0x0047,                                                 // CZ_REQ_TAKEOFF_EQUIP (alpha 0x0046 +1)
+        PacketProfile::EarlyMapServerSend::kWalkToXY,          // 0x0021 — unchanged
+        0x0037,                                                 // CZ_CHANGE_DIRECTION (alpha 0x0036 +1)
+        PacketProfile::EarlyMapServerSend::kTickSend,          // 0x001A — unchanged
+        PacketProfile::EarlyMapServerSend::kNotifyActorInit,   // 0x0019 — unchanged
+        0x0030,                                                 // CZ_REQNAME       (alpha 0x002F +1)
+        0x0032,                                                 // CZ_WHISPER       (alpha 0x0031 +1)
+        0x0028,                                                 // CZ_REQUEST_CHAT  (alpha 0x0027 +1)
+    };
+}
+
 MapGameplaySendProfile MakeLegacyGameplayProfile()
 {
     return {
@@ -199,6 +289,7 @@ MapReceiveProfile MakePacketVer23ReceiveProfile()
     profile.actorActionNotifyExtended = 0x02E1;
     profile.actorSetPositionBasic = 0x0088;
     profile.actorSetPositionHighJump = 0x01FF;
+    profile.selfMoveAck = 0x0087;              // ZC_NOTIFY_PLAYERMOVE (PV23)
     profile.broadcastBasic = 0x009A;
     profile.broadcastColored = 0x01C3;
     profile.groundItemEntryExisting = 0x009D;
@@ -276,6 +367,109 @@ MapReceiveProfile MakePacketVer22ReceiveProfile()
     return profile;
 }
 
+MapReceiveProfile MakePacketVer200ReceiveProfile()
+{
+    // Sabine Beta1 (iRO Ragexe 2002-02-20). Opcode numbers inherited from the
+    // Alpha packet table; many payload sizes are enlarged in Beta1. Reference:
+    // E:/Projects/GitHub/Sabine/src/Shared/Network/PacketTable.{100_Alpha,200_Beta1}.cs
+    // and Sabine/src/ZoneServer/Network/Helpers/Character.cs for actor layouts.
+    //
+    // Beta1 inserts ZC_NOTIFY_ACT_POSITION at 0x0027, shifting all Alpha opcodes
+    // >= 0x0027 up by +1 (plus further shifts at 0x009D/0x009E for higher opcodes).
+    // All opcodes below list both their Alpha value (comment) and the Beta1 final value.
+    MapReceiveProfile profile{};
+    profile.id = PacketVersionId::PacketVer200;
+    profile.name = "packetver200";
+    profile.deferProactiveNameRequests = false;
+    profile.usesLegacyActorStream = true;
+
+    profile.acceptEnterLegacy = 0x000F;        // ZC_ACCEPT_ENTER / 11 (alpha 0x000F, unchanged)
+    profile.acceptEnterModern = 0;
+    profile.notifyTime = 0x001B;               // ZC_NOTIFY_TIME / 6 (alpha 0x001B, unchanged)
+    profile.mapChangeBasic = 0x002D;           // ZC_NPCACK_MAPMOVE / 22 (alpha 0x002C +1)
+    profile.mapChangeServerMove = 0x002E;      // ZC_NPCACK_SERVERMOVE / 28 (alpha 0x002D +1)
+    profile.actorActionNotifyBasic = 0x0026;   // ZC_NOTIFY_ACT / 27 (alpha 0x0026, unchanged)
+    profile.actorActionNotifyExtended = 0x0027; // ZC_NOTIFY_ACT_POSITION / 23 (new in Beta1 at 0x0027)
+    profile.actorSetPositionBasic = 0;          // ZC_NOTIFY_SETPOS doesn't exist in Alpha/Beta1
+    profile.actorSetPositionHighJump = 0;
+    profile.selfMoveAck = 0x0023;              // ZC_NOTIFY_PLAYERMOVE / 12 (alpha 0x0023, unchanged)
+    profile.broadcastBasic = 0x0036;           // ZC_BROADCAST / var (alpha 0x0035 +1)
+    profile.broadcastColored = 0;
+    profile.groundItemEntryExisting = 0x0039;  // ZC_ITEM_ENTRY / 38 (alpha 0x0038 +1)
+    profile.groundItemEntryDropped = 0x003A;   // ZC_ITEM_FALL_ENTRY / 38 (alpha 0x0039 +1)
+    profile.itemPickupAckBasic = 0x003C;       // ZC_ITEM_PICKUP_ACK / 33 (alpha 0x003B +1)
+    profile.itemPickupAckExtended = 0;
+    profile.useItemAckBasic = 0x0044;          // ZC_USE_ITEM_ACK / 7 (alpha 0x0043 +1)
+    profile.useItemAckExtended = 0;
+    profile.itemRemoveBasic = 0x004B;          // ZC_ITEM_THROW_ACK / 6 (alpha 0x004A +1)
+    profile.itemRemoveExtended = 0;
+
+    // Alpha/Beta1 actor stream: the four entry packets + the monster-move packet (0x0022).
+    // These are all < 0x0027 so not shifted.
+    profile.actorSpawnLegacyIdle = 0x0014;     // ZC_NOTIFY_STANDENTRY / 26
+    profile.actorSpawnLegacySpawn = 0x0015;    // ZC_NOTIFY_NEWENTRY / 25
+    profile.actorSpawnLegacyAlt = 0;
+    profile.actorSpawnLegacyNpc = 0x0018;      // ZC_NOTIFY_STANDENTRY_NPC / 25
+    profile.actorSpawnLegacyIdleShifted = 0;
+    profile.actorSpawnLegacySpawnShifted = 0;
+    profile.actorMoveLegacy = 0x0017;          // ZC_NOTIFY_MOVEENTRY / 32
+    profile.actorMoveLegacyShifted = 0x0022;   // ZC_NOTIFY_MOVE / 16 (monster/NPC move on other clients)
+
+    profile.actorSpawnVariableIdle = 0;
+    profile.actorSpawnVariableSpawn = 0;
+    profile.actorSpawnVariableIdleRobe = 0;
+    profile.actorSpawnVariableSpawnRobe = 0;
+    profile.actorMoveVariable = 0;
+    profile.actorMoveVariableRobe = 0;
+    profile.actorSpawnModernIdle = 0;
+    profile.actorSpawnModernSpawn = 0;
+    profile.actorSpawnModernIdleFont = 0;
+    profile.actorSpawnModernSpawnFont = 0;
+    profile.actorMoveModern = 0;
+    profile.actorMoveModernFont = 0;
+
+    profile.actorNameAckBasic = 0x0031;        // ZC_ACK_REQNAME / 54 (alpha 0x0030 +1, beta1 size 54)
+    profile.actorNameAckParty = 0;
+    profile.actorNameAckFull = 0;
+    profile.actorStateChangeBasic = 0x005A;    // ZC_STATUS_CHANGE / 5 (alpha 0x0059 +1)
+    profile.actorStateChangeExtended = 0x00B5; // ZC_STATE_CHANGE / 13 (new in Beta1)
+
+    profile.partyMemberAddedBasic = 0;
+    profile.partyMemberAddedExtended = 0;
+    profile.partyHpUpdateBasic = 0;
+    profile.partyHpUpdateExtended = 0;
+    profile.partyInviteAckBasic = 0;
+    profile.partyInviteAckExtended = 0;
+    profile.partyInviteRequestBasic = 0;
+    profile.partyInviteRequestExtended = 0;
+
+    profile.skillDamagePositionNotify = 0x00B1; // ZC_NOTIFY_SKILL_POSITION / 35 (beta1 new)
+    profile.groundSkillNotify = 0x00B3;         // ZC_NOTIFY_GROUNDSKILL / 18 (beta1 new)
+    profile.skillNoDamageNotify = 0x00B6;       // ZC_USE_SKILL / 15 (beta1 new)
+    profile.skillUnitSetBasic = 0x00BB;         // ZC_SKILL_ENTRY / 11 (beta1 new)
+    profile.skillUnitSetExtended = 0;
+    profile.skillDamageNotifyBasic = 0x00B0;    // ZC_NOTIFY_SKILL / 31 (beta1 new)
+    profile.skillDamageNotifyExtended = 0;
+    profile.notifyEffectBasic = 0;
+    profile.notifyEffectDirect = 0;
+
+    profile.normalInventoryListBasic = 0x003F;  // ZC_NORMAL_ITEMLIST / var (alpha 0x003E +1)
+    profile.normalInventoryListCardSlots = 0;
+    profile.normalInventoryListTimed = 0;
+    profile.equipInventoryListBasic = 0x0040;   // ZC_EQUIPMENT_ITEMLIST / var (alpha 0x003F +1)
+    profile.equipInventoryListTimed = 0;
+    profile.equipInventoryListTimedOwned = 0;
+    profile.normalStorageListBasic = 0x0041;    // ZC_STORE_NORMAL_ITEMLIST / var (alpha 0x0040 +1)
+    profile.normalStorageListCardSlots = 0;
+    profile.normalStorageListTimed = 0;
+    profile.equipStorageListBasic = 0x0042;     // ZC_STORE_EQUIPMENT_ITEMLIST / var (alpha 0x0041 +1)
+    profile.equipStorageListTimedOwned = 0;
+    profile.storageItemAddedBasic = 0x0090;     // ZC_ADD_ITEM_TO_STORE / 32 (alpha 0x008F +1, beta1 size 32)
+    profile.storageItemAddedTyped = 0;
+
+    return profile;
+}
+
 PacketProfileSet MakePacketVer23PacketProfileSet()
 {
     return {
@@ -286,6 +480,19 @@ PacketProfileSet MakePacketVer23PacketProfileSet()
         MakePacketVer23ZoneProfile(),
         MakePacketVer23Profile(),
         MakePacketVer23ReceiveProfile(),
+    };
+}
+
+PacketProfileSet MakePacketVer200PacketProfileSet()
+{
+    return {
+        PacketVersionId::PacketVer200,
+        "packetver200",
+        MakeLoginProfile(PacketVersionId::PacketVer200, "packetver200"),
+        MakeCharacterProfile(PacketVersionId::PacketVer200, "packetver200"),
+        MakePacketVer200ZoneProfile(),
+        MakePacketVer200Profile(),
+        MakePacketVer200ReceiveProfile(),
     };
 }
 
@@ -313,13 +520,180 @@ std::string NormalizeProfileToken(std::string value)
     return value;
 }
 
+ClientProfilePreset ParseClientProfilePreset(const std::string& rawValue)
+{
+    const std::string value = NormalizeProfileToken(rawValue);
+    if (value.empty() || value == "auto") {
+        return ClientProfilePreset::Auto;
+    }
+    if (value == "packetver23" || value == "23" || value == "modern" || value == "20080910") {
+        return ClientProfilePreset::PacketVer23;
+    }
+    if (value == "rathena") {
+        return ClientProfilePreset::PacketVer23;
+    }
+    if (value == "packetver22" || value == "22" || value == "pre20080910") {
+        return ClientProfilePreset::PacketVer22;
+    }
+    if (value == "eathena") {
+        return ClientProfilePreset::PacketVer22;
+    }
+    if (value == "legacy0072" || value == "classic" || value == "legacy") {
+        return ClientProfilePreset::Legacy0072;
+    }
+    if (value == "sabine" || value == "sabinebeta1" || value == "beta1") {
+        return ClientProfilePreset::SabineBeta1;
+    }
+    if (value == "alpha" || value == "sabinealpha") {
+        return ClientProfilePreset::SabineAlpha;
+    }
+    if (value == "beta2" || value == "sabinebeta2") {
+        return ClientProfilePreset::SabineBeta2;
+    }
+    return ClientProfilePreset::Auto;
+}
+
+ClientProfilePreset ResolveClientProfilePreset()
+{
+    std::string configuredProfile;
+    if (TryLoadSelectedClientInfoSettingString("clientprofile", &configuredProfile)) {
+        const ClientProfilePreset preset = ParseClientProfilePreset(configuredProfile);
+        if (preset != ClientProfilePreset::Auto) {
+            return preset;
+        }
+    }
+    if (TryLoadSettingsIniString("Client", "Profile", &configuredProfile)) {
+        const ClientProfilePreset preset = ParseClientProfilePreset(configuredProfile);
+        if (preset != ClientProfilePreset::Auto) {
+            return preset;
+        }
+    }
+
+    int legacyPacketVersion = 0;
+    if (!TryLoadSettingsIniInt("Network", "PacketVersion", &legacyPacketVersion) || legacyPacketVersion <= 0) {
+        return ClientProfilePreset::Auto;
+    }
+
+    if (legacyPacketVersion == 23) {
+        return ClientProfilePreset::PacketVer23;
+    }
+    if (legacyPacketVersion == 22) {
+        return ClientProfilePreset::PacketVer22;
+    }
+    if (legacyPacketVersion < PacketProfile::kSabineVersionBeta1) {
+        return ClientProfilePreset::SabineAlpha;
+    }
+    if (legacyPacketVersion < PacketProfile::kSabineVersionBeta2) {
+        return ClientProfilePreset::SabineBeta1;
+    }
+    if (legacyPacketVersion < static_cast<int>(PacketProfile::PacketVer23LoginChain::kClientDate)) {
+        return ClientProfilePreset::SabineBeta2;
+    }
+
+    return ClientProfilePreset::Auto;
+}
+
+std::string ResolveMapSendProfileToken()
+{
+    const ClientProfilePreset preset = ResolveClientProfilePreset();
+    std::string configured;
+    if (!TryLoadSelectedClientInfoSettingString("mapsendprofile", &configured)) {
+        configured = LoadSettingsIniString("Packets", "MapSendProfile", "packetver23");
+    }
+    configured = NormalizeProfileToken(std::move(configured));
+    if (configured == "inherit" || configured == "active" || configured == "mapsendprofile") {
+        switch (preset) {
+        case ClientProfilePreset::SabineBeta1:
+            return "packetver200";
+        default:
+            return configured;
+        }
+    }
+    if (configured != "packetver23" || preset == ClientProfilePreset::Auto) {
+        return configured;
+    }
+
+    switch (preset) {
+    case ClientProfilePreset::PacketVer22:
+    case ClientProfilePreset::Legacy0072:
+    case ClientProfilePreset::SabineAlpha:
+        return "packetver22";
+    case ClientProfilePreset::SabineBeta1:
+        return "packetver200";
+    case ClientProfilePreset::SabineBeta2:
+        return "packetver23";
+    case ClientProfilePreset::Auto:
+    case ClientProfilePreset::PacketVer23:
+    default:
+        return configured;
+    }
+}
+
+std::string ResolveZoneConnectProfileToken()
+{
+    const ClientProfilePreset preset = ResolveClientProfilePreset();
+    std::string configured;
+    if (!TryLoadSelectedClientInfoSettingString("zoneconnectprofile", &configured)) {
+        configured = LoadSettingsIniString("Packets", "ZoneConnectProfile", "inherit");
+    }
+    configured = NormalizeProfileToken(std::move(configured));
+    if (configured != "inherit" || preset == ClientProfilePreset::Auto) {
+        return configured;
+    }
+
+    switch (preset) {
+    case ClientProfilePreset::Legacy0072:
+    case ClientProfilePreset::SabineAlpha:
+        return "packetver100";
+    case ClientProfilePreset::SabineBeta1:
+        return "packetver200";
+    case ClientProfilePreset::SabineBeta2:
+        return "packetver300";
+    case ClientProfilePreset::Auto:
+    case ClientProfilePreset::PacketVer23:
+    case ClientProfilePreset::PacketVer22:
+    default:
+        return configured;
+    }
+}
+
+std::string ResolveGameplaySendProfileToken()
+{
+    const ClientProfilePreset preset = ResolveClientProfilePreset();
+    std::string configured;
+    if (!TryLoadSelectedClientInfoSettingString("mapgameplaysendprofile", &configured)) {
+        configured = LoadSettingsIniString("Packets", "MapGameplaySendProfile", "inherit");
+    }
+    configured = NormalizeProfileToken(std::move(configured));
+    if (configured != "inherit" || preset == ClientProfilePreset::Auto) {
+        return configured;
+    }
+
+    switch (preset) {
+    case ClientProfilePreset::Legacy0072:
+    case ClientProfilePreset::SabineAlpha:
+        return "legacy0072";
+    case ClientProfilePreset::SabineBeta1:
+        return "packetver200";
+    case ClientProfilePreset::Auto:
+    case ClientProfilePreset::PacketVer23:
+    case ClientProfilePreset::PacketVer22:
+    case ClientProfilePreset::SabineBeta2:
+    default:
+        return configured;
+    }
+}
+
 const PacketProfileSet& ResolveConfiguredProfile()
 {
     static const PacketProfileSet kPacketVer23 = MakePacketVer23PacketProfileSet();
+    static const PacketProfileSet kPacketVer200 = MakePacketVer200PacketProfileSet();
     static const PacketProfileSet kPacketVer22 = MakePacketVer22PacketProfileSet();
 
-    const std::string configured = NormalizeProfileToken(
-        LoadSettingsIniString("Packets", "MapSendProfile", kPacketVer23.name));
+    const std::string configured = ResolveMapSendProfileToken();
+    if (configured == "packetver200" || configured == "200" || configured == "beta1" || configured == "sabinebeta1") {
+        return kPacketVer200;
+    }
     if (configured == "packetver22" || configured == "22" || configured == "legacy" || configured == "pre20080910") {
         return kPacketVer22;
     }
@@ -329,12 +703,14 @@ const PacketProfileSet& ResolveConfiguredProfile()
 const ZonePacketProfile& ResolveConfiguredZoneProfile(const PacketProfileSet& baseProfile)
 {
     static const ZonePacketProfile kPacketVer23Zone = MakePacketVer23ZoneProfile();
+    static const ZonePacketProfile kPacketVer100Zone = MakePacketVer100ZoneProfile();
     static const ZonePacketProfile kPacketVer22Zone = MakePacketVer22ZoneProfile();
+    static const ZonePacketProfile kPacketVer200Zone = MakePacketVer200ZoneProfile();
+    static const ZonePacketProfile kPacketVer300Zone = MakePacketVer300ZoneProfile();
     static const ZonePacketProfile kLegacy72Zone = MakeLegacy72ZoneProfile();
     static const ZonePacketProfile kLegacy72Padded22Zone = MakeLegacy72Padded22ZoneProfile();
 
-    const std::string configured = NormalizeProfileToken(
-        LoadSettingsIniString("Packets", "ZoneConnectProfile", "inherit"));
+    const std::string configured = ResolveZoneConnectProfileToken();
     if (configured.empty() || configured == "inherit" || configured == "active" || configured == "mapsendprofile") {
         return baseProfile.zone;
     }
@@ -342,6 +718,18 @@ const ZonePacketProfile& ResolveConfiguredZoneProfile(const PacketProfileSet& ba
     if (configured == "legacy0072padded22" || configured == "0072padded22" || configured == "packetver6"
         || configured == "22byte0072" || configured == "padded22") {
         return kLegacy72Padded22Zone;
+    }
+
+    if (configured == "packetver100" || configured == "100" || configured == "alpha" || configured == "sabinealpha") {
+        return kPacketVer100Zone;
+    }
+
+    if (configured == "packetver200" || configured == "200" || configured == "beta1" || configured == "sabinebeta1") {
+        return kPacketVer200Zone;
+    }
+
+    if (configured == "packetver300" || configured == "300" || configured == "beta2" || configured == "sabinebeta2") {
+        return kPacketVer300Zone;
     }
 
     if (configured == "legacy0072" || configured == "0072" || configured == "classic" || configured == "legacy19") {
@@ -363,10 +751,10 @@ const MapGameplaySendProfile& ResolveConfiguredGameplaySendProfile(const PacketP
 {
     static const MapGameplaySendProfile kPacketVer23Profile = MakePacketVer23Profile();
     static const MapGameplaySendProfile kPacketVer22Profile = MakePacketVer22Profile();
+    static const MapGameplaySendProfile kPacketVer200Profile = MakePacketVer200Profile();
     static const MapGameplaySendProfile kLegacyProfile = MakeLegacyGameplayProfile();
 
-    const std::string configured = NormalizeProfileToken(
-        LoadSettingsIniString("Packets", "MapGameplaySendProfile", "inherit"));
+    const std::string configured = ResolveGameplaySendProfileToken();
     if (configured == "legacy0072" || configured == "legacy005" || configured == "packetver5"
         || configured == "classic" || configured == "legacyworld") {
         return kLegacyProfile;
@@ -374,6 +762,10 @@ const MapGameplaySendProfile& ResolveConfiguredGameplaySendProfile(const PacketP
 
     if (configured == "packetver22" || configured == "22") {
         return kPacketVer22Profile;
+    }
+
+    if (configured == "packetver200" || configured == "200" || configured == "beta1" || configured == "sabinebeta1") {
+        return kPacketVer200Profile;
     }
 
     if (configured == "packetver23" || configured == "23") {
@@ -391,19 +783,46 @@ const MapGameplaySendProfile& ResolveConfiguredGameplaySendProfile(const PacketP
     return baseProfile.mapSend;
 }
 
+struct ResolvedPacketProfiles {
+    int generation = -1;
+    const PacketProfileSet* packetProfile = nullptr;
+    const ZonePacketProfile* zoneProfile = nullptr;
+    const MapGameplaySendProfile* gameplayProfile = nullptr;
+};
+
+ResolvedPacketProfiles& GetResolvedPacketProfiles()
+{
+    static ResolvedPacketProfiles cache;
+    const int generation = GetClientInfoStateGeneration();
+    if (cache.generation == generation && cache.packetProfile && cache.zoneProfile && cache.gameplayProfile) {
+        return cache;
+    }
+
+    cache.packetProfile = &ResolveConfiguredProfile();
+    cache.zoneProfile = &ResolveConfiguredZoneProfile(*cache.packetProfile);
+    cache.gameplayProfile = &ResolveConfiguredGameplaySendProfile(*cache.packetProfile, *cache.zoneProfile);
+    cache.generation = generation;
+
+    const MapReceiveProfile& receiveProfile = cache.packetProfile->mapReceive;
+    DbgLog("[PacketProfile] active packet profile=%s\n", cache.packetProfile->name);
+    DbgLog("[PacketProfile] active zone connect profile=%s opcode=0x%04X layout=%u\n",
+        cache.zoneProfile->name,
+        static_cast<unsigned int>(cache.zoneProfile->wantToConnection),
+        static_cast<unsigned int>(cache.zoneProfile->wantToConnectionLayout));
+    DbgLog("[PacketProfile] active map receive profile=%s id=%u acceptEnter=0x%04X standEntry=0x%04X\n",
+        receiveProfile.name,
+        static_cast<unsigned int>(receiveProfile.id),
+        static_cast<unsigned int>(receiveProfile.acceptEnterLegacy),
+        static_cast<unsigned int>(receiveProfile.actorSpawnLegacyIdle));
+    DbgLog("[PacketProfile] active map gameplay send profile=%s\n", cache.gameplayProfile->name);
+    return cache;
+}
+
 } // namespace
 
 const PacketProfileSet& GetActivePacketProfile()
 {
-    static std::once_flag once;
-    static const PacketProfileSet* profile = nullptr;
-
-    std::call_once(once, []() {
-        profile = &ResolveConfiguredProfile();
-        DbgLog("[PacketProfile] active packet profile=%s\n", profile->name);
-    });
-
-    return *profile;
+    return *GetResolvedPacketProfiles().packetProfile;
 }
 
 const AccountLoginPacketProfile& GetActiveAccountLoginPacketProfile()
@@ -418,43 +837,27 @@ const CharacterPacketProfile& GetActiveCharacterPacketProfile()
 
 const ZonePacketProfile& GetActiveZonePacketProfile()
 {
-    static std::once_flag once;
-    static const ZonePacketProfile* profile = nullptr;
-
-    std::call_once(once, []() {
-        profile = &ResolveConfiguredZoneProfile(GetActivePacketProfile());
-        DbgLog("[PacketProfile] active zone connect profile=%s opcode=0x%04X layout=%u\n",
-            profile->name,
-            static_cast<unsigned int>(profile->wantToConnection),
-            static_cast<unsigned int>(profile->wantToConnectionLayout));
-    });
-
-    return *profile;
+    return *GetResolvedPacketProfiles().zoneProfile;
 }
 
 const MapReceiveProfile& GetActiveMapReceiveProfile()
 {
-    return GetActivePacketProfile().mapReceive;
+    return GetResolvedPacketProfiles().packetProfile->mapReceive;
 }
 
 const MapGameplaySendProfile& GetActiveMapGameplaySendProfile()
 {
-    static std::once_flag once;
-    static const MapGameplaySendProfile* profile = nullptr;
-
-    std::call_once(once, []() {
-        const PacketProfileSet& baseProfile = GetActivePacketProfile();
-        const ZonePacketProfile& zoneProfile = GetActiveZonePacketProfile();
-        profile = &ResolveConfiguredGameplaySendProfile(baseProfile, zoneProfile);
-        DbgLog("[PacketProfile] active map gameplay send profile=%s\n", profile->name);
-    });
-
-    return *profile;
+    return *GetResolvedPacketProfiles().gameplayProfile;
 }
 
 bool IsPacketVer22MapGameplaySendProfile()
 {
     return GetActiveMapGameplaySendProfile().id == MapGameplaySendProfileId::PacketVer22;
+}
+
+bool IsPacketVer200MapGameplaySendProfile()
+{
+    return GetActiveMapGameplaySendProfile().id == MapGameplaySendProfileId::PacketVer200;
 }
 
 bool IsLegacyMapGameplaySendProfile()
@@ -986,7 +1389,7 @@ bool BuildActiveTakeItemPacket(u32 objectAid,
     }
 
     const MapGameplaySendProfile& profile = GetActiveMapGameplaySendProfile();
-    if (profile.id == MapGameplaySendProfileId::Legacy) {
+    if (profile.id == MapGameplaySendProfileId::Legacy || profile.id == MapGameplaySendProfileId::PacketVer200) {
         if (outBufferSize < static_cast<int>(sizeof(PACKET_CZ_TAKE_ITEM_LEGACY))) {
             return false;
         }

@@ -24,3 +24,7 @@ if(RO_ENABLE_QT6_UI)
         Qt6::Gui
     )
 endif()
+
+if(RO_ENABLE_CAPTURE)
+    target_link_libraries(ro_render PRIVATE ro_capture)
+endif()

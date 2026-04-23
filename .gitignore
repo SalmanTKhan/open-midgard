@@ -30,3 +30,4 @@ build_output*.txt
 *.py
 
 screenshots/
+/server

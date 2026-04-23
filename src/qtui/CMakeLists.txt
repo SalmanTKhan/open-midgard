@@ -47,6 +47,10 @@ if(WIN32 AND RO_HAS_NATIVE_D3D12)
     )
 endif()
 
+if(RO_ENABLE_CAPTURE)
+    target_link_libraries(ro_qtui PRIVATE ro_capture)
+endif()
+
 # Qt's <QVulkanInstance> only forward-declares the class; it relies on
 # <vulkan/vulkan.h> already being on the include path in the TU that uses it.
 # Pull Vulkan headers in explicitly so the build isn't dependent on another

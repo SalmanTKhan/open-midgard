@@ -82,7 +82,76 @@ If `clientinfo.xml` / `sclientinfo.xml` are absent, OpenMidgard falls back to a 
 2. `client.cfg` beside the executable or runtime root, using AppleClient-style keys such as `auth_host=127.0.0.1`, `auth_port=6900`, `packet_version=200`
 3. `open-midgard.ini`
 
-The older `[Packets]` keys used by some configs are not read by this branch. In practice, `PacketVersion=0` keeps the client on the packet_ver 23 map-send profile, so only `AuthHost` and `AuthPort` matter for the connection endpoint.
+For most setups, use a single client preset and only set the account endpoint separately:
+
+```ini
+[Client]
+Profile=auto
+
+[Network]
+AuthHost=127.0.0.1
+AuthPort=6900
+```
+
+Supported `Client.Profile` values include:
+
+- `auto` for the default packet_ver 23 / 2008-era path
+- `packetver22`
+- `legacy0072`
+- `alpha`
+- `beta1`
+- `beta2`
+
+Legacy configs that only set `Network.PacketVersion` still work as a compatibility fallback. In particular, Sabine-style values such as `200` and `300` now feed the newer `[Packets]` and `[Login]` runtime selection automatically. The older preset spellings such as `sabinealpha`, `sabinebeta1`, `sabinebeta2`, and `sabine` are still accepted as aliases.
+
+When `clientinfo.xml` contains multiple `<connection>` entries, each connection can also carry its own runtime overrides. OpenMidgard applies the selected connection's overrides before falling back to `open-midgard.ini`.
+
+Supported per-connection XML tags include:
+
+- `<clientprofile>` or `<profile>` with values such as `rathena`, `eathena`, `alpha`, `beta1`, `beta2`, `packetver22`, or `packetver23`
+- `<charlistreceivelayout>`
+- `<mapsendprofile>`
+- `<mapgameplaysendprofile>`
+- `<zoneconnectprofile>`
+- `<accountloginpacket>`
+- `<clientdateoverride>`
+- `<clienthashoverridemd5>`
+- `<clienthashsourceexe>`
+- `<clienttypeoverride>`
+- `<clientversionoverride>`
+
+Example:
+
+```xml
+<connection>
+  <display>eAthena Test</display>
+  <address>127.0.0.1</address>
+  <port>6900</port>
+  <version>18</version>
+  <profile>eathena</profile>
+</connection>
+
+<connection>
+  <display>Sabine Beta1</display>
+  <address>127.0.0.1</address>
+  <port>6900</port>
+  <version>200</version>
+  <profile>beta1</profile>
+</connection>
+```
+
+If you need a nonstandard server layout, the fine-grained overrides are still available:
+
+- `[Packets] CharListReceiveLayout`
+- `[Packets] MapSendProfile`
+- `[Packets] MapGameplaySendProfile`
+- `[Packets] ZoneConnectProfile`
+- `[Login] AccountLoginPacket`
+- `[Login] ClientDateOverride`
+- `[Login] ClientHashOverrideMd5`
+- `[Login] ClientHashSourceExe`
+- `[Login] ClientTypeOverride`
+- `[Login] ClientVersionOverride`
 
 ```ini
 [Network]

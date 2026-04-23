@@ -1,5 +1,9 @@
 #include "RenderDevice.h"
 
+#if RO_ENABLE_CAPTURE
+#include "capture/FrameCapture.h"
+#endif
+
 #include "Device.h"
 #include "D3dutil.h"
 #include "DebugLog.h"
@@ -24,6 +28,7 @@
 #include <dxgi1_4.h>
 #endif
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -333,6 +338,7 @@ PFN_vkCmdPipelineBarrier vkCmdPipelineBarrier = nullptr;
 PFN_vkCmdCopyImage vkCmdCopyImage = nullptr;
 PFN_vkCmdBlitImage vkCmdBlitImage = nullptr;
 PFN_vkCmdCopyBufferToImage vkCmdCopyBufferToImage = nullptr;
+PFN_vkCmdCopyImageToBuffer vkCmdCopyImageToBuffer = nullptr;
 PFN_vkDestroySurfaceKHR vkDestroySurfaceKHR = nullptr;
 PFN_vkGetPhysicalDeviceSurfaceSupportKHR vkGetPhysicalDeviceSurfaceSupportKHR = nullptr;
 PFN_vkGetPhysicalDeviceSurfaceCapabilitiesKHR vkGetPhysicalDeviceSurfaceCapabilitiesKHR = nullptr;
@@ -530,6 +536,7 @@ bool LoadVulkanDeviceFunctions(VkDevice device)
     vkCmdCopyImage = reinterpret_cast<PFN_vkCmdCopyImage>(vkGetDeviceProcAddr(device, "vkCmdCopyImage"));
     vkCmdBlitImage = reinterpret_cast<PFN_vkCmdBlitImage>(vkGetDeviceProcAddr(device, "vkCmdBlitImage"));
     vkCmdCopyBufferToImage = reinterpret_cast<PFN_vkCmdCopyBufferToImage>(vkGetDeviceProcAddr(device, "vkCmdCopyBufferToImage"));
+    vkCmdCopyImageToBuffer = reinterpret_cast<PFN_vkCmdCopyImageToBuffer>(vkGetDeviceProcAddr(device, "vkCmdCopyImageToBuffer"));
     vkCreateSwapchainKHR = reinterpret_cast<PFN_vkCreateSwapchainKHR>(vkGetDeviceProcAddr(device, "vkCreateSwapchainKHR"));
     vkDestroySwapchainKHR = reinterpret_cast<PFN_vkDestroySwapchainKHR>(vkGetDeviceProcAddr(device, "vkDestroySwapchainKHR"));
     vkGetSwapchainImagesKHR = reinterpret_cast<PFN_vkGetSwapchainImagesKHR>(vkGetDeviceProcAddr(device, "vkGetSwapchainImagesKHR"));
@@ -601,6 +608,7 @@ bool LoadVulkanDeviceFunctions(VkDevice device)
         && vkCmdCopyImage
         && vkCmdBlitImage
         && vkCmdCopyBufferToImage
+        && vkCmdCopyImageToBuffer
         && vkCreateSwapchainKHR
         && vkDestroySwapchainKHR
         && vkGetSwapchainImagesKHR
@@ -5325,6 +5333,15 @@ public:
             }
         }
 
+#if RO_ENABLE_CAPTURE
+        if (m_captureArmed.load(std::memory_order_acquire)
+            && m_currentImageIndex < m_swapChainImages.size()) {
+            QueueCapturePresentCopy(GetCurrentCommandBuffer(),
+                m_swapChainImages[m_currentImageIndex],
+                VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+        }
+#endif
+
         const VkResult endResult = vkEndCommandBuffer(GetCurrentCommandBuffer());
         if (endResult != VK_SUCCESS) {
             DbgLog("[Render][Vulkan] vkEndCommandBuffer failed: %d\n", static_cast<int>(endResult));
@@ -8672,6 +8689,11 @@ private:
         m_commandBuffers = std::move(newCommandBuffers);
         m_currentImageIndex = 0;
         m_overlayPassPrepared = false;
+
+        // Re-allocate the capture ring for the new swapchain. Failure is
+        // non-fatal — capture hotkeys will surface a "no backend readback"
+        // log line and the game keeps running.
+        InitCaptureRing(m_swapChainExtent, m_swapChainFormat);
         return true;
     }
 
@@ -8989,12 +9011,266 @@ private:
         imageViews.clear();
     }
 
+    // ── Capture ring ──────────────────────────────────────────────────────
+    // Allocates two host-visible buffers sized to `extent` × 4 bytes (RGBA/BGRA8).
+    // Called once per swapchain (re)creation after m_swapChainExtent is known.
+    bool InitCaptureRing(const VkExtent2D& extent, VkFormat swapFormat)
+    {
+        DestroyCaptureRing();
+
+        m_captureWidth  = static_cast<int>(extent.width);
+        m_captureHeight = static_cast<int>(extent.height);
+        m_captureFormatIsBgra =
+            (swapFormat == VK_FORMAT_B8G8R8A8_UNORM || swapFormat == VK_FORMAT_B8G8R8A8_SRGB);
+        // If the swapchain is an exotic format we can't bit-reinterpret as
+        // 8-bit RGBA (e.g. 10-bit HDR), skip ring setup — screenshots will
+        // report "no backend readback" rather than produce garbled output.
+        const bool swapIs8BitRgba =
+            (swapFormat == VK_FORMAT_R8G8B8A8_UNORM || swapFormat == VK_FORMAT_R8G8B8A8_SRGB);
+        if (!m_captureFormatIsBgra && !swapIs8BitRgba) {
+            DbgLog("[Capture] swapchain format %d not supported for readback\n",
+                static_cast<int>(swapFormat));
+            m_captureWidth = 0;
+            m_captureHeight = 0;
+            return false;
+        }
+
+        m_captureBufferSize =
+            static_cast<VkDeviceSize>(m_captureWidth) *
+            static_cast<VkDeviceSize>(m_captureHeight) * 4ull;
+
+        for (int i = 0; i < kCaptureRingSize; ++i) {
+            VkBufferCreateInfo bufferInfo{};
+            bufferInfo.sType       = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+            bufferInfo.size        = m_captureBufferSize;
+            bufferInfo.usage       = VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+            bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+            if (vkCreateBuffer(m_device, &bufferInfo, nullptr, &m_captureBuffers[i]) != VK_SUCCESS) {
+                DestroyCaptureRing();
+                return false;
+            }
+
+            VkMemoryRequirements req{};
+            vkGetBufferMemoryRequirements(m_device, m_captureBuffers[i], &req);
+
+            // Prefer HOST_CACHED memory — reads from uncached / write-combined
+            // staging buffers over PCIe are orders of magnitude slower than
+            // reads from cached memory, and the readback callback has to read
+            // every pixel to hand them to the encoder. HOST_CACHED without
+            // HOST_COHERENT would require explicit vkInvalidate calls, so we
+            // ask for all three; if no such memory type exists we fall back
+            // to the coherent-only allocation which always exists.
+            VkMemoryAllocateInfo allocInfo{};
+            allocInfo.sType          = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+            allocInfo.allocationSize = req.size;
+            allocInfo.memoryTypeIndex = FindMemoryType(
+                req.memoryTypeBits,
+                VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT
+                | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
+                | VK_MEMORY_PROPERTY_HOST_CACHED_BIT);
+            if (allocInfo.memoryTypeIndex == kInvalidQueueFamilyIndex) {
+                allocInfo.memoryTypeIndex = FindMemoryType(
+                    req.memoryTypeBits,
+                    VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT
+                    | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+            }
+            if (allocInfo.memoryTypeIndex == kInvalidQueueFamilyIndex) {
+                DestroyCaptureRing();
+                return false;
+            }
+            if (vkAllocateMemory(m_device, &allocInfo, nullptr, &m_captureBufferMemory[i]) != VK_SUCCESS) {
+                DestroyCaptureRing();
+                return false;
+            }
+            if (vkBindBufferMemory(m_device, m_captureBuffers[i], m_captureBufferMemory[i], 0) != VK_SUCCESS) {
+                DestroyCaptureRing();
+                return false;
+            }
+            if (vkMapMemory(m_device, m_captureBufferMemory[i], 0, m_captureBufferSize, 0, &m_captureBufferMapped[i]) != VK_SUCCESS) {
+                DestroyCaptureRing();
+                return false;
+            }
+            m_captureInFlight[i] = false;
+        }
+
+        m_captureWriteIdx = 0;
+        m_captureReadIdx  = -1;
+        m_captureScratchRgba.assign(static_cast<size_t>(m_captureBufferSize), 0);
+
+#if RO_ENABLE_CAPTURE
+        if (!m_captureCallbackRegistered) {
+            capture::SetBackendReadback([this](capture::FrameView* outFrame) {
+                return GetReadableCaptureFrame(outFrame);
+            });
+            capture::SetBackendArm([this](bool armed) {
+                m_captureArmed.store(armed, std::memory_order_release);
+            });
+            m_captureCallbackRegistered = true;
+        }
+#endif
+        DbgLog("[Capture] ring ready: %dx%d (%d slots, bgra=%d)\n",
+            m_captureWidth, m_captureHeight, kCaptureRingSize,
+            m_captureFormatIsBgra ? 1 : 0);
+        return true;
+    }
+
+    void DestroyCaptureRing()
+    {
+#if RO_ENABLE_CAPTURE
+        if (m_captureCallbackRegistered) {
+            capture::SetBackendReadback({});
+            capture::SetBackendArm({});
+            m_captureCallbackRegistered = false;
+        }
+        m_captureArmed.store(false, std::memory_order_release);
+#endif
+        if (m_device == VK_NULL_HANDLE) {
+            for (int i = 0; i < kCaptureRingSize; ++i) {
+                m_captureBuffers[i]      = VK_NULL_HANDLE;
+                m_captureBufferMemory[i] = VK_NULL_HANDLE;
+                m_captureBufferMapped[i] = nullptr;
+                m_captureInFlight[i]     = false;
+            }
+            m_captureBufferSize = 0;
+            m_captureWidth = 0;
+            m_captureHeight = 0;
+            m_captureReadIdx = -1;
+            m_captureWriteIdx = 0;
+            return;
+        }
+        for (int i = 0; i < kCaptureRingSize; ++i) {
+            if (m_captureBufferMapped[i]) {
+                vkUnmapMemory(m_device, m_captureBufferMemory[i]);
+                m_captureBufferMapped[i] = nullptr;
+            }
+            if (m_captureBufferMemory[i] != VK_NULL_HANDLE) {
+                vkFreeMemory(m_device, m_captureBufferMemory[i], nullptr);
+                m_captureBufferMemory[i] = VK_NULL_HANDLE;
+            }
+            if (m_captureBuffers[i] != VK_NULL_HANDLE) {
+                vkDestroyBuffer(m_device, m_captureBuffers[i], nullptr);
+                m_captureBuffers[i] = VK_NULL_HANDLE;
+            }
+            m_captureInFlight[i] = false;
+        }
+        m_captureBufferSize = 0;
+        m_captureWidth = 0;
+        m_captureHeight = 0;
+        m_captureReadIdx = -1;
+        m_captureWriteIdx = 0;
+    }
+
+    // Inserts a layout transition + image→buffer copy + transition back into
+    // the active command buffer. Caller must have already ended the render
+    // pass (swapchain image is in PRESENT_SRC_KHR or COLOR_ATTACHMENT_OPTIMAL).
+    // Returns the slot index written, or -1 if the ring is unavailable.
+    int QueueCapturePresentCopy(VkCommandBuffer cmd, VkImage srcImage, VkImageLayout srcLayout)
+    {
+        if (m_captureBufferSize == 0 || m_captureWidth == 0 || m_captureHeight == 0) {
+            return -1;
+        }
+
+        const int slot = m_captureWriteIdx;
+
+        VkImageMemoryBarrier toSrc{};
+        toSrc.sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+        toSrc.srcAccessMask       = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_MEMORY_READ_BIT;
+        toSrc.dstAccessMask       = VK_ACCESS_TRANSFER_READ_BIT;
+        toSrc.oldLayout           = srcLayout;
+        toSrc.newLayout           = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+        toSrc.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        toSrc.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        toSrc.image               = srcImage;
+        toSrc.subresourceRange    = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
+        vkCmdPipelineBarrier(cmd,
+            VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_TRANSFER_BIT,
+            VK_PIPELINE_STAGE_TRANSFER_BIT,
+            0, 0, nullptr, 0, nullptr, 1, &toSrc);
+
+        VkBufferImageCopy region{};
+        region.bufferOffset      = 0;
+        region.bufferRowLength   = 0;
+        region.bufferImageHeight = 0;
+        region.imageSubresource  = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
+        region.imageOffset       = { 0, 0, 0 };
+        region.imageExtent       = { static_cast<uint32_t>(m_captureWidth),
+                                     static_cast<uint32_t>(m_captureHeight), 1u };
+        vkCmdCopyImageToBuffer(cmd, srcImage,
+            VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+            m_captureBuffers[slot], 1, &region);
+
+        VkImageMemoryBarrier toPresent{};
+        toPresent.sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+        toPresent.srcAccessMask       = VK_ACCESS_TRANSFER_READ_BIT;
+        toPresent.dstAccessMask       = 0;
+        toPresent.oldLayout           = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+        toPresent.newLayout           = srcLayout;
+        toPresent.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        toPresent.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        toPresent.image               = srcImage;
+        toPresent.subresourceRange    = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
+        vkCmdPipelineBarrier(cmd,
+            VK_PIPELINE_STAGE_TRANSFER_BIT,
+            VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
+            0, 0, nullptr, 0, nullptr, 1, &toPresent);
+
+        m_captureInFlight[slot] = true;
+        return slot;
+    }
+
+    // Called from BeginFrame after vkWaitForFences: the slot we wrote last
+    // frame is now coherent with the host. Advance the ring.
+    void AdvanceCaptureRingAfterFenceWait()
+    {
+        for (int i = 0; i < kCaptureRingSize; ++i) {
+            if (m_captureInFlight[i]) {
+                m_captureInFlight[i] = false;
+                m_captureReadIdx = i;
+            }
+        }
+        m_captureWriteIdx = (m_captureWriteIdx + 1) % kCaptureRingSize;
+    }
+
+    // FrameCapture callback body. Copies the latest completed slot into the
+    // scratch buffer via a single streaming memcpy and hands it back with a
+    // format flag — no byte-by-byte BGRA→RGBA swap. Downstream (sws_scale /
+    // libwebp) handles channel ordering via AV_PIX_FMT_BGRA / WebPEncodeBGRA.
+    //
+    // Why the memcpy: the mapped Vulkan buffer is host-visible memory; on
+    // most drivers, reading from it byte-by-byte is extremely slow (uncached
+    // / write-combined). memcpy uses SIMD streaming loads, making the read
+    // pass fast. Once the bytes are in scratch (normal cacheable RAM), the
+    // encoder thread can read them cheaply.
+    bool GetReadableCaptureFrame(capture::FrameView* outFrame)
+    {
+        if (!outFrame) return false;
+        if (m_captureReadIdx < 0 || m_captureReadIdx >= kCaptureRingSize) return false;
+        if (m_captureBufferSize == 0 || !m_captureBufferMapped[m_captureReadIdx]) return false;
+
+        const uint8_t* src = static_cast<const uint8_t*>(m_captureBufferMapped[m_captureReadIdx]);
+        const size_t bytes = static_cast<size_t>(m_captureWidth) *
+                             static_cast<size_t>(m_captureHeight) * 4;
+        uint8_t* dst = m_captureScratchRgba.data();
+        std::memcpy(dst, src, bytes);
+
+        outFrame->pixels      = dst;
+        outFrame->width       = m_captureWidth;
+        outFrame->height      = m_captureHeight;
+        outFrame->strideBytes = m_captureWidth * 4;
+        outFrame->format      = m_captureFormatIsBgra
+            ? capture::PixelFormat::Bgra8
+            : capture::PixelFormat::Rgba8;
+        return true;
+    }
+
     void DestroySwapChainResources()
     {
         if (m_device == VK_NULL_HANDLE) {
             return;
         }
 
+        DestroyCaptureRing();
         ReleasePendingTransferResources();
         ReleaseCachedPipelines();
 
@@ -9246,6 +9522,12 @@ private:
             m_bootstrap.initHr = static_cast<int>(result);
             return result;
         }
+#if RO_ENABLE_CAPTURE
+        // Previous frame's readback copy (if any) is now coherent with the
+        // host. AdvanceCaptureRingAfterFenceWait is a no-op when nothing was
+        // ever queued into the ring, so calling it unconditionally is safe.
+        AdvanceCaptureRingAfterFenceWait();
+#endif
         const double releaseStartMs = VulkanNowMs();
         ReleasePendingTransferResources();
         g_vulkanPerfStats.frameReleaseTransferMs += VulkanNowMs() - releaseStartMs;
@@ -9493,6 +9775,28 @@ private:
     VkImage m_msaaColorImage = VK_NULL_HANDLE;
     VkDeviceMemory m_msaaColorMemory = VK_NULL_HANDLE;
     VkImageView m_msaaColorImageView = VK_NULL_HANDLE;
+    // Capture ring: 2 host-visible readback buffers. Present queues a copy of
+    // the swapchain image into slot[writeIdx]; the next BeginFrame's fence wait
+    // guarantees that slot is safe to read, so we rotate and mark it readable.
+    // Only one frame is in flight in this backend, so two slots is sufficient
+    // to decouple the encoder (which reads `readIdx`) from the render thread.
+    static constexpr int kCaptureRingSize = 2;
+    VkBuffer        m_captureBuffers[kCaptureRingSize]      = { VK_NULL_HANDLE, VK_NULL_HANDLE };
+    VkDeviceMemory  m_captureBufferMemory[kCaptureRingSize] = { VK_NULL_HANDLE, VK_NULL_HANDLE };
+    void*           m_captureBufferMapped[kCaptureRingSize] = { nullptr, nullptr };
+    VkDeviceSize    m_captureBufferSize = 0;
+    int             m_captureWriteIdx  = 0;   // slot GPU writes this frame
+    int             m_captureReadIdx   = -1;  // latest slot with completed bytes (-1 = none)
+    bool            m_captureInFlight[kCaptureRingSize] = { false, false };
+    int             m_captureWidth  = 0;
+    int             m_captureHeight = 0;
+    bool            m_captureFormatIsBgra = false;
+    std::vector<uint8_t> m_captureScratchRgba;  // reused across readback callbacks
+    bool            m_captureCallbackRegistered = false;
+    // Armed by FrameCapture when a screenshot is pending or a recording is
+    // active. Checked on every Present — when disarmed, the ring copy is
+    // skipped entirely and the feature costs nothing.
+    std::atomic<bool> m_captureArmed{false};
 #if !RO_PLATFORM_WINDOWS && RO_ENABLE_QT6_UI
     QVulkanInstance* m_qtVulkanInstance;
 #endif

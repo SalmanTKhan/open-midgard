@@ -2,6 +2,12 @@
   "name": "open-midgard",
   "version-string": "0.0.0",
   "dependencies": [
-    "sdl3"
+    "sdl3",
+    "libwebp",
+    {
+      "name": "ffmpeg",
+      "default-features": false,
+      "features": ["avcodec", "avformat", "swscale", "vpx"]
+    }
   ]
 }

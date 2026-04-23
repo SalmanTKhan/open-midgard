@@ -1,4 +1,7 @@
 #include "Renderer.h"
+#if RO_ENABLE_CAPTURE
+#include "capture/FrameCapture.h"
+#endif
 #include "render3d/RenderDevice.h"
 #include "render3d/Device.h"
 #include "render3d/D3dutil.h"
@@ -833,8 +836,11 @@ bool CRenderer::DrawScene() {
 void CRenderer::Flip(bool vertSync) {
     m_curFrame++;
     m_fpsFrameCount++;
-    
+
     GetRenderDevice().Present(vertSync);
+#if RO_ENABLE_CAPTURE
+    capture::OnFramePresented();
+#endif
 }
 
 void CRenderer::AddRP(RPFace* face, int renderFlag) {

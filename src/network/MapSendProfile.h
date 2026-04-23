@@ -7,12 +7,28 @@ namespace ro::net {
 enum class PacketVersionId : u8 {
     PacketVer23 = 0,
     PacketVer22 = 1,
+    PacketVer100 = 10,
+    PacketVer200 = 20,
+    PacketVer300 = 30,
+    PacketVer400 = 40,
+    PacketVer500 = 50,
+    PacketVer600 = 60,
+    PacketVer700 = 70,
+    PacketVer800 = 80,
 };
 
 enum class MapGameplaySendProfileId : u8 {
     PacketVer23 = 0,
     PacketVer22 = 1,
     Legacy = 2,
+    PacketVer100 = 10,
+    PacketVer200 = 20,
+    PacketVer300 = 30,
+    PacketVer400 = 40,
+    PacketVer500 = 50,
+    PacketVer600 = 60,
+    PacketVer700 = 70,
+    PacketVer800 = 80,
 };
 
 enum class ZoneConnectPacketLayout : u8 {
@@ -92,6 +108,7 @@ struct MapReceiveProfile {
     u16 actorActionNotifyExtended;
     u16 actorSetPositionBasic;
     u16 actorSetPositionHighJump;
+    u16 selfMoveAck;
     u16 broadcastBasic;
     u16 broadcastColored;
     u16 groundItemEntryExisting;
@@ -177,6 +194,7 @@ const MapReceiveProfile& GetActiveMapReceiveProfile();
 
 const MapGameplaySendProfile& GetActiveMapGameplaySendProfile();
 bool IsPacketVer22MapGameplaySendProfile();
+bool IsPacketVer200MapGameplaySendProfile();
 bool IsLegacyMapGameplaySendProfile();
 bool IsPacketVer22PacketProfile();
 bool IsActiveAcceptEnterPacket(u16 packetId);

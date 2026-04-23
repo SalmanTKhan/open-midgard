@@ -5563,7 +5563,7 @@ Item {
             Text {
                 anchors.verticalCenter: parent.verticalCenter
                 x: 16
-                text: "Click / Enter: rebind    •    Esc: cancel / close    •    Del: reset defaults    •    Tab: switch tab    •    ↑↓: move"
+                text: "Click / Enter: rebind    •    Esc: cancel / close    •    Del: reset defaults    •    Tab: switch tab    •    ↑↓: move    •    Wheel / PgUp / PgDn: scroll"
                 color: Theme.textMuted
                 font.pixelSize: 10
             }
@@ -6692,6 +6692,79 @@ Item {
             Text { text: "Faith: " + (uiState.mercInfoPanelData.faith || 0); color: Theme.text; font.pixelSize: 10 }
             Text { text: "Calls: " + (uiState.mercInfoPanelData.calls || 0); color: Theme.text; font.pixelSize: 10 }
             Text { text: "Expires: " + (uiState.mercInfoPanelData.expireTime || 0); color: Theme.text; font.pixelSize: 10 }
+        }
+    }
+
+    // REC badge — top-right corner while a recording is active. Shows elapsed
+    // time and a rolling estimate of the final file size (derived from the
+    // target bitrate × elapsed seconds, so it's in the right ballpark for
+    // typical VBR content but not a byte-exact forecast).
+    Rectangle {
+        id: captureRecBadge
+        visible: (uiState.captureStatus && uiState.captureStatus.recording === true)
+        anchors.right: parent.right
+        anchors.top: parent.top
+        anchors.rightMargin: 16
+        anchors.topMargin: 16
+        radius: 4
+        color: "#AA000000"
+        border.color: "#FF3030"
+        border.width: 1
+        width: captureRecRow.implicitWidth + 16
+        height: captureRecRow.implicitHeight + 8
+
+        function formatElapsed(ms) {
+            var total = Math.floor((ms || 0) / 1000)
+            var mm = Math.floor(total / 60)
+            var ss = total % 60
+            var tenths = Math.floor(((ms || 0) % 1000) / 100)
+            return (mm < 10 ? "0" + mm : mm) + ":" +
+                   (ss < 10 ? "0" + ss : ss) + "." + tenths
+        }
+
+        function formatBytes(bytes) {
+            var b = bytes || 0
+            if (b >= 1024 * 1024 * 1024) {
+                return (b / (1024 * 1024 * 1024)).toFixed(2) + " GB"
+            }
+            if (b >= 1024 * 1024) {
+                return (b / (1024 * 1024)).toFixed(1) + " MB"
+            }
+            if (b >= 1024) {
+                return (b / 1024).toFixed(0) + " KB"
+            }
+            return b + " B"
+        }
+
+        Row {
+            id: captureRecRow
+            anchors.centerIn: parent
+            spacing: 8
+
+            Rectangle {
+                width: 10; height: 10; radius: 5
+                color: "#FF3030"
+                anchors.verticalCenter: parent.verticalCenter
+                SequentialAnimation on opacity {
+                    loops: Animation.Infinite
+                    running: captureRecBadge.visible
+                    NumberAnimation { from: 1.0; to: 0.25; duration: 600 }
+                    NumberAnimation { from: 0.25; to: 1.0; duration: 600 }
+                }
+            }
+
+            Text {
+                anchors.verticalCenter: parent.verticalCenter
+                text: {
+                    var st = uiState.captureStatus || {}
+                    var elapsed = captureRecBadge.formatElapsed(st.elapsedMillis)
+                    var size = captureRecBadge.formatBytes(st.estimatedBytes)
+                    return "REC " + elapsed + " • ~" + size
+                }
+                color: "white"
+                font.pixelSize: 12
+                font.bold: true
+            }
         }
     }
     }

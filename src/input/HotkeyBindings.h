@@ -34,6 +34,8 @@ enum class KeyboardAction {
     QuestToggle,
     HotbarPagePrev,
     HotbarPageNext,
+    CaptureScreenshot,
+    ToggleRecording,
     _Count
 };
 

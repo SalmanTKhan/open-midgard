@@ -141,11 +141,17 @@ int GamepadRowCount()
 #endif
 }
 
+int TitleBarHeight()
+{
+    return kHeaderH;
+}
+
 }  // namespace
 
 UIControllerWnd::UIControllerWnd()
     : m_activeTab(BindingTab::Keyboard),
       m_selectedRow(0),
+      m_listScrollOffset(0),
       m_keyboardRebinding(false),
       m_keyboardRebindAction(hotkeys::KeyboardAction::Invalid)
 {
@@ -192,6 +198,44 @@ int UIControllerWnd::RowCountForTab(BindingTab tab) const
     case BindingTab::Gamepad:  return GamepadRowCount();
     default: return 0;
     }
+}
+
+int UIControllerWnd::VisibleRowCount() const
+{
+    const int listTopY = m_y + kMargin + kHeaderH + kLiveH + 4 + kMoveRowH + 4 + kTabH + 4;
+    const int listBottomY = m_y + m_h - kMargin - kFooterH;
+    const int listHeight = (std::max)(0, listBottomY - listTopY);
+    return (std::max)(1, listHeight / kRowH);
+}
+
+int UIControllerWnd::MaxScrollOffset() const
+{
+    const int rowCount = RowCountForTab(m_activeTab);
+    return (std::max)(0, rowCount - VisibleRowCount());
+}
+
+void UIControllerWnd::ClampScrollOffset()
+{
+    m_listScrollOffset = std::clamp(m_listScrollOffset, 0, MaxScrollOffset());
+}
+
+void UIControllerWnd::EnsureSelectedRowVisible()
+{
+    ClampScrollOffset();
+    const int visibleRows = VisibleRowCount();
+    const int firstVisibleRow = m_listScrollOffset;
+    const int lastVisibleRow = firstVisibleRow + visibleRows - 1;
+    if (m_selectedRow < firstVisibleRow) {
+        m_listScrollOffset = m_selectedRow;
+    } else if (m_selectedRow > lastVisibleRow) {
+        m_listScrollOffset = m_selectedRow - visibleRows + 1;
+    }
+    ClampScrollOffset();
+}
+
+bool UIControllerWnd::IsInTitleBar(int x, int y) const
+{
+    return x >= m_x && x < m_x + m_w && y >= m_y && y < m_y + TitleBarHeight();
 }
 
 hotkeys::KeyboardAction UIControllerWnd::KeyboardActionAtRow(int row) const
@@ -248,6 +292,7 @@ void UIControllerWnd::OnProcess()
     if (m_show == 0) {
         return;
     }
+    ClampScrollOffset();
     Invalidate();
 }
 
@@ -259,7 +304,7 @@ int UIControllerWnd::RowAtPoint(int x, int y) const
     if (x < listX || x >= listX + listW) return -1;
     const int offset = y - listTopY;
     if (offset < 0) return -1;
-    const int row = offset / kRowH;
+    const int row = m_listScrollOffset + (offset / kRowH);
     const int rowCount = RowCountForTab(CurrentTab());
     if (row < 0 || row >= rowCount) return -1;
     return row;
@@ -267,6 +312,15 @@ int UIControllerWnd::RowAtPoint(int x, int y) const
 
 void UIControllerWnd::OnLBtnDown(int x, int y)
 {
+    if (IsInTitleBar(x, y)) {
+        m_isDragging = 1;
+        m_startGlobalX = x;
+        m_startGlobalY = y;
+        m_orgX = m_x;
+        m_orgY = m_y;
+        return;
+    }
+
     const int tabY = m_y + kMargin + kHeaderH + kLiveH + 4 + kMoveRowH + 4;
     const int tabX = m_x + kMargin;
     const int tabW = (m_w - kMargin * 2) / 2;
@@ -275,12 +329,16 @@ void UIControllerWnd::OnLBtnDown(int x, int y)
     if (x >= keyboardTab.left && x < keyboardTab.right && y >= keyboardTab.top && y < keyboardTab.bottom) {
         m_activeTab = BindingTab::Keyboard;
         m_selectedRow = std::min(m_selectedRow, std::max(0, RowCountForTab(m_activeTab) - 1));
+        ClampScrollOffset();
+        EnsureSelectedRowVisible();
         Invalidate();
         return;
     }
     if (x >= gamepadTab.left && x < gamepadTab.right && y >= gamepadTab.top && y < gamepadTab.bottom) {
         m_activeTab = BindingTab::Gamepad;
         m_selectedRow = std::min(m_selectedRow, std::max(0, RowCountForTab(m_activeTab) - 1));
+        ClampScrollOffset();
+        EnsureSelectedRowVisible();
         Invalidate();
         return;
     }
@@ -305,6 +363,7 @@ void UIControllerWnd::OnLBtnDown(int x, int y)
     }
 
     m_selectedRow = row;
+    EnsureSelectedRowVisible();
     if (m_activeTab == BindingTab::Keyboard) {
         BeginKeyboardRebind(KeyboardActionAtRow(row));
     } else {
@@ -315,9 +374,28 @@ void UIControllerWnd::OnLBtnDown(int x, int y)
 
 void UIControllerWnd::OnMouseMove(int x, int y)
 {
+    if (m_isDragging != 0) {
+        UIFrameWnd::OnMouseMove(x, y);
+        return;
+    }
+
     const int row = RowAtPoint(x, y);
     if (row >= 0 && row != m_selectedRow) {
         m_selectedRow = row;
+        EnsureSelectedRowVisible();
+        Invalidate();
+    }
+}
+
+void UIControllerWnd::OnWheel(int delta)
+{
+    const int oldOffset = m_listScrollOffset;
+    if (delta > 0) {
+        m_listScrollOffset = std::max(0, m_listScrollOffset - 1);
+    } else if (delta < 0) {
+        m_listScrollOffset = std::min(MaxScrollOffset(), m_listScrollOffset + 1);
+    }
+    if (m_listScrollOffset != oldOffset) {
         Invalidate();
     }
 }
@@ -355,16 +433,30 @@ void UIControllerWnd::OnKeyDown(int virtualKey)
     if (virtualKey == VK_TAB) {
         m_activeTab = (m_activeTab == BindingTab::Keyboard) ? BindingTab::Gamepad : BindingTab::Keyboard;
         m_selectedRow = std::min(m_selectedRow, std::max(0, RowCountForTab(m_activeTab) - 1));
+        ClampScrollOffset();
+        EnsureSelectedRowVisible();
         Invalidate();
         return;
     }
     if (virtualKey == VK_UP) {
         if (m_selectedRow > 0) --m_selectedRow;
+        EnsureSelectedRowVisible();
         Invalidate();
         return;
     }
     if (virtualKey == VK_DOWN) {
         if (m_selectedRow < RowCountForTab(m_activeTab) - 1) ++m_selectedRow;
+        EnsureSelectedRowVisible();
+        Invalidate();
+        return;
+    }
+    if (virtualKey == VK_PRIOR) {
+        m_listScrollOffset = std::max(0, m_listScrollOffset - VisibleRowCount());
+        Invalidate();
+        return;
+    }
+    if (virtualKey == VK_NEXT) {
+        m_listScrollOffset = std::min(MaxScrollOffset(), m_listScrollOffset + VisibleRowCount());
         Invalidate();
         return;
     }
@@ -491,7 +583,7 @@ void UIControllerWnd::OnDraw()
 
     const int footerY = m_y + m_h - kMargin - kFooterH + 2;
     DrawTextAt(hdc, m_x + kMargin, footerY, m_w - kMargin * 2, kFooterH,
-        "Enter/click: rebind   Esc: close/cancel   Del: reset defaults   Tab: switch tab",
+        "Enter/click: rebind   Esc: close/cancel   Del: reset defaults   Tab: switch tab   Wheel/PgUp/PgDn: scroll",
         RGB(60, 60, 80), 13, FW_NORMAL, DT_LEFT | DT_VCENTER);
 
     ReleaseDrawTarget(hdc);
@@ -523,13 +615,19 @@ void UIControllerWnd::DrawBindings(HDC hdc)
     const int listY = m_y + kMargin + kHeaderH + kLiveH + 4 + kMoveRowH + 4 + kTabH + 4;
     const int listW = m_w - kMargin * 2;
     const int rowCount = RowCountForTab(m_activeTab);
+    const int visibleRows = VisibleRowCount();
+    const int firstRow = m_listScrollOffset;
+    const int lastRow = (std::min)(rowCount, firstRow + visibleRows);
 
     DrawTextAt(hdc, listX, listY - 16, listW, 14,
         m_activeTab == BindingTab::Keyboard ? "Keyboard bindings" : "Controller bindings",
         RGB(40, 40, 60), 13, FW_BOLD, DT_LEFT);
 
-    for (int row = 0; row < rowCount; ++row) {
-        const int rowY = listY + row * kRowH;
+    SaveDC(hdc);
+    IntersectClipRect(hdc, listX, listY, listX + listW, listY + visibleRows * kRowH);
+
+    for (int row = firstRow; row < lastRow; ++row) {
+        const int rowY = listY + (row - firstRow) * kRowH;
         const bool selected = (row == m_selectedRow);
         const RECT rowRc = MakeRect(listX, rowY, listW, kRowH);
         if (selected) {
@@ -568,6 +666,8 @@ void UIControllerWnd::DrawBindings(HDC hdc)
         DrawTextAt(hdc, listX + listW / 2, rowY + 2, listW / 2 - 16, kRowH - 4,
             bindingText.c_str(), RGB(40, 60, 120), 13, FW_BOLD, DT_LEFT);
     }
+
+    RestoreDC(hdc, -1);
 }
 
 bool UIControllerWnd::GetDisplayDataForQt(DisplayData* outData) const
@@ -603,11 +703,12 @@ bool UIControllerWnd::GetDisplayDataForQt(DisplayData* outData) const
     const int listY = kMargin + kHeaderH + kLiveH + 4 + kMoveRowH + 4 + kTabH + 4;
     const int listW = kPanelW - kMargin * 2;
     const int rowCount = RowCountForTab(m_activeTab);
+    const int firstRow = m_listScrollOffset;
     for (int row = 0; row < rowCount; ++row) {
         DisplayRow entry{};
         entry.id = row;
         entry.x = listX;
-        entry.y = listY + row * kRowH;
+        entry.y = listY + (row - firstRow) * kRowH;
         entry.width = listW;
         entry.height = kRowH;
         entry.selected = (row == m_selectedRow);
@@ -639,4 +740,16 @@ bool UIControllerWnd::GetDisplayDataForQt(DisplayData* outData) const
 
     *outData = std::move(data);
     return true;
+}
+
+bool UIControllerWnd::IsRebinding() const
+{
+    if (m_keyboardRebinding) {
+        return true;
+    }
+#if RO_HAS_GAMEPAD
+    return gamepad::g_gamepad.IsRebinding();
+#else
+    return false;
+#endif
 }

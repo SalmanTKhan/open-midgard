@@ -148,3 +148,57 @@ Follow-up applied after revalidation:
 - `src/gamemode/LoginMode.cpp`
 - `src/gamemode/GameMode.cpp`
 - `src/network/GronPacket.cpp` only if receive-side validation proves a missing size or wrong assumption
+## Sabine Beta1 profile (packet_ver 200)
+
+OpenMidgard optionally speaks the **iRO Beta1 (2002-02-20) Ragexe** protocol that
+the Sabine server (<https://github.com/exectails/Sabine>) emulates. Activate it via
+either `data/clientinfo.xml` attribute `clientprofile="beta1"` or
+`settings.ini` `[Client] Profile=beta1`. Accepted aliases: `sabine`,
+`sabinebeta1`, `200`, `packetver200`.
+
+Resolution flow:
+
+- `Client.Profile=beta1` → `ClientProfilePreset::SabineBeta1`
+- `Packets.MapSendProfile=inherit` → `packetver200` (see `ResolveMapSendProfileToken`)
+- `Packets.ZoneConnectProfile=inherit` → `packetver200` → `CZ_ENTER = 0x000E/19`
+- `Packets.MapGameplaySendProfile=inherit` → `packetver200` (`EarlyMapServerSend::*`)
+- Receive table: `MakePacketVer200ReceiveProfile` in `src/network/MapSendProfile.cpp`
+  (standalone, does **not** inherit PV23)
+- Framer size table: `g_packetSizePacketVer200` in `src/network/GronPacket.cpp`,
+  built from the shared fill + `ApplyPacketVer200Overrides` for the
+  `0x0058`/`0x00B0..0x00BB` range that collides with PV23 semantics
+
+Key inbound opcode/size map (Alpha numbers, Beta1 resized payloads):
+
+| Opcode | Name | Size |
+|---|---|---|
+| `0x000F` | ZC_ACCEPT_ENTER | 11 |
+| `0x0014` | ZC_NOTIFY_STANDENTRY | 26 |
+| `0x0015` | ZC_NOTIFY_NEWENTRY | 25 |
+| `0x0017` | ZC_NOTIFY_MOVEENTRY | 32 |
+| `0x0018` | ZC_NOTIFY_STANDENTRY_NPC | 25 |
+| `0x001B` | ZC_NOTIFY_TIME | 6 |
+| `0x001C` | ZC_NOTIFY_VANISH | 7 |
+| `0x0022` | ZC_NOTIFY_MOVE | 16 |
+| `0x0023` | ZC_NOTIFY_PLAYERMOVE | 12 |
+| `0x0026` | ZC_NOTIFY_ACT | 27 |
+| `0x0027` | ZC_NOTIFY_ACT_POSITION | 23 |
+| `0x002C` | ZC_NPCACK_MAPMOVE | 22 |
+| `0x0030` | ZC_ACK_REQNAME | 54 |
+| `0x0038` | ZC_ITEM_ENTRY | 38 |
+| `0x003B` | ZC_ITEM_PICKUP_ACK | 33 |
+| `0x0058` | ZC_STATUS | 44 |
+
+Disconnect: client sends `CZ_REQUEST_QUIT = 0x001E` (2 bytes, opcode only) via
+`PacketProfile::GetQuitGameOpcode()` whenever `UsesEarlyMapServerSendProfile()`
+is true, because the Sabine packet table has no entry for the modern
+`0x018A CZ_QUITGAME` and throws `ArgumentException` on receipt.
+
+Known gaps (follow-up):
+- The legacy `HandleActorSpawn/MoveSkeleton` decoders still read PV23-ish offsets,
+  so Beta1 remote actors currently land at approximate — not exact — positions
+  until the handlers grow a `PacketVersionId::PacketVer200` branch that decodes
+  the 26/25/32-byte Beta1 layouts from `Sabine/src/ZoneServer/Network/Helpers/Character.cs`.
+- `MakePacketVer200ReceiveProfile` leaves party/chatroom/trade/storage opcodes
+  at `0`; those subsystems are silent-consumed rather than rendered.
+

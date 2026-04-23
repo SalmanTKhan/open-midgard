@@ -57,15 +57,22 @@ public:
 
     void OnLBtnDown(int x, int y) override;
     void OnMouseMove(int x, int y) override;
+    void OnWheel(int delta) override;
     void OnKeyDown(int virtualKey) override;
 
     void PositionCentered(int clientWidth, int clientHeight);
     bool GetDisplayDataForQt(DisplayData* outData) const;
+    bool IsRebinding() const;
 
 private:
     int RowAtPoint(int x, int y) const;
     BindingTab CurrentTab() const;
     int RowCountForTab(BindingTab tab) const;
+    int VisibleRowCount() const;
+    int MaxScrollOffset() const;
+    void ClampScrollOffset();
+    void EnsureSelectedRowVisible();
+    bool IsInTitleBar(int x, int y) const;
     hotkeys::KeyboardAction KeyboardActionAtRow(int row) const;
     hotkeys::GamepadAction GamepadActionAtRow(int row) const;
 
@@ -78,6 +85,7 @@ private:
 
     BindingTab m_activeTab;
     int m_selectedRow;
+    int m_listScrollOffset;
     bool m_keyboardRebinding;
     hotkeys::KeyboardAction m_keyboardRebindAction;
 };

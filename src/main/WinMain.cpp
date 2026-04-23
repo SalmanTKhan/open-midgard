@@ -23,6 +23,9 @@
 #include "core/ClientInfoLocale.h"
 #include "lua/LuaBridge.h"
 #include "qtui/QtUiRuntime.h"
+#if RO_ENABLE_CAPTURE
+#include "capture/FrameCapture.h"
+#endif
 #include "ui/UIOptionWnd.h"
 #include "ui/UiScale.h"
 #include "ui/UIWindowMgr.h"
@@ -1043,8 +1046,14 @@ static bool InitClientSystems()
 int __stdcall WinMain(HINSTANCE hInstance, HINSTANCE /*hPrevInstance*/,
                        char* lpCmdLine, int nCmdShow)
 {
-    ApplyRuntimeRoot(ResolveRuntimeRoot());
+    const std::filesystem::path resolvedRuntimeRoot = ResolveRuntimeRoot();
+    ApplyRuntimeRoot(resolvedRuntimeRoot);
     EnableDbgLogConsole(LoadConfiguredBool("OPEN_MIDGARD_LOG_CONSOLE", kLoggingSettingsSection, kConsoleLoggingValueName));
+#if RO_ENABLE_CAPTURE
+    capture::Init(resolvedRuntimeRoot.empty()
+        ? std::filesystem::current_path()
+        : resolvedRuntimeRoot);
+#endif
 
     // Install an unhandled exception filter that writes a minidump next to the executable.
     SetUnhandledExceptionFilter(WriteUnhandledCrashDump);

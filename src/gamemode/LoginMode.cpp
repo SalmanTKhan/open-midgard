@@ -41,6 +41,7 @@ namespace {
 
 constexpr u32 kPasswordHashFallbackDelayMs = 1500;
 constexpr size_t kCompactCharListHeaderSize = 4;
+constexpr size_t kBeta1CharacterInfoSize = 90;
 constexpr size_t kLegacyCharListHeaderSize = 24;
 constexpr size_t kExpandedCharListHeaderSize = 27;
 
@@ -116,8 +117,60 @@ struct LEGACY_CHARACTER_INFO_106
 
 static_assert(sizeof(LEGACY_CHARACTER_INFO_106) == 106, "Legacy 0x006B character record size mismatch");
 
+#pragma pack(push, 1)
+struct BETA1_CHARACTER_INFO_90
+{
+    u32 GID;
+    int exp;
+    int money;
+    int jobexp;
+    int bodystate;
+    int healthstate;
+    int effectstate;
+    int virtue;
+    int honor;
+    int manner;
+    s16 jobpoint;
+    s16 hp;
+    s16 maxhp;
+    s16 sp;
+    s16 maxsp;
+    s16 speed;
+    u8  name[24];
+    u8  job;
+    u8  level;
+    u8  joblevel;
+    u8  Str;
+    u8  Agi;
+    u8  Vit;
+    u8  Int;
+    u8  Dex;
+    u8  Luk;
+    u8  CharNum;
+    u8  gap;
+    u8  head;
+    u8  weapon;
+    u8  headTop;
+};
+#pragma pack(pop)
+
+static_assert(sizeof(BETA1_CHARACTER_INFO_90) == 90, "Beta1 character record size mismatch");
+
+#pragma pack(push, 1)
+struct PACKET_CA_LOGIN_BETA1
+{
+    u16 PacketType;
+    u32 Version;
+    char ID[24];
+    char Passwd[24];
+};
+#pragma pack(pop)
+
+static_assert(sizeof(PACKET_CA_LOGIN_BETA1) == 54, "PACKET_CA_LOGIN_BETA1 size mismatch");
+
 enum class CharListLayout
 {
+    Beta1,
     CompactLegacy,
     Legacy,
     Expanded,
@@ -126,9 +179,20 @@ enum class CharListLayout
 enum class CharListLayoutOverride
 {
     Auto,
+    Beta1,
     CompactLegacy,
     Legacy,
     Expanded,
+};
+
+enum class ClientProfilePreset {
+    Auto,
+    PacketVer23,
+    PacketVer22,
+    Legacy0072,
+    SabineAlpha,
+    SabineBeta1,
+    SabineBeta2,
 };
 
 constexpr u8 kStockMainHash[16] = {
@@ -229,6 +293,41 @@ CHARACTER_INFO ExpandLegacyCharacterInfo(const LEGACY_CHARACTER_INFO_106& legacy
     return info;
 }
 
+CHARACTER_INFO ExpandBeta1CharacterInfo(const BETA1_CHARACTER_INFO_90& legacy)
+{
+    CHARACTER_INFO info{};
+    info.GID = legacy.GID;
+    info.exp = legacy.exp;
+    info.money = legacy.money;
+    info.jobexp = legacy.jobexp;
+    info.bodystate = legacy.bodystate;
+    info.healthstate = legacy.healthstate;
+    info.effectstate = legacy.effectstate;
+    info.virtue = legacy.virtue;
+    info.honor = legacy.honor;
+    info.jobpoint = legacy.jobpoint;
+    info.hp = legacy.hp;
+    info.maxhp = legacy.maxhp;
+    info.sp = legacy.sp;
+    info.maxsp = legacy.maxsp;
+    info.speed = legacy.speed;
+    std::memcpy(info.name, legacy.name, sizeof(legacy.name));
+    info.job = legacy.job;
+    info.level = legacy.level;
+    info.Str = legacy.Str;
+    info.Agi = legacy.Agi;
+    info.Vit = legacy.Vit;
+    info.Int = legacy.Int;
+    info.Dex = legacy.Dex;
+    info.Luk = legacy.Luk;
+    info.CharNum = legacy.CharNum;
+    info.head = legacy.head;
+    info.weapon = legacy.weapon;
+    info.accessory2 = legacy.headTop;
+    info.bIsChangedCharName = 1;
+    return info;
+}
+
 std::string NormalizeAsciiLower(std::string value)
 {
     std::transform(value.begin(), value.end(), value.begin(), [](unsigned char ch) {
@@ -237,11 +336,115 @@ std::string NormalizeAsciiLower(std::string value)
     return value;
 }
 
+std::string NormalizeProfileToken(std::string value)
+{
+    value.erase(std::remove_if(value.begin(), value.end(), [](unsigned char ch) {
+        return std::isspace(ch) != 0 || ch == '_' || ch == '-';
+    }), value.end());
+    return NormalizeAsciiLower(std::move(value));
+}
+
+ClientProfilePreset ParseClientProfilePreset(const std::string& rawValue)
+{
+    const std::string value = NormalizeProfileToken(rawValue);
+    if (value.empty() || value == "auto") {
+        return ClientProfilePreset::Auto;
+    }
+    if (value == "packetver23" || value == "23" || value == "modern" || value == "20080910") {
+        return ClientProfilePreset::PacketVer23;
+    }
+    if (value == "rathena") {
+        return ClientProfilePreset::PacketVer23;
+    }
+    if (value == "packetver22" || value == "22" || value == "pre20080910") {
+        return ClientProfilePreset::PacketVer22;
+    }
+    if (value == "eathena") {
+        return ClientProfilePreset::PacketVer22;
+    }
+    if (value == "legacy0072" || value == "classic" || value == "legacy") {
+        return ClientProfilePreset::Legacy0072;
+    }
+    if (value == "sabine" || value == "sabinebeta1" || value == "beta1") {
+        return ClientProfilePreset::SabineBeta1;
+    }
+    if (value == "alpha" || value == "sabinealpha") {
+        return ClientProfilePreset::SabineAlpha;
+    }
+    if (value == "beta2" || value == "sabinebeta2") {
+        return ClientProfilePreset::SabineBeta2;
+    }
+    return ClientProfilePreset::Auto;
+}
+
+ClientProfilePreset ResolveClientProfilePreset()
+{
+    std::string configuredProfile;
+    if (TryLoadSelectedClientInfoSettingString("clientprofile", &configuredProfile)) {
+        const ClientProfilePreset preset = ParseClientProfilePreset(configuredProfile);
+        if (preset != ClientProfilePreset::Auto) {
+            return preset;
+        }
+    }
+    if (TryLoadSettingsIniString("Client", "Profile", &configuredProfile)) {
+        const ClientProfilePreset preset = ParseClientProfilePreset(configuredProfile);
+        if (preset != ClientProfilePreset::Auto) {
+            return preset;
+        }
+    }
+
+    int legacyPacketVersion = 0;
+    if (!TryLoadSettingsIniInt("Network", "PacketVersion", &legacyPacketVersion) || legacyPacketVersion <= 0) {
+        return ClientProfilePreset::Auto;
+    }
+
+    if (legacyPacketVersion == 23) {
+        return ClientProfilePreset::PacketVer23;
+    }
+    if (legacyPacketVersion == 22) {
+        return ClientProfilePreset::PacketVer22;
+    }
+    if (legacyPacketVersion < PacketProfile::kSabineVersionBeta1) {
+        return ClientProfilePreset::SabineAlpha;
+    }
+    if (legacyPacketVersion < PacketProfile::kSabineVersionBeta2) {
+        return ClientProfilePreset::SabineBeta1;
+    }
+    if (legacyPacketVersion < static_cast<int>(PacketProfile::PacketVer23LoginChain::kClientDate)) {
+        return ClientProfilePreset::SabineBeta2;
+    }
+
+    return ClientProfilePreset::Auto;
+}
+
 CharListLayoutOverride LoadCharListLayoutOverride()
 {
-    std::string value = NormalizeAsciiLower(LoadSettingsIniString("Packets", "CharListReceiveLayout", "auto"));
+    std::string value;
+    if (!TryLoadSelectedClientInfoSettingString("charlistreceivelayout", &value)) {
+        value = LoadSettingsIniString("Packets", "CharListReceiveLayout", "auto");
+    }
+    value = NormalizeAsciiLower(std::move(value));
+    if (value == "auto") {
+        switch (ResolveClientProfilePreset()) {
+        case ClientProfilePreset::SabineAlpha:
+            return CharListLayoutOverride::CompactLegacy;
+        case ClientProfilePreset::SabineBeta1:
+            return CharListLayoutOverride::Beta1;
+        case ClientProfilePreset::SabineBeta2:
+            return CharListLayoutOverride::Legacy;
+        case ClientProfilePreset::Auto:
+        case ClientProfilePreset::PacketVer23:
+        case ClientProfilePreset::PacketVer22:
+        case ClientProfilePreset::Legacy0072:
+        default:
+            break;
+        }
+    }
     if (value == "legacy_4_106" || value == "compact_legacy" || value == "compact106") {
         return CharListLayoutOverride::CompactLegacy;
+    }
+    if (value == "beta1" || value == "legacy_4_90" || value == "compact_legacy_90" || value == "compact90") {
+        return CharListLayoutOverride::Beta1;
     }
     if (value == "legacy_24_108" || value == "legacy108") {
         return CharListLayoutOverride::Legacy;
@@ -262,6 +465,14 @@ bool TryResolveSpecificCharListLayout(size_t packetSize,
     }
 
     switch (desiredLayout) {
+    case CharListLayout::Beta1:
+        if (packetSize >= kCompactCharListHeaderSize
+            && ((packetSize - kCompactCharListHeaderSize) % kBeta1CharacterInfoSize) == 0) {
+            *headerSize = kCompactCharListHeaderSize;
+            *charInfoSize = kBeta1CharacterInfoSize;
+            return true;
+        }
+        break;
     case CharListLayout::Expanded:
         if (packetSize >= kExpandedCharListHeaderSize
             && ((packetSize - kExpandedCharListHeaderSize) % sizeof(CHARACTER_INFO)) == 0) {
@@ -302,6 +513,9 @@ bool TryResolveCharListLayout(u16 packetLength,
 
     const size_t packetSize = static_cast<size_t>(packetLength);
     switch (LoadCharListLayoutOverride()) {
+    case CharListLayoutOverride::Beta1:
+        *layout = CharListLayout::Beta1;
+        return TryResolveSpecificCharListLayout(packetSize, *layout, headerSize, charInfoSize);
     case CharListLayoutOverride::CompactLegacy:
         *layout = CharListLayout::CompactLegacy;
         return TryResolveSpecificCharListLayout(packetSize, *layout, headerSize, charInfoSize);
@@ -322,6 +536,11 @@ bool TryResolveCharListLayout(u16 packetLength,
 
     if (TryResolveSpecificCharListLayout(packetSize, CharListLayout::Legacy, headerSize, charInfoSize)) {
         *layout = CharListLayout::Legacy;
+        return true;
+    }
+
+    if (TryResolveSpecificCharListLayout(packetSize, CharListLayout::Beta1, headerSize, charInfoSize)) {
+        *layout = CharListLayout::Beta1;
         return true;
     }
 
@@ -428,6 +647,11 @@ u8 GetAccountType()
 u32 ResolveAccountLoginVersion()
 {
     int configuredVersionOverride = 0;
+    if (TryLoadSelectedClientInfoSettingInt("clientversionoverride", &configuredVersionOverride)) {
+        if (configuredVersionOverride > 0) {
+            return static_cast<u32>(configuredVersionOverride);
+        }
+    }
     if (TryLoadSettingsIniInt("Login", "ClientVersionOverride", &configuredVersionOverride)) {
         if (configuredVersionOverride > 0) {
             return static_cast<u32>(configuredVersionOverride);
@@ -438,6 +662,12 @@ u32 ResolveAccountLoginVersion()
     }
 
     int configuredOverride = 0;
+    if (TryLoadSelectedClientInfoSettingInt("clientdateoverride", &configuredOverride)) {
+        const u32 overrideVersion = configuredOverride > 0 ? static_cast<u32>(configuredOverride) : 0;
+        if (overrideVersion >= 20000000u) {
+            return overrideVersion;
+        }
+    }
     if (TryLoadSettingsIniInt("Login", "ClientDateOverride", &configuredOverride)) {
         const u32 overrideVersion = configuredOverride > 0 ? static_cast<u32>(configuredOverride) : 0;
         if (overrideVersion >= 20000000u) {
@@ -458,6 +688,22 @@ u32 ResolveAccountLoginVersion()
 
     if (configuredVersion >= 20000000u) {
         return configuredVersion;
+    }
+
+    switch (ResolveClientProfilePreset()) {
+    case ClientProfilePreset::SabineAlpha:
+    case ClientProfilePreset::SabineBeta1:
+    case ClientProfilePreset::SabineBeta2:
+        if (configuredVersion > 0) {
+            return configuredVersion;
+        }
+        break;
+    case ClientProfilePreset::Auto:
+    case ClientProfilePreset::PacketVer23:
+    case ClientProfilePreset::PacketVer22:
+    case ClientProfilePreset::Legacy0072:
+    default:
+        break;
     }
 
     return ro::net::GetActiveAccountLoginPacketProfile().clientDate;
@@ -482,6 +728,7 @@ bool UsesLoginChannelPacket();
 
 enum class AccountLoginPacketKind {
     Legacy,
+    EarlyBeta1,
     LoginChannel,
     LoginPcBang,
     Login4,
@@ -489,7 +736,10 @@ enum class AccountLoginPacketKind {
 
 AccountLoginPacketKind ResolveAccountLoginPacketKind()
 {
-    std::string overrideValue = LoadSettingsIniString("Login", "AccountLoginPacket", "");
+    std::string overrideValue;
+    if (!TryLoadSelectedClientInfoSettingString("accountloginpacket", &overrideValue)) {
+        overrideValue = LoadSettingsIniString("Login", "AccountLoginPacket", "");
+    }
     std::transform(overrideValue.begin(), overrideValue.end(), overrideValue.begin(), [](unsigned char ch) {
         return static_cast<char>(std::tolower(ch));
     });
@@ -511,12 +761,31 @@ AccountLoginPacketKind ResolveAccountLoginPacketKind()
         DbgLog("[Login] Ignoring invalid AccountLoginPacket override '%s'\n", overrideValue.c_str());
     }
 
+    switch (ResolveClientProfilePreset()) {
+    case ClientProfilePreset::SabineBeta1:
+        return AccountLoginPacketKind::EarlyBeta1;
+    case ClientProfilePreset::SabineAlpha:
+    case ClientProfilePreset::SabineBeta2:
+    case ClientProfilePreset::Legacy0072:
+        return AccountLoginPacketKind::Legacy;
+    case ClientProfilePreset::Auto:
+    case ClientProfilePreset::PacketVer23:
+    case ClientProfilePreset::PacketVer22:
+    default:
+        break;
+    }
+
     return UsesLoginChannelPacket() ? AccountLoginPacketKind::LoginChannel : AccountLoginPacketKind::Legacy;
 }
 
 u8 ResolveAccountClientType()
 {
     int configuredClientType = -1;
+    if (TryLoadSelectedClientInfoSettingInt("clienttypeoverride", &configuredClientType)
+        && configuredClientType >= 0
+        && configuredClientType <= 255) {
+        return static_cast<u8>(configuredClientType);
+    }
     if (TryLoadLoginSettingInt("ClientTypeOverride", &configuredClientType)
         && configuredClientType >= 0
         && configuredClientType <= 255) {
@@ -548,6 +817,13 @@ bool ShouldRequestPasswordHashOnConnect()
 
 bool HasConfiguredClientHashSetting()
 {
+    std::string clientInfoValue;
+    if (TryLoadSelectedClientInfoSettingString("clienthashoverridemd5", &clientInfoValue) && !clientInfoValue.empty()) {
+        return true;
+    }
+    if (TryLoadSelectedClientInfoSettingString("clienthashsourceexe", &clientInfoValue) && !clientInfoValue.empty()) {
+        return true;
+    }
     return !LoadSettingsIniString("Login", "ClientHashOverrideMd5", "").empty()
         || !LoadSettingsIniString("Login", "ClientHashSourceExe", "").empty();
 }
@@ -651,7 +927,10 @@ bool TryResolveConfiguredClientHash(std::array<u8, 16>* digest)
         return false;
     }
 
-    const std::string overrideMd5 = LoadSettingsIniString("Login", "ClientHashOverrideMd5", "");
+    std::string overrideMd5;
+    if (!TryLoadSelectedClientInfoSettingString("clienthashoverridemd5", &overrideMd5)) {
+        overrideMd5 = LoadSettingsIniString("Login", "ClientHashOverrideMd5", "");
+    }
     if (!overrideMd5.empty() && TryParseMd5HexString(overrideMd5, digest)) {
         DbgLog("[Login] Using configured ClientHashOverrideMd5 value\n");
         return true;
@@ -660,7 +939,10 @@ bool TryResolveConfiguredClientHash(std::array<u8, 16>* digest)
         DbgLog("[Login] Ignoring invalid ClientHashOverrideMd5 value: '%s'\n", overrideMd5.c_str());
     }
 
-    const std::string overrideExe = LoadSettingsIniString("Login", "ClientHashSourceExe", "");
+    std::string overrideExe;
+    if (!TryLoadSelectedClientInfoSettingString("clienthashsourceexe", &overrideExe)) {
+        overrideExe = LoadSettingsIniString("Login", "ClientHashSourceExe", "");
+    }
     if (overrideExe.empty()) {
         return false;
     }
@@ -1639,7 +1921,9 @@ void CLoginMode::OnChangeState(int newState) {
 
         // Send CA_ENTER (0x0065) to char server
         PACKET_CA_ENTER ePkt{};
-        ePkt.PacketType = ro::net::GetActiveCharacterPacketProfile().charServerEnter;
+        ePkt.PacketType = (ResolveClientProfilePreset() == ClientProfilePreset::SabineBeta1)
+            ? 0x0001
+            : ro::net::GetActiveCharacterPacketProfile().charServerEnter;
         ePkt.AID        = g_session.m_aid;
         ePkt.AuthCode   = g_session.m_authCode;
         ePkt.UserLevel  = g_session.m_userLevel;
@@ -1687,7 +1971,9 @@ void CLoginMode::OnChangeState(int newState) {
                (int)charNum, reinterpret_cast<const char*>(m_charInfo[m_selectedCharIndex].name));
 
         PACKET_CZ_SELECT_CHAR selPkt{};
-        selPkt.PacketType = ro::net::GetActiveCharacterPacketProfile().selectCharacter;
+        selPkt.PacketType = (ResolveClientProfilePreset() == ClientProfilePreset::SabineBeta1)
+            ? 0x0002
+            : ro::net::GetActiveCharacterPacketProfile().selectCharacter;
         selPkt.CharNum    = charNum;
         CRagConnection::instance()->SendPacket(reinterpret_cast<const char*>(&selPkt), static_cast<int>(sizeof(selPkt)));
         SetLoginStatus("Login: selecting character...");
@@ -1714,7 +2000,9 @@ void CLoginMode::OnChangeState(int newState) {
         }
 
         PACKET_CH_DELETE_CHAR pkt{};
-        pkt.PacketType = ro::net::GetActiveCharacterPacketProfile().deleteCharacter;
+        pkt.PacketType = (ResolveClientProfilePreset() == ClientProfilePreset::SabineBeta1)
+            ? 0x0004
+            : ro::net::GetActiveCharacterPacketProfile().deleteCharacter;
         pkt.GID = m_pendingDeleteCharGid;
         CopyCString(pkt.key, sizeof(pkt.key), m_emaiAddress);
 
@@ -1866,7 +2154,7 @@ void CLoginMode::PollNetwork()
             OnAckHash(pkt);
             continue;
         }
-        if (id == mapReceiveProfile.acceptEnterLegacy || id == mapReceiveProfile.acceptEnterModern) {
+        if (id == mapReceiveProfile.acceptEnterLegacy || id == mapReceiveProfile.acceptEnterModern || id == 0x000F) {
             OnZcAcceptEnter(pkt);
             return;
         }
@@ -1875,15 +2163,25 @@ void CLoginMode::PollNetwork()
             continue;
         }
         switch (id) {
+        case 0x0005:
         case 0x0069: OnAcceptLogin(pkt);    break;
+        case 0x0006:
         case 0x006A: OnRefuseLogin(pkt);    break;
+        case 0x0007:
         case 0x006B: OnAcceptChar(pkt);     break;
+        case 0x0008:
         case 0x006C: OnRefuseChar(pkt);     break;
+        case 0x0009:
         case 0x006D: OnAcceptMakeChar(pkt); break;
+        case 0x000A:
         case 0x006E: OnRefuseMakeChar(pkt); break;
+        case 0x000B:
         case 0x006F: OnAcceptDeleteChar(pkt); break;
+        case 0x000C:
         case 0x0070: OnRefuseDeleteChar(pkt); break;
+        case 0x000D:
         case 0x0071: OnNotifyZonesvr(pkt);  break;
+        case 0x001D:
         case 0x0081: OnDisconnectMsg(pkt);  break;
         case 0x0283: break;
         case 0x8482: break;
@@ -1964,6 +2262,29 @@ void CLoginMode::SendPasswordHashRequest()
 void CLoginMode::SendPlainAccountLogin()
 {
     switch (ResolveAccountLoginPacketKind()) {
+    case AccountLoginPacketKind::EarlyBeta1:
+    {
+        PACKET_CA_LOGIN_BETA1 pkt{};
+        pkt.PacketType = 0x0000;
+        pkt.Version = ResolveAccountLoginVersion();
+        CopyCString(pkt.ID, sizeof(pkt.ID), m_userId);
+        CopyCString(pkt.Passwd, sizeof(pkt.Passwd), m_userPassword);
+        if (!CRagConnection::instance()->SendPacket(reinterpret_cast<const char*>(&pkt), static_cast<int>(sizeof(pkt)))) {
+            DbgLog("[Login] CA_LOGIN(beta1) send failed: user='%s' version=%u (clientinfo=%d)\n",
+                   pkt.ID,
+                   pkt.Version,
+                   g_version);
+            return;
+        }
+        m_plainAccountLoginSent = true;
+        DbgLog("[Login] CA_LOGIN(beta1) sent: opcode=0x%04X user='%s' version=%u (clientinfo=%d)\n",
+               pkt.PacketType,
+               pkt.ID,
+               pkt.Version,
+               g_version);
+        SetLoginStatus("Login: waiting for account server response...");
+        return;
+    }
     case AccountLoginPacketKind::LoginChannel:
         SendLoginChannel();
         return;
@@ -2146,14 +2467,65 @@ void CLoginMode::OnAckHash(const std::vector<u8>& raw)
 void CLoginMode::OnAcceptLogin(const std::vector<u8>& raw)
 {
     ResetAccountLoginHandshake();
-    if (raw.size() < 47) {
+    if (raw.size() < 4) {
         SetLoginStatus("Login error: AC_ACCEPT_LOGIN too short.");
         m_nextSubMode = LoginSubMode_Login;
         return;
     }
     const u8* p = raw.data();
-
+    const u16 packetId = static_cast<u16>(p[0]) | (static_cast<u16>(p[1]) << 8);
     const u16 packetLen = static_cast<u16>(p[2]) | (static_cast<u16>(p[3]) << 8);
+
+    if (packetId == 0x0005) {
+        if (raw.size() < 17 || packetLen < 17) {
+            SetLoginStatus("Login error: AC_ACCEPT_LOGIN(beta1) too short.");
+            m_nextSubMode = LoginSubMode_Login;
+            return;
+        }
+
+        g_session.m_authCode = u32(p[4])|(u32(p[5])<<8)|(u32(p[6])<<16)|(u32(p[7])<<24);
+        g_session.m_aid = u32(p[8])|(u32(p[9])<<8)|(u32(p[10])<<16)|(u32(p[11])<<24);
+        g_session.m_userLevel = u32(p[12])|(u32(p[13])<<8)|(u32(p[14])<<16)|(u32(p[15])<<24);
+        g_session.m_sex = p[16];
+
+        m_numServer = 0;
+        const int serverListBytes = static_cast<int>(packetLen) - 17;
+        if (serverListBytes > 0) {
+            const int count = serverListBytes / 26;
+            const int toRead = (count < 100) ? count : 100;
+            for (int index = 0; index < toRead; ++index) {
+                const size_t offset = 17 + static_cast<size_t>(index) * 26;
+                SERVER_ADDR& info = m_serverInfo[index];
+                std::memset(&info, 0, sizeof(info));
+                info.ip = u32(p[offset + 0])|(u32(p[offset + 1])<<8)|(u32(p[offset + 2])<<16)|(u32(p[offset + 3])<<24);
+                info.port = static_cast<s16>(static_cast<u16>(p[offset + 4]) | (static_cast<u16>(p[offset + 5]) << 8));
+                std::memcpy(info.name, p + offset + 6, 20);
+            }
+            m_numServer = toRead;
+        }
+
+        DbgLog("[Login] AC_ACCEPT_LOGIN(beta1): aid=%u authCode=%u userLevel=%u sex=%d servers=%d\n",
+               g_session.m_aid, g_session.m_authCode, g_session.m_userLevel,
+               static_cast<int>(g_session.m_sex), m_numServer);
+        SetLoginStatus("Login: account accepted by server.");
+
+        if (m_numServer == 0) {
+            SetLoginStatus("Login error: no char servers in login response.");
+            m_nextSubMode = LoginSubMode_Login;
+            return;
+        }
+
+        m_serverSelected = 0;
+        m_nextSubMode = LoginSubMode_ConnectChar;
+        return;
+    }
+
+    if (raw.size() < 47) {
+        SetLoginStatus("Login error: AC_ACCEPT_LOGIN too short.");
+        m_nextSubMode = LoginSubMode_Login;
+        return;
+    }
+
     g_session.m_authCode   = u32(p[4])|(u32(p[5])<<8)|(u32(p[6])<<16)|(u32(p[7])<<24);
     g_session.m_aid        = u32(p[8])|(u32(p[9])<<8)|(u32(p[10])<<16)|(u32(p[11])<<24);
     g_session.m_userLevel  = u32(p[12])|(u32(p[13])<<8)|(u32(p[14])<<16)|(u32(p[15])<<24);
@@ -2260,7 +2632,15 @@ void CLoginMode::OnAcceptChar(const std::vector<u8>& raw)
             : static_cast<int>(std::size(m_charInfo));
         if (static_cast<size_t>(raw.size()) >= headerSize + static_cast<size_t>(toRead) * charInfoSize) {
             std::memset(m_charInfo, 0, sizeof(m_charInfo));
-            if (layout == CharListLayout::CompactLegacy) {
+            if (layout == CharListLayout::Beta1) {
+                for (int index = 0; index < toRead; ++index) {
+                    BETA1_CHARACTER_INFO_90 legacy{};
+                    std::memcpy(&legacy,
+                                p + headerSize + static_cast<size_t>(index) * sizeof(legacy),
+                                sizeof(legacy));
+                    m_charInfo[index] = ExpandBeta1CharacterInfo(legacy);
+                }
+            } else if (layout == CharListLayout::CompactLegacy) {
                 for (int index = 0; index < toRead; ++index) {
                     LEGACY_CHARACTER_INFO_106 legacy{};
                     std::memcpy(&legacy,
@@ -2287,7 +2667,13 @@ void CLoginMode::OnAcceptChar(const std::vector<u8>& raw)
                static_cast<unsigned int>(p[4]),
                static_cast<unsigned int>(p[5]),
                static_cast<unsigned int>(p[6]));
-        } else if (layout == CharListLayout::CompactLegacy) {
+    } else if (layout == CharListLayout::Beta1) {
+        DbgLog("[Login] HC_ACCEPT_ENTER: numChar=%d (pktLen=%u header=%zu charSize=%zu layout=beta1_4_90)\n",
+               m_numChar,
+               pktLen,
+               headerSize,
+               charInfoSize);
+    } else if (layout == CharListLayout::CompactLegacy) {
          DbgLog("[Login] HC_ACCEPT_ENTER: numChar=%d (pktLen=%u header=%zu charSize=%zu layout=legacy_4_106)\n",
              m_numChar,
              pktLen,
@@ -2360,6 +2746,23 @@ void CLoginMode::OnRefuseChar(const std::vector<u8>& raw)
 // ---------------------------------------------------------------------------
 void CLoginMode::OnAcceptMakeChar(const std::vector<u8>& raw)
 {
+    if (raw.size() == 92) {
+        BETA1_CHARACTER_INFO_90 createdBeta1{};
+        std::memcpy(&createdBeta1, raw.data() + sizeof(u16), sizeof(createdBeta1));
+        const CHARACTER_INFO created = ExpandBeta1CharacterInfo(createdBeta1);
+
+        if (m_numChar >= 0 && m_numChar < static_cast<int>(std::size(m_charInfo))) {
+            m_charInfo[m_numChar] = created;
+            ++m_numChar;
+        }
+
+        DbgLog("[Login] HC_ACCEPT_MAKECHAR(beta1): name='%.24s' gid=%u slot=%d totalChars=%d\n",
+               reinterpret_cast<const char*>(created.name), created.GID, static_cast<int>(created.CharNum), m_numChar);
+        SetLoginStatus("Login: character created successfully.");
+        m_nextSubMode = LoginSubMode_CharSelect;
+        return;
+    }
+
     if (raw.size() < sizeof(PACKET_HC_ACCEPT_MAKECHAR)) {
         SetLoginStatus("Login error: HC_ACCEPT_MAKECHAR too short.");
         m_nextSubMode = LoginSubMode_CharSelect;

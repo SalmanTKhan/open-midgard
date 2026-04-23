@@ -21,6 +21,7 @@ class QtUiState : public QObject {
     Q_PROPERTY(double uiScale READ uiScale NOTIFY uiScaleChanged)
     Q_PROPERTY(double textScale READ textScale NOTIFY textScaleChanged)
     Q_PROPERTY(QVariantMap debugOverlayData READ debugOverlayData NOTIFY debugOverlayDataChanged)
+    Q_PROPERTY(QVariantMap captureStatus READ captureStatus NOTIFY captureStatusChanged)
     Q_PROPERTY(QVariantMap cartPanelData READ cartPanelData NOTIFY cartPanelDataChanged)
     Q_PROPERTY(QVariantMap guildPanelData READ guildPanelData NOTIFY guildPanelDataChanged)
     Q_PROPERTY(QVariantMap mailBoxPanelData READ mailBoxPanelData NOTIFY mailBoxPanelDataChanged)
@@ -319,6 +320,7 @@ public:
     double uiScale() const { return m_uiScale; }
     double textScale() const { return m_textScale; }
     const QVariantMap& debugOverlayData() const { return m_debugOverlayData; }
+    const QVariantMap& captureStatus() const { return m_captureStatus; }
     const QVariantMap& cartPanelData() const { return m_cartPanelData; }
     const QVariantMap& guildPanelData() const { return m_guildPanelData; }
     const QVariantMap& mailBoxPanelData() const { return m_mailBoxPanelData; }
@@ -692,6 +694,13 @@ public:
         emit textScaleCycleRequested(direction);
     }
 
+    void setCaptureStatus(const QVariantMap& value) {
+        if (m_captureStatus == value) {
+            return;
+        }
+        m_captureStatus = value;
+        emit captureStatusChanged();
+    }
     void setDebugOverlayData(const QVariantMap& value) {
         if (m_debugOverlayData == value) {
             return;
@@ -2119,6 +2128,7 @@ signals:
     void textScaleChanged();
     void textScaleCycleRequested(int direction);
     void debugOverlayDataChanged();
+    void captureStatusChanged();
     void cartPanelDataChanged();
     void guildPanelDataChanged();
     void mailBoxPanelDataChanged();
@@ -2294,6 +2304,7 @@ private:
     double m_uiScale = 1.0;
     double m_textScale = 1.0;
     QVariantMap m_debugOverlayData;
+    QVariantMap m_captureStatus;
     QVariantMap m_cartPanelData;
     QVariantMap m_guildPanelData;
     QVariantMap m_mailBoxPanelData;
