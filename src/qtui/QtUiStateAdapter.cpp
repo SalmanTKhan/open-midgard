@@ -836,7 +836,7 @@ void PopulateLoginPanelState(QtUiState* state)
     state->setLoginPanelVisible(visible);
     if (!visible) {
         state->setLoginPanelGeometry(0, 0, 0, 0);
-        state->setLoginPanelData(QString(), QString(), false, false);
+        state->setLoginPanelData(QString(), QString(), false, false, 0, 0);
         state->setLoginPanelLabels(QVariantMap{});
         state->setLoginButtons(QVariantList{});
         return;
@@ -851,7 +851,9 @@ void PopulateLoginPanelState(QtUiState* state)
         userId,
         passwordMask,
         loginWnd->IsSaveAccountChecked(),
-        loginWnd->IsPasswordFocused());
+        loginWnd->IsPasswordFocused(),
+        loginWnd->GetLoginCaret(),
+        loginWnd->GetPasswordCaret());
     QVariantMap loginPanelLabels;
     loginPanelLabels.insert(QStringLiteral("title"), QStringLiteral("Login"));
     loginPanelLabels.insert(QStringLiteral("saveLabel"), QStringLiteral("Save"));

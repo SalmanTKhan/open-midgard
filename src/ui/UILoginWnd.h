@@ -32,6 +32,8 @@ public:
     void RefreshRememberedUserIdStorage();
     const char* GetLoginText() const;
     int GetPasswordLength() const;
+    int GetLoginCaret() const;
+    int GetPasswordCaret() const;
     bool IsSaveAccountChecked() const;
     bool IsPasswordFocused() const;
     int GetQtButtonCount() const;

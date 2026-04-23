@@ -51,6 +51,8 @@ class QtUiState : public QObject {
     Q_PROPERTY(QString loginPasswordMask READ loginPasswordMask NOTIFY loginPanelDataChanged)
     Q_PROPERTY(bool loginSaveAccountChecked READ loginSaveAccountChecked NOTIFY loginPanelDataChanged)
     Q_PROPERTY(bool loginPasswordFocused READ loginPasswordFocused NOTIFY loginPanelDataChanged)
+    Q_PROPERTY(int loginUserIdCaret READ loginUserIdCaret NOTIFY loginPanelDataChanged)
+    Q_PROPERTY(int loginPasswordCaret READ loginPasswordCaret NOTIFY loginPanelDataChanged)
     Q_PROPERTY(QVariantMap loginPanelLabels READ loginPanelLabels NOTIFY loginPanelLabelsChanged)
     Q_PROPERTY(QVariantList loginButtons READ loginButtons NOTIFY loginButtonsChanged)
     Q_PROPERTY(bool charSelectVisible READ charSelectVisible NOTIFY charSelectVisibleChanged)
@@ -350,6 +352,8 @@ public:
     const QString& loginPasswordMask() const { return m_loginPasswordMask; }
     bool loginSaveAccountChecked() const { return m_loginSaveAccountChecked; }
     bool loginPasswordFocused() const { return m_loginPasswordFocused; }
+    int loginUserIdCaret() const { return m_loginUserIdCaret; }
+    int loginPasswordCaret() const { return m_loginPasswordCaret; }
     const QVariantMap& loginPanelLabels() const { return m_loginPanelLabels; }
     const QVariantList& loginButtons() const { return m_loginButtons; }
     bool charSelectVisible() const { return m_charSelectVisible; }
@@ -836,11 +840,15 @@ public:
     void setLoginPanelData(const QString& userId,
         const QString& passwordMask,
         bool saveAccountChecked,
-        bool passwordFocused) {
+        bool passwordFocused,
+        int userIdCaret = 0,
+        int passwordCaret = 0) {
         const bool changed = m_loginUserId != userId
             || m_loginPasswordMask != passwordMask
             || m_loginSaveAccountChecked != saveAccountChecked
-            || m_loginPasswordFocused != passwordFocused;
+            || m_loginPasswordFocused != passwordFocused
+            || m_loginUserIdCaret != userIdCaret
+            || m_loginPasswordCaret != passwordCaret;
         if (!changed) {
             return;
         }
@@ -848,6 +856,8 @@ public:
         m_loginPasswordMask = passwordMask;
         m_loginSaveAccountChecked = saveAccountChecked;
         m_loginPasswordFocused = passwordFocused;
+        m_loginUserIdCaret = userIdCaret;
+        m_loginPasswordCaret = passwordCaret;
         emit loginPanelDataChanged();
     }
 
@@ -2334,6 +2344,8 @@ private:
     QString m_loginPasswordMask;
     bool m_loginSaveAccountChecked = false;
     bool m_loginPasswordFocused = false;
+    int m_loginUserIdCaret = 0;
+    int m_loginPasswordCaret = 0;
     QVariantMap m_loginPanelLabels;
     QVariantList m_loginButtons;
     bool m_charSelectVisible = false;

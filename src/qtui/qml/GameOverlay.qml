@@ -5877,7 +5877,13 @@ Item {
             x: 98
             y: 31
             width: 112
-            text: uiState.loginUserId + (!uiState.loginPasswordFocused && root.loginCaretVisible ? "|" : "")
+            text: {
+                const s = uiState.loginUserId;
+                const showCaret = !uiState.loginPasswordFocused && root.loginCaretVisible;
+                if (!showCaret) return s;
+                const c = Math.max(0, Math.min(uiState.loginUserIdCaret, s.length));
+                return s.slice(0, c) + "|" + s.slice(c);
+            }
             color: Theme.inputText
             font.pixelSize: 12
             elide: Text.ElideRight
@@ -5897,7 +5903,13 @@ Item {
             x: 98
             y: 63
             width: 112
-            text: uiState.loginPasswordMask + (uiState.loginPasswordFocused && root.loginCaretVisible ? "|" : "")
+            text: {
+                const s = uiState.loginPasswordMask;
+                const showCaret = uiState.loginPasswordFocused && root.loginCaretVisible;
+                if (!showCaret) return s;
+                const c = Math.max(0, Math.min(uiState.loginPasswordCaret, s.length));
+                return s.slice(0, c) + "|" + s.slice(c);
+            }
             color: Theme.inputText
             font.pixelSize: 12
             elide: Text.ElideRight

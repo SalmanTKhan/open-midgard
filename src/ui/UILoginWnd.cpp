@@ -471,6 +471,19 @@ int UILoginWnd::GetPasswordLength() const
     return text ? static_cast<int>(std::strlen(text)) : 0;
 }
 
+int UILoginWnd::GetLoginCaret() const
+{
+    if (!m_login) return 0;
+    const int len = static_cast<int>(std::strlen(m_login->GetText() ? m_login->GetText() : ""));
+    return std::clamp(m_login->m_selectionCursor, 0, len);
+}
+
+int UILoginWnd::GetPasswordCaret() const
+{
+    if (!m_password) return 0;
+    return std::clamp(m_password->m_selectionCursor, 0, GetPasswordLength());
+}
+
 bool UILoginWnd::IsSaveAccountChecked() const
 {
     return m_saveAccountCheck ? (m_saveAccountCheck->m_isChecked != 0) : m_saveAccountChecked;
