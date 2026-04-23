@@ -34,49 +34,85 @@ endif()
 # The VP8 encoder ships inside avcodec when libvpx was linked in during the
 # ffmpeg build; we call avcodec_find_encoder_by_name("libvpx") at runtime.
 #
-# Resolve libraries to absolute paths. `find_package(FFMPEG)` on vcpkg-mingw
-# hands back bare names like "avcodec", which ld can't find unless we also
-# propagate FFMPEG_LIBRARY_DIRS — and even then the resolution is flaky across
-# generators. `find_library` with hints from the vcpkg layout is more
-# reliable.
-find_package(FFMPEG COMPONENTS avcodec avformat avutil swscale QUIET)
+# Discovery order:
+#   1. pkg-config (Homebrew / Linux distro packages): clean and propagates
+#      include + link dirs automatically via the imported target.
+#   2. find_package(FFMPEG) — Qt bundles a FindFFMPEG.cmake; best-effort hint
+#      source. Often fails silently on macOS, which is fine.
+#   3. find_library with extended hints (vcpkg layout, FFMPEG_DIR, Homebrew
+#      prefixes) as a last resort.
 
-set(_ro_ffmpeg_hint_dirs)
-if(FFMPEG_LIBRARY_DIRS)
-    list(APPEND _ro_ffmpeg_hint_dirs ${FFMPEG_LIBRARY_DIRS})
+set(_ro_ffmpeg_resolved FALSE)
+
+find_package(PkgConfig QUIET)
+if(PkgConfig_FOUND)
+    pkg_check_modules(RO_FFMPEG_PC QUIET IMPORTED_TARGET
+        libavformat libavcodec libswscale libavutil)
+    if(RO_FFMPEG_PC_FOUND)
+        target_link_libraries(ro_capture PRIVATE PkgConfig::RO_FFMPEG_PC)
+        set(_ro_ffmpeg_resolved TRUE)
+    endif()
 endif()
-if(DEFINED VCPKG_INSTALLED_DIR AND DEFINED VCPKG_TARGET_TRIPLET)
-    list(APPEND _ro_ffmpeg_hint_dirs
-        "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/lib"
-        "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/debug/lib")
+
+if(NOT _ro_ffmpeg_resolved)
+    find_package(FFMPEG COMPONENTS avcodec avformat avutil swscale QUIET)
+
+    set(_ro_ffmpeg_hint_libs)
+    set(_ro_ffmpeg_hint_incs)
+    if(FFMPEG_LIBRARY_DIRS)
+        list(APPEND _ro_ffmpeg_hint_libs ${FFMPEG_LIBRARY_DIRS})
+    endif()
+    if(FFMPEG_INCLUDE_DIRS)
+        list(APPEND _ro_ffmpeg_hint_incs ${FFMPEG_INCLUDE_DIRS})
+    endif()
+    if(DEFINED VCPKG_INSTALLED_DIR AND DEFINED VCPKG_TARGET_TRIPLET)
+        list(APPEND _ro_ffmpeg_hint_libs
+            "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/lib"
+            "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/debug/lib")
+        list(APPEND _ro_ffmpeg_hint_incs
+            "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/include")
+    endif()
+    foreach(_ro_ffmpeg_prefix
+            "${FFMPEG_DIR}"
+            "$ENV{FFMPEG_DIR}"
+            "/opt/homebrew/opt/ffmpeg"
+            "/usr/local/opt/ffmpeg")
+        if(_ro_ffmpeg_prefix AND IS_DIRECTORY "${_ro_ffmpeg_prefix}")
+            list(APPEND _ro_ffmpeg_hint_libs "${_ro_ffmpeg_prefix}/lib")
+            list(APPEND _ro_ffmpeg_hint_incs "${_ro_ffmpeg_prefix}/include")
+        endif()
+    endforeach()
+
+    find_path(RO_FFMPEG_INCLUDE_DIR libavcodec/avcodec.h
+        HINTS ${_ro_ffmpeg_hint_incs})
+    find_library(RO_FFMPEG_AVCODEC_LIB  NAMES avcodec  HINTS ${_ro_ffmpeg_hint_libs})
+    find_library(RO_FFMPEG_AVFORMAT_LIB NAMES avformat HINTS ${_ro_ffmpeg_hint_libs})
+    find_library(RO_FFMPEG_AVUTIL_LIB   NAMES avutil   HINTS ${_ro_ffmpeg_hint_libs})
+    find_library(RO_FFMPEG_SWSCALE_LIB  NAMES swscale  HINTS ${_ro_ffmpeg_hint_libs})
+
+    if(RO_FFMPEG_INCLUDE_DIR
+       AND RO_FFMPEG_AVCODEC_LIB
+       AND RO_FFMPEG_AVFORMAT_LIB
+       AND RO_FFMPEG_AVUTIL_LIB
+       AND RO_FFMPEG_SWSCALE_LIB)
+        target_include_directories(ro_capture PRIVATE ${RO_FFMPEG_INCLUDE_DIR})
+        target_link_libraries(ro_capture PRIVATE
+            ${RO_FFMPEG_AVFORMAT_LIB}
+            ${RO_FFMPEG_AVCODEC_LIB}
+            ${RO_FFMPEG_SWSCALE_LIB}
+            ${RO_FFMPEG_AVUTIL_LIB})
+        set(_ro_ffmpeg_resolved TRUE)
+    endif()
+    unset(_ro_ffmpeg_hint_libs)
+    unset(_ro_ffmpeg_hint_incs)
 endif()
 
-find_path(RO_FFMPEG_INCLUDE_DIR libavcodec/avcodec.h
-    HINTS ${FFMPEG_INCLUDE_DIRS})
-find_library(RO_FFMPEG_AVCODEC_LIB  NAMES avcodec  HINTS ${_ro_ffmpeg_hint_dirs})
-find_library(RO_FFMPEG_AVFORMAT_LIB NAMES avformat HINTS ${_ro_ffmpeg_hint_dirs})
-find_library(RO_FFMPEG_AVUTIL_LIB   NAMES avutil   HINTS ${_ro_ffmpeg_hint_dirs})
-find_library(RO_FFMPEG_SWSCALE_LIB  NAMES swscale  HINTS ${_ro_ffmpeg_hint_dirs})
-
-if(RO_FFMPEG_INCLUDE_DIR
-   AND RO_FFMPEG_AVCODEC_LIB
-   AND RO_FFMPEG_AVFORMAT_LIB
-   AND RO_FFMPEG_AVUTIL_LIB
-   AND RO_FFMPEG_SWSCALE_LIB)
-    target_include_directories(ro_capture PRIVATE ${RO_FFMPEG_INCLUDE_DIR})
-    target_link_libraries(ro_capture PRIVATE
-        ${RO_FFMPEG_AVFORMAT_LIB}
-        ${RO_FFMPEG_AVCODEC_LIB}
-        ${RO_FFMPEG_SWSCALE_LIB}
-        ${RO_FFMPEG_AVUTIL_LIB})
-else()
+if(NOT _ro_ffmpeg_resolved)
     message(FATAL_ERROR
         "ro_capture: FFmpeg libraries not found. "
-        "include=${RO_FFMPEG_INCLUDE_DIR} "
-        "avcodec=${RO_FFMPEG_AVCODEC_LIB} "
-        "avformat=${RO_FFMPEG_AVFORMAT_LIB} "
-        "avutil=${RO_FFMPEG_AVUTIL_LIB} "
-        "swscale=${RO_FFMPEG_SWSCALE_LIB}. "
-        "Install via vcpkg (ffmpeg[vpx]) or disable RO_ENABLE_CAPTURE.")
+        "Tried pkg-config (libavformat/libavcodec/libswscale/libavutil), "
+        "find_package(FFMPEG), and find_library with hints from "
+        "FFMPEG_DIR and Homebrew prefixes. "
+        "Install via vcpkg (ffmpeg[vpx]), `brew install ffmpeg`, or disable RO_ENABLE_CAPTURE.")
 endif()
-unset(_ro_ffmpeg_hint_dirs)
+unset(_ro_ffmpeg_resolved)

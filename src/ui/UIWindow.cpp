@@ -743,6 +743,8 @@ void UIEditCtrl::SetText(const char* text)
     if (m_maxchar > 0 && static_cast<int>(m_text.size()) > m_maxchar) {
         m_text.resize(static_cast<size_t>(m_maxchar));
     }
+    m_selectionCursor = static_cast<int>(m_text.size());
+    m_selectionOrigin = m_selectionCursor;
     Invalidate();
 }
 
@@ -756,46 +758,84 @@ void UIEditCtrl::OnLBtnDown(int x, int y)
     (void)x; (void)y;
     if (!m_hasFocus) {
         m_hasFocus = true;
+        m_selectionCursor = static_cast<int>(m_text.size());
+        m_selectionOrigin = m_selectionCursor;
         Invalidate();
     }
 }
 
 void UIEditCtrl::OnChar(char c)
 {
-    const std::string before = m_text;
-    if (c == '\b') {
-        if (!m_text.empty()) {
-            m_text.pop_back();
-        }
-    } else if (static_cast<unsigned char>(c) >= 0x20u) {
-        if (m_type == 1 && (c < '0' || c > '9')) {
-            return;
-        }
-        if (m_maxchar <= 0 || static_cast<int>(m_text.size()) < m_maxchar) {
-            m_text += c;
-        }
+    if (static_cast<unsigned char>(c) < 0x20u || static_cast<unsigned char>(c) == 0x7Fu) {
+        return;
     }
-    if (m_text != before) {
-        Invalidate();
+    if (m_type == 1 && (c < '0' || c > '9')) {
+        return;
     }
+    if (m_maxchar > 0 && static_cast<int>(m_text.size()) >= m_maxchar) {
+        return;
+    }
+    const int size = static_cast<int>(m_text.size());
+    if (m_selectionCursor < 0) m_selectionCursor = 0;
+    if (m_selectionCursor > size) m_selectionCursor = size;
+    m_text.insert(static_cast<size_t>(m_selectionCursor), 1, c);
+    ++m_selectionCursor;
+    m_selectionOrigin = m_selectionCursor;
+    Invalidate();
 }
 
 void UIEditCtrl::OnKeyDown(int virtualKey)
 {
-    switch(virtualKey)
-    {
-        case VK_BACK:
-        {
-            // Backspace
-            if (!m_text.empty())
-            {
-                m_text.pop_back();
-                Invalidate();
-            }
+    const int size = static_cast<int>(m_text.size());
+    if (m_selectionCursor < 0) m_selectionCursor = 0;
+    if (m_selectionCursor > size) m_selectionCursor = size;
+
+    switch (virtualKey) {
+    case VK_BACK:
+        if (m_selectionCursor > 0) {
+            m_text.erase(static_cast<size_t>(m_selectionCursor - 1), 1);
+            --m_selectionCursor;
+            m_selectionOrigin = m_selectionCursor;
+            Invalidate();
         }
         break;
-        default:
-            break;
+    case VK_DELETE:
+        if (m_selectionCursor < size) {
+            m_text.erase(static_cast<size_t>(m_selectionCursor), 1);
+            m_selectionOrigin = m_selectionCursor;
+            Invalidate();
+        }
+        break;
+    case VK_LEFT:
+        if (m_selectionCursor > 0) {
+            --m_selectionCursor;
+            m_selectionOrigin = m_selectionCursor;
+            Invalidate();
+        }
+        break;
+    case VK_RIGHT:
+        if (m_selectionCursor < size) {
+            ++m_selectionCursor;
+            m_selectionOrigin = m_selectionCursor;
+            Invalidate();
+        }
+        break;
+    case VK_HOME:
+        if (m_selectionCursor != 0) {
+            m_selectionCursor = 0;
+            m_selectionOrigin = 0;
+            Invalidate();
+        }
+        break;
+    case VK_END:
+        if (m_selectionCursor != size) {
+            m_selectionCursor = size;
+            m_selectionOrigin = size;
+            Invalidate();
+        }
+        break;
+    default:
+        break;
     }
 }
 

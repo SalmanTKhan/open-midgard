@@ -231,6 +231,8 @@ int MapQtKeyToVirtualKey(int key)
     case Qt::Key_Down: return VK_DOWN;
     case Qt::Key_Insert: return VK_INSERT;
     case Qt::Key_Delete: return VK_DELETE;
+    case Qt::Key_Home: return VK_HOME;
+    case Qt::Key_End: return VK_END;
     case Qt::Key_Plus:
     case Qt::Key_Equal: return VK_OEM_PLUS;
     case Qt::Key_Minus:
@@ -322,11 +324,26 @@ protected:
         const unsigned int msg = event->modifiers().testFlag(Qt::AltModifier) ? WM_SYSKEYDOWN : WM_KEYDOWN;
         sendMessage(msg, static_cast<std::uintptr_t>(virtualKey), 0);
 
-        const QString text = event->text();
-        if (!text.isEmpty()) {
-            const QChar character = text.front();
-            if (!character.isNull() && character.unicode() >= 0x20u) {
-                sendMessage(WM_CHAR, static_cast<std::uintptr_t>(character.toLatin1()), 0);
+        auto isNonTextVirtualKey = [](int vk) {
+            switch (vk) {
+            case VK_BACK: case VK_TAB: case VK_RETURN: case VK_ESCAPE:
+            case VK_LEFT: case VK_RIGHT: case VK_UP: case VK_DOWN:
+            case VK_HOME: case VK_END: case VK_PRIOR: case VK_NEXT:
+            case VK_INSERT: case VK_DELETE:
+            case VK_SHIFT: case VK_CONTROL: case VK_MENU:
+                return true;
+            default:
+                return vk >= VK_F1 && vk <= VK_F12;
+            }
+        };
+
+        if (!isNonTextVirtualKey(virtualKey)) {
+            const QString text = event->text();
+            if (!text.isEmpty()) {
+                const QChar character = text.front();
+                if (!character.isNull() && character.unicode() >= 0x20u && character.unicode() != 0x7Fu) {
+                    sendMessage(WM_CHAR, static_cast<std::uintptr_t>(character.toLatin1()), 0);
+                }
             }
         }
 
