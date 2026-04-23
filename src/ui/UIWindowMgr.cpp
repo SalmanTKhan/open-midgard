@@ -2892,6 +2892,24 @@ void UIWindowMgr::OnKeyDown(int virtualKey)
         return;
     }
 
+    // Cursor/edit navigation keys belong to the focused edit control. Frame
+    // windows (login, select-char, make-char) only get Enter/Escape/Tab etc.
+    switch (virtualKey) {
+    case VK_LEFT:
+    case VK_RIGHT:
+    case VK_HOME:
+    case VK_END:
+    case VK_BACK:
+    case VK_DELETE:
+        if (m_editWindow) {
+            m_editWindow->OnKeyDown(virtualKey);
+            return;
+        }
+        break;
+    default:
+        break;
+    }
+
     // Route Enter/Escape to the login window or the topmost frame window
     if (m_loginWnd && m_loginWnd->m_show != 0) {
         m_loginWnd->OnKeyDown(virtualKey);

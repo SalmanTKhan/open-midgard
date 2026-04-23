@@ -7,10 +7,7 @@ FetchContent_Declare(lua51
     DOWNLOAD_EXTRACT_TIMESTAMP TRUE
 )
 
-FetchContent_GetProperties(lua51)
-if(NOT lua51_POPULATED)
-    FetchContent_Populate(lua51)
-endif()
+FetchContent_MakeAvailable(lua51)
 
 add_library(lua51 STATIC
     ${lua51_SOURCE_DIR}/src/lapi.c

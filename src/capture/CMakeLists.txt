@@ -51,11 +51,14 @@ if(PkgConfig_FOUND)
     if(RO_FFMPEG_PC_FOUND)
         target_link_libraries(ro_capture PRIVATE PkgConfig::RO_FFMPEG_PC)
         set(_ro_ffmpeg_resolved TRUE)
+        message(STATUS "ro_capture: FFmpeg resolved via pkg-config (${RO_FFMPEG_PC_VERSION})")
     endif()
 endif()
 
 if(NOT _ro_ffmpeg_resolved)
-    find_package(FFMPEG COMPONENTS avcodec avformat avutil swscale QUIET)
+    # Qt's bundled FindFFMPEG.cmake expects uppercase component names; lowercase
+    # yields a "Found ... missing components: AVCODEC AVFORMAT ..." warning.
+    find_package(FFMPEG COMPONENTS AVCODEC AVFORMAT AVUTIL SWSCALE QUIET)
 
     set(_ro_ffmpeg_hint_libs)
     set(_ro_ffmpeg_hint_incs)
@@ -102,6 +105,7 @@ if(NOT _ro_ffmpeg_resolved)
             ${RO_FFMPEG_SWSCALE_LIB}
             ${RO_FFMPEG_AVUTIL_LIB})
         set(_ro_ffmpeg_resolved TRUE)
+        message(STATUS "ro_capture: FFmpeg resolved via find_library (${RO_FFMPEG_AVCODEC_LIB})")
     endif()
     unset(_ro_ffmpeg_hint_libs)
     unset(_ro_ffmpeg_hint_incs)
