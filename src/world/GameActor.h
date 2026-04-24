@@ -233,6 +233,7 @@ public:
     int m_willBeDead, m_is99;
     char m_99;
     int m_bodyState, m_effectState, m_healthState, m_pkState;
+    int m_previousBodyState = 0;
     int m_isSitting;
     float m_damageDestX, m_damageDestZ;
     u32 m_effectLaunchCnt, m_vanishTime;
@@ -263,6 +264,7 @@ public:
     virtual void UnRegisterPos();
     void StartHideFade(u32 durationMs);
     void CancelHideFade();
+    void ApplyBodyStateTransition(int oldState, int newState);
     bool IsHideFadeActive(u32 now) const;
     u32 GetHideFadeAlpha(u32 now) const;
     void QueueWillBeAttacked(const WBA& hitInfo);

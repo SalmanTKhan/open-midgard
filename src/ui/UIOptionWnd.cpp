@@ -53,6 +53,7 @@ constexpr char kOptionWndAttackSnapValue[] = "AttackSnap";
 constexpr char kOptionWndSkillSnapValue[] = "SkillSnap";
 constexpr char kOptionWndItemSnapValue[] = "ItemSnap";
 constexpr char kOptionWndAlwaysShowNamesValue[] = "AlwaysShowNames";
+constexpr char kOptionWndShowZeroBonusesValue[] = "ShowZeroBonuses";
 constexpr char kOptionWndTextScaleValue[] = "TextScalePercent";
 constexpr char kOptionWndCollapsedValue[] = "Collapsed";
 constexpr char kOptionWndTabValue[] = "Tab";
@@ -100,6 +101,7 @@ constexpr int kCheckIdAttack = 404;
 constexpr int kCheckIdSkill = 405;
 constexpr int kCheckIdItem = 406;
 constexpr int kCheckIdAlwaysShowNames = 407;
+constexpr int kCheckIdShowZeroBonuses = 408;
 
 constexpr std::array<RenderBackendType, 4> kRendererEntries = {
     RenderBackendType::LegacyDirect3D7,
@@ -570,6 +572,7 @@ UIOptionWnd::UIOptionWnd()
       m_skillSnapCheckBox(nullptr),
       m_itemSnapCheckBox(nullptr),
       m_alwaysShowNamesCheckBox(nullptr),
+      m_showZeroBonusesCheckBox(nullptr),
       m_orgHeight(kDefaultHeight),
       m_bgmVolume(100),
       m_soundVolume(100),
@@ -581,6 +584,7 @@ UIOptionWnd::UIOptionWnd()
       m_skillSnap(0),
       m_itemSnap(0),
       m_alwaysShowNames(0),
+      m_showZeroBonuses(0),
             m_guiScalePercent(GetConfiguredUiScalePercent()),
             m_appliedGuiScalePercent(GetConfiguredUiScalePercent()),
       m_collapsed(0),
@@ -859,6 +863,7 @@ void UIOptionWnd::LoadSettings()
     m_skillSnap = LoadSettingsIniInt(kOptionWndSection, kOptionWndSkillSnapValue, m_skillSnap);
     m_itemSnap = LoadSettingsIniInt(kOptionWndSection, kOptionWndItemSnapValue, m_itemSnap);
     m_alwaysShowNames = LoadSettingsIniInt(kOptionWndSection, kOptionWndAlwaysShowNamesValue, m_alwaysShowNames);
+    m_showZeroBonuses = LoadSettingsIniInt(kOptionWndSection, kOptionWndShowZeroBonusesValue, m_showZeroBonuses);
     m_textScalePercent = LoadSettingsIniInt(kOptionWndSection, kOptionWndTextScaleValue, m_textScalePercent);
     m_collapsed = LoadSettingsIniInt(kOptionWndSection, kOptionWndCollapsedValue, m_collapsed);
     m_activeTab = LoadSettingsIniInt(kOptionWndSection, kOptionWndTabValue, m_activeTab);
@@ -904,6 +909,7 @@ void UIOptionWnd::LoadSettings()
     m_skillSnap = (m_skillSnap != 0) ? 1 : 0;
     m_itemSnap = (m_itemSnap != 0) ? 1 : 0;
     m_alwaysShowNames = (m_alwaysShowNames != 0) ? 1 : 0;
+    m_showZeroBonuses = (m_showZeroBonuses != 0) ? 1 : 0;
     m_textScalePercent = ClampTextScalePercent(m_textScalePercent);
     m_guiScalePercent = ClampUiScalePercent(m_guiScalePercent);
     m_appliedGuiScalePercent = ClampUiScalePercent(m_appliedGuiScalePercent);
@@ -944,6 +950,7 @@ void UIOptionWnd::SaveSettings() const
     SaveSettingsIniInt(kOptionWndSection, kOptionWndSkillSnapValue, m_skillSnap != 0 ? 1 : 0);
     SaveSettingsIniInt(kOptionWndSection, kOptionWndItemSnapValue, m_itemSnap != 0 ? 1 : 0);
     SaveSettingsIniInt(kOptionWndSection, kOptionWndAlwaysShowNamesValue, m_alwaysShowNames != 0 ? 1 : 0);
+    SaveSettingsIniInt(kOptionWndSection, kOptionWndShowZeroBonusesValue, m_showZeroBonuses != 0 ? 1 : 0);
     SaveSettingsIniInt(kOptionWndSection, kOptionWndTextScaleValue, m_textScalePercent);
     SaveSettingsIniInt(kOptionWndSection, kOptionWndCollapsedValue, m_collapsed != 0 ? 1 : 0);
     SaveSettingsIniInt(kOptionWndSection, kOptionWndTabValue, m_activeTab);
@@ -1082,6 +1089,12 @@ void UIOptionWnd::LayoutControls()
         m_alwaysShowNamesCheckBox->Move(toggleRect.left, toggleRect.top);
         m_alwaysShowNamesCheckBox->SetShow(showGame ? 1 : 0);
         m_alwaysShowNamesCheckBox->SetCheck(m_alwaysShowNames);
+    }
+    if (m_showZeroBonusesCheckBox) {
+        const RECT toggleRect = GetGameToggleRect(5);
+        m_showZeroBonusesCheckBox->Move(toggleRect.left, toggleRect.top);
+        m_showZeroBonusesCheckBox->SetShow(showGame ? 1 : 0);
+        m_showZeroBonusesCheckBox->SetCheck(m_showZeroBonuses);
     }
 }
 
@@ -1715,6 +1728,7 @@ void UIOptionWnd::OnCreate(int cx, int cy)
         m_skillSnapCheckBox = makeCheckBox(kCheckIdSkill, m_skillSnap);
         m_itemSnapCheckBox = makeCheckBox(kCheckIdItem, m_itemSnap);
         m_alwaysShowNamesCheckBox = makeCheckBox(kCheckIdAlwaysShowNames, m_alwaysShowNames);
+        m_showZeroBonusesCheckBox = makeCheckBox(kCheckIdShowZeroBonuses, m_showZeroBonuses);
     }
 
     LayoutControls();
@@ -1843,6 +1857,13 @@ void UIOptionWnd::OnDraw()
                 DrawUiOptionText(hdc, m_alwaysShowNamesCheckBox->m_x + 18, m_alwaysShowNamesCheckBox->m_y - 1, "Always show actor names", RGB(0, 0, 0));
 #else
                 TextOutA(hdc, m_alwaysShowNamesCheckBox->m_x + 18, m_alwaysShowNamesCheckBox->m_y - 1, "Always show actor names", 23);
+#endif
+            }
+            if (m_showZeroBonusesCheckBox) {
+#if RO_ENABLE_QT6_UI
+                DrawUiOptionText(hdc, m_showZeroBonusesCheckBox->m_x + 18, m_showZeroBonusesCheckBox->m_y - 1, "Show stat bonuses when zero", RGB(0, 0, 0));
+#else
+                TextOutA(hdc, m_showZeroBonusesCheckBox->m_x + 18, m_showZeroBonusesCheckBox->m_y - 1, "Show stat bonuses when zero", 27);
 #endif
             }
 
@@ -2158,6 +2179,7 @@ bool UIOptionWnd::HandleQtToggleClick(int x, int y)
         &m_skillSnap,
         &m_itemSnap,
         &m_alwaysShowNames,
+        &m_showZeroBonuses,
     };
 
     for (int index = 0; index < static_cast<int>(std::size(gameToggleValues)); ++index) {
@@ -2210,6 +2232,8 @@ msgresult_t UIOptionWnd::SendMsg(UIWindow* sender, int msg, msgparam_t wparam, m
         m_itemSnap = (lparam != 0) ? 1 : 0;
     } else if (sender == m_alwaysShowNamesCheckBox) {
         m_alwaysShowNames = (lparam != 0) ? 1 : 0;
+    } else if (sender == m_showZeroBonusesCheckBox) {
+        m_showZeroBonuses = (lparam != 0) ? 1 : 0;
     } else {
         return 0;
     }
@@ -2357,6 +2381,7 @@ bool UIOptionWnd::GetDisplayDataForQt(DisplayData* outData) const
                 { 2, m_skillSnap != 0, "Skill target snap" },
                 { 3, m_itemSnap != 0, "Item target snap" },
                 { 4, m_alwaysShowNames != 0, "Always show actor names" },
+                { 5, m_showZeroBonuses != 0, "Show stat bonuses when zero" },
             };
             for (const ToggleDef& def : toggleDefs) {
                 const RECT toggleRect = GetGameToggleRect(def.index);

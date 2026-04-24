@@ -3,6 +3,7 @@
 #include "render/DC.h"
 #include "UIWindowMgr.h"
 #include "core/File.h"
+#include "core/SettingsIni.h"
 #include "gamemode/GameMode.h"
 #include "gamemode/Mode.h"
 #include "main/WinMain.h"
@@ -267,10 +268,10 @@ HFONT GetStatusFont()
     return s_font;
 }
 
-std::string FormatCompositeValue(int primary, int secondary)
+std::string FormatCompositeValue(int primary, int secondary, bool showZero)
 {
     char text[64] = {};
-    if (secondary > 0) {
+    if (showZero || secondary > 0) {
         std::snprintf(text, sizeof(text), "%d + %d", primary, secondary);
     } else {
         std::snprintf(text, sizeof(text), "%d", primary);
@@ -490,16 +491,17 @@ void UIStatusWnd::OnDraw()
                 DrawWindowText(hdc, m_x + 54, rowY, statText.c_str(), RGB(0, 0, 0));
             }
 
-            DrawRightAlignedValue(hdc, m_x + 192, m_y + kRightLeftRows[0], FormatCompositeValue(data.attack, data.refineAttack));
+            const bool showZeroBonuses = LoadSettingsIniInt("OptionWnd", "ShowZeroBonuses", 0) != 0;
+            DrawRightAlignedValue(hdc, m_x + 192, m_y + kRightLeftRows[0], FormatCompositeValue(data.attack, data.refineAttack, showZeroBonuses));
             DrawRightAlignedValue(hdc, m_x + 192, m_y + kRightLeftRows[1], FormatMatkValue(data.matkMin, data.matkMax));
             DrawRightAlignedValue(hdc, m_x + 192, m_y + kRightLeftRows[2], std::to_string(data.hit));
             DrawRightAlignedValue(hdc, m_x + 192, m_y + kRightLeftRows[3], std::to_string(data.critical));
             DrawRightAlignedValue(hdc, m_x + 273, m_y + kRightLeftRows[4], std::to_string(data.statusPoint));
 
-            DrawRightAlignedValue(hdc, m_x + 273, m_y + kRightRightRows[0], FormatCompositeValue(data.itemDef, data.plusDef));
-            DrawRightAlignedValue(hdc, m_x + 273, m_y + kRightRightRows[1], FormatCompositeValue(data.itemMdef, data.plusMdef));
-            DrawRightAlignedValue(hdc, m_x + 273, m_y + kRightRightRows[2], FormatCompositeValue(data.flee, data.plusFlee));
-            DrawRightAlignedValue(hdc, m_x + 273, m_y + kRightRightRows[3], FormatCompositeValue(data.aspd, data.plusAspd));
+            DrawRightAlignedValue(hdc, m_x + 273, m_y + kRightRightRows[0], FormatCompositeValue(data.itemDef, data.plusDef, showZeroBonuses));
+            DrawRightAlignedValue(hdc, m_x + 273, m_y + kRightRightRows[1], FormatCompositeValue(data.itemMdef, data.plusMdef, showZeroBonuses));
+            DrawRightAlignedValue(hdc, m_x + 273, m_y + kRightRightRows[2], FormatCompositeValue(data.flee, data.plusFlee, showZeroBonuses));
+            DrawRightAlignedValue(hdc, m_x + 273, m_y + kRightRightRows[3], FormatCompositeValue(data.aspd, data.plusAspd, showZeroBonuses));
         }
     }
 

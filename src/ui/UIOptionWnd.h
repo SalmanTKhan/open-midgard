@@ -222,6 +222,7 @@ private:
     UICheckBox* m_skillSnapCheckBox;
     UICheckBox* m_itemSnapCheckBox;
     UICheckBox* m_alwaysShowNamesCheckBox;
+    UICheckBox* m_showZeroBonusesCheckBox;
     int m_orgHeight;
     int m_bgmVolume;
     int m_soundVolume;
@@ -233,6 +234,7 @@ private:
     int m_skillSnap;
     int m_itemSnap;
     int m_alwaysShowNames;
+    int m_showZeroBonuses;
     int m_guiScalePercent;
     int m_appliedGuiScalePercent;
     int m_collapsed;

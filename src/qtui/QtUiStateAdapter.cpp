@@ -290,9 +290,9 @@ QString ToQString(const char* value)
     return value ? QString::fromLocal8Bit(value) : QString();
 }
 
-QString FormatCompositeStatusText(int primary, int secondary)
+QString FormatCompositeStatusText(int primary, int secondary, bool showZero)
 {
-    if (secondary > 0) {
+    if (showZero || secondary > 0) {
         return QStringLiteral("%1 + %2").arg(primary).arg(secondary);
     }
     return QString::number(primary);
@@ -1906,16 +1906,17 @@ void PopulateStatusState(QtUiState* state)
         }
         data.insert(QStringLiteral("pageTabs"), pageTabs);
 
+        const bool showZeroBonuses = LoadSettingsIniInt("OptionWnd", "ShowZeroBonuses", 0) != 0;
         data.insert(QStringLiteral("title"), QStringLiteral("Status"));
-        data.insert(QStringLiteral("attackText"), FormatCompositeStatusText(display.attack, display.refineAttack));
+        data.insert(QStringLiteral("attackText"), FormatCompositeStatusText(display.attack, display.refineAttack, showZeroBonuses));
         data.insert(QStringLiteral("matkText"), FormatMatkStatusText(display.matkMin, display.matkMax));
         data.insert(QStringLiteral("hit"), display.hit);
         data.insert(QStringLiteral("critical"), display.critical);
         data.insert(QStringLiteral("statusPoint"), display.statusPoint);
-        data.insert(QStringLiteral("itemDefText"), FormatCompositeStatusText(display.itemDef, display.plusDef));
-        data.insert(QStringLiteral("itemMdefText"), FormatCompositeStatusText(display.itemMdef, display.plusMdef));
-        data.insert(QStringLiteral("fleeText"), FormatCompositeStatusText(display.flee, display.plusFlee));
-        data.insert(QStringLiteral("aspdText"), FormatCompositeStatusText(display.aspd, display.plusAspd));
+        data.insert(QStringLiteral("itemDefText"), FormatCompositeStatusText(display.itemDef, display.plusDef, showZeroBonuses));
+        data.insert(QStringLiteral("itemMdefText"), FormatCompositeStatusText(display.itemMdef, display.plusMdef, showZeroBonuses));
+        data.insert(QStringLiteral("fleeText"), FormatCompositeStatusText(display.flee, display.plusFlee, showZeroBonuses));
+        data.insert(QStringLiteral("aspdText"), FormatCompositeStatusText(display.aspd, display.plusAspd, showZeroBonuses));
         data.insert(QStringLiteral("miniPointsText"), QStringLiteral("Points %1").arg(display.statusPoint));
         data.insert(QStringLiteral("attackLine"), QStringLiteral("Atk  %1").arg(data.value(QStringLiteral("attackText")).toString()));
         data.insert(QStringLiteral("matkLine"), QStringLiteral("Matk %1").arg(data.value(QStringLiteral("matkText")).toString()));

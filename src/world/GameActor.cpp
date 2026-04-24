@@ -110,10 +110,25 @@ constexpr int kAttackStateId = kGameActorAttackStateId;
 constexpr int kDeathStateId = kGameActorDeathStateId;
 constexpr int kSecondAttackStateId = 9;
 constexpr int kHitReactionStateId = 4;
-constexpr int kDeathAction = 64;
+constexpr int kDeathAction = 64;           // PC sprite layout: DIE slot (8 * 8)
 constexpr int kDeathMotion = 4;
-constexpr int kHitReactionAction = 48;
+constexpr int kHitReactionAction = 48;      // PC sprite layout: HURT slot (6 * 8)
 constexpr int kHitReactionMotion = 5;
+constexpr int kMonsterDeathAction = 32;     // Monster sprite layout: DIE slot (4 * 8)
+constexpr int kMonsterHitAction = 24;       // Monster sprite layout: HURT slot (3 * 8)
+constexpr int kPcFreeze2Action = 72;        // PC sprite layout: FREEZE2 slot (9 * 8)
+
+// OPT1 body-state values, per Aegis protocol (mirrors roBrowserLegacy
+// src/DB/Status/StatusState.js BodyState enum).
+constexpr int kBodyStateNone       = 0;
+constexpr int kBodyStateStone      = 1;
+constexpr int kBodyStateFreeze     = 2;
+constexpr int kBodyStateStun       = 3;
+constexpr int kBodyStateSleep      = 4;
+constexpr int kBodyStateStoneWait  = 6;
+constexpr int kBodyStateBurning    = 7;
+constexpr int kBodyStateImprison   = 8;
+constexpr int kBodyStateCrystalize = 9;
 constexpr u32 kHitReactionDurationMs = 200;
 constexpr float kHitReactionKnockbackDist = 6.0f;
 constexpr int kMonsterJobMin = 1000;
@@ -4329,6 +4344,60 @@ void CGameActor::CancelHideFade()
     m_hideFadeEndTick = 0;
 }
 
+// Maps OPT1 body-state transitions to their visible effects. Mirrors
+// roBrowserLegacy src/Renderer/Entity/EntityState.js:updateBodyState — we only
+// cover the visual pieces OpenMidgard currently has primitives for (action row
+// swap, motion freeze). Status-icon attachments (stun stars, sleep Z's, etc.)
+// need an overlay-sprite system that doesn't exist yet.
+void CGameActor::ApplyBodyStateTransition(int oldState, int newState)
+{
+    const bool wasIncapacitated = (oldState == kBodyStateStone
+        || oldState == kBodyStateFreeze
+        || oldState == kBodyStateStun
+        || oldState == kBodyStateSleep);
+    if (wasIncapacitated) {
+        m_isMotionFreezed = 0;
+        if (oldState == kBodyStateFreeze) {
+            TryPlayQueuedWaveAtActor(*this, "_frozen_explosion.wav");
+            if (m_isPc != 0 && m_stateId != kDeathStateId) {
+                // Return to combat-ready stance, matching RBL
+                // EntityState.js:205 which re-applies ACTION.READYFIGHT.
+                SetAction(32, 0, 0);
+            }
+        } else if (oldState == kBodyStateStone) {
+            TryPlayQueuedWaveAtActor(*this, "_stone_explosion.wav");
+        }
+    }
+
+    switch (newState) {
+    case kBodyStateStone:
+        // Petrified: pause animation at whatever frame is current.
+        m_isMotionFreezed = 1;
+        break;
+    case kBodyStateStoneWait:
+        TryPlayQueuedWaveAtActor(*this, "_stonecurse.wav");
+        break;
+    case kBodyStateFreeze:
+        if (m_isPc != 0) {
+            SetAction(kPcFreeze2Action, 0, 1);
+        }
+        m_isMotionFreezed = 1;
+        break;
+    case kBodyStateStun:
+        TryPlayQueuedWaveAtActor(*this, "_stun.wav");
+        m_isMotionFreezed = 1;
+        break;
+    case kBodyStateSleep:
+        // No action-row equivalent for sleep on PC or monster sprites.
+        // RBL overlays an icon (status-sleep); that overlay system isn't
+        // ported yet, so we only hold the sprite in place.
+        m_isMotionFreezed = 1;
+        break;
+    default:
+        break;
+    }
+}
+
 bool CGameActor::IsHideFadeActive(u32 now) const
 {
     return m_hideFadeEndTick != 0 && now < m_hideFadeEndTick;
@@ -4347,6 +4416,11 @@ u32 CGameActor::GetHideFadeAlpha(u32 now) const
 
 u8 CGameActor::ProcessState() {
     ProcessWillBeAttacked();
+
+    if (m_bodyState != m_previousBodyState) {
+        ApplyBodyStateTransition(m_previousBodyState, m_bodyState);
+        m_previousBodyState = m_bodyState;
+    }
 
     if (m_hideFadeEndTick != 0 && timeGetTime() >= m_hideFadeEndTick) {
         const bool hiding = (m_effectState & kEffectStateHidingMask) != 0;
@@ -4765,7 +4839,14 @@ void CGameActor::SetState(int state) {
         m_path.Reset();
         m_isMotionFinished = 0;
         m_isMotionFreezed = 0;
-        SetAction(80, 3, 1);
+        if (m_isPc != 0) {
+            SetAction(ResolvePcAttackAction(*this), 3, 1);
+        } else {
+            // Non-PC actors have no dedicated skill/cast row. Use the monster
+            // ATTACK slot; without this, fallback resolves to row 32 (DIE)
+            // and the actor visually dies while casting.
+            SetAction(16, 3, 1);
+        }
         m_attackMotion = static_cast<float>(GetAttackMotion());
         break;
     case kGameActorPickupStateId:
@@ -4817,7 +4898,8 @@ void CGameActor::SetState(int state) {
         m_targetGid = 0;
         m_isMotionFinished = 0;
         m_isMotionFreezed = 0;
-        SetAction(kHitReactionAction, kHitReactionMotion, 1);
+        SetAction(m_isPc != 0 ? kHitReactionAction : kMonsterHitAction,
+            kHitReactionMotion, 1);
         break;
     case kDeathStateId:
         m_isMoving = 0;
@@ -4831,7 +4913,8 @@ void CGameActor::SetState(int state) {
         m_isLieOnGround = 1;
         m_isMotionFinished = 0;
         m_isMotionFreezed = 0;
-        SetAction(kDeathAction, kDeathMotion, 1);
+        SetAction(m_isPc != 0 ? kDeathAction : kMonsterDeathAction,
+            kDeathMotion, 1);
         break;
     default:
         return;
@@ -5549,7 +5632,10 @@ void CPc::SetState(int state)
         break;
     case kMoveStateId:
         m_isCounter = 0;
-        if (m_bodyState != 1 && m_bodyState != 2) {
+        if (m_bodyState != kBodyStateStone
+            && m_bodyState != kBodyStateFreeze
+            && m_bodyState != kBodyStateStun
+            && m_bodyState != kBodyStateSleep) {
             m_isMotionFreezed = 0;
         }
         m_headDir = 0;
@@ -5558,7 +5644,10 @@ void CPc::SetState(int state)
     case kAttackStateId:
     case kSecondAttackStateId: {
         m_isCounter = 0;
-        if (m_bodyState != 1 && m_bodyState != 2) {
+        if (m_bodyState != kBodyStateStone
+            && m_bodyState != kBodyStateFreeze
+            && m_bodyState != kBodyStateStun
+            && m_bodyState != kBodyStateSleep) {
             m_isMotionFreezed = 0;
         }
         SendMsg(this, 83, 0, 0, 0);

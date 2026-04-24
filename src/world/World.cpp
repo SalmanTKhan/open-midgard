@@ -1020,6 +1020,9 @@ bool ComputeActorShadowRect(const CWorld::BillboardScreenEntry& entry,
     if (!actor || actor->m_shadowOn == 0 || !outLeft || !outTop || !outRight || !outBottom || !outBottomOow || !outTopOow || !outAngle) {
         return false;
     }
+    if (actor->m_stateId == kGameActorDeathStateId || actor->m_isSitting != 0) {
+        return false;
+    }
 
     const float shadowZoom = actor->m_shadowZoom > 0.0f ? actor->m_shadowZoom : 1.0f;
     if (zoom == 0.0f || shadowZoom == 0.0f) {
@@ -1069,6 +1072,9 @@ void RenderCachedActorShadow(const CWorld::BillboardScreenEntry& entry, const ma
     const ActorShadowResource* shadow = GetActorShadowResource();
     const CPc* actor = entry.actor;
     if (!shadow || !shadow->texture || !actor || actor->m_shadowOn == 0) {
+        return;
+    }
+    if (actor->m_stateId == kGameActorDeathStateId || actor->m_isSitting != 0) {
         return;
     }
 

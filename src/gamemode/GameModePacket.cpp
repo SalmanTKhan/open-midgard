@@ -1472,6 +1472,17 @@ int ConvertRawAspdToDisplay(int rawMotion)
     return (std::max)(0, (2000 - clampedMotion) / 10);
 }
 
+// Modern PV23 servers emit SP_ASPD as raw attack motion time (ms), which the
+// 2008 client converts via (2000 - raw) / 10. Early/alpha/beta1-era profiles
+// (e.g. Sabine) send SP_ASPD already in display units, so the conversion must
+// be skipped for those.
+bool ServerSendsRawAspdMotion()
+{
+    return !PacketProfile::UsesEarlyMapServerSendProfile()
+        && !PacketProfile::UsesAlphaMapServerSendProfile()
+        && !PacketProfile::UsesBeta1MapServerSendProfile();
+}
+
 void SyncLocalPlayerPrimaryStatsFromSession(CGameMode& mode)
 {
     CPlayer* player = mode.m_world ? mode.m_world->m_player : nullptr;
@@ -1603,7 +1614,7 @@ void ApplyCombatStatusSummary(CGameMode& mode,
 
 bool ApplySelfStatusUpdateToSession(u32 statusType, u32 value)
 {
-    if (ApplyCombatStatusParamToSession(statusType, static_cast<int>(value), true)) {
+    if (ApplyCombatStatusParamToSession(statusType, static_cast<int>(value), ServerSendsRawAspdMotion())) {
         return true;
     }
 
@@ -3188,7 +3199,9 @@ void UpdateStatusSummaryFromPacket00BD(CGameMode& mode, const PacketView& packet
         static_cast<int>(ReadLE16(packet.data + 34)),
         static_cast<int>(ReadLE16(packet.data + 36)),
         static_cast<int>(ReadLE16(packet.data + 38)),
-        ConvertRawAspdToDisplay(static_cast<int>(ReadLE16(packet.data + 40))),
+        ServerSendsRawAspdMotion()
+            ? ConvertRawAspdToDisplay(static_cast<int>(ReadLE16(packet.data + 40)))
+            : static_cast<int>(ReadLE16(packet.data + 40)),
         static_cast<int>(ReadLE16(packet.data + 42)));
 
     InvalidateStatusWindows();
