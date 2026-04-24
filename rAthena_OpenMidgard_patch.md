@@ -25,7 +25,7 @@ Without `PACKETVER_SAK_NUM`, the server still compiles parts of the newer charac
 
 ### 1. `src/map/clif_packetdb.hpp`
 
-Restore the early Renewal packet-db branch for the 2008 RE client family:
+Add a guard so this client does not fall into the early Renewal packet-db branch when it should stay on the early Sakexe-compatible path:
 
 ```cpp
 // Renewal Clients
@@ -88,15 +88,15 @@ Restore the early Renewal packet-db branch for the 2008 RE client family:
 
 ### Why this patch was needed
 
-This block is the map-server packet table for the early RE client family. It tells rAthena which client-to-server opcodes exist for those dates, how long each packet body is, and which parser should consume each one.
+This block is the map-server packet table for the early RE client family. In this compatibility patch, the point of calling it out is not that OpenMidgard should use that RE family. The point is to guard against rAthena selecting that nearby RE packet-db path for a client that is actually speaking the `2008-09-10aSakexe` opcode family.
 
-The important note for OpenMidgard is that our client is intentionally following the `2008-09-10aSakexe` opcode family. The reason to call out and patch this RE block is to stop rAthena from drifting into the nearby early-RE opcode mappings for the same general era. If the server uses those RE mappings, it starts expecting different opcodes and field positions for core requests than the client actually sends.
+The important note for OpenMidgard is that our client is intentionally following the `2008-09-10aSakexe` opcode family. The reason to call out this RE block is to make the boundary explicit: without the guard, rAthena can drift into the nearby early-RE opcode mappings for the same general era. If the server uses those RE mappings, it starts expecting different opcodes and field positions for core requests than the client actually sends.
 
 The important consequence is that login/map bootstrap and normal gameplay traffic stop agreeing on the wire format. Requests such as `WantToConnection`, `ActionRequest`, `UseSkillToId`, `UseItem`, `TickSend`, `WalkToXY`, `TakeItem`, and the Kafra move packets get parsed using the wrong layouts, which leads to dropped requests, desync, or apparently random behavior once the client reaches the map server. In short: this patch exists so rAthena does not treat our Sakexe-style client as an early-RE client and switch to RE packet opcodes that OpenMidgard does not implement.
 
 This patch also carries the early RE-side packet-size overrides for server packets that changed during that window, including the `0x006d` character-info packet becoming 114 bytes for `2008-12-17bRagexeRE` and the later `0x043f` size change in January 2009. Those overrides are part of the same compatibility story: the packet-db has to match the exact 2008 RE family, not just the broad `PACKETVER` date.
 
-Compared against the upstream packet table in rAthena's `src/map/clif_packetdb.hpp`, this is the missing section that restores the intended early-RE mapping behavior.
+Compared against the upstream packet table in rAthena's `src/map/clif_packetdb.hpp`, this is the missing section needed to document and enforce that OpenMidgard must not be treated as one of those early-RE packet-db clients.
 
 ### 2. `src/common/packets.hpp`
 
