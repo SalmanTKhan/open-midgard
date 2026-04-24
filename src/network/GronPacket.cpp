@@ -230,6 +230,7 @@ void FillPacketSizeTable(PacketSizeTable& packetSizeTable)
     SetPacketSize(0x0194, 30);
     SetPacketSize(0x0195, 102);
     SetPacketSize(0x0196, 9);
+        SetPacketSize(0x0199, 4);               // ZC_NOTIFY_MAPPROPERTY
     SetPacketSize(0x0192, 24);
     SetPacketSize(0x019B, 10);
     SetPacketSize(0x01A2, 37);
@@ -315,6 +316,7 @@ void FillPacketSizeTable(PacketSizeTable& packetSizeTable)
     SetPacketSize(0x0816, 6);
     SetPacketSize(0x02C9, 3);
     SetPacketSize(0x02D7, kVariablePacketSize);
+    SetPacketSize(0x02D9, 10);              // ZC_CONFIG
     SetPacketSize(0x02DA, 3);
     SetPacketSize(0x02B9, 191);
     SetPacketSize(0x02BA, 11);

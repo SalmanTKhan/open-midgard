@@ -616,8 +616,8 @@ void UIOptionWnd::RefreshResolutionEntries()
 
         RECT clientRect{};
         if (g_hMainWnd && GetClientRect(g_hMainWnd, &clientRect)) {
-            maxWidth = (std::max)(maxWidth, clientRect.right - clientRect.left);
-            maxHeight = (std::max)(maxHeight, clientRect.bottom - clientRect.top);
+            maxWidth = (std::max)(maxWidth, static_cast<int>(clientRect.right - clientRect.left));
+            maxHeight = (std::max)(maxHeight, static_cast<int>(clientRect.bottom - clientRect.top));
         }
 
 #if RO_ENABLE_QT6_UI

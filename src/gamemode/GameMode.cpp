@@ -9325,9 +9325,6 @@ void CGameMode::OnInit(const char* worldName) {
         g_session.m_playerPosY,
         g_session.m_playerDir);
 
-    m_sentLoadEndAck = SendLoadEndAckPacket() ? 1 : 0;
-    m_mapLoadingAckTick = GetTickCount();
-    m_lastActorBootstrapPacketTick = m_mapLoadingAckTick;
     SendTimeSyncRequest(*this, true);
 
     CAudio* audio = CAudio::GetInstance();

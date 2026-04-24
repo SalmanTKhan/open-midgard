@@ -7,14 +7,9 @@ set(RO_QTUI_SOURCES
     QtUiStateAdapter.h
     QtUiStateAdapter.cpp
     QtUiSpikeAssets.qrc
+    QtPlatformWindow.h
+    QtPlatformWindow.cpp
 )
-
-if(NOT WIN32)
-    list(APPEND RO_QTUI_SOURCES
-        QtPlatformWindow.h
-        QtPlatformWindow.cpp
-    )
-endif()
 
 add_library(ro_qtui STATIC ${RO_QTUI_SOURCES})
 
