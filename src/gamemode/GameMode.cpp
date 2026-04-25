@@ -6863,6 +6863,8 @@ void PumpPendingPickupRequest(CGameMode& mode)
     }
 }
 
+void DestroyDeferredRuntimeActors(CGameMode& mode);
+
 void ClearRuntimeActors(CGameMode& mode)
 {
     CWorld* const world = mode.m_world ? mode.m_world : &g_world;
@@ -6885,6 +6887,7 @@ void ClearRuntimeActors(CGameMode& mode)
     }
     mode.m_runtimeActors.clear();
     mode.m_actorPosList.clear();
+    DestroyDeferredRuntimeActors(mode);
 
     if (world) {
         world->m_actorList.clear();
@@ -6892,6 +6895,14 @@ void ClearRuntimeActors(CGameMode& mode)
         world->RebuildSceneGraph();
         world->InvalidateBillboardFrameCache();
     }
+}
+
+void DestroyDeferredRuntimeActors(CGameMode& mode)
+{
+    for (CGameActor* actor : mode.m_deferredActorDeletes) {
+        delete actor;
+    }
+    mode.m_deferredActorDeletes.clear();
 }
 
 void EnsureBootstrapSelfActor(CGameMode& mode)
@@ -9588,6 +9599,7 @@ int  CGameMode::OnRun() {
     return 1;
 }
 void CGameMode::OnUpdate() {
+    DestroyDeferredRuntimeActors(*this);
     EnsureBootstrapSelfActor(*this);
     SendTimeSyncRequest(*this, false);
     const bool trackMovePerfFrame = IsMovePerfActive(*this);

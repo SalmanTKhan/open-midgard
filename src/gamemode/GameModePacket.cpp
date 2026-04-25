@@ -6983,11 +6983,12 @@ void RemoveRuntimeActor(CGameMode& mode, u32 gid)
     }
 
     if (it->second) {
+        CGameActor* actor = it->second;
         if (mode.m_world) {
-            mode.m_world->NotifyActorDeleted(it->second);
+            mode.m_world->NotifyActorDeleted(actor);
         }
-        it->second->UnRegisterPos();
-        delete it->second;
+        actor->UnRegisterPos();
+        mode.m_deferredActorDeletes.push_back(actor);
     }
     mode.m_runtimeActors.erase(it);
 }
