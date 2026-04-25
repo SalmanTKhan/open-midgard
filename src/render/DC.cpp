@@ -271,6 +271,42 @@ void BlitMotionToArgb(unsigned int* dest, int destW, int destH, int baseX, int b
     }
 }
 
+bool ComputeMotionClipBounds(CSprRes* sprRes, const CMotion* motion, RECT* outBounds)
+{
+    if (!sprRes || !motion || !outBounds) {
+        return false;
+    }
+
+    RECT clipBox{};
+    bool hasClip = false;
+    for (const CSprClip& clip : motion->sprClips) {
+        const SprImg* image = sprRes->GetSprite(clip.clipType, clip.sprIndex);
+        if (!image) {
+            continue;
+        }
+
+        const int drawX = clip.x - image->width / 2;
+        const int drawY = clip.y - image->height / 2;
+        RECT current = { drawX, drawY, drawX + image->width, drawY + image->height };
+        if (!hasClip) {
+            clipBox = current;
+            hasClip = true;
+        } else {
+            clipBox.left = (std::min)(clipBox.left, current.left);
+            clipBox.top = (std::min)(clipBox.top, current.top);
+            clipBox.right = (std::max)(clipBox.right, current.right);
+            clipBox.bottom = (std::max)(clipBox.bottom, current.bottom);
+        }
+    }
+
+    if (!hasClip) {
+        return false;
+    }
+
+    *outBounds = clipBox;
+    return true;
+}
+
 bool StretchArgbToHdc(HDC hdc,
                       int dstX,
                       int dstY,
@@ -400,28 +436,7 @@ bool DrawActMotionToHdc(HDC hdc, int x, int y, class CSprRes* sprRes, const stru
     }
 
     RECT clipBox{};
-    bool hasClip = false;
-    for (const CSprClip& clip : motion->sprClips) {
-        const SprImg* image = sprRes->GetSprite(clip.clipType, clip.sprIndex);
-        if (!image) {
-            continue;
-        }
-
-        const int drawX = clip.x - image->width / 2;
-        const int drawY = clip.y - image->height / 2;
-        RECT current = { drawX, drawY, drawX + image->width, drawY + image->height };
-        if (!hasClip) {
-            clipBox = current;
-            hasClip = true;
-        } else {
-            clipBox.left = (std::min)(clipBox.left, current.left);
-            clipBox.top = (std::min)(clipBox.top, current.top);
-            clipBox.right = (std::max)(clipBox.right, current.right);
-            clipBox.bottom = (std::max)(clipBox.bottom, current.bottom);
-        }
-    }
-
-    if (!hasClip) {
+    if (!ComputeMotionClipBounds(sprRes, motion, &clipBox)) {
         return false;
     }
 
@@ -441,28 +456,7 @@ bool DrawActMotionToArgb(unsigned int* dest, int destW, int destH, int x, int y,
     }
 
     RECT clipBox{};
-    bool hasClip = false;
-    for (const CSprClip& clip : motion->sprClips) {
-        const SprImg* image = sprRes->GetSprite(clip.clipType, clip.sprIndex);
-        if (!image) {
-            continue;
-        }
-
-        const int drawX = clip.x - image->width / 2;
-        const int drawY = clip.y - image->height / 2;
-        RECT current = { drawX, drawY, drawX + image->width, drawY + image->height };
-        if (!hasClip) {
-            clipBox = current;
-            hasClip = true;
-        } else {
-            clipBox.left = (std::min)(clipBox.left, current.left);
-            clipBox.top = (std::min)(clipBox.top, current.top);
-            clipBox.right = (std::max)(clipBox.right, current.right);
-            clipBox.bottom = (std::max)(clipBox.bottom, current.bottom);
-        }
-    }
-
-    if (!hasClip) {
+    if (!ComputeMotionClipBounds(sprRes, motion, &clipBox)) {
         return false;
     }
 

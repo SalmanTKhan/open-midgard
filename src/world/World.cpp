@@ -53,6 +53,7 @@ constexpr float kNearPlane = 10.0f;
 constexpr float kGroundSubmitNearPlane = 80.0f;
 constexpr float kAttrTileDepthBias = 0.0010f;
 constexpr float kPlayerBillboardWorldHeightScale = 2.0f;
+constexpr float kNonPcBillboardScaleAnchorY = 110.0f;
 constexpr float kPlayerBillboardDepthWorldBiasScale = 0.35f;
 constexpr float kPlayerBillboardDepthWorldBiasMin = 0.75f;
 constexpr float kPlayerBillboardDepthWorldBiasMax = 3.0f;
@@ -2784,9 +2785,15 @@ bool BuildBillboardRenderEntry(CPc* actor,
         rightPixels = static_cast<float>(opaqueRightPx);
         bottomPixels = static_cast<float>(opaqueBottomPx);
     }
+    if (actor->m_isPc == 0) {
+        bottomPixels = (std::max)(bottomPixels, anchorY + 1.0f);
+    }
 
     const float worldHeight = zoom * kPlayerBillboardWorldHeightScale;
-    const float unitsPerPixel = worldHeight / anchorY;
+    const float scaleAnchorY = actor->m_isPc != 0
+        ? anchorY
+        : kNonPcBillboardScaleAnchorY;
+    const float unitsPerPixel = worldHeight / (std::max)(1.0f, scaleAnchorY);
     const float leftUnits = (anchorX - leftPixels) * unitsPerPixel;
     const float rightUnits = (rightPixels - anchorX) * unitsPerPixel;
     const float topUnits = (anchorY - topPixels) * unitsPerPixel;
@@ -2856,9 +2863,9 @@ bool BuildBillboardRenderEntry(CPc* actor,
     }
 
     const float fullTopUnits = anchorY * unitsPerPixel;
-    const float fullBottomUnits = (textureHeight - anchorY) * unitsPerPixel;
+    const float visibleBottomUnits = bottomUnits;
     const vector3d fullDepthTopCenter = AddVec3(actor->m_pos, ScaleVec3(depthUp, fullTopUnits));
-    const vector3d fullDepthBottomCenter = AddVec3(actor->m_pos, ScaleVec3(depthUp, -fullBottomUnits));
+    const vector3d fullDepthBottomCenter = AddVec3(actor->m_pos, ScaleVec3(depthUp, -visibleBottomUnits));
     tlvertex3d projectedDepthTop{};
     {
         const vector3d depthBiasedTop = AddVec3(
