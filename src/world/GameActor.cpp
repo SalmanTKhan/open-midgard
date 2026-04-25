@@ -1354,12 +1354,14 @@ bool ResolveNonPcBillboardComposeConfig(const CPc& actor,
     const int clipRight = static_cast<int>(clipBounds.right);
     const int clipBottom = static_cast<int>(clipBounds.bottom);
 
+    const int composeLeft = (std::min)(clipLeft, 0);
+    const int composeRight = (std::max)(clipRight, 1);
     const int composeTop = (std::min)(clipTop, 0);
     const int composeBottom = (std::max)(clipBottom, 1);
 
-    outConfig->width = kPlayerBillboardComposeWidth;
+    outConfig->width = (std::max)(1, composeRight - composeLeft);
     outConfig->height = (std::max)(1, composeBottom - composeTop);
-    outConfig->anchorX = kPlayerBillboardAnchorX;
+    outConfig->anchorX = -composeLeft;
     outConfig->anchorY = -composeTop;
     return true;
 }
