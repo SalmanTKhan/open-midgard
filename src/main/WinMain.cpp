@@ -104,6 +104,12 @@ constexpr const char* kLoggingSettingsSection = "Logging";
 constexpr const char* kRuntimeRootValueName = "RuntimeRoot";
 constexpr const char* kGrfRootValueName = "GrfRoot";
 constexpr const char* kConsoleLoggingValueName = "Console";
+constexpr const char* kPerTagFilesLoggingValueName = "PerTagFiles";
+constexpr const char* kCombinedFileLoggingValueName = "CombinedFile";
+constexpr const char* kDisabledTagsLoggingValueName = "DisabledTags";
+constexpr const char* kCombinedDisabledTagsLoggingValueName = "CombinedDisabledTags";
+constexpr const char* kDefaultCombinedDisabledTags =
+    "View,ViewPerfHiRes,GameMode,GameModePerfHiRes,QtUiPerf,OverlayPerfHiRes";
 
 constexpr int kCrashMiniDumpTypePrimary = 0x21065;
 constexpr int kCrashMiniDumpTypeFallback = 0x20000;
@@ -239,7 +245,7 @@ std::filesystem::path LoadConfiguredPath(const char* environmentVariableName, co
     return {};
 }
 
-bool LoadConfiguredBool(const char* environmentVariableName, const char* settingsSection, const char* settingsKey)
+bool LoadConfiguredBool(const char* environmentVariableName, const char* settingsSection, const char* settingsKey, bool defaultValue = false)
 {
     if (environmentVariableName) {
         if (const char* value = std::getenv(environmentVariableName)) {
@@ -250,10 +256,29 @@ bool LoadConfiguredBool(const char* environmentVariableName, const char* setting
     }
 
     if (settingsSection && settingsKey) {
-        return LoadSettingsIniInt(settingsSection, settingsKey, 0) != 0;
+        return LoadSettingsIniInt(settingsSection, settingsKey, defaultValue ? 1 : 0) != 0;
     }
 
-    return false;
+    return defaultValue;
+}
+
+std::string LoadConfiguredString(const char* environmentVariableName,
+    const char* settingsSection, const char* settingsKey, const char* defaultValue)
+{
+    if (environmentVariableName) {
+        if (const char* value = std::getenv(environmentVariableName)) {
+            return std::string(value);
+        }
+    }
+
+    if (settingsSection && settingsKey) {
+        std::string fromIni;
+        if (TryLoadSettingsIniString(settingsSection, settingsKey, &fromIni)) {
+            return fromIni;
+        }
+    }
+
+    return defaultValue ? std::string(defaultValue) : std::string();
 }
 
 std::filesystem::path ResolveRuntimeRoot()
@@ -1048,6 +1073,14 @@ int __stdcall WinMain(HINSTANCE hInstance, HINSTANCE /*hPrevInstance*/,
 {
     const std::filesystem::path resolvedRuntimeRoot = ResolveRuntimeRoot();
     ApplyRuntimeRoot(resolvedRuntimeRoot);
+    SetDbgLogPerTagFilesEnabled(LoadConfiguredBool("OPEN_MIDGARD_LOG_PER_TAG_FILES",
+        kLoggingSettingsSection, kPerTagFilesLoggingValueName, true));
+    SetDbgLogCombinedFileEnabled(LoadConfiguredBool("OPEN_MIDGARD_LOG_COMBINED_FILE",
+        kLoggingSettingsSection, kCombinedFileLoggingValueName, true));
+    SetDbgLogDisabledTags(LoadConfiguredString("OPEN_MIDGARD_LOG_DISABLED_TAGS",
+        kLoggingSettingsSection, kDisabledTagsLoggingValueName, "").c_str());
+    SetDbgLogCombinedDisabledTags(LoadConfiguredString("OPEN_MIDGARD_LOG_COMBINED_DISABLED_TAGS",
+        kLoggingSettingsSection, kCombinedDisabledTagsLoggingValueName, kDefaultCombinedDisabledTags).c_str());
     EnableDbgLogConsole(LoadConfiguredBool("OPEN_MIDGARD_LOG_CONSOLE", kLoggingSettingsSection, kConsoleLoggingValueName));
 #if RO_ENABLE_CAPTURE
     capture::Init(resolvedRuntimeRoot.empty()
