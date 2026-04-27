@@ -5411,6 +5411,79 @@ bool SendEmotionRequest(CGameMode& mode, int emotionType)
     return sent || localPreview;
 }
 
+// Kafra storage password ack (CZ_ACK_STORE_PASSWORD, 0x023B, 24 bytes per
+// eAthena packet_db at our packet_ver 23). Layout matches rAthena docs:
+// header(2) + type(2) + password(16, plaintext zero-padded) + new_password(4).
+// type 2 = change, type 3 = verify. The 24-byte legacy form truncates
+// new_password to 4 bytes; for "verify" (the common case) only password is
+// meaningful so this is a non-issue. Most eAthena/rAthena builds parse this
+// as a no-op anyway (clif_parse_StoragePassword is a TODO upstream).
+bool SendStoragePasswordAck(int type, const char* password)
+{
+    if (!password) {
+        password = "";
+    }
+    if (type != 2 && type != 3) {
+        return false;
+    }
+
+    constexpr size_t kPacketSize = 24;
+    char packet[kPacketSize] = {};
+    *reinterpret_cast<u16*>(packet + 0) = 0x023B;
+    *reinterpret_cast<u16*>(packet + 2) = static_cast<u16>(type);
+    const size_t pwLen = (std::min)(static_cast<size_t>(16), std::strlen(password));
+    std::memcpy(packet + 4, password, pwLen);
+    // packet[20..23] is new_password truncated to 4 bytes — leave zero-padded.
+
+    const bool sent = CRagConnection::instance()->SendPacket(packet, kPacketSize) != 0;
+    DbgLog("[GameMode] storage password ack type=%d sent=%d pwLen=%zu\n",
+        type, sent ? 1 : 0, pwLen);
+    return sent;
+}
+
+// CZ_ADD_FRIENDS (0x0202, 26 bytes per eAthena packet_db at packet_ver 23):
+// header(2) + name(24, null-terminated, fixed-width).
+bool SendFriendsListAdd(const char* characterName)
+{
+    if (!characterName || *characterName == '\0') {
+        return false;
+    }
+
+    constexpr size_t kPacketSize = 26;
+    constexpr size_t kNameMax = 24;
+    char packet[kPacketSize] = {};
+    *reinterpret_cast<u16*>(packet + 0) = 0x0202;
+    const size_t nameLen = (std::min)(kNameMax - 1, std::strlen(characterName));
+    std::memcpy(packet + 2, characterName, nameLen);
+
+    const bool sent = CRagConnection::instance()->SendPacket(packet, kPacketSize) != 0;
+    DbgLog("[GameMode] friend add request name='%s' sent=%d\n",
+        characterName, sent ? 1 : 0);
+    return sent;
+}
+
+// CZ_ACK_REQ_ADD_FRIENDS (0x0208, 14 bytes for packet_ver >= 6 per
+// Ref/eAthena/db/packet_db.txt:476): header(2) + inviter_aid(4) + inviter_cid(4) + reply.L(4).
+// reply: 0 = reject, 1 = accept (rAthena clif_parse_FriendsListReply).
+bool SendFriendsListReply(u32 inviterAid, u32 inviterCid, bool accept)
+{
+    if (inviterAid == 0 || inviterCid == 0) {
+        return false;
+    }
+
+    constexpr size_t kPacketSize = 14;
+    char packet[kPacketSize] = {};
+    *reinterpret_cast<u16*>(packet + 0) = 0x0208;
+    *reinterpret_cast<u32*>(packet + 2) = inviterAid;
+    *reinterpret_cast<u32*>(packet + 6) = inviterCid;
+    *reinterpret_cast<u32*>(packet + 10) = accept ? 1u : 0u;
+
+    const bool sent = CRagConnection::instance()->SendPacket(packet, kPacketSize) != 0;
+    DbgLog("[GameMode] friend reply aid=%u cid=%u accept=%d sent=%d\n",
+        inviterAid, inviterCid, accept ? 1 : 0, sent ? 1 : 0);
+    return sent;
+}
+
 bool SendTakeItemRequestPacket(u32 objectAid)
 {
     if (objectAid == 0) {
@@ -10657,6 +10730,15 @@ msgresult_t CGameMode::SendMsg(int msg, msgparam_t wparam, msgparam_t lparam, ms
     case GameMsg_RequestEmotion:
         return SendEmotionRequest(*this, static_cast<int>(wparam)) ? 1 : 0;
 
+    case GameMsg_RequestStoragePasswordSubmit:
+        return SendStoragePasswordAck(static_cast<int>(wparam),
+            reinterpret_cast<const char*>(lparam)) ? 1 : 0;
+
+    case GameMsg_RequestFriendReply:
+        return SendFriendsListReply(static_cast<u32>(wparam),
+            static_cast<u32>(extra),
+            lparam != 0) ? 1 : 0;
+
     case GameMsg_ResetCamera:
         if (m_view) {
             m_view->ResetToDefaultOrientation();
@@ -10725,6 +10807,19 @@ msgresult_t CGameMode::SendMsg(int msg, msgparam_t wparam, msgparam_t lparam, ms
                 static_cast<int>(action),
                 GetPlayerContextActionName(action));
             return SendMsg(GameMsg_RequestPartyInvite, targetAid, 0, 0);
+        }
+        if (action == PlayerContext_RegisterFriend) {
+            // The context menu was opened on a hovered player; the name was
+            // captured into m_lastWhisperMenuCharacterName at menu-open time
+            // (TryOpenPlayerContextMenu). Use it directly — CZ_ADD_FRIENDS
+            // takes a 24-byte character name, not an aid.
+            const std::string& name = m_lastWhisperMenuCharacterName;
+            if (name.empty()) {
+                g_windowMgr.PushChatEvent("Cannot resolve target player name for friend request.",
+                    0x000000FFu, 6);
+                return 0;
+            }
+            return SendFriendsListAdd(name.c_str()) ? 1 : 0;
         }
 
         DbgLog("[GameMode] player context action stub targetAid=%u action=%d (%s)\n",

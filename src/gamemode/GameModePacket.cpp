@@ -21,6 +21,7 @@
 #include "lua/LuaBridge.h"
 #include "ui/UIBasicInfoWnd.h"
 #include "ui/UIJoinPartyAcceptWnd.h"
+#include "ui/UIFriendRequestAcceptWnd.h"
 #include "ui/UISayDialogWnd.h"
 #include "ui/UINpcMenuWnd.h"
 #include "ui/UINpcInputWnd.h"
@@ -2676,9 +2677,31 @@ void HandleStoragePasswordRequest(CGameMode&, const PacketView& packet)
         return;
     }
 
+    // info: 0 = set password (first time), 1 = verify password, 2 = closed.
+    // Encode the desired CZ_ACK type in the GameMsg wparam: info 0 → type 2 (change),
+    // info 1 → type 3 (verify). info 2 means the server closed the dialog — no UI.
     const u16 info = ReadLE16(packet.data + 2);
     DbgLog("[GameMode] storage password request info=%u\n", static_cast<unsigned int>(info));
-    g_windowMgr.PushChatEvent("Storage password flow is not implemented yet.", 0x000000FFu, 6);
+
+    UINpcInputWnd* inputWnd = g_windowMgr.m_npcInputWnd;
+    if (!inputWnd) {
+        g_windowMgr.PushChatEvent("Storage requires a password but no input UI is available.",
+            0x000000FFu, 6);
+        return;
+    }
+
+    if (info == 2) {
+        inputWnd->HideInput();
+        return;
+    }
+
+    const int ackType = (info == 0) ? 2 : 3;
+    const char* label = (info == 0)
+        ? "Set Kafra storage password (max 16 chars)"
+        : "Enter Kafra storage password";
+    inputWnd->OpenGameStringPrompt(label,
+        CGameMode::GameMsg_RequestStoragePasswordSubmit,
+        static_cast<msgparam_t>(ackType));
 }
 
 void HandleStoragePasswordResult(CGameMode&, const PacketView& packet)
@@ -2692,6 +2715,29 @@ void HandleStoragePasswordResult(CGameMode&, const PacketView& packet)
     DbgLog("[GameMode] storage password result=%u errors=%u\n",
         static_cast<unsigned int>(result),
         static_cast<unsigned int>(errorCount));
+
+    // Result codes per ZC_RESULT_STORE_PASSWORD (rAthena clif.cpp:13773):
+    //   4 = change success, 5 = change fail, 6 = check success,
+    //   7 = check fail, 8 = locked out (too many wrong passwords).
+    const char* message = nullptr;
+    u32 color = 0x00FFFF00u;
+    switch (result) {
+    case 4: message = "Storage password changed."; color = 0x0000FF00u; break;
+    case 5: message = "Storage password change failed."; color = 0x000000FFu; break;
+    case 6: message = "Storage password accepted."; color = 0x0000FF00u; break;
+    case 7: {
+        char buf[96] = {};
+        std::snprintf(buf, sizeof(buf),
+            "Storage password incorrect (%u attempt%s).",
+            static_cast<unsigned int>(errorCount),
+            errorCount == 1 ? "" : "s");
+        g_windowMgr.PushChatEvent(buf, 0x000000FFu, 6);
+        return;
+    }
+    case 8: message = "Too many wrong passwords. Storage locked."; color = 0x000000FFu; break;
+    default: return;
+    }
+    g_windowMgr.PushChatEvent(message, color, 6);
 }
 
 void HandleItemPickupAck(CGameMode& mode, const PacketView& packet)
@@ -4062,6 +4108,11 @@ u32 ResolveCombatNumberColor(int damage, u8 actionType)
     switch (actionType) {
     case kNotifyActCriticalDamage:
         return 0xFFFFFF00u;
+    case kNotifyActEndureDamage:
+    case kNotifyActMultiHitEndure:
+        // Endure/guard hits use the yellow guard tint (matches RBL Damage.js BaseGuard skin)
+        // so the player can tell the hit was partially absorbed.
+        return 0xFFFFD040u;
     default:
         return 0xFFFFFFFFu;
     }
@@ -4491,6 +4542,18 @@ void QueueCombatHitReaction(CGameActor* sourceActor, CGameActor* targetActor, in
     hitInfo.time = timeGetTime();
     hitInfo.message = ResolveQueuedCombatMessage(actionType);
     hitInfo.attackedMotionTime = attackedMT;
+    // hitInfo.damage drives ApplyQueuedHitReaction's hurt-state branch: damage==0
+    // suppresses SetState(kHitReactionStateId), so skill hits without this would
+    // queue a hit but never play the target's hurt animation.
+    hitInfo.damage = damage < 0 ? -damage : damage;
+    if (hitInfo.damage != 0) {
+        const bool isLocalPlayerTarget = targetActor->m_gid == g_session.m_gid || targetActor->m_gid == g_session.m_aid;
+        const bool isLocalPlayerSource = sourceActor && (sourceActor->m_gid == g_session.m_gid || sourceActor->m_gid == g_session.m_aid);
+        hitInfo.damageColor = (isLocalPlayerTarget && !isLocalPlayerSource)
+            ? 0xFFFF4040u
+            : ResolveCombatNumberColor(damage, actionType);
+        hitInfo.damageKind = ResolveCombatNumberKind(damage, actionType);
+    }
     hitInfo.damageDestX = targetActor->m_pos.x;
     hitInfo.damageDestZ = targetActor->m_pos.z;
     if (actionType != kNotifyActLuckyDodge) {
@@ -8262,9 +8325,21 @@ void HandleFriendRequest(CGameMode& mode, const PacketView& packet)
         return;
     }
 
+    const u32 inviterAid = ReadLE32(packet.data + 2);
+    const u32 inviterCid = ReadLE32(packet.data + 6);
     const std::string friendName = ExtractFixedPacketString(packet.data + 10, 24);
     if (!friendName.empty()) {
         RecordChat(mode, std::string("Friend request from ") + friendName + ".", 0x00FFFF00, kChatChannelSystem);
+    }
+
+    if (inviterAid == 0 || inviterCid == 0) {
+        return;
+    }
+
+    auto* dialog = static_cast<UIFriendRequestAcceptWnd*>(
+        g_windowMgr.MakeWindow(UIWindowMgr::WID_FRIENDREQUESTACCEPTWND));
+    if (dialog) {
+        dialog->OpenInvite(inviterAid, inviterCid, friendName.c_str());
     }
 }
 
@@ -9303,7 +9378,15 @@ void RegisterDefaultGameModePacketHandlers(CGameModePacketRouter& router)
     router.Register(0x00BC, HandleStatusChangeAck);
     router.Register(0x00BD, HandleInitialStatusSummary);
     router.Register(0x00BE, HandleStatusPointCostUpdate);
-    router.Register(0x00C0, HandleIgnorePacket);
+    // 0x00C0 is ZC_EMOTION on the modern Sakexe profile (size 7) and
+    // ZC_ADD_ITEM_TO_CART on the Beta1 profile. Only mark it ignorable when the
+    // active profile isn't using it as the emotion broadcast packet — otherwise
+    // this overwrites HandleEmotion registered above and other players' emotes
+    // (and our own server-echoed emote) get silently dropped.
+    if (PacketProfile::kEmotion != 0x00C0
+        || ro::net::GetPacketSize(PacketProfile::kEmotion) != 7) {
+        router.Register(0x00C0, HandleIgnorePacket);
+    }
     router.Register(0x0101, HandlePartyOptionChanged);
     router.Register(0x013D, HandleRecovery);
     router.Register(0x013E, HandleSkillCastAck);

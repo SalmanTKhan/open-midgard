@@ -31,6 +31,8 @@ add_library(ro_ui STATIC
     UIPlayerContextMenuWnd.cpp
     UIJoinPartyAcceptWnd.h
     UIJoinPartyAcceptWnd.cpp
+    UIFriendRequestAcceptWnd.h
+    UIFriendRequestAcceptWnd.cpp
     UIMessengerGroupWnd.h
     UIMessengerGroupWnd.cpp
     UIPartyOptionWnd.h

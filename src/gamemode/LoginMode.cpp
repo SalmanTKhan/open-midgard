@@ -1,4 +1,5 @@
 #include <winsock2.h>
+#include <shellapi.h>
 #include "CursorRenderer.h"
 #include "LoginMode.h"
 #include "ui/UIWindowMgr.h"
@@ -1684,12 +1685,31 @@ msgresult_t CLoginMode::SendMsg(int msg, msgparam_t wparam, msgparam_t lparam, m
         g_modeMgr.Quit();
         return 1;
 
-    case LoginMsg_RequestAccount:
-        SetLoginStatus("Login: account request flow not implemented yet.");
+    case LoginMsg_RequestAccount: {
+        const ClientInfoConnection* connection = GetSelectedClientInfoConnection();
+        if (connection && !connection->registrationWeb.empty()) {
+            ShellExecuteA(nullptr,
+                "open",
+                connection->registrationWeb.c_str(),
+                nullptr,
+                nullptr,
+                SW_SHOWNORMAL);
+            char status[256] = {};
+            std::snprintf(status, sizeof(status),
+                "Opening account registration: %s",
+                connection->registrationWeb.c_str());
+            SetLoginStatus(status);
+        } else {
+            SetLoginStatus("No registration URL configured for this server.");
+        }
         return 1;
+    }
 
     case LoginMsg_Intro:
-        SetLoginStatus("Login: intro action not implemented yet.");
+        // 2008 client played intro.bik via Bink Video; that path is stubbed in this
+        // build (CLAUDE.md: x64 force-disables RO_ENABLE_BINK_VIDEO). Don't surface
+        // it as a bug — just acknowledge unavailability.
+        SetLoginStatus("Intro playback is not available in this build.");
         return 1;
 
     case LoginMsg_SaveAccount:
@@ -2087,8 +2107,12 @@ void CLoginMode::OnChangeState(int newState) {
     case LoginSubMode_SubAccount:
     case LoginSubMode_CharSelectReturn:
     default:
+        // These sub-modes aren't part of the active login flow (multi-server-select,
+        // notice/licence walls, sub-account listing, etc.). Falling back to the main
+        // login window is the right behavior; no need to surface a bug-flavored status.
+        DbgLog("[Login] Unmapped sub-mode %d, falling back to login window\n",
+            static_cast<int>(m_subMode));
         g_windowMgr.MakeWindow(UIWindowMgr::WID_LOGINWND);
-        SetLoginStatus("Login: sub-mode not implemented.");
         break;
     }
 }

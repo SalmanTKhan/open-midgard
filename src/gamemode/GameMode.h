@@ -126,6 +126,8 @@ public:
         GameMsg_RequestChangeCart = 20046,
         GameMsg_ShopAddSourceRow = 20047,
         GameMsg_ShopSetDealQty = 20048,
+        GameMsg_RequestStoragePasswordSubmit = 20049,
+        GameMsg_RequestFriendReply = 20050,
 
         GameMsg_RequestMoveDelta = 20100,
     };

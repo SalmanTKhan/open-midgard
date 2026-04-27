@@ -398,6 +398,15 @@ void UINpcInputWnd::OpenGameNumberPrompt(const char* label, int gameMessage, msg
     m_editCtrl->SetText(valueText);
 }
 
+void UINpcInputWnd::OpenGameStringPrompt(const char* label, int gameMessage, msgparam_t wparam)
+{
+    OpenForMode(0, InputMode::String, SubmitAction::GameStringMessage, label && *label ? label : "Enter text");
+    m_submitGameMessage = gameMessage;
+    m_submitWparam = wparam;
+    m_maxNumberValue = 0;
+    m_editCtrl->SetText("");
+}
+
 void UINpcInputWnd::HideInput()
 {
     m_npcId = 0;
@@ -450,13 +459,18 @@ bool UINpcInputWnd::SubmitCurrentText()
     if (submitAction == SubmitAction::GameMessage) {
         return g_modeMgr.SendMsg(submitGameMessage, submitWparam, static_cast<msgparam_t>(numericValue), 0) != 0;
     }
+    if (submitAction == SubmitAction::GameStringMessage) {
+        return g_modeMgr.SendMsg(submitGameMessage, submitWparam, reinterpret_cast<msgparam_t>(textCopy.c_str()), 0) != 0;
+    }
 
     return false;
 }
 
 void UINpcInputWnd::CancelInput()
 {
-    if (m_submitAction == SubmitAction::GameMessage || m_npcId == 0) {
+    if (m_submitAction == SubmitAction::GameMessage
+        || m_submitAction == SubmitAction::GameStringMessage
+        || m_npcId == 0) {
         HideInput();
         PlayUiButtonSound();
         return;

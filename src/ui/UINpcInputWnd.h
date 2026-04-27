@@ -27,6 +27,7 @@ public:
     void OpenNumber(u32 npcId);
     void OpenString(u32 npcId);
     void OpenGameNumberPrompt(const char* label, int gameMessage, msgparam_t wparam, u32 initialValue, u32 maxValue);
+    void OpenGameStringPrompt(const char* label, int gameMessage, msgparam_t wparam);
     void HideInput();
     bool HandleKeyDown(int virtualKey);
     UIEditCtrl* GetEditCtrl() const;
@@ -45,6 +46,7 @@ private:
         NpcNumber,
         NpcString,
         GameMessage,
+        GameStringMessage,
     };
 
     enum class ClickTarget {
