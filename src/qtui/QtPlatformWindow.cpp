@@ -351,6 +351,17 @@ bool RoQtGetCursorPos(POINT* point)
     return true;
 }
 
+bool RoQtSetCursorPos(RoNativeWindowHandle window, int x, int y)
+{
+    RoQtMainWindow* mainWindow = AsWindow(window);
+    if (!mainWindow) {
+        return false;
+    }
+
+    QCursor::setPos(mainWindow->mapToGlobal(QPoint(x, y)));
+    return true;
+}
+
 bool RoQtSetWindowTitle(RoNativeWindowHandle window, const char* title)
 {
     RoQtMainWindow* mainWindow = AsWindow(window);

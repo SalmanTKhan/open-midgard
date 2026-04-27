@@ -6,6 +6,8 @@ set(RO_QTUI_SOURCES
     QtUiSpikeState.h
     QtUiStateAdapter.h
     QtUiStateAdapter.cpp
+    QtUiTheme.h
+    QtUiTheme.cpp
     QtUiSpikeAssets.qrc
     QtPlatformWindow.h
     QtPlatformWindow.cpp
