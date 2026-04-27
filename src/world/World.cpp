@@ -58,7 +58,7 @@ constexpr float kPlayerBillboardDepthWorldBiasScale = 0.35f;
 constexpr float kPlayerBillboardDepthWorldBiasMin = 0.75f;
 constexpr float kPlayerBillboardDepthWorldBiasMax = 3.0f;
 constexpr float kPlayerBillboardDepthHeightBiasFactor = 0.45f;
-constexpr float kPlayerBillboardTopDepthForwardBiasScale = 0.0f;
+constexpr float kPlayerBillboardTopDepthForwardBiasScale = 0.85f;
 constexpr int kActorLabelBaseYOffset = 4;
 constexpr int kPlayerLabelBaseYOffset = 22;
 constexpr int kActorSpeechBubbleHeadGapPx = 26;
@@ -117,7 +117,6 @@ constexpr float kGroundCullWidthFactor = 6.0f;
 constexpr float kGroundCullHeightFactor = 6.0f;
 constexpr int kGroundCullMarginTiles = 14;
 constexpr int kJobWarpNpc = 0x2D;
-constexpr int kJobWarpNpcCompat = 0x20;
 constexpr int kJobWarpPortal = 0x80;
 constexpr int kJobPreWarpPortal = 0x81;
 constexpr float kActorShadowPixelRatioScale = 0.14285715f;
@@ -289,8 +288,7 @@ bool IsPortalLikeEffect(const C3dWorldRes::effectSrcInfo& effect)
 
 bool IsPortalActorJob(int job)
 {
-    return job == kJobWarpNpcCompat
-        || job == kJobWarpNpc
+    return job == kJobWarpNpc
         || job == kJobWarpPortal
         || job == kJobPreWarpPortal;
 }
@@ -1021,9 +1019,6 @@ bool ComputeActorShadowRect(const CWorld::BillboardScreenEntry& entry,
     if (!actor || actor->m_shadowOn == 0 || !outLeft || !outTop || !outRight || !outBottom || !outBottomOow || !outTopOow || !outAngle) {
         return false;
     }
-    if (actor->m_stateId == kGameActorDeathStateId || actor->m_isSitting != 0) {
-        return false;
-    }
 
     const float shadowZoom = actor->m_shadowZoom > 0.0f ? actor->m_shadowZoom : 1.0f;
     if (zoom == 0.0f || shadowZoom == 0.0f) {
@@ -1073,9 +1068,6 @@ void RenderCachedActorShadow(const CWorld::BillboardScreenEntry& entry, const ma
     const ActorShadowResource* shadow = GetActorShadowResource();
     const CPc* actor = entry.actor;
     if (!shadow || !shadow->texture || !actor || actor->m_shadowOn == 0) {
-        return;
-    }
-    if (actor->m_stateId == kGameActorDeathStateId || actor->m_isSitting != 0) {
         return;
     }
 
@@ -2118,9 +2110,16 @@ private:
             return false;
         }
 
-        if (CGameActor* actor = g_world.FindActorByGid(m_targetGid)) {
-            *outTargetPos = ResolveAnchorPosition(actor->m_pos);
+        if (g_world.m_player && g_world.m_player->m_gid == m_targetGid) {
+            *outTargetPos = ResolveAnchorPosition(g_world.m_player->m_pos);
             return true;
+        }
+
+        for (CGameActor* actor : g_world.m_actorList) {
+            if (actor && actor->m_gid == m_targetGid) {
+                *outTargetPos = ResolveAnchorPosition(actor->m_pos);
+                return true;
+            }
         }
 
         return false;
@@ -2681,7 +2680,7 @@ u32 ResolveBackgroundActorUpdateInterval(const C3dActor& actor,
 
 bool RenderCachedBillboard(const CWorld::BillboardScreenEntry& entry)
 {
-    constexpr float kBillboardDepthBias = 0.0001f;
+    constexpr float kBillboardDepthBias = 0.0005f;
 
     CPc* actor = entry.actor;
     if (!actor || !actor->m_isVisible || !actor->m_billboardTexture) {
@@ -2889,6 +2888,7 @@ bool BuildBillboardRenderEntry(CPc* actor,
     const float u1 = rightPixels / textureWidth;
     const float v1 = bottomPixels / textureHeight;
 
+    const float minRenderOow = (std::min)(projectedDepthTop.oow, projectedDepthBottom.oow);
     for (int index = 0; index < 4; ++index) {
         const tlvertex3d& projected = projectedRenderVerts[index];
         outEntry->renderX[index] = projected.x;
@@ -2908,7 +2908,7 @@ bool BuildBillboardRenderEntry(CPc* actor,
 
     outEntry->actor = actor;
     outEntry->screenY = projectedBase.y;
-    outEntry->depthKey = projectedBase.oow;
+    outEntry->depthKey = minRenderOow;
     outEntry->left = renderMinX;
     outEntry->top = renderMinY;
     outEntry->right = renderMaxX;
@@ -5251,15 +5251,6 @@ void CWorld::ClearFixedObjects(bool preserveAttachedActorEffects)
     m_itemList.clear();
 }
 
-void CWorld::ClearGroundItems()
-{
-    for (CItem* item : m_itemList) {
-        delete item;
-    }
-    m_itemList.clear();
-    InvalidateBillboardFrameCache();
-}
-
 void CWorld::NotifyActorDeleted(const CGameActor* actor)
 {
     if (!actor) {
@@ -5483,10 +5474,6 @@ void CWorld::RegisterActor(CGameActor* actor)
         m_actorList.push_back(actor);
     }
 
-    if (actor->m_gid != 0) {
-        m_actorByGid[actor->m_gid] = actor;
-    }
-
     if (m_rootNode.m_child[0] || m_rootNode.m_child[1] || m_rootNode.m_child[2] || m_rootNode.m_child[3]) {
         m_rootNode.InsertActor(actor, actor->m_pos.x, actor->m_pos.z);
     }
@@ -5499,28 +5486,9 @@ void CWorld::UnregisterActor(CGameActor* actor)
         return;
     }
 
-    if (actor->m_gid != 0) {
-        const auto it = m_actorByGid.find(actor->m_gid);
-        if (it != m_actorByGid.end() && it->second == actor) {
-            m_actorByGid.erase(it);
-        }
-    }
-
     m_rootNode.RemoveActor(actor);
     m_actorList.remove(actor);
     InvalidateBillboardFrameCache();
-}
-
-CGameActor* CWorld::FindActorByGid(u32 gid) const
-{
-    if (gid == 0) {
-        return nullptr;
-    }
-    if (m_player && m_player->m_gid == gid) {
-        return m_player;
-    }
-    const auto it = m_actorByGid.find(gid);
-    return (it != m_actorByGid.end()) ? it->second : nullptr;
 }
 
 std::vector<CGameActor*>* CWorld::GetActorsAtWorldPos(float x, float z)
@@ -5966,7 +5934,7 @@ void CWorld::RenderActors(const matrix& viewMatrix, float cameraLongitude)
 
         const int desiredEffectId = pc->m_job == kJobPreWarpPortal
             ? kRagEffectReadyPortal
-            : ((pc->m_job == kJobWarpPortal || pc->m_job == kJobWarpNpcCompat || pc->m_job == kJobWarpNpc) ? 321 : kRagEffectPortal);
+            : ((pc->m_job == kJobWarpPortal || pc->m_job == kJobWarpNpc) ? 321 : kRagEffectPortal);
 
         for (CRagEffect* effect : pc->m_effectList) {
             if (effect && effect->GetEffectType() == desiredEffectId) {
@@ -6467,7 +6435,7 @@ bool CWorld::HasWarpAtAttrCell(int attrX, int attrY) const
             return false;
         }
 
-        const float radius = (pc->m_job == kJobWarpNpcCompat || pc->m_job == kJobWarpNpc) ? 6.5f : 5.0f;
+        const float radius = pc->m_job == kJobWarpNpc ? 6.5f : 5.0f;
         return DoesWorldPositionCoverAttrCell(*m_attr, pc->m_pos, radius, attrX, attrY);
     };
 

@@ -6,8 +6,6 @@ set(RO_QTUI_SOURCES
     QtUiSpikeState.h
     QtUiStateAdapter.h
     QtUiStateAdapter.cpp
-    QtUiTheme.h
-    QtUiTheme.cpp
     QtUiSpikeAssets.qrc
     QtPlatformWindow.h
     QtPlatformWindow.cpp
@@ -42,17 +40,4 @@ if(WIN32 AND RO_HAS_NATIVE_D3D12)
     target_link_libraries(ro_qtui PUBLIC
         Qt6::GuiPrivate
     )
-endif()
-
-if(RO_ENABLE_CAPTURE)
-    target_link_libraries(ro_qtui PRIVATE ro_capture)
-endif()
-
-# Qt's <QVulkanInstance> only forward-declares the class; it relies on
-# <vulkan/vulkan.h> already being on the include path in the TU that uses it.
-# Pull Vulkan headers in explicitly so the build isn't dependent on another
-# package (e.g. vcpkg sdl2) transitively providing them.
-find_package(Vulkan QUIET)
-if(Vulkan_FOUND)
-    target_include_directories(ro_qtui PUBLIC ${Vulkan_INCLUDE_DIRS})
 endif()
