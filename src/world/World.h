@@ -4,6 +4,7 @@
 #include <string>
 #include <map>
 #include <list>
+#include <unordered_map>
 #include <vector>
 
 // Forward declarations
@@ -215,6 +216,7 @@ public:
     CMode* m_curMode;
     std::list<CGameObject*> m_gameObjectList;
     std::list<CGameActor*> m_actorList;
+    std::unordered_map<u32, CGameActor*> m_actorByGid;
     std::list<CItem*> m_itemList;
     std::list<CSkill*> m_skillList;
     C3dGround* m_ground;
@@ -247,6 +249,7 @@ public:
     void ClearGround();
     void ClearBackgroundObjects();
     void ClearFixedObjects(bool preserveAttachedActorEffects = false);
+    void ClearGroundItems();
     void ClearSky();
     bool EnsureSkyActor();
     void NotifyActorDeleted(const CGameActor* actor);
@@ -260,6 +263,7 @@ public:
     void UpdateCalculatedNodeForTile(int tileX, int tileY);
     void RegisterActor(CGameActor* actor);
     void UnregisterActor(CGameActor* actor);
+    CGameActor* FindActorByGid(u32 gid) const;
     std::vector<CGameActor*>* GetActorsAtWorldPos(float x, float z);
     const std::vector<CGameActor*>* GetActorsAtWorldPos(float x, float z) const;
     bool BuildGroundFromGnd(const CGndRes& gnd,

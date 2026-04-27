@@ -4184,7 +4184,7 @@ void FinishMapLoading(CGameMode& mode)
         mode.m_rswName,
         mode.m_actorPosList.size(),
         mode.m_runtimeActors.size());
-    mode.m_mapLoadingStage = CGameMode::MapLoading_None;
+    mode.AdvanceMapLoadingStage(CGameMode::MapLoading_None);
 }
 
 void AdvanceMapLoading(CGameMode& mode)
@@ -4193,7 +4193,7 @@ void AdvanceMapLoading(CGameMode& mode)
     switch (mode.m_mapLoadingStage) {
     case CGameMode::MapLoading_PresentScreen:
         UpdateMapLoadingUi(mode, "Preparing loading screen...", 0.08f);
-        mode.m_mapLoadingStage = CGameMode::MapLoading_BootstrapAssets;
+        mode.AdvanceMapLoadingStage(CGameMode::MapLoading_BootstrapAssets);
         return;
 
     case CGameMode::MapLoading_BootstrapAssets:
@@ -4207,7 +4207,7 @@ void AdvanceMapLoading(CGameMode& mode)
             return;
         }
         UpdateMapLoadingUi(mode, "Loading ground and map objects...", 0.62f);
-        mode.m_mapLoadingStage = CGameMode::MapLoading_CreateView;
+        mode.AdvanceMapLoadingStage(CGameMode::MapLoading_CreateView);
         return;
     }
 
@@ -4218,7 +4218,7 @@ void AdvanceMapLoading(CGameMode& mode)
             return;
         }
         UpdateMapLoadingUi(mode, "Preparing camera and scene...", 0.78f);
-        mode.m_mapLoadingStage = CGameMode::MapLoading_SendLoadAck;
+        mode.AdvanceMapLoadingStage(CGameMode::MapLoading_SendLoadAck);
         return;
 
     case CGameMode::MapLoading_SendLoadAck:
@@ -4228,7 +4228,7 @@ void AdvanceMapLoading(CGameMode& mode)
         mode.m_mapLoadingAckTick = now;
         mode.m_lastActorBootstrapPacketTick = now;
         UpdateMapLoadingUi(mode, "Waiting for map actors...", 0.86f);
-        mode.m_mapLoadingStage = CGameMode::MapLoading_AwaitActors;
+        mode.AdvanceMapLoadingStage(CGameMode::MapLoading_AwaitActors);
         return;
 
     case CGameMode::MapLoading_AwaitActors: {
@@ -6926,7 +6926,7 @@ bool TryRequestAttackFromScreenPoint(CGameMode& mode, int screenX, int screenY)
         return false;
     }
 
-    if (!SendAttackRequestPacket(hoveredActor->m_gid, kActionRequestContinuousAttack)) {
+    if (!SendAttackRequestPacket(hoveredActor->m_gid, kActionRequestSingleAttack)) {
         return false;
     }
 
@@ -6941,7 +6941,10 @@ bool TryRequestAttackFromScreenPoint(CGameMode& mode, int screenX, int screenY)
     mode.m_heldMoveTargetCellY = -1;
     mode.m_hasHeldMoveTarget = 0;
     mode.m_lastMoveRequestTick = 0;
-    mode.m_lastAttackRequestTick = 0;
+    // Fix #2: preserve attack throttle across click + per-frame tick.
+    // Previously set to 0 here, which disabled the retry gate at UpdateAttackChase
+    // causing 2-3 CZ_REQUEST_ACT within the same frame burst.
+    mode.m_lastAttackRequestTick = GetTickCount();
     ClearAttackChaseHint(mode);
     mode.m_attackChaseTargetGid = hoveredActor->m_gid;
     mode.m_hasAttackChaseHint = 1;
@@ -7217,7 +7220,7 @@ void PumpAttackChaseRequest(CGameMode& mode)
             return;
         }
 
-        if (SendAttackRequestPacket(target->m_gid, kActionRequestContinuousAttack)) {
+        if (SendAttackRequestPacket(target->m_gid, kActionRequestSingleAttack)) {
             mode.m_lastAttackRequestTick = now;
             DbgLog("[DBG-attack-desync] SENT in-range attack tgt=%u\n", target->m_gid);
         }
@@ -7231,7 +7234,7 @@ void PumpAttackChaseRequest(CGameMode& mode)
     }
 
     if (mode.m_lastAttackRequestTick == 0 || now - mode.m_lastAttackRequestTick >= kAttackRetryIntervalMs) {
-        if (SendAttackRequestPacket(target->m_gid, kActionRequestContinuousAttack)) {
+        if (SendAttackRequestPacket(target->m_gid, kActionRequestSingleAttack)) {
             mode.m_lastAttackRequestTick = now;
             DbgLog("[DBG-attack-desync] SENT out-of-range attack tgt=%u\n", target->m_gid);
         }
@@ -9796,7 +9799,7 @@ void CGameMode::OnInit(const char* worldName) {
     m_mapLoadingStartTick = GetTickCount();
     m_mapLoadingAckTick = 0;
     m_lastActorBootstrapPacketTick = m_mapLoadingStartTick;
-    m_mapLoadingStage = MapLoading_PresentScreen;
+    AdvanceMapLoadingStage(MapLoading_PresentScreen);
     ResetGamePacketTrace(m_mapLoadingStartTick);
 
     EnsureBootstrapSelfActor(*this);
@@ -9826,6 +9829,26 @@ void CGameMode::OnInit(const char* worldName) {
 void CGameMode::MakeFog(int fogOn)
 {
     ApplyRefFogForMap(m_rswName, fogOn);
+}
+
+void CGameMode::AdvanceMapLoadingStage(MapLoadingStage target)
+{
+    static const char* kStageNames[] = {
+        "None", "PresentScreen", "BootstrapAssets", "CreateView", "SendLoadAck", "AwaitActors",
+    };
+    const int prev = static_cast<int>(m_mapLoadingStage);
+    const int next = static_cast<int>(target);
+    const bool isReset = target == MapLoading_None;
+    if (!isReset && next <= prev) {
+        DbgLog("[GameMode] map-load stage non-forward transition %s(%d) -> %s(%d)\n",
+            (prev >= 0 && prev < 6) ? kStageNames[prev] : "?", prev,
+            (next >= 0 && next < 6) ? kStageNames[next] : "?", next);
+    } else if (prev != next) {
+        DbgLog("[GameMode] map-load stage %s -> %s\n",
+            (prev >= 0 && prev < 6) ? kStageNames[prev] : "?",
+            (next >= 0 && next < 6) ? kStageNames[next] : "?");
+    }
+    m_mapLoadingStage = target;
 }
 
 void CGameMode::OnExit() {
@@ -9863,7 +9886,7 @@ void CGameMode::OnExit() {
     m_lastMoveRequestTick = 0;
     m_lastAttackRequestTick = 0;
     ClearAttackChaseHint(*this);
-    m_mapLoadingStage = MapLoading_None;
+    AdvanceMapLoadingStage(MapLoading_None);
     m_mapLoadingStartTick = 0;
     m_mapLoadingAckTick = 0;
     m_lastActorBootstrapPacketTick = 0;

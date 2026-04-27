@@ -2117,16 +2117,9 @@ private:
             return false;
         }
 
-        if (g_world.m_player && g_world.m_player->m_gid == m_targetGid) {
-            *outTargetPos = ResolveAnchorPosition(g_world.m_player->m_pos);
+        if (CGameActor* actor = g_world.FindActorByGid(m_targetGid)) {
+            *outTargetPos = ResolveAnchorPosition(actor->m_pos);
             return true;
-        }
-
-        for (CGameActor* actor : g_world.m_actorList) {
-            if (actor && actor->m_gid == m_targetGid) {
-                *outTargetPos = ResolveAnchorPosition(actor->m_pos);
-                return true;
-            }
         }
 
         return false;
@@ -5251,6 +5244,15 @@ void CWorld::ClearFixedObjects(bool preserveAttachedActorEffects)
     m_itemList.clear();
 }
 
+void CWorld::ClearGroundItems()
+{
+    for (CItem* item : m_itemList) {
+        delete item;
+    }
+    m_itemList.clear();
+    InvalidateBillboardFrameCache();
+}
+
 void CWorld::NotifyActorDeleted(const CGameActor* actor)
 {
     if (!actor) {
@@ -5474,6 +5476,10 @@ void CWorld::RegisterActor(CGameActor* actor)
         m_actorList.push_back(actor);
     }
 
+    if (actor->m_gid != 0) {
+        m_actorByGid[actor->m_gid] = actor;
+    }
+
     if (m_rootNode.m_child[0] || m_rootNode.m_child[1] || m_rootNode.m_child[2] || m_rootNode.m_child[3]) {
         m_rootNode.InsertActor(actor, actor->m_pos.x, actor->m_pos.z);
     }
@@ -5486,9 +5492,28 @@ void CWorld::UnregisterActor(CGameActor* actor)
         return;
     }
 
+    if (actor->m_gid != 0) {
+        const auto it = m_actorByGid.find(actor->m_gid);
+        if (it != m_actorByGid.end() && it->second == actor) {
+            m_actorByGid.erase(it);
+        }
+    }
+
     m_rootNode.RemoveActor(actor);
     m_actorList.remove(actor);
     InvalidateBillboardFrameCache();
+}
+
+CGameActor* CWorld::FindActorByGid(u32 gid) const
+{
+    if (gid == 0) {
+        return nullptr;
+    }
+    if (m_player && m_player->m_gid == gid) {
+        return m_player;
+    }
+    const auto it = m_actorByGid.find(gid);
+    return (it != m_actorByGid.end()) ? it->second : nullptr;
 }
 
 std::vector<CGameActor*>* CWorld::GetActorsAtWorldPos(float x, float z)

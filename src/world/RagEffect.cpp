@@ -4324,10 +4324,8 @@ CRenderObject* CRagEffect::ResolveCurrentMaster() const
         }
     }
 
-    for (CGameActor* actor : g_world.m_actorList) {
-        if (actor && actor->m_gid == m_masterActorGid) {
-            return IsLikelyLiveRenderObject(actor) ? actor : nullptr;
-        }
+    if (CGameActor* actor = g_world.FindActorByGid(m_masterActorGid)) {
+        return IsLikelyLiveRenderObject(actor) ? actor : nullptr;
     }
 
     return nullptr;

@@ -357,10 +357,8 @@ CGameActor* ResolveActorByGidForCastRetarget(u32 gid)
         return world->m_player;
     }
 
-    for (CGameActor* actor : world->m_actorList) {
-        if (actor && actor->m_gid == gid) {
-            return actor;
-        }
+    if (CGameActor* actor = world->FindActorByGid(gid)) {
+        return actor;
     }
 
     const auto it = gameMode->m_runtimeActors.find(gid);
@@ -555,16 +553,7 @@ void ApplyQueuedHitReaction(CGameActor& actor, const WBA& hitInfo)
 {
     CGameActor* sourceActor = nullptr;
     if (hitInfo.gid != 0) {
-        if (g_world.m_player && g_world.m_player->m_gid == hitInfo.gid) {
-            sourceActor = g_world.m_player;
-        } else {
-            for (CGameActor* entry : g_world.m_actorList) {
-                if (entry && entry->m_gid == hitInfo.gid) {
-                    sourceActor = entry;
-                    break;
-                }
-            }
-        }
+        sourceActor = g_world.FindActorByGid(hitInfo.gid);
     }
 
     actor.m_damageDestX = hitInfo.damageDestX;
@@ -614,14 +603,34 @@ void ApplyQueuedHitReaction(CGameActor& actor, const WBA& hitInfo)
     // [DBG-hit-anim] Pre/post SetState snapshot. `suppressed=1` means the force-state guard blocked the hurt animation.
     const int prevStateId = actor.m_stateId;
     const bool forceGuard = (actor.m_isForceState || actor.m_isForceState2 || actor.m_isForceState3) != 0;
+    const float prevRoty = actor.m_roty;
+
+    // Classic RO behavior: the victim turns to face the attacker for the HURT
+    // animation. Without this the sprite keeps whichever direction it was in
+    // (walk heading, or stale attack facing), which looks wrong when the hit
+    // comes from behind or from a different actor than the one being attacked.
+    if (sourceActor && sourceActor != &actor) {
+        const float dx = sourceActor->m_pos.x - actor.m_pos.x;
+        const float dz = sourceActor->m_pos.z - actor.m_pos.z;
+        if (dx != 0.0f || dz != 0.0f) {
+            float rot = std::atan2(dx, -dz) * (180.0f / 3.14159265f);
+            if (rot < 0.0f) rot += 360.0f;
+            if (rot >= 360.0f) rot -= 360.0f;
+            actor.m_roty = rot;
+        }
+    }
+
     actor.SetState(kHitReactionStateId);
-    DbgLog("[DBG-hit-anim] apply gid=%u pc=%d wasState=%d forceSt=%d,%d,%d suppressed=%d newState=%d dmg=%d\n",
+    DbgLog("[DBG-hit-anim] apply gid=%u pc=%d wasState=%d forceSt=%d,%d,%d suppressed=%d newState=%d dmg=%d prevRoty=%.1f newRoty=%.1f srcGid=%u\n",
         actor.m_gid, actor.m_isPc,
         prevStateId,
         actor.m_isForceState, actor.m_isForceState2, actor.m_isForceState3,
         forceGuard ? 1 : 0,
         actor.m_stateId,
-        hitInfo.damage);
+        hitInfo.damage,
+        prevRoty,
+        actor.m_roty,
+        sourceActor ? sourceActor->m_gid : 0u);
 }
 
 bool IsPortalFallbackJob(int job)

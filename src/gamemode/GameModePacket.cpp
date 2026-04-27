@@ -3958,10 +3958,7 @@ void PrepareSameMapWarpReuse(CGameMode& mode)
     mode.m_groundItemList.clear();
 
     if (mode.m_world) {
-        for (CItem* item : mode.m_world->m_itemList) {
-            delete item;
-        }
-        mode.m_world->m_itemList.clear();
+        mode.m_world->ClearGroundItems();
     }
 
     player->m_targetGid = 0;
@@ -4015,7 +4012,7 @@ void PrepareSameMapWarpReuse(CGameMode& mode)
     mode.m_hasAttackChaseHint = 0;
     mode.m_isLeftButtonHeld = 0;
     mode.m_sentLoadEndAck = 0;
-    mode.m_mapLoadingStage = CGameMode::MapLoading_None;
+    mode.AdvanceMapLoadingStage(CGameMode::MapLoading_None);
     mode.m_mapLoadingStartTick = 0;
     mode.m_mapLoadingAckTick = 0;
     mode.m_lastActorBootstrapPacketTick = GetTickCount();
@@ -7412,8 +7409,14 @@ void UpdateRuntimeActorPosition(CGameMode& mode, u32 gid, int tileX, int tileY, 
     actor->m_lastTlvertY = tileY;
     actor->m_path.Reset();
 
+    // Fix: always align moveStartPos with the packet's src cell. Previously, when
+    // the local player changed direction mid-walk we kept the interpolated m_pos,
+    // but the new path's segment 0 still had a fixed duration of one speed-tick
+    // regardless of actual distance — so the first step covered up to ~sqrt(2)
+    // cells in 150 ms (visible speedup on direction change). On a low-latency
+    // server the snap to srcX/Y is sub-cell and invisible.
     actor->m_moveStartPos = actor->m_pos;
-    if (!keepInterpolatedMoveStart && isLocalPlayer && srcX >= 0 && srcY >= 0 && mode.m_world) {
+    if (isLocalPlayer && srcX >= 0 && srcY >= 0 && mode.m_world) {
         const float srcWorldX = TileToWorldCoordX(mode.m_world, actor->m_moveSrcX);
         const float srcWorldZ = TileToWorldCoordZ(mode.m_world, actor->m_moveSrcY);
         actor->m_moveStartPos.x = srcWorldX;
