@@ -22,6 +22,7 @@
 #include "ui/UIBasicInfoWnd.h"
 #include "ui/UIJoinPartyAcceptWnd.h"
 #include "ui/UIFriendRequestAcceptWnd.h"
+#include "ui/UIDealRequestAcceptWnd.h"
 #include "ui/UISayDialogWnd.h"
 #include "ui/UINpcMenuWnd.h"
 #include "ui/UINpcInputWnd.h"
@@ -8319,6 +8320,54 @@ void HandleFriendDelete(CGameMode&, const PacketView& packet)
     }
 }
 
+// ZC_REQ_EXCHANGE_ITEM (0x00E5, 26 bytes per Ref/eAthena/db/packet_db.txt:170):
+// header(2) + name(24). The packet form at packet_ver 23 carries no aid/cid;
+// the server tracks the trade pair in session state, so the ack only needs
+// the result byte.
+void HandleDealRequestIncoming(CGameMode& mode, const PacketView& packet)
+{
+    if (!packet.data || packet.packetLength < 26) {
+        return;
+    }
+
+    const std::string inviterName = ExtractFixedPacketString(packet.data + 2, 24);
+    if (!inviterName.empty()) {
+        RecordChat(mode,
+            std::string("Trade request from ") + inviterName + ".",
+            0x00FFFF00, kChatChannelSystem);
+    }
+
+    auto* dialog = static_cast<UIDealRequestAcceptWnd*>(
+        g_windowMgr.MakeWindow(UIWindowMgr::WID_DEALREQUESTACCEPTWND));
+    if (dialog) {
+        dialog->OpenInvite(inviterName.c_str());
+    }
+}
+
+// ZC_ACK_EXCHANGE_ITEM (0x00E7, 3 bytes per Ref/eAthena/db/packet_db.txt:172):
+// header(2) + result(1). Result codes per rAthena trade.hpp e_ack_trade_response.
+// This is the server's response to *our* outgoing CZ_REQUEST_EXCHANGE_ITEM.
+void HandleDealRequestResponse(CGameMode&, const PacketView& packet)
+{
+    if (!packet.data || packet.packetLength < 3) {
+        return;
+    }
+
+    const u8 result = packet.data[2];
+    const char* message = nullptr;
+    u32 color = 0x00FFFF00u;
+    switch (result) {
+    case 0: message = "Trade target is too far away."; color = 0x000000FFu; break;
+    case 1: message = "Trade target does not exist."; color = 0x000000FFu; break;
+    case 2: message = "Trade request failed."; color = 0x000000FFu; break;
+    case 3: message = "Trade request accepted."; color = 0x0000FF00u; break;
+    case 4: message = "Trade request declined."; color = 0x000000FFu; break;
+    case 5: message = "Trade target is busy."; color = 0x000000FFu; break;
+    default: return;
+    }
+    g_windowMgr.PushChatEvent(message, color, 6);
+}
+
 void HandleFriendRequest(CGameMode& mode, const PacketView& packet)
 {
     if (!packet.data || packet.packetLength < 34) {
@@ -9414,6 +9463,8 @@ void RegisterDefaultGameModePacketHandlers(CGameModePacketRouter& router)
     RegisterHandlerIfValid(router, receiveProfile.skillDamageNotifyExtended, HandleSkillDamageNotify);
     router.Register(0x01E1, HandleIgnorePacket);
     RegisterHandlerIfValid(router, receiveProfile.notifyEffectDirect, HandleNotifyEffect2);
+    router.Register(0x00E5, HandleDealRequestIncoming);
+    router.Register(0x00E7, HandleDealRequestResponse);
     router.Register(0x0201, HandleFriendsList);
     router.Register(0x0206, HandleFriendState);
     router.Register(0x0207, HandleFriendRequest);

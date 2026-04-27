@@ -35,6 +35,7 @@ class UINpcMenuWnd;
 class UIPlayerContextMenuWnd;
 class UIJoinPartyAcceptWnd;
 class UIFriendRequestAcceptWnd;
+class UIDealRequestAcceptWnd;
 class UIMessengerGroupWnd;
 class UIPartyOptionWnd;
 class UINpcInputWnd;
@@ -89,6 +90,7 @@ public:
         WID_NPCMENUWND        = 12,
         WID_JOINPARTYACCEPTWND = 0x23,
         WID_FRIENDREQUESTACCEPTWND = 0x97,
+        WID_DEALREQUESTACCEPTWND = 0x98,
         WID_PLAYERCONTEXTMENUWND = 0x94,
         WID_MESSENGERGROUPWND = 0x22,
         WID_PARTYOPTIONWND    = 0x95,
@@ -219,6 +221,7 @@ public:
     UIPlayerContextMenuWnd* m_playerContextMenuWnd;
     UIJoinPartyAcceptWnd* m_joinPartyAcceptWnd;
     UIFriendRequestAcceptWnd* m_friendRequestAcceptWnd;
+    UIDealRequestAcceptWnd* m_dealRequestAcceptWnd;
     UIMessengerGroupWnd* m_messengerGroupWnd;
     UIPartyOptionWnd* m_partyOptionWnd;
     UINpcInputWnd* m_npcInputWnd;

@@ -2,13 +2,13 @@
 
 #include "UIYesNoDialogWnd.h"
 
-class UIJoinPartyAcceptWnd : public UIYesNoDialogWnd {
+class UIDealRequestAcceptWnd : public UIYesNoDialogWnd {
 public:
-    void OpenInvite(u32 partyId, const char* partyName);
+    void OpenInvite(const char* inviterName);
 
 protected:
     int GetWindowId() const override;
-    const char* GetTitleText() const override { return "Party Invitation"; }
+    const char* GetTitleText() const override { return "Trade Request"; }
     void GetTitleColors(COLORREF& fillRgb, COLORREF& frameRgb) const override;
     std::string ComposeBodyText() const override;
     void ComposeMessageLines(std::vector<std::string>& outLines) const override;
@@ -16,6 +16,5 @@ protected:
     unsigned long long HashSubclassState() const override;
 
 private:
-    u32 m_partyId = 0;
-    std::string m_partyName;
+    std::string m_inviterName;
 };

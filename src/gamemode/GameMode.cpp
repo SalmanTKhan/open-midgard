@@ -5462,6 +5462,40 @@ bool SendFriendsListAdd(const char* characterName)
     return sent;
 }
 
+// CZ_REQUEST_EXCHANGE_ITEM (0x00E4, 6 bytes per Ref/eAthena/db/packet_db.txt:169):
+// header(2) + target_aid(4). Initiates a trade with the target player.
+bool SendDealRequest(u32 targetAid)
+{
+    if (targetAid == 0) {
+        return false;
+    }
+
+    constexpr size_t kPacketSize = 6;
+    char packet[kPacketSize] = {};
+    *reinterpret_cast<u16*>(packet + 0) = 0x00E4;
+    *reinterpret_cast<u32*>(packet + 2) = targetAid;
+
+    const bool sent = CRagConnection::instance()->SendPacket(packet, kPacketSize) != 0;
+    DbgLog("[GameMode] deal request targetAid=%u sent=%d\n", targetAid, sent ? 1 : 0);
+    return sent;
+}
+
+// CZ_ACK_EXCHANGE_ITEM (0x00E6, 3 bytes per Ref/eAthena/db/packet_db.txt:171):
+// header(2) + result(1). result codes per rAthena trade.hpp e_ack_trade_response:
+// 3 = ACCEPT, 4 = CANCEL/reject. Server matches the ack to the pending invite
+// from session state, so no inviter id is carried in the ack.
+bool SendDealAck(bool accept)
+{
+    constexpr size_t kPacketSize = 3;
+    char packet[kPacketSize] = {};
+    *reinterpret_cast<u16*>(packet + 0) = 0x00E6;
+    packet[2] = accept ? 3 : 4;
+
+    const bool sent = CRagConnection::instance()->SendPacket(packet, kPacketSize) != 0;
+    DbgLog("[GameMode] deal ack accept=%d sent=%d\n", accept ? 1 : 0, sent ? 1 : 0);
+    return sent;
+}
+
 // CZ_ACK_REQ_ADD_FRIENDS (0x0208, 14 bytes for packet_ver >= 6 per
 // Ref/eAthena/db/packet_db.txt:476): header(2) + inviter_aid(4) + inviter_cid(4) + reply.L(4).
 // reply: 0 = reject, 1 = accept (rAthena clif_parse_FriendsListReply).
@@ -10739,6 +10773,9 @@ msgresult_t CGameMode::SendMsg(int msg, msgparam_t wparam, msgparam_t lparam, ms
             static_cast<u32>(extra),
             lparam != 0) ? 1 : 0;
 
+    case GameMsg_RequestDealReply:
+        return SendDealAck(wparam != 0) ? 1 : 0;
+
     case GameMsg_ResetCamera:
         if (m_view) {
             m_view->ResetToDefaultOrientation();
@@ -10807,6 +10844,17 @@ msgresult_t CGameMode::SendMsg(int msg, msgparam_t wparam, msgparam_t lparam, ms
                 static_cast<int>(action),
                 GetPlayerContextActionName(action));
             return SendMsg(GameMsg_RequestPartyInvite, targetAid, 0, 0);
+        }
+        if (action == PlayerContext_RequestDeal) {
+            // CZ_REQUEST_EXCHANGE_ITEM is keyed by target account id, which
+            // TryOpenPlayerContextMenu stashes in m_menuTargetAID (see line 3465).
+            // The dispatch's `targetAid` arg already carries this value.
+            if (targetAid == 0) {
+                g_windowMgr.PushChatEvent("Cannot resolve target player for trade.",
+                    0x000000FFu, 6);
+                return 0;
+            }
+            return SendDealRequest(targetAid) ? 1 : 0;
         }
         if (action == PlayerContext_RegisterFriend) {
             // The context menu was opened on a hovered player; the name was

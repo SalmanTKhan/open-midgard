@@ -128,6 +128,7 @@ public:
         GameMsg_ShopSetDealQty = 20048,
         GameMsg_RequestStoragePasswordSubmit = 20049,
         GameMsg_RequestFriendReply = 20050,
+        GameMsg_RequestDealReply = 20051,
 
         GameMsg_RequestMoveDelta = 20100,
     };
