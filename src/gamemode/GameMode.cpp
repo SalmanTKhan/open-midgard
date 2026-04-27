@@ -7349,6 +7349,8 @@ void PumpPendingPickupRequest(CGameMode& mode)
     }
 }
 
+void DestroyDeferredRuntimeActors(CGameMode& mode);
+
 void ClearRuntimeActors(CGameMode& mode)
 {
     CWorld* const world = mode.m_world ? mode.m_world : &g_world;
@@ -7371,6 +7373,7 @@ void ClearRuntimeActors(CGameMode& mode)
     }
     mode.m_runtimeActors.clear();
     mode.m_actorPosList.clear();
+    DestroyDeferredRuntimeActors(mode);
 
     if (world) {
         world->m_actorList.clear();
@@ -7378,6 +7381,14 @@ void ClearRuntimeActors(CGameMode& mode)
         world->RebuildSceneGraph();
         world->InvalidateBillboardFrameCache();
     }
+}
+
+void DestroyDeferredRuntimeActors(CGameMode& mode)
+{
+    for (CGameActor* actor : mode.m_deferredActorDeletes) {
+        delete actor;
+    }
+    mode.m_deferredActorDeletes.clear();
 }
 
 void EnsureBootstrapSelfActor(CGameMode& mode)
@@ -9811,9 +9822,6 @@ void CGameMode::OnInit(const char* worldName) {
         g_session.m_playerPosY,
         g_session.m_playerDir);
 
-    m_sentLoadEndAck = SendLoadEndAckPacket() ? 1 : 0;
-    m_mapLoadingAckTick = GetTickCount();
-    m_lastActorBootstrapPacketTick = m_mapLoadingAckTick;
     SendTimeSyncRequest(*this, true);
 
     CAudio* audio = CAudio::GetInstance();
@@ -10097,6 +10105,7 @@ int  CGameMode::OnRun() {
     return 1;
 }
 void CGameMode::OnUpdate() {
+    DestroyDeferredRuntimeActors(*this);
     EnsureBootstrapSelfActor(*this);
     SendTimeSyncRequest(*this, false);
     const bool trackMovePerfFrame = IsMovePerfActive(*this);

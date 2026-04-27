@@ -304,6 +304,7 @@ public:
     int m_pendingPartyCreateItemShare;
     int m_pendingPartyCreateItemSharingType;
     std::string m_pendingPartyCreateName;
+    std::vector<CGameActor*> m_deferredActorDeletes;
 };
 
 bool ArmPendingSkillUseFromSkillList(int skillId);

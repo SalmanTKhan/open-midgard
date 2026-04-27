@@ -9,9 +9,6 @@ set(RO_QTUI_SOURCES
     QtUiTheme.h
     QtUiTheme.cpp
     QtUiSpikeAssets.qrc
-)
-
-list(APPEND RO_QTUI_SOURCES
     QtPlatformWindow.h
     QtPlatformWindow.cpp
 )
