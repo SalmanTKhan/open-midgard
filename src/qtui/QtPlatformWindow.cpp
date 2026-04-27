@@ -20,163 +20,48 @@
 #include <algorithm>
 #include <cstdlib>
 
-#ifdef WM_MOUSEMOVE
-#undef WM_MOUSEMOVE
-#endif
-#ifdef WM_LBUTTONDOWN
-#undef WM_LBUTTONDOWN
-#endif
-#ifdef WM_LBUTTONUP
-#undef WM_LBUTTONUP
-#endif
-#ifdef WM_LBUTTONDBLCLK
-#undef WM_LBUTTONDBLCLK
-#endif
-#ifdef WM_RBUTTONDOWN
-#undef WM_RBUTTONDOWN
-#endif
-#ifdef WM_RBUTTONUP
-#undef WM_RBUTTONUP
-#endif
-#ifdef WM_MOUSEWHEEL
-#undef WM_MOUSEWHEEL
-#endif
-#ifdef WM_CHAR
-#undef WM_CHAR
-#endif
-#ifdef WM_KEYDOWN
-#undef WM_KEYDOWN
-#endif
-#ifdef WM_SYSKEYDOWN
-#undef WM_SYSKEYDOWN
-#endif
-#ifdef WM_ACTIVATE
-#undef WM_ACTIVATE
-#endif
-#ifdef WM_CLOSE
-#undef WM_CLOSE
-#endif
-#ifdef MK_LBUTTON
-#undef MK_LBUTTON
-#endif
-#ifdef MK_RBUTTON
-#undef MK_RBUTTON
-#endif
-#ifdef WA_INACTIVE
-#undef WA_INACTIVE
-#endif
-#ifdef WA_ACTIVE
-#undef WA_ACTIVE
-#endif
-#ifdef VK_BACK
-#undef VK_BACK
-#endif
-#ifdef VK_TAB
-#undef VK_TAB
-#endif
-#ifdef VK_RETURN
-#undef VK_RETURN
-#endif
-#ifdef VK_SHIFT
-#undef VK_SHIFT
-#endif
-#ifdef VK_CONTROL
-#undef VK_CONTROL
-#endif
-#ifdef VK_MENU
-#undef VK_MENU
-#endif
-#ifdef VK_ESCAPE
-#undef VK_ESCAPE
-#endif
-#ifdef VK_PRIOR
-#undef VK_PRIOR
-#endif
-#ifdef VK_NEXT
-#undef VK_NEXT
-#endif
-#ifdef VK_LEFT
-#undef VK_LEFT
-#endif
-#ifdef VK_UP
-#undef VK_UP
-#endif
-#ifdef VK_RIGHT
-#undef VK_RIGHT
-#endif
-#ifdef VK_DOWN
-#undef VK_DOWN
-#endif
-#ifdef VK_INSERT
-#undef VK_INSERT
-#endif
-#ifdef VK_DELETE
-#undef VK_DELETE
-#endif
-#ifdef VK_F1
-#undef VK_F1
-#endif
-#ifdef VK_F9
-#undef VK_F9
-#endif
-#ifdef VK_F10
-#undef VK_F10
-#endif
-#ifdef VK_F11
-#undef VK_F11
-#endif
-#ifdef VK_F12
-#undef VK_F12
-#endif
-#ifdef VK_OEM_PLUS
-#undef VK_OEM_PLUS
-#endif
-#ifdef VK_OEM_MINUS
-#undef VK_OEM_MINUS
-#endif
-
 namespace {
 
-constexpr unsigned int WM_MOUSEMOVE = 0x0200u;
-constexpr unsigned int WM_LBUTTONDOWN = 0x0201u;
-constexpr unsigned int WM_LBUTTONUP = 0x0202u;
-constexpr unsigned int WM_LBUTTONDBLCLK = 0x0203u;
-constexpr unsigned int WM_RBUTTONDOWN = 0x0204u;
-constexpr unsigned int WM_RBUTTONUP = 0x0205u;
-constexpr unsigned int WM_MOUSEWHEEL = 0x020Au;
-constexpr unsigned int WM_CHAR = 0x0102u;
-constexpr unsigned int WM_KEYDOWN = 0x0100u;
-constexpr unsigned int WM_SYSKEYDOWN = 0x0104u;
-constexpr unsigned int WM_ACTIVATE = 0x0006u;
-constexpr unsigned int WM_CLOSE = 0x0010u;
+constexpr unsigned int kWmMouseMove = 0x0200u;
+constexpr unsigned int kWmLButtonDown = 0x0201u;
+constexpr unsigned int kWmLButtonUp = 0x0202u;
+constexpr unsigned int kWmLButtonDblClk = 0x0203u;
+constexpr unsigned int kWmRButtonDown = 0x0204u;
+constexpr unsigned int kWmRButtonUp = 0x0205u;
+constexpr unsigned int kWmMouseWheel = 0x020Au;
+constexpr unsigned int kWmChar = 0x0102u;
+constexpr unsigned int kWmKeyDown = 0x0100u;
+constexpr unsigned int kWmSysKeyDown = 0x0104u;
+constexpr unsigned int kWmActivate = 0x0006u;
+constexpr unsigned int kWmClose = 0x0010u;
 
-constexpr std::uintptr_t MK_LBUTTON = 0x0001u;
-constexpr std::uintptr_t MK_RBUTTON = 0x0002u;
-constexpr std::uintptr_t WA_INACTIVE = 0u;
-constexpr std::uintptr_t WA_ACTIVE = 1u;
+constexpr std::uintptr_t kMkLButton = 0x0001u;
+constexpr std::uintptr_t kMkRButton = 0x0002u;
+constexpr std::uintptr_t kWaInactive = 0u;
+constexpr std::uintptr_t kWaActive = 1u;
 
-constexpr int VK_BACK = 0x08;
-constexpr int VK_TAB = 0x09;
-constexpr int VK_RETURN = 0x0D;
-constexpr int VK_SHIFT = 0x10;
-constexpr int VK_CONTROL = 0x11;
-constexpr int VK_MENU = 0x12;
-constexpr int VK_ESCAPE = 0x1B;
-constexpr int VK_PRIOR = 0x21;
-constexpr int VK_NEXT = 0x22;
-constexpr int VK_LEFT = 0x25;
-constexpr int VK_UP = 0x26;
-constexpr int VK_RIGHT = 0x27;
-constexpr int VK_DOWN = 0x28;
-constexpr int VK_INSERT = 0x2D;
-constexpr int VK_DELETE = 0x2E;
-constexpr int VK_F1 = 0x70;
-constexpr int VK_F9 = 0x78;
-constexpr int VK_F10 = 0x79;
-constexpr int VK_F11 = 0x7A;
-constexpr int VK_F12 = 0x7B;
-constexpr int VK_OEM_PLUS = 0xBB;
-constexpr int VK_OEM_MINUS = 0xBD;
+constexpr int kVkBack = 0x08;
+constexpr int kVkTab = 0x09;
+constexpr int kVkReturn = 0x0D;
+constexpr int kVkShift = 0x10;
+constexpr int kVkControl = 0x11;
+constexpr int kVkMenu = 0x12;
+constexpr int kVkEscape = 0x1B;
+constexpr int kVkPrior = 0x21;
+constexpr int kVkNext = 0x22;
+constexpr int kVkLeft = 0x25;
+constexpr int kVkUp = 0x26;
+constexpr int kVkRight = 0x27;
+constexpr int kVkDown = 0x28;
+constexpr int kVkInsert = 0x2D;
+constexpr int kVkDelete = 0x2E;
+constexpr int kVkF1 = 0x70;
+constexpr int kVkF9 = 0x78;
+constexpr int kVkF10 = 0x79;
+constexpr int kVkF11 = 0x7A;
+constexpr int kVkF12 = 0x7B;
+constexpr int kVkOemPlus = 0xBB;
+constexpr int kVkOemMinus = 0xBD;
 
 std::intptr_t MakeLParam(int x, int y)
 {
@@ -196,10 +81,10 @@ std::uintptr_t BuildMouseKeyState(Qt::MouseButtons buttons)
 {
     std::uintptr_t state = 0;
     if (buttons.testFlag(Qt::LeftButton)) {
-        state |= MK_LBUTTON;
+        state |= kMkLButton;
     }
     if (buttons.testFlag(Qt::RightButton)) {
-        state |= MK_RBUTTON;
+        state |= kMkRButton;
     }
     return state;
 }
@@ -215,28 +100,26 @@ int MapQtKeyToVirtualKey(int key)
     }
 
     switch (key) {
-    case Qt::Key_Backspace: return VK_BACK;
-    case Qt::Key_Tab: return VK_TAB;
+    case Qt::Key_Backspace: return kVkBack;
+    case Qt::Key_Tab: return kVkTab;
     case Qt::Key_Return:
-    case Qt::Key_Enter: return VK_RETURN;
-    case Qt::Key_Shift: return VK_SHIFT;
-    case Qt::Key_Control: return VK_CONTROL;
-    case Qt::Key_Alt: return VK_MENU;
-    case Qt::Key_Escape: return VK_ESCAPE;
-    case Qt::Key_PageUp: return VK_PRIOR;
-    case Qt::Key_PageDown: return VK_NEXT;
-    case Qt::Key_Left: return VK_LEFT;
-    case Qt::Key_Up: return VK_UP;
-    case Qt::Key_Right: return VK_RIGHT;
-    case Qt::Key_Down: return VK_DOWN;
-    case Qt::Key_Insert: return VK_INSERT;
-    case Qt::Key_Delete: return VK_DELETE;
-    case Qt::Key_Home: return VK_HOME;
-    case Qt::Key_End: return VK_END;
+    case Qt::Key_Enter: return kVkReturn;
+    case Qt::Key_Shift: return kVkShift;
+    case Qt::Key_Control: return kVkControl;
+    case Qt::Key_Alt: return kVkMenu;
+    case Qt::Key_Escape: return kVkEscape;
+    case Qt::Key_PageUp: return kVkPrior;
+    case Qt::Key_PageDown: return kVkNext;
+    case Qt::Key_Left: return kVkLeft;
+    case Qt::Key_Up: return kVkUp;
+    case Qt::Key_Right: return kVkRight;
+    case Qt::Key_Down: return kVkDown;
+    case Qt::Key_Insert: return kVkInsert;
+    case Qt::Key_Delete: return kVkDelete;
     case Qt::Key_Plus:
-    case Qt::Key_Equal: return VK_OEM_PLUS;
+    case Qt::Key_Equal: return kVkOemPlus;
     case Qt::Key_Minus:
-    case Qt::Key_Underscore: return VK_OEM_MINUS;
+    case Qt::Key_Underscore: return kVkOemMinus;
     default:
         return key;
     }
@@ -255,31 +138,31 @@ protected:
     void focusInEvent(QFocusEvent* event) override
     {
         QWindow::focusInEvent(event);
-        sendMessage(WM_ACTIVATE, WA_ACTIVE, 0);
+        sendMessage(kWmActivate, kWaActive, 0);
     }
 
     void focusOutEvent(QFocusEvent* event) override
     {
         QWindow::focusOutEvent(event);
-        sendMessage(WM_ACTIVATE, WA_INACTIVE, 0);
+        sendMessage(kWmActivate, kWaInactive, 0);
     }
 
     void closeEvent(QCloseEvent* event) override
     {
-        sendMessage(WM_CLOSE, 0, 0);
+        sendMessage(kWmClose, 0, 0);
         event->ignore();
     }
 
     void mouseMoveEvent(QMouseEvent* event) override
     {
         const QPointF pos = event->position();
-        sendMessage(WM_MOUSEMOVE, BuildMouseKeyState(event->buttons()), MakeLParam(static_cast<int>(pos.x()), static_cast<int>(pos.y())));
+        sendMessage(kWmMouseMove, BuildMouseKeyState(event->buttons()), MakeLParam(static_cast<int>(pos.x()), static_cast<int>(pos.y())));
         QWindow::mouseMoveEvent(event);
     }
 
     void mousePressEvent(QMouseEvent* event) override
     {
-        const unsigned int msg = event->button() == Qt::RightButton ? WM_RBUTTONDOWN : WM_LBUTTONDOWN;
+        const unsigned int msg = event->button() == Qt::RightButton ? kWmRButtonDown : kWmLButtonDown;
         const QPointF pos = event->position();
         sendMessage(msg, BuildMouseKeyState(event->buttons()), MakeLParam(static_cast<int>(pos.x()), static_cast<int>(pos.y())));
         QWindow::mousePressEvent(event);
@@ -287,7 +170,7 @@ protected:
 
     void mouseReleaseEvent(QMouseEvent* event) override
     {
-        const unsigned int msg = event->button() == Qt::RightButton ? WM_RBUTTONUP : WM_LBUTTONUP;
+        const unsigned int msg = event->button() == Qt::RightButton ? kWmRButtonUp : kWmLButtonUp;
         const QPointF pos = event->position();
         sendMessage(msg, BuildMouseKeyState(event->buttons()), MakeLParam(static_cast<int>(pos.x()), static_cast<int>(pos.y())));
         QWindow::mouseReleaseEvent(event);
@@ -296,14 +179,14 @@ protected:
     void mouseDoubleClickEvent(QMouseEvent* event) override
     {
         const QPointF pos = event->position();
-        sendMessage(WM_LBUTTONDBLCLK, BuildMouseKeyState(event->buttons()), MakeLParam(static_cast<int>(pos.x()), static_cast<int>(pos.y())));
+        sendMessage(kWmLButtonDblClk, BuildMouseKeyState(event->buttons()), MakeLParam(static_cast<int>(pos.x()), static_cast<int>(pos.y())));
         QWindow::mouseDoubleClickEvent(event);
     }
 
     void wheelEvent(QWheelEvent* event) override
     {
         const QPointF pos = event->position();
-        sendMessage(WM_MOUSEWHEEL,
+        sendMessage(kWmMouseWheel,
             MakeWheelWParam(event->angleDelta().y(), BuildMouseKeyState(event->buttons())),
             MakeLParam(static_cast<int>(pos.x()), static_cast<int>(pos.y())));
         QWindow::wheelEvent(event);
@@ -321,29 +204,14 @@ protected:
             return;
         }
 
-        const unsigned int msg = event->modifiers().testFlag(Qt::AltModifier) ? WM_SYSKEYDOWN : WM_KEYDOWN;
+        const unsigned int msg = event->modifiers().testFlag(Qt::AltModifier) ? kWmSysKeyDown : kWmKeyDown;
         sendMessage(msg, static_cast<std::uintptr_t>(virtualKey), 0);
 
-        auto isNonTextVirtualKey = [](int vk) {
-            switch (vk) {
-            case VK_BACK: case VK_TAB: case VK_RETURN: case VK_ESCAPE:
-            case VK_LEFT: case VK_RIGHT: case VK_UP: case VK_DOWN:
-            case VK_HOME: case VK_END: case VK_PRIOR: case VK_NEXT:
-            case VK_INSERT: case VK_DELETE:
-            case VK_SHIFT: case VK_CONTROL: case VK_MENU:
-                return true;
-            default:
-                return vk >= VK_F1 && vk <= VK_F12;
-            }
-        };
-
-        if (!isNonTextVirtualKey(virtualKey)) {
-            const QString text = event->text();
-            if (!text.isEmpty()) {
-                const QChar character = text.front();
-                if (!character.isNull() && character.unicode() >= 0x20u && character.unicode() != 0x7Fu) {
-                    sendMessage(WM_CHAR, static_cast<std::uintptr_t>(character.toLatin1()), 0);
-                }
+        const QString text = event->text();
+        if (!text.isEmpty()) {
+            const QChar character = text.front();
+            if (!character.isNull() && character.unicode() >= 0x20u) {
+                sendMessage(kWmChar, static_cast<std::uintptr_t>(character.toLatin1()), 0);
             }
         }
 
@@ -480,17 +348,6 @@ bool RoQtGetCursorPos(POINT* point)
     const QPoint pos = QCursor::pos();
     point->x = pos.x();
     point->y = pos.y();
-    return true;
-}
-
-bool RoQtSetCursorPos(RoNativeWindowHandle window, int x, int y)
-{
-    RoQtMainWindow* mainWindow = AsWindow(window);
-    if (!mainWindow) {
-        return false;
-    }
-
-    QCursor::setPos(mainWindow->mapToGlobal(QPoint(x, y)));
     return true;
 }
 

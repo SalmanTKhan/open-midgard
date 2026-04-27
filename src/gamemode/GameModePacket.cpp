@@ -3914,7 +3914,13 @@ bool SendLoadEndAckPacket()
 
 bool IsSameMapAlreadyLoaded(const CGameMode& mode, const MapChangeInfo& info)
 {
-    if (info.mapName.empty() || !mode.m_world || !mode.m_world->m_player || mode.m_rswName[0] == '\0') {
+    if (info.mapName.empty()
+        || mode.m_mapLoadingStage != CGameMode::MapLoading_None
+        || !mode.m_world
+        || !mode.m_world->m_player
+        || !mode.m_world->m_ground
+        || !mode.m_view
+        || mode.m_rswName[0] == '\0') {
         return false;
     }
 
@@ -7622,11 +7628,12 @@ void RemoveRuntimeActor(CGameMode& mode, u32 gid)
     }
 
     if (it->second) {
+        CGameActor* actor = it->second;
         if (mode.m_world) {
-            mode.m_world->NotifyActorDeleted(it->second);
+            mode.m_world->NotifyActorDeleted(actor);
         }
-        it->second->UnRegisterPos();
-        delete it->second;
+        actor->UnRegisterPos();
+        mode.m_deferredActorDeletes.push_back(actor);
     }
     mode.m_runtimeActors.erase(it);
 }
@@ -9318,6 +9325,7 @@ void RegisterDefaultGameModePacketHandlers(CGameModePacketRouter& router)
     RegisterHandlerIfValid(router, receiveProfile.skillUnitSetExtended, HandleSkillUnitSet);
     router.Register(0x01CF, HandleIgnorePacket);
     router.Register(0x01D0, HandleIgnorePacket);
+        router.Register(0x0199, HandleIgnorePacket); // map property state; keep framing aligned until consumed
     router.Register(0x01D6, HandleIgnorePacket); // map type / mapflags hint; framing only for now
     router.Register(0x01D7, HandleActorSpriteChange);
     RegisterHandlerIfValid(router, receiveProfile.skillDamageNotifyExtended, HandleSkillDamageNotify);
@@ -9330,6 +9338,7 @@ void RegisterDefaultGameModePacketHandlers(CGameModePacketRouter& router)
     router.Register(0x020A, HandleFriendDelete);
     router.Register(0x0214, HandleStatusSummary);
     RegisterHandlerIfValid(router, receiveProfile.partyInviteAckExtended, HandlePartyInviteAck);
+    router.Register(0x02D9, HandleIgnorePacket); // config state; 0x02DA notify already routes separately
     router.Register(0x02DD, HandleIgnorePacket);
     RegisterHandlerIfValid(router, receiveProfile.partyHpUpdateExtended, HandlePartyHpUpdate);
     router.Register(0x0283, HandleIgnorePacket);
