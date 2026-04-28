@@ -1546,6 +1546,12 @@ void CSession::SetSelectedCharacterAppearance(const CHARACTER_INFO& info)
     m_hasSelectedCharacterInfo = true;
     m_skillItems.clear();
     ClearActiveStatusIcons();
+    ClearAllSkillCooldowns();
+    ClearQuests();
+    EndTrade();
+    EndVending();
+    EndVendingBrowse();
+    m_actorShopTitles.clear();
     m_hasBaseExpValue = false;
     m_hasNextBaseExpValue = false;
     m_hasJobExpValue = false;
@@ -1738,6 +1744,203 @@ void CSession::PruneExpiredStatusIcons(u32 serverTime)
             return entry.hasTimer && entry.expireServerTime <= serverTime;
         }),
         m_activeStatusIcons.end());
+
+    for (auto it = m_skillCooldownEndServerTime.begin(); it != m_skillCooldownEndServerTime.end();) {
+        if (it->second <= serverTime) {
+            it = m_skillCooldownEndServerTime.erase(it);
+        } else {
+            ++it;
+        }
+    }
+}
+
+void CSession::SetSkillCooldown(int skillId, u32 durationMs)
+{
+    if (skillId <= 0) {
+        return;
+    }
+    if (durationMs == 0) {
+        m_skillCooldownEndServerTime.erase(skillId);
+        return;
+    }
+    m_skillCooldownEndServerTime[skillId] = GetServerTime() + durationMs;
+}
+
+void CSession::ClearAllSkillCooldowns()
+{
+    m_skillCooldownEndServerTime.clear();
+}
+
+u32 CSession::GetSkillCooldownRemainingMs(int skillId) const
+{
+    const auto it = m_skillCooldownEndServerTime.find(skillId);
+    if (it == m_skillCooldownEndServerTime.end()) {
+        return 0;
+    }
+    const u32 now = GetServerTime();
+    if (it->second <= now) {
+        return 0;
+    }
+    return it->second - now;
+}
+
+void CSession::ClearQuests()
+{
+    m_quests.clear();
+}
+
+void CSession::AddQuest(const QUEST_INFO& info)
+{
+    if (info.questId == 0) {
+        return;
+    }
+    for (QUEST_INFO& existing : m_quests) {
+        if (existing.questId == info.questId) {
+            existing = info;
+            return;
+        }
+    }
+    m_quests.push_back(info);
+}
+
+void CSession::RemoveQuest(u32 questId)
+{
+    m_quests.erase(
+        std::remove_if(m_quests.begin(), m_quests.end(),
+            [questId](const QUEST_INFO& q) { return q.questId == questId; }),
+        m_quests.end());
+}
+
+void CSession::UpdateQuestHunt(u32 questId, u32 monsterId, u32 newCount)
+{
+    for (QUEST_INFO& quest : m_quests) {
+        if (quest.questId != questId) {
+            continue;
+        }
+        for (QUEST_HUNT_INFO& hunt : quest.hunts) {
+            if (hunt.monsterId == monsterId) {
+                hunt.count = newCount;
+                return;
+            }
+        }
+        // Server pushed an update for a hunt slot we didn't know about; record
+        // it so the UI surfaces partial progress rather than dropping it.
+        QUEST_HUNT_INFO hunt;
+        hunt.monsterId = monsterId;
+        hunt.count = newCount;
+        quest.hunts.push_back(std::move(hunt));
+        return;
+    }
+}
+
+const std::vector<QUEST_INFO>& CSession::GetQuests() const
+{
+    return m_quests;
+}
+
+void CSession::BeginTrade(const std::string& partnerName)
+{
+    m_tradeState = TRADE_STATE{};
+    m_tradeState.active = true;
+    m_tradeState.partnerName = partnerName;
+}
+
+void CSession::EndTrade()
+{
+    m_tradeState = TRADE_STATE{};
+}
+
+bool CSession::IsTradeActive() const
+{
+    return m_tradeState.active;
+}
+
+TRADE_STATE& CSession::GetTradeState()
+{
+    return m_tradeState;
+}
+
+const TRADE_STATE& CSession::GetTradeState() const
+{
+    return m_tradeState;
+}
+
+void CSession::BeginVending(const std::string& shopTitle)
+{
+    m_vendingState = VENDING_STATE{};
+    m_vendingState.active = true;
+    m_vendingState.shopTitle = shopTitle;
+}
+
+void CSession::EndVending()
+{
+    m_vendingState = VENDING_STATE{};
+}
+
+bool CSession::IsVendingActive() const
+{
+    return m_vendingState.active;
+}
+
+VENDING_STATE& CSession::GetVendingState()
+{
+    return m_vendingState;
+}
+
+const VENDING_STATE& CSession::GetVendingState() const
+{
+    return m_vendingState;
+}
+
+void CSession::BeginVendingBrowse(u32 partnerAid, const std::string& shopTitle)
+{
+    m_vendingBrowseState = VENDING_SHOP_BROWSE_STATE{};
+    m_vendingBrowseState.active = true;
+    m_vendingBrowseState.partnerAid = partnerAid;
+    m_vendingBrowseState.partnerShopTitle = shopTitle;
+}
+
+void CSession::EndVendingBrowse()
+{
+    m_vendingBrowseState = VENDING_SHOP_BROWSE_STATE{};
+}
+
+bool CSession::IsVendingBrowseActive() const
+{
+    return m_vendingBrowseState.active;
+}
+
+VENDING_SHOP_BROWSE_STATE& CSession::GetVendingBrowseState()
+{
+    return m_vendingBrowseState;
+}
+
+const VENDING_SHOP_BROWSE_STATE& CSession::GetVendingBrowseState() const
+{
+    return m_vendingBrowseState;
+}
+
+void CSession::SetActorShopTitle(u32 aid, const std::string& title)
+{
+    if (aid == 0) {
+        return;
+    }
+    if (title.empty()) {
+        m_actorShopTitles.erase(aid);
+        return;
+    }
+    m_actorShopTitles[aid] = title;
+}
+
+void CSession::ClearActorShopTitle(u32 aid)
+{
+    m_actorShopTitles.erase(aid);
+}
+
+std::string CSession::GetActorShopTitle(u32 aid) const
+{
+    const auto it = m_actorShopTitles.find(aid);
+    return it == m_actorShopTitles.end() ? std::string() : it->second;
 }
 
 void CSession::ClearHomunSkillItems()
@@ -2126,12 +2329,26 @@ void CSession::SetGuildBasic(int guildId, int emblemId, const char* name, const 
     }
 }
 
+void CSession::SetGuildNotice(const char* subject, const char* body)
+{
+    std::memset(m_guildNoticeSubject, 0, sizeof(m_guildNoticeSubject));
+    if (subject) {
+        std::strncpy(m_guildNoticeSubject, subject, sizeof(m_guildNoticeSubject) - 1);
+    }
+    std::memset(m_guildNoticeBody, 0, sizeof(m_guildNoticeBody));
+    if (body) {
+        std::strncpy(m_guildNoticeBody, body, sizeof(m_guildNoticeBody) - 1);
+    }
+}
+
 void CSession::ClearGuild()
 {
     m_guildId = 0;
     m_guildEmblemId = 0;
     std::memset(m_guildName, 0, sizeof(m_guildName));
     std::memset(m_guildMasterName, 0, sizeof(m_guildMasterName));
+    std::memset(m_guildNoticeSubject, 0, sizeof(m_guildNoticeSubject));
+    std::memset(m_guildNoticeBody, 0, sizeof(m_guildNoticeBody));
     m_guildMembers.clear();
 }
 

@@ -37,6 +37,14 @@ add_library(ro_ui STATIC
     UIFriendRequestAcceptWnd.cpp
     UIDealRequestAcceptWnd.h
     UIDealRequestAcceptWnd.cpp
+    UITradeWnd.h
+    UITradeWnd.cpp
+    UIVendingWnd.h
+    UIVendingWnd.cpp
+    UIVendingShopWnd.h
+    UIVendingShopWnd.cpp
+    UISkillUpConfirmWnd.h
+    UISkillUpConfirmWnd.cpp
     UIMessengerGroupWnd.h
     UIMessengerGroupWnd.cpp
     UIPartyOptionWnd.h
@@ -118,6 +126,16 @@ add_library(ro_ui STATIC
     UIHomunInfoWnd.cpp
     UIMercInfoWnd.h
     UIMercInfoWnd.cpp
+    UINpcCutinWnd.h
+    UINpcCutinWnd.cpp
+    UIRefineWnd.h
+    UIRefineWnd.cpp
+    UIMapNameBannerWnd.h
+    UIMapNameBannerWnd.cpp
+    UIWorldMapWnd.h
+    UIWorldMapWnd.cpp
+    UISkillCastIndicatorWnd.h
+    UISkillCastIndicatorWnd.cpp
 )
 
 target_include_directories(ro_ui PUBLIC 

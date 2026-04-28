@@ -26,6 +26,10 @@
 #include "ui/UISayDialogWnd.h"
 #include "ui/UINpcMenuWnd.h"
 #include "ui/UINpcInputWnd.h"
+#include "ui/UINpcCutinWnd.h"
+#include "ui/UIRefineWnd.h"
+#include "ui/UIMapNameBannerWnd.h"
+#include "ui/UIEggListWnd.h"
 
 #include <cmath>
 #include "ui/UIChooseSellBuyWnd.h"
@@ -911,10 +915,190 @@ void HandleSkillCastCancel(CGameMode& mode, const PacketView& packet)
     actor->SendMsg(actor, 84, 0, 0, 0);
     actor->SendMsg(actor, 87, 0, 0, 0);
     actor->SendMsg(actor, 83, 0, 0, 0);
+    actor->m_castStartTick = 0;
+    actor->m_castEndTick = 0;
+    actor->m_castSkillId = 0;
 }
 
 void HandleIgnorePacket(CGameMode&, const PacketView&)
 {
+}
+
+// ZC_SKILL_POSTDELAY (0x043D, 8 bytes): server-issued per-skill cooldown for the
+// local player. Layout: [u16 packetId][u16 skillId][u32 tickMs].
+void HandleSkillPostDelay(CGameMode&, const PacketView& packet)
+{
+    if (!packet.data || packet.packetLength < 8) {
+        return;
+    }
+    const int skillId = static_cast<int>(ReadLE16(packet.data + 2));
+    const u32 tickMs = ReadLE32(packet.data + 4);
+    g_session.SetSkillCooldown(skillId, tickMs);
+}
+
+// Helper: open the NPC menu chrome in crafting submit mode and populate it
+// with item display names resolved from g_ttemmgr.
+void OpenCraftingMenuFromItemIdList(UINpcMenuWnd::SubmitMode submitMode,
+                                    const u8* listBytes,
+                                    size_t listByteLen)
+{
+    if (!listBytes || listByteLen < 2) {
+        return;
+    }
+
+    std::vector<u16> itemIds;
+    std::vector<std::string> options;
+    const size_t entryCount = listByteLen / 2;
+    itemIds.reserve(entryCount);
+    options.reserve(entryCount);
+
+    for (size_t i = 0; i < entryCount; ++i) {
+        const u16 itemId = ReadLE16(listBytes + (i * 2));
+        if (itemId == 0) {
+            continue;
+        }
+        std::string name = g_ttemmgr.GetDisplayName(itemId, true);
+        if (name.empty()) {
+            char buf[32] = {};
+            std::snprintf(buf, sizeof(buf), "Item #%u", static_cast<unsigned int>(itemId));
+            name = buf;
+        }
+        itemIds.push_back(itemId);
+        options.push_back(std::move(name));
+    }
+
+    if (itemIds.empty()) {
+        return;
+    }
+
+    auto* menuWnd = static_cast<UINpcMenuWnd*>(g_windowMgr.MakeWindow(UIWindowMgr::WID_NPCMENUWND));
+    if (menuWnd) {
+        menuWnd->SetCraftingMenu(submitMode, options, itemIds);
+    }
+}
+
+// ZC_MAKINGARROW_LIST (0x01AD, var): list of arrow result item ids the player
+// can craft from currently-held materials. Layout: [u16 packetId][u16 packetLen]
+// followed by N x u16 item ids (typically 2 bytes per entry per packet_db).
+void HandleMakingArrowList(CGameMode&, const PacketView& packet)
+{
+    if (!packet.data || packet.packetLength < 4) {
+        return;
+    }
+    OpenCraftingMenuFromItemIdList(UINpcMenuWnd::SubmitMode::MakingArrow,
+                                   packet.data + 4,
+                                   packet.packetLength - 4);
+}
+
+// ZC_MAKABLEITEMLIST (0x025A, var): list of item ids the player can produce
+// (alchemy/forging). Same layout as ZC_MAKINGARROW_LIST.
+void HandleMakableItemList(CGameMode&, const PacketView& packet)
+{
+    if (!packet.data || packet.packetLength < 4) {
+        return;
+    }
+    OpenCraftingMenuFromItemIdList(UINpcMenuWnd::SubmitMode::MakingItem,
+                                   packet.data + 4,
+                                   packet.packetLength - 4);
+}
+
+// ZC_ALL_QUEST_LIST (0x02B1, var): full quest snapshot at login. Layout:
+// header(2) + len(2) + count(4) + N x QUEST_LIST_INFO(5) where each entry is
+// questId(4) + active(1).
+void HandleAllQuestList(CGameMode&, const PacketView& packet)
+{
+    if (!packet.data || packet.packetLength < 8) {
+        g_session.ClearQuests();
+        return;
+    }
+    const u32 count = ReadLE32(packet.data + 4);
+    g_session.ClearQuests();
+
+    const size_t headerLen = 8;
+    const size_t entrySize = 5;
+    const size_t available = packet.packetLength > headerLen
+        ? (packet.packetLength - headerLen) / entrySize
+        : 0;
+    const u32 safeCount = (count <= available) ? count : static_cast<u32>(available);
+
+    for (u32 i = 0; i < safeCount; ++i) {
+        const u8* p = packet.data + headerLen + i * entrySize;
+        QUEST_INFO info;
+        info.questId = ReadLE32(p);
+        info.active = p[4] != 0;
+        g_session.AddQuest(info);
+    }
+    DbgLog("[GameMode] ZC_ALL_QUEST_LIST count=%u stored=%u\n",
+        count, safeCount);
+}
+
+// ZC_ADD_QUEST (0x02B3, 107 bytes): one quest added. Layout per Ref/eAthena
+// packet_db.txt: questId(4) + active(1) + svrTime(4) + endTime(4) + count(2)
+// + 3 x ITEM_PROGRESS_INFO(30) where each = monsterId(4) + count(2) + name(24).
+void HandleAddQuest(CGameMode&, const PacketView& packet)
+{
+    if (!packet.data || packet.packetLength < 17) {
+        return;
+    }
+    QUEST_INFO info;
+    info.questId = ReadLE32(packet.data + 2);
+    info.active = packet.data[6] != 0;
+    info.startServerTime = ReadLE32(packet.data + 7);
+    info.endServerTime = ReadLE32(packet.data + 11);
+
+    const u16 huntCount = ReadLE16(packet.data + 15);
+    const u16 safeHuntCount = huntCount > 3 ? 3 : huntCount;
+    for (u16 i = 0; i < safeHuntCount; ++i) {
+        const size_t base = 17 + i * 30;
+        if (packet.packetLength < base + 30) {
+            break;
+        }
+        QUEST_HUNT_INFO hunt;
+        hunt.monsterId = ReadLE32(packet.data + base);
+        hunt.maxCount = ReadLE16(packet.data + base + 4);
+        hunt.count = 0;
+        const char* nameBytes = reinterpret_cast<const char*>(packet.data + base + 6);
+        const size_t nameLen = strnlen(nameBytes, 24);
+        hunt.monsterName.assign(nameBytes, nameLen);
+        info.hunts.push_back(std::move(hunt));
+    }
+    g_session.AddQuest(info);
+    DbgLog("[GameMode] ZC_ADD_QUEST qid=%u active=%d hunts=%u\n",
+        info.questId, info.active ? 1 : 0, static_cast<unsigned int>(info.hunts.size()));
+}
+
+// ZC_DEL_QUEST (0x02B4, 6 bytes): header(2) + questId(4).
+void HandleDelQuest(CGameMode&, const PacketView& packet)
+{
+    if (!packet.data || packet.packetLength < 6) {
+        return;
+    }
+    const u32 questId = ReadLE32(packet.data + 2);
+    g_session.RemoveQuest(questId);
+    DbgLog("[GameMode] ZC_DEL_QUEST qid=%u\n", questId);
+}
+
+// ZC_UPDATE_MISSION_HUNT (0x02B5, var): kill-count progress updates. Layout:
+// header(2) + len(2) + count(2) + N x (questId(4) + monsterId(4) + count(2)).
+void HandleUpdateMissionHunt(CGameMode&, const PacketView& packet)
+{
+    if (!packet.data || packet.packetLength < 6) {
+        return;
+    }
+    const u16 entryCount = ReadLE16(packet.data + 4);
+    const size_t headerLen = 6;
+    const size_t entrySize = 10;
+    const size_t available = packet.packetLength > headerLen
+        ? (packet.packetLength - headerLen) / entrySize
+        : 0;
+    const u16 safe = entryCount > available ? static_cast<u16>(available) : entryCount;
+    for (u16 i = 0; i < safe; ++i) {
+        const u8* p = packet.data + headerLen + i * entrySize;
+        const u32 questId = ReadLE32(p);
+        const u32 monsterId = ReadLE32(p + 4);
+        const u16 newCount = ReadLE16(p + 8);
+        g_session.UpdateQuestHunt(questId, monsterId, newCount);
+    }
 }
 
 void HandleRestartAck(CGameMode& mode, const PacketView& packet)
@@ -931,18 +1115,54 @@ void HandleRestartAck(CGameMode& mode, const PacketView& packet)
     }
 }
 
-void ApplySelfStatusIconPacket(int statusType, u32 actorId, bool active, u32 remainingMs)
+void ApplyPerActorStatusIcon(CGameActor* actor, int statusType, bool active, u32 remainingMs)
 {
-    const bool matchesLocalPlayer = actorId != 0
-        && (actorId == g_session.m_gid || actorId == g_session.m_aid);
-    if (!matchesLocalPlayer) {
+    if (!actor || statusType <= 0) {
         return;
     }
-
-    g_session.SetActiveStatusIcon(statusType, active, remainingMs);
+    auto& vec = actor->m_perActorStatusIcons;
+    const auto it = std::find_if(vec.begin(), vec.end(), [&](const ACTIVE_STATUS_ICON& e) {
+        return e.statusType == statusType;
+    });
+    if (!active) {
+        if (it != vec.end()) {
+            vec.erase(it);
+        }
+        return;
+    }
+    ACTIVE_STATUS_ICON icon;
+    icon.statusType = statusType;
+    icon.hasTimer = remainingMs > 0;
+    icon.expireServerTime = icon.hasTimer ? (g_session.GetServerTime() + remainingMs) : 0;
+    if (it != vec.end()) {
+        *it = icon;
+    } else {
+        vec.push_back(icon);
+    }
 }
 
-void HandlePacket0196(CGameMode&, const PacketView& packet)
+// Routes a status icon packet to either the local-player HUD ring (g_session)
+// or the targeted actor's per-actor ring. Both paths can fire if the actor is
+// the local player (kept for HUD) — but in practice the local-player early-out
+// returns first. Non-local actors receive their icons on the per-actor list,
+// which feeds the over-head strip.
+void DispatchStatusIconPacket(CGameMode& mode, int statusType, u32 actorId, bool active, u32 remainingMs)
+{
+    if (statusType <= 0) {
+        return;
+    }
+    const bool matchesLocalPlayer = actorId != 0
+        && (actorId == g_session.m_gid || actorId == g_session.m_aid);
+    if (matchesLocalPlayer) {
+        g_session.SetActiveStatusIcon(statusType, active, remainingMs);
+        return;
+    }
+    if (CGameActor* actor = ResolveNotifyEffectActor(mode, actorId)) {
+        ApplyPerActorStatusIcon(actor, statusType, active, remainingMs);
+    }
+}
+
+void HandlePacket0196(CGameMode& mode, const PacketView& packet)
 {
     if (!packet.data || packet.packetLength < 9) {
         return;
@@ -951,10 +1171,10 @@ void HandlePacket0196(CGameMode&, const PacketView& packet)
     const int statusType = static_cast<int>(ReadLE16(packet.data + 2));
     const u32 actorId = ReadLE32(packet.data + 4);
     const bool active = packet.data[8] != 0;
-    ApplySelfStatusIconPacket(statusType, actorId, active, 0);
+    DispatchStatusIconPacket(mode, statusType, actorId, active, 0);
 }
 
-void HandlePacket043F(CGameMode&, const PacketView& packet)
+void HandlePacket043F(CGameMode& mode, const PacketView& packet)
 {
     if (!packet.data || packet.packetLength < 25) {
         return;
@@ -964,7 +1184,7 @@ void HandlePacket043F(CGameMode&, const PacketView& packet)
     const u32 actorId = ReadLE32(packet.data + 4);
     const bool active = packet.data[8] != 0;
     const u32 remainingMs = ReadLE32(packet.data + 9);
-    ApplySelfStatusIconPacket(statusType, actorId, active, remainingMs);
+    DispatchStatusIconPacket(mode, statusType, actorId, active, remainingMs);
 }
 
 int ResolvePotionEffectId(unsigned int itemId)
@@ -2427,6 +2647,12 @@ void HandlePetProperty(CGameMode&, const PacketView& packet)
     const int itemId = static_cast<int>(ReadLE16(packet.data + 33));
     const int job = static_cast<int>(ReadLE16(packet.data + 35));
     g_session.SetPetProperty(name, level, fullness, intimacy, itemId, job);
+
+    // Hatching closes the egg-list window: server has accepted CZ_PET_EGGSELECT
+    // and the new pet is now active.
+    if (g_windowMgr.m_eggListWnd) {
+        g_windowMgr.m_eggListWnd->SetShow(0);
+    }
 }
 
 void HandlePetFeedResult(CGameMode&, const PacketView& packet)
@@ -2544,6 +2770,23 @@ void HandleGuildLeaveOrDisband(CGameMode&, const PacketView&)
         return;
     }
     g_session.ClearGuild();
+}
+
+// ZC_GUILD_NOTICE (0x016F, 182 bytes per packet_db):
+//   header(2) + guildId(4) + subject(56) + body(120).
+void HandleGuildNotice(CGameMode&, const PacketView& packet)
+{
+    if (!IsFeatureEnabled(ClientFeature::Guild)) {
+        return;
+    }
+    if (!packet.data || packet.packetLength < 182) {
+        return;
+    }
+    char subject[57] = {};
+    char body[121] = {};
+    std::memcpy(subject, packet.data + 6, 56);
+    std::memcpy(body,    packet.data + 62, 120);
+    g_session.SetGuildNotice(subject, body);
 }
 
 void HandleGuildMemberList(CGameMode&, const PacketView& packet)
@@ -3719,6 +3962,100 @@ void HandleNpcDialogStringInput(CGameMode&, const PacketView& packet)
     }
 }
 
+// ZC_SHOW_IMAGE  (0x0145, 19 bytes): name(16) + position(1).
+// ZC_SHOW_IMAGE2 (0x01B3, 67 bytes): name(64) + position(1).
+// Empty filename or position == 0xFF clears the cutin.
+void HandleShowImage(CGameMode&, const PacketView& packet)
+{
+    if (!packet.data || packet.packetLength < 4) {
+        return;
+    }
+    const bool isExtended = (packet.packetId == 0x01B3);
+    const size_t nameLen = isExtended ? 64u : 16u;
+    if (static_cast<size_t>(packet.packetLength) < 2u + nameLen + 1u) {
+        return;
+    }
+    std::string name(reinterpret_cast<const char*>(packet.data + 2), nameLen);
+    const size_t nul = name.find('\0');
+    if (nul != std::string::npos) {
+        name.resize(nul);
+    }
+    const unsigned char position = packet.data[2 + nameLen];
+
+    auto* cutinWnd = static_cast<UINpcCutinWnd*>(
+        g_windowMgr.MakeWindow(UIWindowMgr::WID_NPCCUTINWND));
+    if (!cutinWnd) {
+        return;
+    }
+    cutinWnd->SetCutin(name, position);
+}
+
+// ZC_NOTIFY_WEAPONITEMLIST (0x0221, varlen): list of refinable items.
+// Each entry: index(2) + itemId(2) + refine(1) + cards(8) = 13 bytes.
+void HandleWeaponRefineList(CGameMode&, const PacketView& packet)
+{
+    if (!packet.data || packet.packetLength < 4) {
+        return;
+    }
+    const size_t headerLen = 4;
+    const size_t entrySize = 13;
+    const size_t totalEntries = (packet.packetLength > static_cast<int>(headerLen))
+        ? (static_cast<size_t>(packet.packetLength) - headerLen) / entrySize
+        : 0;
+
+    std::vector<UIRefineWnd::Candidate> candidates;
+    candidates.reserve(totalEntries);
+    for (size_t i = 0; i < totalEntries; ++i) {
+        const u8* p = packet.data + headerLen + i * entrySize;
+        UIRefineWnd::Candidate c{};
+        c.inventoryIndex = ReadLE16(p);
+        c.itemId = ReadLE16(p + 2);
+        c.refine = p[4];
+        c.cards[0] = ReadLE16(p + 5);
+        c.cards[1] = ReadLE16(p + 7);
+        c.cards[2] = ReadLE16(p + 9);
+        c.cards[3] = ReadLE16(p + 11);
+        candidates.push_back(c);
+    }
+
+    auto* refineWnd = static_cast<UIRefineWnd*>(
+        g_windowMgr.MakeWindow(UIWindowMgr::WID_REFINEWND));
+    if (!refineWnd) {
+        return;
+    }
+    refineWnd->SetCandidates(std::move(candidates));
+}
+
+// Forward decls — defined later in this TU.
+void RecordChat(CGameMode& mode, const std::string& text, u32 color, u8 channel);
+constexpr u8 kRefineChatChannelSystem = 6;
+
+// ZC_ACK_WEAPONREFINE (0x0223, 8 bytes): result(4) + itemId(2).
+//   result: 0 = success, 1 = failure, 2 = downgrade, 3 = no enriched ore.
+void HandleWeaponRefineAck(CGameMode& mode, const PacketView& packet)
+{
+    if (!packet.data || packet.packetLength < 8) {
+        return;
+    }
+    const u32 result = ReadLE32(packet.data + 2);
+    const u16 itemId = ReadLE16(packet.data + 6);
+    const std::string itemName = g_ttemmgr.GetDisplayName(itemId, true);
+
+    char buf[160] = {};
+    const char* outcome = "Refine";
+    u32 color = 0x00C0C0C0;
+    switch (result) {
+    case 0: outcome = "Refine succeeded"; color = 0x0000C000; break;
+    case 1: outcome = "Refine failed"; color = 0x00FF4040; break;
+    case 2: outcome = "Refine downgraded"; color = 0x00FFC040; break;
+    default: outcome = "Refine result"; color = 0x00C0C0C0; break;
+    }
+    std::snprintf(buf, sizeof(buf), "%s: %s",
+                  outcome,
+                  itemName.empty() ? "(unknown item)" : itemName.c_str());
+    RecordChat(mode, buf, color, kRefineChatChannelSystem);
+}
+
 void HandleNpcShopDealType(CGameMode&, const PacketView& packet)
 {
     if (!packet.data || packet.packetLength < 6) {
@@ -4881,9 +5218,14 @@ const char* ResolveSkillFailMessage(u16 skillId, u32 btype, u8 cause)
 
 void HandleSkillFailAck(CGameMode& mode, const PacketView& packet)
 {
-    (void)mode;
     if (!packet.data || packet.packetLength < 10) {
         return;
+    }
+
+    if (mode.m_world && mode.m_world->m_player) {
+        mode.m_world->m_player->m_castStartTick = 0;
+        mode.m_world->m_player->m_castEndTick = 0;
+        mode.m_world->m_player->m_castSkillId = 0;
     }
 
     const u16 skillId = ReadLE16(packet.data + 2);
@@ -5090,6 +5432,13 @@ void ApplyMapChangeSessionState(const MapChangeInfo& info)
 
     if (info.hasPosition) {
         g_session.SetPlayerPosDir(info.x, info.y, g_session.m_playerDir);
+    }
+
+    if (!info.mapName.empty()) {
+        if (auto* banner = static_cast<UIMapNameBannerWnd*>(
+                g_windowMgr.MakeWindow(UIWindowMgr::WID_MAPNAMEBANNERWND))) {
+            banner->Trigger(info.mapName);
+        }
     }
 }
 
@@ -5745,6 +6094,17 @@ void HandleSkillCastAck(CGameMode& mode, const PacketView& packet)
         if (castTimeMs > 0) {
             sourceActor->SendMsg(sourceActor, 82, castTimeMs, 0, 0);
         }
+    }
+
+    if (castTimeMs > 0) {
+        const u32 nowTick = timeGetTime();
+        sourceActor->m_castStartTick = nowTick;
+        sourceActor->m_castEndTick = nowTick + static_cast<u32>(castTimeMs);
+        sourceActor->m_castSkillId = skillId;
+    } else {
+        sourceActor->m_castStartTick = 0;
+        sourceActor->m_castEndTick = 0;
+        sourceActor->m_castSkillId = 0;
     }
 
     if (dstGid != 0 && targetActor && targetActor != sourceActor) {
@@ -8366,6 +8726,298 @@ void HandleDealRequestResponse(CGameMode&, const PacketView& packet)
     default: return;
     }
     g_windowMgr.PushChatEvent(message, color, 6);
+    if (result == 3) {
+        // Both sides receive this with result=3 once accepted; begin tracking the
+        // shared trade state and open the trade window. Partner name is unknown
+        // from this packet alone; the UI labels the panes "You" / "Partner".
+        g_session.BeginTrade(std::string());
+        g_windowMgr.MakeWindow(UIWindowMgr::WID_TRADEWND);
+    }
+}
+
+// ZC_ADD_EXCHANGE_ITEM (0x00E9, 19 bytes per Ref/eAthena/db/packet_db.txt:174):
+// header(2) + amount(4) + itemId(2) + identified(1) + damaged(1) + refine(1) +
+// cards[4] (4*2=8) = 19. Server tells us the OTHER side just added an item to
+// their pane. The server tracks indices internally; client only needs name.
+void HandleTradeItemAdd(CGameMode&, const PacketView& packet)
+{
+    if (!packet.data || packet.packetLength < 19) {
+        return;
+    }
+    if (!g_session.IsTradeActive()) {
+        return;
+    }
+
+    const u32 amount = ReadLE32(packet.data + 2);
+    const u16 itemId = ReadLE16(packet.data + 6);
+    const u8 identified = packet.data[8];
+    const u8 damaged = packet.data[9];
+    const u8 refine = packet.data[10];
+
+    TRADE_STATE& state = g_session.GetTradeState();
+
+    // itemId == 0 with non-zero amount is the canonical "zeny" add packet.
+    if (itemId == 0) {
+        state.theirs.zeny += static_cast<int>(amount);
+        return;
+    }
+
+    ITEM_INFO entry;
+    entry.SetItemId(itemId);
+    entry.m_num = static_cast<int>(amount);
+    entry.m_isIdentified = identified;
+    entry.m_isDamaged = damaged;
+    entry.m_refiningLevel = refine;
+    for (int i = 0; i < 4; ++i) {
+        entry.m_slot[i] = static_cast<int>(ReadLE16(packet.data + 11 + i * 2));
+    }
+    state.theirs.items.push_back(std::move(entry));
+}
+
+// ZC_ACK_ADD_EXCHANGE_ITEM (0x00EA, 5 bytes per Ref/eAthena/db/packet_db.txt:175):
+// header(2) + index.W(2) + result.B(1). result: 0 ok, 1 weight overflow, 2 too
+// many items, others=fail. We commit the local-pane add only on result==0.
+void HandleTradeAddItemAck(CGameMode&, const PacketView& packet)
+{
+    if (!packet.data || packet.packetLength < 5) {
+        return;
+    }
+    if (!g_session.IsTradeActive()) {
+        return;
+    }
+    const u16 inventoryIndex = ReadLE16(packet.data + 2);
+    const u8 result = packet.data[4];
+    if (result != 0) {
+        const char* msg = "Failed to add item to trade.";
+        if (result == 1) msg = "Cannot add item: trade weight limit.";
+        else if (result == 2) msg = "Cannot add item: too many items in trade.";
+        g_windowMgr.PushChatEvent(msg, 0x000000FFu, 6);
+        return;
+    }
+
+    // Move the corresponding inventory item entry into our trade pane. The
+    // index here is the same server-assigned inventory index that tradeadditem
+    // sent; we look it up in g_session inventory.
+    TRADE_STATE& state = g_session.GetTradeState();
+    const std::list<ITEM_INFO>& inv = g_session.GetInventoryItems();
+    for (const ITEM_INFO& invItem : inv) {
+        if (invItem.m_itemIndex == inventoryIndex) {
+            ITEM_INFO copy = invItem;
+            state.mine.items.push_back(std::move(copy));
+            break;
+        }
+    }
+}
+
+// ZC_CONCLUDE_EXCHANGE_ITEM (0x00EC, 3 bytes per Ref/eAthena/db/packet_db.txt:177):
+// header(2) + who.B(1). who: 0 = us, 1 = partner. Once both sides hit Ready
+// the client may send CZ_EXEC_EXCHANGE_ITEM to commit.
+void HandleTradeConclude(CGameMode&, const PacketView& packet)
+{
+    if (!packet.data || packet.packetLength < 3) {
+        return;
+    }
+    if (!g_session.IsTradeActive()) {
+        return;
+    }
+    const u8 who = packet.data[2];
+    TRADE_STATE& state = g_session.GetTradeState();
+    if (who == 0) {
+        state.mine.ready = true;
+    } else {
+        state.theirs.ready = true;
+    }
+    state.finalConfirmAvailable = state.mine.ready && state.theirs.ready;
+}
+
+// ZC_CANCEL_EXCHANGE_ITEM (0x00EE, 2 bytes): trade cancelled by either side.
+void HandleTradeCancel(CGameMode&, const PacketView& packet)
+{
+    (void)packet;
+    if (!g_session.IsTradeActive()) {
+        return;
+    }
+    g_session.EndTrade();
+    g_windowMgr.PushChatEvent("Trade cancelled.", 0x00FFFF00u, 6);
+}
+
+// ZC_EXEC_EXCHANGE_ITEM (0x00F0, 3 bytes per Ref/eAthena/db/packet_db.txt:181):
+// header(2) + result.B(1). result: 0 ok, 1 partner inventory full, 2 own
+// inventory full, others=fail. Either way the trade window closes.
+void HandleTradeCommit(CGameMode&, const PacketView& packet)
+{
+    if (!packet.data || packet.packetLength < 3) {
+        return;
+    }
+    if (!g_session.IsTradeActive()) {
+        return;
+    }
+    const u8 result = packet.data[2];
+    const char* message = (result == 0) ? "Trade complete." : "Trade failed.";
+    const u32 color = (result == 0) ? 0x0000FF00u : 0x000000FFu;
+    g_windowMgr.PushChatEvent(message, color, 6);
+    g_session.EndTrade();
+}
+
+// Decode the per-item entry shared by ZC_PC_PURCHASE_ITEMLIST_FROMMC (0x0133)
+// and ZC_PC_PURCHASE_MYITEMLIST (0x0136). Per eAthena clif.cpp the layout is:
+// price.L(4) + amount.W(2) + idx.W(2) + type.B(1) + itemId.W(2) + identify.B(1)
+// + attribute.B(1) + refine.B(1) + cards[4].W(8) = 22 bytes.
+void DecodeVendingEntries(const u8* base, size_t bytes, std::vector<VENDING_ITEM>& out)
+{
+    constexpr size_t kEntrySize = 22;
+    const size_t count = bytes / kEntrySize;
+    out.clear();
+    out.reserve(count);
+    for (size_t i = 0; i < count; ++i) {
+        const u8* p = base + i * kEntrySize;
+        VENDING_ITEM entry;
+        entry.price = ReadLE32(p + 0);
+        entry.amount = ReadLE16(p + 4);
+        entry.inventoryIndex = ReadLE16(p + 6);
+        entry.itemType = p[8];
+        entry.itemId = ReadLE16(p + 9);
+        entry.identified = p[11];
+        entry.damaged = p[12];
+        entry.refine = p[13];
+        for (int s = 0; s < 4; ++s) {
+            entry.slot[s] = static_cast<int>(ReadLE16(p + 14 + s * 2));
+        }
+        out.push_back(std::move(entry));
+    }
+}
+
+// ZC_STORE_ENTRY (0x0131, 86): header(2) + accountId(4) + shopTitle(80).
+// Broadcast when a player nearby opens a vending shop. Cache the title so the
+// click hook can offer "Browse Shop" on that actor.
+void HandleStoreEntry(CGameMode&, const PacketView& packet)
+{
+    if (!packet.data || packet.packetLength < 86) {
+        return;
+    }
+    const u32 sellerAid = ReadLE32(packet.data + 2);
+    const std::string title = ExtractFixedPacketString(packet.data + 6, 80);
+    g_session.SetActorShopTitle(sellerAid, title);
+    if (!title.empty()) {
+        g_windowMgr.PushChatEvent(
+            (std::string("Shop opened: ") + title).c_str(),
+            0x00FFFF00u, 6);
+    }
+}
+
+// ZC_DISAPPEAR_ENTRY (0x0132, 6): header(2) + accountId(4). Shop closed.
+void HandleStoreDisappear(CGameMode&, const PacketView& packet)
+{
+    if (!packet.data || packet.packetLength < 6) {
+        return;
+    }
+    const u32 sellerAid = ReadLE32(packet.data + 2);
+    g_session.ClearActorShopTitle(sellerAid);
+    if (g_session.IsVendingBrowseActive()
+        && g_session.GetVendingBrowseState().partnerAid == sellerAid) {
+        g_session.EndVendingBrowse();
+    }
+}
+
+// ZC_OPENSTORE (0x012D, 4): header(2) + count.W(2). Server's confirmation that
+// our own shop opened. The seller window opened on `MC_VENDING` should already
+// be in setup mode; flip it to active here.
+void HandleVendingOpenAck(CGameMode&, const PacketView& packet)
+{
+    (void)packet;
+    if (!g_session.IsVendingActive()) {
+        // The seller pressed Open Shop in setup mode — confirm activation.
+        g_session.BeginVending(g_session.GetVendingState().shopTitle);
+    }
+    g_windowMgr.MakeWindow(UIWindowMgr::WID_VENDINGWND);
+}
+
+// ZC_PC_PURCHASE_ITEMLIST_FROMMC (0x0133, var): seller's shop list sent to a
+// buyer. Layout: header(2) + len(2) + accountId(4) + N x 22-byte entries.
+void HandleVendingItemList(CGameMode&, const PacketView& packet)
+{
+    if (!packet.data || packet.packetLength < 8) {
+        return;
+    }
+    const u32 sellerAid = ReadLE32(packet.data + 4);
+    const std::string shopTitle = g_session.GetActorShopTitle(sellerAid);
+    g_session.BeginVendingBrowse(sellerAid, shopTitle);
+    DecodeVendingEntries(packet.data + 8, packet.packetLength - 8,
+                         g_session.GetVendingBrowseState().items);
+    g_windowMgr.MakeWindow(UIWindowMgr::WID_VENDINGSHOPWND);
+}
+
+// ZC_PC_PURCHASE_RESULT_FROMMC (0x0135, 7): header(2) + count.W(2) + result.B(1)
+// + reason.W(2) (per packet_db this is a 7-byte fixed packet; eAthena uses
+// only the first byte at offset 4 and ignores the rest in some forks).
+void HandleVendingResult(CGameMode&, const PacketView& packet)
+{
+    if (!packet.data || packet.packetLength < 7) {
+        return;
+    }
+    const u8 result = packet.data[4];
+    const char* msg = nullptr;
+    u32 color = 0x00FFFF00u;
+    switch (result) {
+    case 0: msg = "Purchase successful."; color = 0x0000FF00u; break;
+    case 1: msg = "Not enough zeny."; color = 0x000000FFu; break;
+    case 2: msg = "Inventory weight limit exceeded."; color = 0x000000FFu; break;
+    case 3: msg = "Out of stock."; color = 0x000000FFu; break;
+    case 4: msg = "Purchase failed."; color = 0x000000FFu; break;
+    default: msg = "Purchase result unknown."; break;
+    }
+    g_windowMgr.PushChatEvent(msg, color, 6);
+}
+
+// ZC_PC_PURCHASE_MYITEMLIST (0x0136, var): the seller's own view of their open
+// shop. Layout: header(2) + len(2) + ownAid(4) + N x 22-byte entries.
+void HandleVendingMyItems(CGameMode&, const PacketView& packet)
+{
+    if (!packet.data || packet.packetLength < 8) {
+        return;
+    }
+    if (!g_session.IsVendingActive()) {
+        // Server is showing us our shop — make sure the state is on.
+        g_session.BeginVending(g_session.GetVendingState().shopTitle);
+    }
+    DecodeVendingEntries(packet.data + 8, packet.packetLength - 8,
+                         g_session.GetVendingState().items);
+    g_windowMgr.MakeWindow(UIWindowMgr::WID_VENDINGWND);
+}
+
+// ZC_DELETEITEM_FROMMC (0x0137, 6): header(2) + index.W(2) + amount.W(2).
+// Decrements stock on a sold item in our active shop.
+void HandleVendingItemDelete(CGameMode&, const PacketView& packet)
+{
+    if (!packet.data || packet.packetLength < 6) {
+        return;
+    }
+    if (!g_session.IsVendingActive()) {
+        return;
+    }
+    const u16 index = ReadLE16(packet.data + 2);
+    const u16 amount = ReadLE16(packet.data + 4);
+    VENDING_STATE& vs = g_session.GetVendingState();
+    for (auto it = vs.items.begin(); it != vs.items.end(); ++it) {
+        if (it->inventoryIndex == index) {
+            if (it->amount > amount) {
+                it->amount -= amount;
+            } else {
+                vs.items.erase(it);
+            }
+            return;
+        }
+    }
+}
+
+// ZC_BAN_VENDING (0x0138, 3): header(2) + reason.B(1). Surface as a chat error.
+void HandleVendingBan(CGameMode&, const PacketView& packet)
+{
+    if (!packet.data || packet.packetLength < 3) {
+        return;
+    }
+    g_windowMgr.PushChatEvent("You are temporarily banned from vending.",
+                              0x000000FFu, 6);
 }
 
 void HandleFriendRequest(CGameMode& mode, const PacketView& packet)
@@ -9346,6 +9998,10 @@ void RegisterDefaultGameModePacketHandlers(CGameModePacketRouter& router)
     router.Register(0x00CB, HandleNpcShopSellResult);
     router.Register(0x0142, HandleNpcDialogNumberInput);
     router.Register(0x01D4, HandleNpcDialogStringInput);
+    router.Register(0x0145, HandleShowImage);
+    router.Register(0x01B3, HandleShowImage);
+    router.Register(0x0221, HandleWeaponRefineList);
+    router.Register(0x0223, HandleWeaponRefineAck);
     RegisterHandlerIfValid(router, receiveProfile.broadcastColored, HandleBroadcast);
     router.Register(0x02DC, HandleBattlefieldChat);
     RegisterHandlerIfValid(router, receiveProfile.actorNameAckBasic, HandleActorNameAck);
@@ -9397,6 +10053,7 @@ void RegisterDefaultGameModePacketHandlers(CGameModePacketRouter& router)
     router.Register(0x022E, HandleHomunProperty);
     router.Register(0x029B, HandleMercProperty);
     router.Register(0x016C, HandleGuildBasicInfo);
+    router.Register(0x016F, HandleGuildNotice);
     router.Register(0x015E, HandleGuildLeaveOrDisband);
     router.Register(0x0154, HandleGuildMemberList);
     router.Register(0x0240, HandleMailList);
@@ -9447,8 +10104,14 @@ void RegisterDefaultGameModePacketHandlers(CGameModePacketRouter& router)
     RegisterHandlerIfValid(router, receiveProfile.partyMemberAddedExtended, HandlePartyMemberAdded);
     RegisterHandlerIfValid(router, receiveProfile.skillUnitSetBasic, HandleSkillUnitSet);
     router.Register(0x0120, HandleIgnorePacket);
-    router.Register(0x0131, HandleIgnorePacket);
-    router.Register(0x0132, HandleIgnorePacket);
+    router.Register(0x012D, HandleVendingOpenAck);
+    router.Register(0x0131, HandleStoreEntry);
+    router.Register(0x0132, HandleStoreDisappear);
+    router.Register(0x0133, HandleVendingItemList);
+    router.Register(0x0135, HandleVendingResult);
+    router.Register(0x0136, HandleVendingMyItems);
+    router.Register(0x0137, HandleVendingItemDelete);
+    router.Register(0x0138, HandleVendingBan);
     router.Register(0x0141, HandleSelfStatInfo);
     router.Register(0x0148, HandleActorResurrection);
     RegisterHandlerIfValid(router, receiveProfile.notifyEffectBasic, HandleNotifyEffect);
@@ -9465,6 +10128,11 @@ void RegisterDefaultGameModePacketHandlers(CGameModePacketRouter& router)
     RegisterHandlerIfValid(router, receiveProfile.notifyEffectDirect, HandleNotifyEffect2);
     router.Register(0x00E5, HandleDealRequestIncoming);
     router.Register(0x00E7, HandleDealRequestResponse);
+    router.Register(0x00E9, HandleTradeItemAdd);
+    router.Register(0x00EA, HandleTradeAddItemAck);
+    router.Register(0x00EC, HandleTradeConclude);
+    router.Register(0x00EE, HandleTradeCancel);
+    router.Register(0x00F0, HandleTradeCommit);
     router.Register(0x0201, HandleFriendsList);
     router.Register(0x0206, HandleFriendState);
     router.Register(0x0207, HandleFriendRequest);
@@ -9478,8 +10146,11 @@ void RegisterDefaultGameModePacketHandlers(CGameModePacketRouter& router)
     router.Register(0x0283, HandleIgnorePacket);
     RegisterHandlerIfValid(router, receiveProfile.partyInviteRequestExtended, HandlePartyInviteRequest);
     router.Register(0x02C9, HandleIgnorePacket);
-    router.Register(0x02B1, HandleIgnorePacket);
+    router.Register(0x02B1, HandleAllQuestList);
     router.Register(0x02B2, HandleIgnorePacket);
+    router.Register(0x02B3, HandleAddQuest);
+    router.Register(0x02B4, HandleDelQuest);
+    router.Register(0x02B5, HandleUpdateMissionHunt);
     router.Register(0x02B9, HandleShortcutKeyList);
     router.Register(0x02D2, HandleIgnorePacket);
     router.Register(0x02D3, HandleIgnorePacket);
@@ -9490,6 +10161,9 @@ void RegisterDefaultGameModePacketHandlers(CGameModePacketRouter& router)
     router.Register(0x02E7, HandleIgnorePacket);
     router.Register(0x02E9, HandleIgnorePacket);
     router.Register(0x0196, HandlePacket0196);
+    router.Register(0x01AD, HandleMakingArrowList);
+    router.Register(0x025A, HandleMakableItemList);
+    router.Register(0x043D, HandleSkillPostDelay);
     router.Register(0x043F, HandlePacket043F);
     router.Register(0x0814, HandleIgnorePacket);
     router.Register(0x0816, HandleIgnorePacket);

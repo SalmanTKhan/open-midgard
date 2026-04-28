@@ -36,6 +36,10 @@ class UIPlayerContextMenuWnd;
 class UIJoinPartyAcceptWnd;
 class UIFriendRequestAcceptWnd;
 class UIDealRequestAcceptWnd;
+class UITradeWnd;
+class UIVendingWnd;
+class UIVendingShopWnd;
+class UISkillUpConfirmWnd;
 class UIMessengerGroupWnd;
 class UIPartyOptionWnd;
 class UINpcInputWnd;
@@ -48,6 +52,11 @@ class UISelectCartWnd;
 class UIItemShopWnd;
 class UIItemPurchaseWnd;
 class UIItemSellWnd;
+class UINpcCutinWnd;
+class UIRefineWnd;
+class UIMapNameBannerWnd;
+class UIWorldMapWnd;
+class UISkillCastIndicatorWnd;
 class CBitmapRes;
 class CSurface;
 struct ITEM_INFO;
@@ -91,6 +100,10 @@ public:
         WID_JOINPARTYACCEPTWND = 0x23,
         WID_FRIENDREQUESTACCEPTWND = 0x97,
         WID_DEALREQUESTACCEPTWND = 0x98,
+        WID_TRADEWND = 0x99,
+        WID_VENDINGWND = 0x9A,
+        WID_VENDINGSHOPWND = 0x9B,
+        WID_SKILLUPCONFIRMWND = 0x9C,
         WID_PLAYERCONTEXTMENUWND = 0x94,
         WID_MESSENGERGROUPWND = 0x22,
         WID_PARTYOPTIONWND    = 0x95,
@@ -120,6 +133,11 @@ public:
         WID_EGGLISTWND        = 66,
         WID_HOMUNINFOWND      = 67,
         WID_MERCINFOWND       = 68,
+        WID_NPCCUTINWND       = 69,
+        WID_REFINEWND         = 70,
+        WID_MAPNAMEBANNERWND  = 71,
+        WID_WORLDMAPWND       = 72,
+        WID_SKILLCASTINDICATORWND = 0xC0,
     };
 
     UIWindowMgr();
@@ -222,6 +240,10 @@ public:
     UIJoinPartyAcceptWnd* m_joinPartyAcceptWnd;
     UIFriendRequestAcceptWnd* m_friendRequestAcceptWnd;
     UIDealRequestAcceptWnd* m_dealRequestAcceptWnd;
+    UITradeWnd* m_tradeWnd = nullptr;
+    UIVendingWnd* m_vendingWnd = nullptr;
+    UIVendingShopWnd* m_vendingShopWnd = nullptr;
+    UISkillUpConfirmWnd* m_skillUpConfirmWnd = nullptr;
     UIMessengerGroupWnd* m_messengerGroupWnd;
     UIPartyOptionWnd* m_partyOptionWnd;
     UINpcInputWnd* m_npcInputWnd;
@@ -264,6 +286,11 @@ public:
     class UIEggListWnd* m_eggListWnd;
     class UIHomunInfoWnd* m_homunInfoWnd;
     class UIMercInfoWnd* m_mercInfoWnd;
+    UINpcCutinWnd* m_npcCutinWnd = nullptr;
+    UIRefineWnd* m_refineWnd = nullptr;
+    UIMapNameBannerWnd* m_mapNameBannerWnd = nullptr;
+    UIWorldMapWnd* m_worldMapWnd = nullptr;
+    UISkillCastIndicatorWnd* m_skillCastIndicatorWnd = nullptr;
     std::string m_loginStatus;
     std::string m_loginWallpaper;
     std::string m_loadedWallpaperPath;

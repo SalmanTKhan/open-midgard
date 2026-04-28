@@ -1,5 +1,9 @@
 #include "UINpcMenuWnd.h"
 
+// network/Connection.h pulls in winsock2.h, which must be included before
+// windows.h to avoid the WIN32_LEAN_AND_MEAN / winsock1 collision warning.
+#include "network/Connection.h"
+
 #include "NpcDialogColoredText.h"
 #include "input/Gamepad.h"
 #include "gamemode/CursorRenderer.h"
@@ -345,6 +349,8 @@ void UINpcMenuWnd::SetMenu(u32 npcId,
     const std::vector<std::string>& options,
     const std::vector<u8>& optionChoices)
 {
+    m_submitMode = SubmitMode::NpcMenu;
+    m_craftItemIds.clear();
     m_npcId = npcId;
     m_options = options;
     m_optionChoices = optionChoices;
@@ -367,10 +373,39 @@ void UINpcMenuWnd::HideMenu()
     m_npcId = 0;
     m_options.clear();
     m_optionChoices.clear();
+    m_craftItemIds.clear();
+    m_submitMode = SubmitMode::NpcMenu;
     m_selectedIndex = -1;
     m_hoverIndex = -1;
     m_pressedTarget = ClickTarget::None;
     SetShow(0);
+}
+
+// Reuses the NPC menu chrome to render a list of craftable item names. On OK
+// the picked item id is sent via CZ_REQ_MAKINGARROW (0x01AE) for SubmitMode::
+// MakingArrow, or CZ_REQ_MAKINGITEM (0x018E) for SubmitMode::MakingItem. The
+// caller resolves itemId -> display name from g_ttemmgr before passing in.
+void UINpcMenuWnd::SetCraftingMenu(SubmitMode mode,
+    const std::vector<std::string>& options,
+    const std::vector<u16>& itemIds)
+{
+    m_submitMode = mode;
+    m_npcId = 0;
+    m_options = options;
+    m_optionChoices.clear();
+    m_craftItemIds = itemIds;
+    m_selectedIndex = m_options.empty() ? -1 : 0;
+    m_hoverIndex = -1;
+    m_pressedTarget = ClickTarget::None;
+    Resize(kMenuWidth, GetNpcMenuHeightForOptionCount(static_cast<int>(m_options.size())));
+    Move(m_x, m_y);
+    SetShow(1);
+    if (m_selectedIndex >= 0 && m_selectedIndex < static_cast<int>(m_options.size())) {
+        SnapCursorToRect(GetOptionRect(m_selectedIndex));
+    } else {
+        SnapCursorToRect(GetOkRect());
+    }
+    Invalidate();
 }
 
 u8 UINpcMenuWnd::GetSelectedChoice() const
@@ -388,6 +423,41 @@ u8 UINpcMenuWnd::GetSelectedChoice() const
 
 void UINpcMenuWnd::SubmitSelection(u8 choice)
 {
+    if (m_submitMode != SubmitMode::NpcMenu) {
+        // Crafting menus (Make-Arrow / Make-Item) reuse the NPC menu chrome
+        // but submit through dedicated CZ_REQ_MAKING* packets instead of the
+        // NPC select-menu reply. choice==0xFF means cancel; selectedIndex maps
+        // through m_craftItemIds (parallel to m_options) to a u16 item id.
+        if (choice == 0xFF) {
+            HideMenu();
+            PlayUiButtonSound();
+            return;
+        }
+        if (m_selectedIndex < 0 || m_selectedIndex >= static_cast<int>(m_craftItemIds.size())) {
+            return;
+        }
+        const u16 itemId = m_craftItemIds[static_cast<size_t>(m_selectedIndex)];
+        const SubmitMode mode = m_submitMode;
+        HideMenu();
+        PlayUiButtonSound();
+
+        if (mode == SubmitMode::MakingArrow) {
+            // CZ_REQ_MAKINGARROW (0x01AE, 4 bytes): header(2) + itemId(2)
+            char packet[4] = {};
+            *reinterpret_cast<u16*>(packet + 0) = 0x01AE;
+            *reinterpret_cast<u16*>(packet + 2) = itemId;
+            CRagConnection::instance()->SendPacket(packet, sizeof(packet));
+        } else if (mode == SubmitMode::MakingItem) {
+            // CZ_REQ_MAKINGITEM (0x018E, 8 bytes): header(2) + itemId(2) + 3 material itemIds(2 each)=6
+            // We don't track materials client-side; send zeros and let the server resolve.
+            char packet[8] = {};
+            *reinterpret_cast<u16*>(packet + 0) = 0x018E;
+            *reinterpret_cast<u16*>(packet + 2) = itemId;
+            CRagConnection::instance()->SendPacket(packet, sizeof(packet));
+        }
+        return;
+    }
+
     if (m_npcId == 0 || choice == 0) {
         return;
     }

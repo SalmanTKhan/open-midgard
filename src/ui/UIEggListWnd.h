@@ -31,9 +31,12 @@ public:
 private:
     void ToggleMinimized();
     void BuildSystemButtons(std::vector<SystemButton>* out) const;
+    int HitTestRow(int x, int y) const;
 
     int m_selectedIndex = -1;
     bool m_minimized = false;
+    static constexpr int kRowTop = 24;
+    static constexpr int kRowHeight = 22;
     static constexpr int kTitleHeight = 18;
     static constexpr int kFullWidth = 200;
     static constexpr int kFullHeight = 240;

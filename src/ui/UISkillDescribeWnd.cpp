@@ -268,11 +268,31 @@ void UISkillDescribeWnd::OnDraw()
     RECT nameRect{ iconBox.right + 8, iconBox.top, m_x + m_w - kPadding, iconBox.top + 18 };
     shopui::DrawWindowTextRect(hdc, nameRect, SanitizeRoText(m_skillInfo.skillName.empty() ? m_skillInfo.skillIdName : m_skillInfo.skillName), RGB(0, 0, 0), DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
 
-    const std::array<std::string, 3> lines = {
+    std::vector<std::string> lines{
         "Level: " + std::to_string(m_skillInfo.level) + (m_skillInfo.skillMaxLv > 0 ? (" / " + std::to_string(m_skillInfo.skillMaxLv)) : std::string()),
         (m_skillInfo.spcost > 0 ? ("SP Cost: " + std::to_string(m_skillInfo.spcost)) : std::string("Type: Passive")),
-        (m_skillInfo.attackRange > 0 ? ("Range: " + std::to_string(m_skillInfo.attackRange)) : std::string())
+        (m_skillInfo.attackRange > 0 ? ("Range: " + std::to_string(m_skillInfo.attackRange)) : std::string()),
     };
+
+    if (const JobSkillEntry* tree = g_skillMgr.GetJobSkillEntry(g_session.m_playerJob, m_skillInfo.SKID)) {
+        if (tree->maxLevel > 0 && m_skillInfo.skillMaxLv == 0) {
+            lines.push_back("Max Level: " + std::to_string(tree->maxLevel));
+        }
+        if (tree->jobLevelRequired > 0) {
+            lines.push_back("Job Lv Req: " + std::to_string(tree->jobLevelRequired));
+        }
+        for (const auto& pr : tree->prerequisites) {
+            std::string name = "Skill #" + std::to_string(pr.first);
+            if (const SkillMetadata* meta = g_skillMgr.GetSkillMetadata(pr.first)) {
+                if (!meta->displayName.empty()) {
+                    name = meta->displayName;
+                } else if (!meta->skillIdName.empty()) {
+                    name = meta->skillIdName;
+                }
+            }
+            lines.push_back("Req: " + name + " Lv " + std::to_string(pr.second));
+        }
+    }
 
     int detailY = nameRect.bottom + 2;
     for (const std::string& line : lines) {

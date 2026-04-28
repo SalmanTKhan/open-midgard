@@ -6,6 +6,7 @@
 #include "UINpcInputWnd.h"
 #include "UIShortCutWnd.h"
 #include "UIStorageWnd.h"
+#include "UITradeWnd.h"
 #include "gamemode/CursorRenderer.h"
 #include "UIWindowMgr.h"
 #include "core/File.h"
@@ -895,6 +896,27 @@ void UIItemWnd::OnLBtnDblClk(int x, int y)
         const std::vector<const ITEM_INFO*> filteredItems = GetFilteredItems();
         if (m_hoveredItemIndex < static_cast<int>(filteredItems.size())) {
             const ITEM_INFO* item = filteredItems[m_hoveredItemIndex];
+            if (g_session.IsTradeActive() && item && g_windowMgr.m_tradeWnd) {
+                const int stack = (std::max)(1, item->m_num);
+                if (stack > 1) {
+                    // Stacked item: prompt for quantity. Submission re-enters
+                    // CGameMode::SendMsg with GameMsg_RequestTradeAddItem.
+                    if (auto* inputWnd = static_cast<UINpcInputWnd*>(
+                            g_windowMgr.MakeWindow(UIWindowMgr::WID_NPCINPUTWND))) {
+                        inputWnd->OpenGameNumberPrompt(
+                            "Enter amount to trade",
+                            CGameMode::GameMsg_RequestTradeAddItem,
+                            static_cast<msgparam_t>(item->m_itemIndex),
+                            static_cast<u32>(stack),
+                            static_cast<u32>(stack));
+                    }
+                    return;
+                }
+                if (g_windowMgr.m_tradeWnd->TryAddItemFromInventory(
+                        static_cast<unsigned int>(item->m_itemIndex), 1)) {
+                    return;
+                }
+            }
             if (g_session.IsStorageOpen() && item) {
                 if (g_modeMgr.SendMsg(
                         CGameMode::GameMsg_RequestStorageStoreItem,

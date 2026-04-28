@@ -293,6 +293,11 @@ class QtUiState : public QObject {
     Q_PROPERTY(int minimapHeight READ minimapHeight NOTIFY minimapGeometryChanged)
     Q_PROPERTY(QVariantMap minimapData READ minimapData NOTIFY minimapDataChanged)
     Q_PROPERTY(QVariantList statusIcons READ statusIcons NOTIFY statusIconsChanged)
+    Q_PROPERTY(QVariantMap castBar READ castBar NOTIFY castBarChanged)
+    Q_PROPERTY(QVariantList quests READ quests NOTIFY questsChanged)
+    Q_PROPERTY(QVariantMap tradePanel READ tradePanel NOTIFY tradePanelChanged)
+    Q_PROPERTY(QVariantMap vendingPanel READ vendingPanel NOTIFY vendingPanelChanged)
+    Q_PROPERTY(QVariantMap vendingShopPanel READ vendingShopPanel NOTIFY vendingShopPanelChanged)
     Q_PROPERTY(bool shopChoiceVisible READ shopChoiceVisible NOTIFY shopChoiceVisibleChanged)
     Q_PROPERTY(int shopChoiceX READ shopChoiceX NOTIFY shopChoiceGeometryChanged)
     Q_PROPERTY(int shopChoiceY READ shopChoiceY NOTIFY shopChoiceGeometryChanged)
@@ -594,6 +599,11 @@ public:
     int minimapHeight() const { return m_minimapHeight; }
     const QVariantMap& minimapData() const { return m_minimapData; }
     const QVariantList& statusIcons() const { return m_statusIcons; }
+    const QVariantMap& castBar() const { return m_castBar; }
+    const QVariantList& quests() const { return m_quests; }
+    const QVariantMap& tradePanel() const { return m_tradePanel; }
+    const QVariantMap& vendingPanel() const { return m_vendingPanel; }
+    const QVariantMap& vendingShopPanel() const { return m_vendingShopPanel; }
     bool shopChoiceVisible() const { return m_shopChoiceVisible; }
     int shopChoiceX() const { return m_shopChoiceX; }
     int shopChoiceY() const { return m_shopChoiceY; }
@@ -2079,6 +2089,41 @@ public:
         m_statusIcons = value;
         emit statusIconsChanged();
     }
+    void setCastBar(const QVariantMap& value) {
+        if (m_castBar == value) {
+            return;
+        }
+        m_castBar = value;
+        emit castBarChanged();
+    }
+    void setQuests(const QVariantList& value) {
+        if (m_quests == value) {
+            return;
+        }
+        m_quests = value;
+        emit questsChanged();
+    }
+    void setTradePanel(const QVariantMap& value) {
+        if (m_tradePanel == value) {
+            return;
+        }
+        m_tradePanel = value;
+        emit tradePanelChanged();
+    }
+    void setVendingPanel(const QVariantMap& value) {
+        if (m_vendingPanel == value) {
+            return;
+        }
+        m_vendingPanel = value;
+        emit vendingPanelChanged();
+    }
+    void setVendingShopPanel(const QVariantMap& value) {
+        if (m_vendingShopPanel == value) {
+            return;
+        }
+        m_vendingShopPanel = value;
+        emit vendingShopPanelChanged();
+    }
 
     void setShopChoiceVisible(bool value) {
         if (m_shopChoiceVisible == value) {
@@ -2294,6 +2339,11 @@ signals:
     void minimapGeometryChanged();
     void minimapDataChanged();
     void statusIconsChanged();
+    void castBarChanged();
+    void questsChanged();
+    void tradePanelChanged();
+    void vendingPanelChanged();
+    void vendingShopPanelChanged();
     void shopChoiceVisibleChanged();
     void shopChoiceGeometryChanged();
     void shopChoiceTextChanged();
@@ -2586,6 +2636,11 @@ private:
     int m_minimapHeight = 0;
     QVariantMap m_minimapData;
     QVariantList m_statusIcons;
+    QVariantMap m_castBar;
+    QVariantList m_quests;
+    QVariantMap m_tradePanel;
+    QVariantMap m_vendingPanel;
+    QVariantMap m_vendingShopPanel;
     bool m_shopChoiceVisible = false;
     int m_shopChoiceX = 0;
     int m_shopChoiceY = 0;

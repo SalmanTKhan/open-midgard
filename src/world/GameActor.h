@@ -3,6 +3,7 @@
 #include "res/Sprite.h"
 #include "res/ActRes.h"
 #include "Granny.h"
+#include "session/Session.h"  // ACTIVE_STATUS_ICON
 #include <string>
 #include <vector>
 #include <list>
@@ -228,6 +229,13 @@ public:
     UIMerchantShopTitle* m_merchantShopTitle;
     UIRechargeGage* m_skillRechargeGage = nullptr;
     u32 m_freezeEndTick, m_petEmotionStartTick, m_skillRechargeEndTick = 0, m_skillRechargeStartTick = 0;
+    u32 m_castStartTick = 0;
+    u32 m_castEndTick = 0;
+    u16 m_castSkillId = 0;
+    // Per-actor status icon ring (parallel to the local-player HUD list in
+    // CSession). Populated by HandlePacket0196 / HandlePacket043F lookup
+    // when the targeted actor is not the local player. Pruned each frame.
+    std::vector<ACTIVE_STATUS_ICON> m_perActorStatusIcons;
     int m_chatWidth, m_chatHeight, m_nameWidth, m_xSize, m_ySize, m_headType;
     std::list<WBA> m_willBeAttackList, m_willBeAttackedList;
     int m_willBeDead, m_is99;

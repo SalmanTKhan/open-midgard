@@ -113,6 +113,8 @@ private:
     void DrawWindowChrome(HDC hdc) const;
     void DrawBottomButton(HDC hdc, const TextButton& button) const;
     int HitTestBottomButton(int globalX, int globalY) const;
+    int HitTestFilterTab(int globalX, int globalY) const;
+    void DrawFilterTab(HDC hdc, const TextButton& tab, bool selected) const;
     RECT GetScrollTrackRect() const;
     RECT GetScrollThumbRect(int skillCount) const;
     bool IsScrollBarVisible(int skillCount) const;
@@ -136,6 +138,8 @@ private:
     int m_scrollDragOffsetY;
     std::array<UIBitmapButton*, 3> m_systemButtons;
     std::array<TextButton, 2> m_bottomButtons;
+    std::array<TextButton, 3> m_filterTabs;
+    int m_filterMode = 0;  // 0=All, 1=Active, 2=Passive
     shopui::BitmapPixels m_titleBarBitmap;
     shopui::BitmapPixels m_titleBarLeftBitmap;
     shopui::BitmapPixels m_titleBarMidBitmap;

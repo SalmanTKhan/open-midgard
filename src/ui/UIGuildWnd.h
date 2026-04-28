@@ -53,8 +53,32 @@ private:
     void ToggleMinimized();
     void BuildSystemButtons(std::vector<SystemButton>* out) const;
 
+    enum ActionButtonId {
+        ButtonLeaveGuild = 1,
+        ButtonExpelMember = 2,
+        ButtonEditNotice = 3,
+    };
+
+public:
+    void SetPendingNoticeSubject(const char* s);
+    void SetPendingNoticeBody(const char* s);
+    const std::string& GetPendingNoticeSubject() const { return m_pendingNoticeSubject; }
+    const std::string& GetPendingNoticeBody() const { return m_pendingNoticeBody; }
+private:
+
+    struct InteractRect { int x; int y; int w; int h; };
+    InteractRect GetTabRect(int tabIndex) const;
+    InteractRect GetMemberRowRect(int rowIndex) const;
+    InteractRect GetActionButtonRect(int buttonId) const;
+    int HitTestTab(int x, int y) const;
+    int HitTestMemberRow(int x, int y) const;
+    int HitTestActionButton(int x, int y) const;
+
     int m_activeTab = TabInfo;
     bool m_minimized = false;
+    int m_selectedMemberIndex = -1;
+    std::string m_pendingNoticeSubject;
+    std::string m_pendingNoticeBody;
     static constexpr int kTitleHeight = 18;
     static constexpr int kFullWidth = 300;
     static constexpr int kFullHeight = 280;

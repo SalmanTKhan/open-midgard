@@ -3648,6 +3648,162 @@ void PopulateMinimapState(QtUiState* state)
     state->setMinimapData(data);
 }
 
+void PopulateVendingPanelState(QtUiState* state)
+{
+    if (!state) {
+        return;
+    }
+    QVariantMap data;
+    const VENDING_STATE& vs = g_session.GetVendingState();
+    data.insert(QStringLiteral("active"), vs.active);
+    data.insert(QStringLiteral("shopTitle"), ToQString(vs.shopTitle));
+    QVariantList items;
+    items.reserve(static_cast<qsizetype>(vs.items.size()));
+    for (const VENDING_ITEM& it : vs.items) {
+        QVariantMap row;
+        row.insert(QStringLiteral("itemId"), static_cast<int>(it.itemId));
+        row.insert(QStringLiteral("name"), ToQString(g_ttemmgr.GetDisplayName(it.itemId, it.identified != 0)));
+        row.insert(QStringLiteral("amount"), static_cast<int>(it.amount));
+        row.insert(QStringLiteral("price"), static_cast<int>(it.price));
+        row.insert(QStringLiteral("inventoryIndex"), static_cast<int>(it.inventoryIndex));
+        items.push_back(row);
+    }
+    data.insert(QStringLiteral("items"), items);
+    state->setVendingPanel(data);
+}
+
+void PopulateVendingShopPanelState(QtUiState* state)
+{
+    if (!state) {
+        return;
+    }
+    QVariantMap data;
+    const VENDING_SHOP_BROWSE_STATE& bs = g_session.GetVendingBrowseState();
+    data.insert(QStringLiteral("active"), bs.active);
+    data.insert(QStringLiteral("partnerAid"), static_cast<int>(bs.partnerAid));
+    data.insert(QStringLiteral("partnerShopTitle"), ToQString(bs.partnerShopTitle));
+    QVariantList items;
+    items.reserve(static_cast<qsizetype>(bs.items.size()));
+    for (const VENDING_ITEM& it : bs.items) {
+        QVariantMap row;
+        row.insert(QStringLiteral("itemId"), static_cast<int>(it.itemId));
+        row.insert(QStringLiteral("name"), ToQString(g_ttemmgr.GetDisplayName(it.itemId, it.identified != 0)));
+        row.insert(QStringLiteral("amount"), static_cast<int>(it.amount));
+        row.insert(QStringLiteral("price"), static_cast<int>(it.price));
+        row.insert(QStringLiteral("inventoryIndex"), static_cast<int>(it.inventoryIndex));
+        items.push_back(row);
+    }
+    data.insert(QStringLiteral("items"), items);
+    state->setVendingShopPanel(data);
+}
+
+void PopulateTradePanelState(QtUiState* state)
+{
+    if (!state) {
+        return;
+    }
+    QVariantMap data;
+    const TRADE_STATE& tradeState = g_session.GetTradeState();
+    data.insert(QStringLiteral("active"), tradeState.active);
+    data.insert(QStringLiteral("partnerName"), ToQString(tradeState.partnerName));
+    data.insert(QStringLiteral("confirmEnabled"), tradeState.finalConfirmAvailable);
+
+    auto buildPane = [](const TRADE_PANE& p) {
+        QVariantMap m;
+        m.insert(QStringLiteral("zeny"), p.zeny);
+        m.insert(QStringLiteral("ready"), p.ready);
+        QVariantList items;
+        items.reserve(static_cast<qsizetype>(p.items.size()));
+        for (const ITEM_INFO& item : p.items) {
+            QVariantMap row;
+            row.insert(QStringLiteral("itemId"), static_cast<int>(item.GetItemId()));
+            row.insert(QStringLiteral("name"), ToQString(item.GetDisplayName()));
+            row.insert(QStringLiteral("count"), item.m_num);
+            row.insert(QStringLiteral("refine"), item.m_refiningLevel);
+            items.push_back(row);
+        }
+        m.insert(QStringLiteral("items"), items);
+        return m;
+    };
+    data.insert(QStringLiteral("mine"), buildPane(tradeState.mine));
+    data.insert(QStringLiteral("theirs"), buildPane(tradeState.theirs));
+    state->setTradePanel(data);
+}
+
+void PopulateQuestState(QtUiState* state)
+{
+    if (!state) {
+        return;
+    }
+    QVariantList list;
+    const std::vector<QUEST_INFO>& quests = g_session.GetQuests();
+    list.reserve(static_cast<qsizetype>(quests.size()));
+    for (const QUEST_INFO& quest : quests) {
+        QVariantMap entry;
+        entry.insert(QStringLiteral("questId"), static_cast<int>(quest.questId));
+        entry.insert(QStringLiteral("active"), quest.active);
+        entry.insert(QStringLiteral("startServerTime"), static_cast<int>(quest.startServerTime));
+        entry.insert(QStringLiteral("endServerTime"), static_cast<int>(quest.endServerTime));
+        QVariantList hunts;
+        hunts.reserve(static_cast<qsizetype>(quest.hunts.size()));
+        for (const QUEST_HUNT_INFO& hunt : quest.hunts) {
+            QVariantMap h;
+            h.insert(QStringLiteral("monsterId"), static_cast<int>(hunt.monsterId));
+            h.insert(QStringLiteral("monsterName"), ToQString(hunt.monsterName));
+            h.insert(QStringLiteral("count"), static_cast<int>(hunt.count));
+            h.insert(QStringLiteral("maxCount"), static_cast<int>(hunt.maxCount));
+            hunts.push_back(h);
+        }
+        entry.insert(QStringLiteral("hunts"), hunts);
+        list.push_back(entry);
+    }
+    state->setQuests(list);
+}
+
+void PopulateCastBarState(QtUiState* state, const CGameMode& mode)
+{
+    if (!state) {
+        return;
+    }
+
+    QVariantMap data;
+    bool active = false;
+    int skillId = 0;
+    QString skillName;
+    int durationMs = 0;
+    int remainingMs = 0;
+    double progress = 0.0;
+
+    const CGameActor* const player = (mode.m_world ? mode.m_world->m_player : nullptr);
+    if (player && player->m_castEndTick != 0 && player->m_castStartTick != 0) {
+        const u32 now = timeGetTime();
+        if (now < player->m_castEndTick) {
+            const u32 total = player->m_castEndTick - player->m_castStartTick;
+            const u32 elapsed = (now > player->m_castStartTick) ? (now - player->m_castStartTick) : 0;
+            const u32 remaining = (player->m_castEndTick > now) ? (player->m_castEndTick - now) : 0;
+            active = total > 0;
+            skillId = player->m_castSkillId;
+            durationMs = static_cast<int>(total);
+            remainingMs = static_cast<int>(remaining);
+            progress = total > 0 ? std::min(1.0, static_cast<double>(elapsed) / static_cast<double>(total)) : 0.0;
+
+            if (skillId != 0) {
+                if (const PLAYER_SKILL_INFO* const info = g_session.GetSkillItemBySkillId(skillId)) {
+                    skillName = ToQString(!info->skillName.empty() ? info->skillName : info->skillIdName);
+                }
+            }
+        }
+    }
+
+    data.insert(QStringLiteral("active"), active);
+    data.insert(QStringLiteral("skillId"), skillId);
+    data.insert(QStringLiteral("skillName"), skillName);
+    data.insert(QStringLiteral("durationMs"), durationMs);
+    data.insert(QStringLiteral("remainingMs"), remainingMs);
+    data.insert(QStringLiteral("progress"), progress);
+    state->setCastBar(data);
+}
+
 void PopulateStatusIconsState(QtUiState* state, int mouseX, int mouseY)
 {
     if (!state) {
@@ -3980,6 +4136,47 @@ QVariantMap MakePartyHpBarAnchor(int centerX, int topY, int currentHp, int maxHp
     return anchor;
 }
 
+QVariantMap MakeActorStatusStripAnchor(int centerX, int topY,
+                                       const std::vector<ACTIVE_STATUS_ICON>& icons,
+                                       u32 nowServerTime)
+{
+    constexpr int kIconSize = 18;
+    constexpr int kSpacing = 2;
+    const int count = static_cast<int>(icons.size());
+    const int width = count * kIconSize + (count - 1) * kSpacing;
+
+    QVariantMap anchor;
+    anchor.insert(QStringLiteral("kind"), QStringLiteral("actorStatusStrip"));
+    anchor.insert(QStringLiteral("x"), centerX - width / 2);
+    anchor.insert(QStringLiteral("y"), topY - (kIconSize + 4));
+    anchor.insert(QStringLiteral("width"), width);
+    anchor.insert(QStringLiteral("height"), kIconSize);
+    anchor.insert(QStringLiteral("iconSize"), kIconSize);
+    anchor.insert(QStringLiteral("iconSpacing"), kSpacing);
+    anchor.insert(QStringLiteral("z"), 2055);
+
+    QVariantList iconList;
+    iconList.reserve(static_cast<qsizetype>(icons.size()));
+    for (const ACTIVE_STATUS_ICON& ico : icons) {
+        const qtui::StatusIconCatalogEntry* const catalogEntry =
+            qtui::FindStatusIconCatalogEntry(ico.statusType);
+        const int skillId = catalogEntry ? catalogEntry->skillId : 0;
+        const u32 remainingMs = (ico.hasTimer && ico.expireServerTime > nowServerTime)
+            ? (ico.expireServerTime - nowServerTime) : 0;
+        QVariantMap entry;
+        entry.insert(QStringLiteral("statusType"), ico.statusType);
+        entry.insert(QStringLiteral("skillId"), skillId);
+        entry.insert(QStringLiteral("name"), ResolveStatusIconLabel(ico.statusType, skillId));
+        entry.insert(QStringLiteral("shortName"),
+                     BuildStatusIconShortLabel(ResolveStatusIconLabel(ico.statusType, skillId)));
+        entry.insert(QStringLiteral("timed"), ico.hasTimer);
+        entry.insert(QStringLiteral("remainingMs"), static_cast<int>(remainingMs));
+        iconList.push_back(entry);
+    }
+    anchor.insert(QStringLiteral("icons"), iconList);
+    return anchor;
+}
+
 QVariantMap MakeUiItemAnchor(const shopui::ItemHoverInfo& hoverInfo)
 {
     const int logicalCenterX = hoverInfo.anchorRect.left + ((hoverInfo.anchorRect.right - hoverInfo.anchorRect.left) / 2);
@@ -4174,6 +4371,11 @@ bool QtUiStateAdapter::syncGameplay(CGameMode& mode,
     const int uiMouseX = UiScaleRawToLogicalCoordinate(mouseX);
     const int uiMouseY = UiScaleRawToLogicalCoordinate(mouseY);
     PopulateStatusIconsState(m_state, uiMouseX, uiMouseY);
+    PopulateCastBarState(m_state, mode);
+    PopulateQuestState(m_state);
+    PopulateTradePanelState(m_state);
+    PopulateVendingPanelState(m_state);
+    PopulateVendingShopPanelState(m_state);
     PopulateShopChoiceState(m_state);
     PopulateNotificationState(m_state);
 
@@ -4237,6 +4439,31 @@ bool QtUiStateAdapter::syncGameplay(CGameMode& mode,
                 bubbleBottomY));
         };
 
+        const u32 nowServerTimeForIcons = g_session.GetServerTime();
+
+        auto appendActorStatusStrip = [&](CGameActor* actor) {
+            if (!actor || !actor->m_isVisible) {
+                return;
+            }
+            // Prune expired entries on the actor's per-actor list inline.
+            auto& vec = actor->m_perActorStatusIcons;
+            vec.erase(std::remove_if(vec.begin(), vec.end(),
+                [&](const ACTIVE_STATUS_ICON& e) {
+                    return e.hasTimer && e.expireServerTime <= nowServerTimeForIcons;
+                }), vec.end());
+            if (vec.empty()) {
+                return;
+            }
+            int centerX = 0;
+            int topY = 0;
+            int labelY = 0;
+            if (!mode.m_world->GetActorScreenMarker(viewMatrix, cameraLongitude,
+                    actor->m_gid, &centerX, &topY, &labelY)) {
+                return;
+            }
+            anchors.push_back(MakeActorStatusStripAnchor(centerX, topY, vec, nowServerTimeForIcons));
+        };
+
         appendChatBubbleAnchor(mode.m_world->m_player);
         for (const auto& runtimeEntry : mode.m_runtimeActors) {
             CGameActor* const actor = runtimeEntry.second;
@@ -4245,6 +4472,7 @@ bool QtUiStateAdapter::syncGameplay(CGameMode& mode,
             }
             appendPartyHpAnchor(actor);
             appendChatBubbleAnchor(actor);
+            appendActorStatusStrip(actor);
         }
 
         const bool hasUiItemHover = TryAppendHoveredUiItemAnchor(&anchors);

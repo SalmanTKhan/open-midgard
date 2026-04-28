@@ -18,9 +18,18 @@ public:
     void OnMouseMove(int x, int y) override;
     void OnLBtnUp(int x, int y) override;
 
+    enum class SubmitMode {
+        NpcMenu = 0,
+        MakingArrow = 1,
+        MakingItem = 2,
+    };
+
     void SetMenu(u32 npcId,
         const std::vector<std::string>& options,
         const std::vector<u8>& optionChoices);
+    void SetCraftingMenu(SubmitMode mode,
+        const std::vector<std::string>& options,
+        const std::vector<u16>& itemIds);
     void HideMenu();
     bool HandleKeyDown(int virtualKey);
     u32 GetNpcId() const;
@@ -53,6 +62,8 @@ private:
     u32 m_npcId;
     std::vector<std::string> m_options;
     std::vector<u8> m_optionChoices;
+    std::vector<u16> m_craftItemIds;
+    SubmitMode m_submitMode = SubmitMode::NpcMenu;
     int m_selectedIndex;
     int m_hoverIndex;
     ClickTarget m_pressedTarget;

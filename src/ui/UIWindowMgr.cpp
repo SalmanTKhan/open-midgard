@@ -12,6 +12,15 @@
 #include "UIJoinPartyAcceptWnd.h"
 #include "UIFriendRequestAcceptWnd.h"
 #include "UIDealRequestAcceptWnd.h"
+#include "UITradeWnd.h"
+#include "UIVendingWnd.h"
+#include "UIVendingShopWnd.h"
+#include "UINpcCutinWnd.h"
+#include "UIRefineWnd.h"
+#include "UIMapNameBannerWnd.h"
+#include "UIWorldMapWnd.h"
+#include "UISkillCastIndicatorWnd.h"
+#include "UISkillUpConfirmWnd.h"
 #include "UIMessengerGroupWnd.h"
 #include "UIPartyOptionWnd.h"
 #include "UINpcInputWnd.h"
@@ -946,6 +955,144 @@ UIWindow* UIWindowMgr::MakeWindow(int windowId)
         m_dealRequestAcceptWnd->SetShow(1);
         return m_dealRequestAcceptWnd;
 
+    case WID_TRADEWND:
+        if (!m_tradeWnd) {
+            m_tradeWnd = new UITradeWnd();
+            int defaultX = 0;
+            int defaultY = 0;
+            if (g_hMainWnd) {
+                RECT clientRect{};
+                if (GetClientRect(g_hMainWnd, &clientRect)) {
+                    defaultX = ((clientRect.right - clientRect.left) - 360) / 2;
+                    defaultY = ((clientRect.bottom - clientRect.top) - 280) / 2;
+                }
+            }
+            m_tradeWnd->OnCreate(defaultX, defaultY);
+            m_children.push_back(m_tradeWnd);
+        }
+        m_children.remove(m_tradeWnd);
+        m_children.push_back(m_tradeWnd);
+        m_tradeWnd->SetShow(1);
+        return m_tradeWnd;
+
+    case WID_VENDINGWND:
+        if (!m_vendingWnd) {
+            m_vendingWnd = new UIVendingWnd();
+            int defaultX = 0;
+            int defaultY = 0;
+            if (g_hMainWnd) {
+                RECT clientRect{};
+                if (GetClientRect(g_hMainWnd, &clientRect)) {
+                    defaultX = ((clientRect.right - clientRect.left) - 380) / 2;
+                    defaultY = ((clientRect.bottom - clientRect.top) - 320) / 2;
+                }
+            }
+            m_vendingWnd->OnCreate(defaultX, defaultY);
+            m_children.push_back(m_vendingWnd);
+        }
+        m_children.remove(m_vendingWnd);
+        m_children.push_back(m_vendingWnd);
+        m_vendingWnd->SetShow(1);
+        return m_vendingWnd;
+
+    case WID_SKILLUPCONFIRMWND:
+        if (!m_skillUpConfirmWnd) {
+            m_skillUpConfirmWnd = new UISkillUpConfirmWnd();
+            m_children.push_back(m_skillUpConfirmWnd);
+        }
+        m_children.remove(m_skillUpConfirmWnd);
+        m_children.push_back(m_skillUpConfirmWnd);
+        m_skillUpConfirmWnd->SetShow(1);
+        return m_skillUpConfirmWnd;
+
+    case WID_VENDINGSHOPWND:
+        if (!m_vendingShopWnd) {
+            m_vendingShopWnd = new UIVendingShopWnd();
+            int defaultX = 0;
+            int defaultY = 0;
+            if (g_hMainWnd) {
+                RECT clientRect{};
+                if (GetClientRect(g_hMainWnd, &clientRect)) {
+                    defaultX = ((clientRect.right - clientRect.left) - 380) / 2;
+                    defaultY = ((clientRect.bottom - clientRect.top) - 320) / 2;
+                }
+            }
+            m_vendingShopWnd->OnCreate(defaultX, defaultY);
+            m_children.push_back(m_vendingShopWnd);
+        }
+        m_children.remove(m_vendingShopWnd);
+        m_children.push_back(m_vendingShopWnd);
+        m_vendingShopWnd->SetShow(1);
+        return m_vendingShopWnd;
+
+    case WID_NPCCUTINWND:
+        if (!m_npcCutinWnd) {
+            m_npcCutinWnd = new UINpcCutinWnd();
+            m_children.push_back(m_npcCutinWnd);
+        }
+        m_children.remove(m_npcCutinWnd);
+        m_children.push_back(m_npcCutinWnd);
+        return m_npcCutinWnd;
+
+    case WID_MAPNAMEBANNERWND:
+        if (!m_mapNameBannerWnd) {
+            m_mapNameBannerWnd = new UIMapNameBannerWnd();
+            m_children.push_back(m_mapNameBannerWnd);
+        }
+        m_children.remove(m_mapNameBannerWnd);
+        m_children.push_back(m_mapNameBannerWnd);
+        return m_mapNameBannerWnd;
+
+    case WID_SKILLCASTINDICATORWND:
+        if (!m_skillCastIndicatorWnd) {
+            m_skillCastIndicatorWnd = new UISkillCastIndicatorWnd();
+            m_children.push_back(m_skillCastIndicatorWnd);
+        }
+        m_children.remove(m_skillCastIndicatorWnd);
+        m_children.push_back(m_skillCastIndicatorWnd);
+        m_skillCastIndicatorWnd->SetShow(1);
+        return m_skillCastIndicatorWnd;
+
+    case WID_WORLDMAPWND:
+        if (!m_worldMapWnd) {
+            m_worldMapWnd = new UIWorldMapWnd();
+            int defaultX = 0;
+            int defaultY = 0;
+            if (g_hMainWnd) {
+                RECT clientRect{};
+                if (GetClientRect(g_hMainWnd, &clientRect)) {
+                    defaultX = ((clientRect.right - clientRect.left) - 380) / 2;
+                    defaultY = ((clientRect.bottom - clientRect.top) - 320) / 2;
+                }
+            }
+            m_worldMapWnd->OnCreate(defaultX, defaultY);
+            m_children.push_back(m_worldMapWnd);
+        }
+        m_children.remove(m_worldMapWnd);
+        m_children.push_back(m_worldMapWnd);
+        m_worldMapWnd->SetShow(1);
+        return m_worldMapWnd;
+
+    case WID_REFINEWND:
+        if (!m_refineWnd) {
+            m_refineWnd = new UIRefineWnd();
+            int defaultX = 0;
+            int defaultY = 0;
+            if (g_hMainWnd) {
+                RECT clientRect{};
+                if (GetClientRect(g_hMainWnd, &clientRect)) {
+                    defaultX = ((clientRect.right - clientRect.left) - 320) / 2;
+                    defaultY = ((clientRect.bottom - clientRect.top) - 280) / 2;
+                }
+            }
+            m_refineWnd->OnCreate(defaultX, defaultY);
+            m_children.push_back(m_refineWnd);
+        }
+        m_children.remove(m_refineWnd);
+        m_children.push_back(m_refineWnd);
+        m_refineWnd->SetShow(1);
+        return m_refineWnd;
+
     case WID_PARTYOPTIONWND:
         if (!m_partyOptionWnd) {
             m_partyOptionWnd = new UIPartyOptionWnd();
@@ -1517,6 +1664,18 @@ void UIWindowMgr::DeleteWindow(UIWindow* window)
     if (window == m_friendRequestAcceptWnd) {
         m_friendRequestAcceptWnd = nullptr;
     }
+    if (window == m_tradeWnd) {
+        m_tradeWnd = nullptr;
+    }
+    if (window == m_vendingWnd) {
+        m_vendingWnd = nullptr;
+    }
+    if (window == m_vendingShopWnd) {
+        m_vendingShopWnd = nullptr;
+    }
+    if (window == m_skillUpConfirmWnd) {
+        m_skillUpConfirmWnd = nullptr;
+    }
     if (window == m_dealRequestAcceptWnd) {
         m_dealRequestAcceptWnd = nullptr;
     }
@@ -1700,6 +1859,10 @@ void UIWindowMgr::RemoveAllWindows()
     m_joinPartyAcceptWnd = nullptr;
     m_friendRequestAcceptWnd = nullptr;
     m_dealRequestAcceptWnd = nullptr;
+    m_tradeWnd = nullptr;
+    m_vendingWnd = nullptr;
+    m_vendingShopWnd = nullptr;
+    m_skillUpConfirmWnd = nullptr;
     m_messengerGroupWnd = nullptr;
     m_partyOptionWnd = nullptr;
     m_npcInputWnd = nullptr;

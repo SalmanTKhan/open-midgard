@@ -129,6 +129,17 @@ public:
         GameMsg_RequestStoragePasswordSubmit = 20049,
         GameMsg_RequestFriendReply = 20050,
         GameMsg_RequestDealReply = 20051,
+        GameMsg_RequestTradeAddItem = 20052,
+        GameMsg_RequestVendingShopTitle = 20053,
+        GameMsg_RequestVendingItemPrice = 20054,
+        GameMsg_RequestMailRecipient = 20055,
+        GameMsg_RequestMailSubject = 20056,
+        GameMsg_RequestMailBody = 20057,
+        GameMsg_RequestMailZeny = 20058,
+        GameMsg_RequestMailSendNow = 20059,
+        GameMsg_RequestGuildNoticeSubject = 20060,
+        GameMsg_RequestGuildNoticeBody = 20061,
+        GameMsg_RequestGuildNoticeSubmit = 20062,
 
         GameMsg_RequestMoveDelta = 20100,
     };
@@ -142,6 +153,7 @@ public:
         PlayerContext_RegisterFriend,
         PlayerContext_SendMail,
         PlayerContext_RejectWhispering,
+        PlayerContext_BrowseShop,
     };
 
     CGameMode();

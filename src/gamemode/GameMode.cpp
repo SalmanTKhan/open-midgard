@@ -26,6 +26,10 @@
 #include "ui/UIMinimapWnd.h"
 #include "ui/UiScale.h"
 #include "ui/UIPlayerContextMenuWnd.h"
+#include "ui/UIVendingWnd.h"
+#include "ui/UIMailSendWnd.h"
+#include "ui/UIGuildWnd.h"
+#include "ui/UINpcInputWnd.h"
 #include "ui/UIWindow.h"
 #include "ui/UIWindowMgr.h"
 #include "render/DrawUtil.h"
@@ -3464,7 +3468,12 @@ bool TryOpenPlayerContextMenu(CGameMode& mode, int screenX, int screenY)
 
     mode.m_menuTargetAID = targetAid;
     mode.m_lastWhisperMenuCharacterName = targetName;
-    menuWnd->SetMenu(targetAid, targetName, BuildPlayerContextMenuEntries(targetName), menuX, menuY);
+    std::vector<PlayerContextMenuEntry> entries = BuildPlayerContextMenuEntries(targetName);
+    if (!g_session.GetActorShopTitle(targetAid).empty()) {
+        entries.push_back({ CGameMode::PlayerContext_BrowseShop,
+                            std::string("Browse ") + targetName + "'s Shop" });
+    }
+    menuWnd->SetMenu(targetAid, targetName, entries, menuX, menuY);
     DbgLog("[GameMode] opened player context menu targetAid=%u targetName='%s'\n",
         static_cast<unsigned int>(targetAid),
         targetName.c_str());
@@ -3490,6 +3499,8 @@ const char* GetPlayerContextActionName(CGameMode::PlayerContextAction action)
         return "send-mail";
     case CGameMode::PlayerContext_RejectWhispering:
         return "reject-whispering";
+    case CGameMode::PlayerContext_BrowseShop:
+        return "browse-shop";
     default:
         return "unknown";
     }
@@ -6662,16 +6673,8 @@ bool RequestPetRename(const char* name)
     return SendRawPacketBytes(&pkt, sizeof(pkt));
 }
 
-bool RequestPetSelectEgg(u16 inventoryIndex)
-{
-    if (!IsFeatureEnabled(ClientFeature::Pet) || inventoryIndex == 0) {
-        return false;
-    }
-#pragma pack(push, 1)
-    struct { u16 op; u16 index; } pkt { 0x01A7, inventoryIndex };
-#pragma pack(pop)
-    return SendRawPacketBytes(&pkt, sizeof(pkt));
-}
+// RequestPetSelectEgg moved to file scope (after the outer anonymous namespace
+// closes) so UIEggListWnd.cpp can link against it cross-TU.
 
 bool RequestHomunMenu(u8 type, u8 command)
 {
@@ -6750,63 +6753,9 @@ bool RequestMailReturn(u32 mailId)
     return SendRawPacketBytes(&pkt, sizeof(pkt));
 }
 
-bool RequestMailSend(const char* recipient, const char* subject, const char* body)
-{
-    if (!IsFeatureEnabled(ClientFeature::MailLegacy) || !recipient || !subject) {
-        return false;
-    }
-    const std::string bodyStr = body ? body : "";
-    // CZ_MAIL_SEND (0x0248): opcode(2) + packetLen(2) + receiveName(24) + header(40) + msg_len(1) + msg(variable)
-    const u16 bodyLen = static_cast<u16>((std::min<std::size_t>)(bodyStr.size(), 200));
-    const u16 packetLen = static_cast<u16>(2 + 2 + 24 + 40 + 1 + bodyLen);
-    std::vector<u8> buf(packetLen, 0);
-    *reinterpret_cast<u16*>(buf.data() + 0) = 0x0248;
-    *reinterpret_cast<u16*>(buf.data() + 2) = packetLen;
-    std::strncpy(reinterpret_cast<char*>(buf.data() + 4), recipient, 23);
-    std::strncpy(reinterpret_cast<char*>(buf.data() + 28), subject, 39);
-    buf[68] = static_cast<u8>(bodyLen);
-    if (bodyLen > 0) {
-        std::memcpy(buf.data() + 69, bodyStr.data(), bodyLen);
-    }
-    return SendRawPacketBytes(buf.data(), static_cast<int>(buf.size()));
-}
-
-bool RequestMailAddAttachment(u16 inventoryIndex, u32 amount)
-{
-    if (!IsFeatureEnabled(ClientFeature::MailLegacy) || inventoryIndex == 0 || amount == 0) {
-        return false;
-    }
-#pragma pack(push, 1)
-    struct { u16 op; u16 index; u32 count; } pkt { 0x0247, inventoryIndex, amount };
-#pragma pack(pop)
-    return SendRawPacketBytes(&pkt, sizeof(pkt));
-}
-
-bool RequestMailResetAttachment()
-{
-    if (!IsFeatureEnabled(ClientFeature::MailLegacy)) {
-        return false;
-    }
-#pragma pack(push, 1)
-    struct { u16 op; u16 type; } pkt { 0x0246, 0 };
-#pragma pack(pop)
-    return SendRawPacketBytes(&pkt, sizeof(pkt));
-}
-
-bool RequestGuildLeave(int guildId, const char* reason)
-{
-    if (!IsFeatureEnabled(ClientFeature::Guild) || !g_session.IsInGuild() || guildId == 0) {
-        return false;
-    }
-#pragma pack(push, 1)
-    struct { u16 op; u32 guildId; u32 accountId; u32 charId; char mes[40]; } pkt {
-        0x0159, static_cast<u32>(guildId), g_session.m_aid, g_session.m_gid, {} };
-#pragma pack(pop)
-    if (reason) {
-        std::strncpy(pkt.mes, reason, sizeof(pkt.mes) - 1);
-    }
-    return SendRawPacketBytes(&pkt, sizeof(pkt));
-}
+// RequestMailSend / RequestMailAddAttachment / RequestMailResetAttachment /
+// RequestGuildExpel / RequestGuildLeave moved to file scope (after the outer
+// anonymous namespace) so UI windows can link against them across TUs.
 
 std::string NormalizePartyNameForPacket(const char* rawName)
 {
@@ -9736,6 +9685,245 @@ void DrawBootstrapScene(HWND hwnd, const CGameMode& mode)
 }
 }
 
+// CZ_GUILD_NOTICE (0x016E, 186 bytes): opcode + guildId + subject(60) + body(120).
+bool RequestGuildSetNotice(int guildId, const char* subject, const char* body)
+{
+    if (!IsFeatureEnabled(ClientFeature::Guild) || !g_session.IsInGuild() || guildId == 0) {
+        return false;
+    }
+    char packet[186] = {};
+    *reinterpret_cast<u16*>(packet + 0) = 0x016E;
+    *reinterpret_cast<u32*>(packet + 2) = static_cast<u32>(guildId);
+    if (subject) {
+        std::strncpy(packet + 6, subject, 59);
+    }
+    if (body) {
+        std::strncpy(packet + 66, body, 119);
+    }
+    return CRagConnection::instance()->SendPacket(packet, 186) != 0;
+}
+
+// CZ_REQ_PET_EGGSELECT (0x01A7, 4 bytes): u16 op + u16 inventoryIndex.
+bool RequestPetSelectEgg(unsigned short inventoryIndex)
+{
+    if (!IsFeatureEnabled(ClientFeature::Pet) || inventoryIndex == 0) {
+        return false;
+    }
+    char packet[4] = {};
+    *reinterpret_cast<u16*>(packet + 0) = 0x01A7;
+    *reinterpret_cast<u16*>(packet + 2) = inventoryIndex;
+    return CRagConnection::instance()->SendPacket(packet, 4) != 0;
+}
+
+// CZ_REQ_WEAPONREFINE (0x0222, 6 bytes): u16 op + u32 inventoryIndex.
+// File scope so UIRefineWnd.cpp can link against it.
+bool SendWeaponRefineRequest(unsigned int inventoryIndex)
+{
+    char packet[6] = {};
+    *reinterpret_cast<u16*>(packet + 0) = 0x0222;
+    *reinterpret_cast<u32*>(packet + 2) = inventoryIndex;
+    return CRagConnection::instance()->SendPacket(packet, 6) != 0;
+}
+
+// CZ_MAIL_SEND (0x0248, varlen).
+bool RequestMailSend(const char* recipient, const char* subject, const char* body)
+{
+    if (!IsFeatureEnabled(ClientFeature::MailLegacy) || !recipient || !subject) {
+        return false;
+    }
+    const std::string bodyStr = body ? body : "";
+    const u16 bodyLen = static_cast<u16>((std::min<std::size_t>)(bodyStr.size(), 200));
+    const u16 packetLen = static_cast<u16>(2 + 2 + 24 + 40 + 1 + bodyLen);
+    std::vector<char> buf(packetLen, 0);
+    *reinterpret_cast<u16*>(buf.data() + 0) = 0x0248;
+    *reinterpret_cast<u16*>(buf.data() + 2) = packetLen;
+    std::strncpy(buf.data() + 4, recipient, 23);
+    std::strncpy(buf.data() + 28, subject, 39);
+    buf[68] = static_cast<char>(bodyLen);
+    if (bodyLen > 0) {
+        std::memcpy(buf.data() + 69, bodyStr.data(), bodyLen);
+    }
+    return CRagConnection::instance()->SendPacket(buf.data(), static_cast<int>(buf.size())) != 0;
+}
+
+// CZ_MAIL_ADD_ITEM (0x0247, 8 bytes).
+bool RequestMailAddAttachment(u16 inventoryIndex, u32 amount)
+{
+    if (!IsFeatureEnabled(ClientFeature::MailLegacy) || inventoryIndex == 0 || amount == 0) {
+        return false;
+    }
+    char packet[8] = {};
+    *reinterpret_cast<u16*>(packet + 0) = 0x0247;
+    *reinterpret_cast<u16*>(packet + 2) = inventoryIndex;
+    *reinterpret_cast<u32*>(packet + 4) = amount;
+    return CRagConnection::instance()->SendPacket(packet, 8) != 0;
+}
+
+// CZ_MAIL_RESET_ITEM (0x0246, 4 bytes): opcode + type(0=item,1=zeny). type=0 resets attachment.
+bool RequestMailResetAttachment()
+{
+    if (!IsFeatureEnabled(ClientFeature::MailLegacy)) {
+        return false;
+    }
+    char packet[4] = {};
+    *reinterpret_cast<u16*>(packet + 0) = 0x0246;
+    *reinterpret_cast<u16*>(packet + 2) = 0;
+    return CRagConnection::instance()->SendPacket(packet, 4) != 0;
+}
+
+// CZ_REQ_BAN_GUILD (0x015B, 54 bytes): opcode + guildId + aid + charId + mes(40).
+bool RequestGuildExpel(int guildId, unsigned int accountId, unsigned int charId, const char* reason)
+{
+    if (!IsFeatureEnabled(ClientFeature::Guild) || !g_session.IsInGuild() || guildId == 0) {
+        return false;
+    }
+    char packet[54] = {};
+    *reinterpret_cast<u16*>(packet + 0) = 0x015B;
+    *reinterpret_cast<u32*>(packet + 2) = static_cast<u32>(guildId);
+    *reinterpret_cast<u32*>(packet + 6) = accountId;
+    *reinterpret_cast<u32*>(packet + 10) = charId;
+    if (reason) {
+        std::strncpy(packet + 14, reason, 39);
+    }
+    return CRagConnection::instance()->SendPacket(packet, 54) != 0;
+}
+
+// CZ_REQ_LEAVE_GUILD (0x0159, 54 bytes): opcode + guildId + aid + charId + mes(40).
+bool RequestGuildLeave(int guildId, const char* reason)
+{
+    if (!IsFeatureEnabled(ClientFeature::Guild) || !g_session.IsInGuild() || guildId == 0) {
+        return false;
+    }
+    char packet[54] = {};
+    *reinterpret_cast<u16*>(packet + 0) = 0x0159;
+    *reinterpret_cast<u32*>(packet + 2) = static_cast<u32>(guildId);
+    *reinterpret_cast<u32*>(packet + 6) = g_session.m_aid;
+    *reinterpret_cast<u32*>(packet + 10) = g_session.m_gid;
+    if (reason) {
+        std::strncpy(packet + 14, reason, 39);
+    }
+    return CRagConnection::instance()->SendPacket(packet, 54) != 0;
+}
+
+// Trade CZ senders. Must live at file scope (outside the outer anonymous
+// namespace that wraps most of GameMode.cpp) so UITradeWnd.cpp can link to
+// them across translation units.
+//
+// CZ_ADD_EXCHANGE_ITEM (0x00E8, 8 bytes per Ref/eAthena/db/packet_db.txt:173):
+// header(2) + index.W(2) + amount.L(4). Index 0 = zeny add; non-zero = inventory index.
+bool SendTradeAddItem(u16 inventoryIndex, u32 amount)
+{
+    constexpr size_t kPacketSize = 8;
+    char packet[kPacketSize] = {};
+    *reinterpret_cast<u16*>(packet + 0) = 0x00E8;
+    *reinterpret_cast<u16*>(packet + 2) = inventoryIndex;
+    *reinterpret_cast<u32*>(packet + 4) = amount;
+    return CRagConnection::instance()->SendPacket(packet, kPacketSize) != 0;
+}
+
+// CZ_CONCLUDE_EXCHANGE_ITEM (0x00EB, 2 bytes): header only. Marks our side ready.
+bool SendTradeOk()
+{
+    char packet[2] = {};
+    *reinterpret_cast<u16*>(packet + 0) = 0x00EB;
+    return CRagConnection::instance()->SendPacket(packet, 2) != 0;
+}
+
+// CZ_CANCEL_EXCHANGE_ITEM (0x00ED, 2 bytes): header only. Cancels the trade.
+bool SendTradeCancel()
+{
+    char packet[2] = {};
+    *reinterpret_cast<u16*>(packet + 0) = 0x00ED;
+    return CRagConnection::instance()->SendPacket(packet, 2) != 0;
+}
+
+// CZ_EXEC_EXCHANGE_ITEM (0x00EF, 2 bytes): header only. Both sides must have
+// hit Ready (concluded) before the server accepts this.
+bool SendTradeCommit()
+{
+    char packet[2] = {};
+    *reinterpret_cast<u16*>(packet + 0) = 0x00EF;
+    return CRagConnection::instance()->SendPacket(packet, 2) != 0;
+}
+
+// Vending CZ senders. File-scope, outside the outer anonymous namespace, so
+// UIVendingWnd / UIVendingShopWnd can link to them across translation units.
+//
+// CZ_REQ_OPENSTORE (0x012F, var per Ref/eAthena/db/packet_db.txt:244):
+// header(2) + len(2) + shopTitle(80, NUL-padded) + visible(1) +
+// entries[N x 8] (index.W(2) + amount.W(2) + price.L(4)).
+// `visible` = 1 to actually open the shop (vs preview).
+bool SendVendingOpen(const char* shopTitle,
+                     const u16* itemIndices,
+                     const u16* itemAmounts,
+                     const u32* itemPrices,
+                     int itemCount)
+{
+    if (!shopTitle || !itemIndices || !itemAmounts || !itemPrices || itemCount <= 0) {
+        return false;
+    }
+    constexpr int kHeader = 4;       // packetId + len
+    constexpr int kTitleLen = 80;
+    constexpr int kVisible = 1;
+    constexpr int kEntrySize = 8;
+    const int totalLen = kHeader + kTitleLen + kVisible + itemCount * kEntrySize;
+    std::vector<char> buf(totalLen, 0);
+    *reinterpret_cast<u16*>(buf.data() + 0) = 0x012F;
+    *reinterpret_cast<u16*>(buf.data() + 2) = static_cast<u16>(totalLen);
+    std::strncpy(buf.data() + 4, shopTitle, kTitleLen - 1);
+    buf[4 + kTitleLen] = 1;          // visible
+    for (int i = 0; i < itemCount; ++i) {
+        char* row = buf.data() + 4 + kTitleLen + 1 + i * kEntrySize;
+        *reinterpret_cast<u16*>(row + 0) = itemIndices[i];
+        *reinterpret_cast<u16*>(row + 2) = itemAmounts[i];
+        *reinterpret_cast<u32*>(row + 4) = itemPrices[i];
+    }
+    return CRagConnection::instance()->SendPacket(buf.data(), totalLen) != 0;
+}
+
+// CZ_REQ_CLOSESTORE (0x012E, 2 bytes): header only.
+bool SendVendingClose()
+{
+    char packet[2] = {};
+    *reinterpret_cast<u16*>(packet + 0) = 0x012E;
+    return CRagConnection::instance()->SendPacket(packet, 2) != 0;
+}
+
+// CZ_REQ_BUY_FROMMC (0x0130, 6 bytes): header(2) + accountId(4).
+bool SendVendingBuyRequest(u32 sellerAid)
+{
+    char packet[6] = {};
+    *reinterpret_cast<u16*>(packet + 0) = 0x0130;
+    *reinterpret_cast<u32*>(packet + 2) = sellerAid;
+    return CRagConnection::instance()->SendPacket(packet, 6) != 0;
+}
+
+// CZ_PC_PURCHASE_ITEMLIST_FROMMC (0x0134, var per packet_db.txt:249):
+// header(2) + len(2) + accountId(4) + entries[N x 4] (amount.W(2) + index.W(2)).
+bool SendVendingPurchase(u32 sellerAid,
+                         const u16* itemAmounts,
+                         const u16* itemIndices,
+                         int pickCount)
+{
+    if (!itemAmounts || !itemIndices || pickCount <= 0) {
+        return false;
+    }
+    constexpr int kHeader = 4;
+    constexpr int kAid = 4;
+    constexpr int kEntrySize = 4;
+    const int totalLen = kHeader + kAid + pickCount * kEntrySize;
+    std::vector<char> buf(totalLen, 0);
+    *reinterpret_cast<u16*>(buf.data() + 0) = 0x0134;
+    *reinterpret_cast<u16*>(buf.data() + 2) = static_cast<u16>(totalLen);
+    *reinterpret_cast<u32*>(buf.data() + 4) = sellerAid;
+    for (int i = 0; i < pickCount; ++i) {
+        char* row = buf.data() + 8 + i * kEntrySize;
+        *reinterpret_cast<u16*>(row + 0) = itemAmounts[i];
+        *reinterpret_cast<u16*>(row + 2) = itemIndices[i];
+    }
+    return CRagConnection::instance()->SendPacket(buf.data(), totalLen) != 0;
+}
+
 bool ArmPendingSkillUseFromSkillList(int skillId)
 {
     if (skillId <= 0) {
@@ -9768,6 +9956,9 @@ bool ArmPendingSkillUseFromSkillList(int skillId)
         ClearAttackChaseHint(*gameMode);
         gameMode->m_skillUseInfo.id = skillId;
         gameMode->m_skillUseInfo.level = static_cast<int>(skillLevel);
+        // Surface a HUD banner so the player knows the skill is armed.
+        // The window self-hides when m_skillUseInfo is cleared.
+        g_windowMgr.MakeWindow(UIWindowMgr::WID_SKILLCASTINDICATORWND);
         DbgLog("[GameMode] skill list armed ground skillId=%u level=%u\n",
             static_cast<unsigned int>(skillIdU),
             static_cast<unsigned int>(skillLevel));
@@ -10620,6 +10811,10 @@ msgresult_t CGameMode::SendMsg(int msg, msgparam_t wparam, msgparam_t lparam, ms
         if (command == "/sit") {
             return SendSitStandToggleRequest(*this) ? 1 : 0;
         }
+        if (command == "/worldmap") {
+            g_windowMgr.MakeWindow(UIWindowMgr::WID_WORLDMAPWND);
+            return 1;
+        }
         if (command == "/stand") {
             return SendSitStandRequest(*this, false) ? 1 : 0;
         }
@@ -10776,6 +10971,105 @@ msgresult_t CGameMode::SendMsg(int msg, msgparam_t wparam, msgparam_t lparam, ms
     case GameMsg_RequestDealReply:
         return SendDealAck(wparam != 0) ? 1 : 0;
 
+    case GameMsg_RequestTradeAddItem:
+        // wparam = inventory index, lparam = quantity. Wired by UIItemWnd's
+        // trade-active double-click branch that defers to a quantity prompt
+        // when a stacked item is selected.
+        return SendTradeAddItem(static_cast<u16>(wparam),
+                                static_cast<u32>(lparam)) ? 1 : 0;
+
+    case GameMsg_RequestVendingShopTitle: {
+        // lparam = const char* (input prompt's stored buffer; valid for the
+        // duration of this call only — copy into the seller window).
+        const char* title = reinterpret_cast<const char*>(lparam);
+        if (g_windowMgr.m_vendingWnd && title) {
+            g_windowMgr.m_vendingWnd->SetPendingShopTitle(title);
+        }
+        return 1;
+    }
+
+    case GameMsg_RequestVendingItemPrice:
+        // wparam = inventory index, lparam = new price.
+        if (g_windowMgr.m_vendingWnd) {
+            g_windowMgr.m_vendingWnd->SetPendingItemPrice(
+                static_cast<unsigned int>(wparam),
+                static_cast<unsigned int>(lparam));
+        }
+        return 1;
+
+    case GameMsg_RequestMailRecipient: {
+        const char* val = reinterpret_cast<const char*>(lparam);
+        if (g_windowMgr.m_mailSendWnd && val) {
+            g_windowMgr.m_mailSendWnd->SetRecipient(val);
+            g_windowMgr.m_mailSendWnd->Invalidate();
+        }
+        return 1;
+    }
+
+    case GameMsg_RequestMailSubject: {
+        const char* val = reinterpret_cast<const char*>(lparam);
+        if (g_windowMgr.m_mailSendWnd && val) {
+            g_windowMgr.m_mailSendWnd->SetSubject(val);
+            g_windowMgr.m_mailSendWnd->Invalidate();
+        }
+        return 1;
+    }
+
+    case GameMsg_RequestMailBody: {
+        const char* val = reinterpret_cast<const char*>(lparam);
+        if (g_windowMgr.m_mailSendWnd && val) {
+            g_windowMgr.m_mailSendWnd->SetBody(val);
+            g_windowMgr.m_mailSendWnd->Invalidate();
+        }
+        return 1;
+    }
+
+    case GameMsg_RequestMailZeny:
+        if (g_windowMgr.m_mailSendWnd) {
+            g_windowMgr.m_mailSendWnd->SetZeny(static_cast<unsigned int>(lparam));
+            g_windowMgr.m_mailSendWnd->Invalidate();
+        }
+        return 1;
+
+    case GameMsg_RequestMailSendNow:
+        if (g_windowMgr.m_mailSendWnd) {
+            g_windowMgr.m_mailSendWnd->SubmitSend();
+        }
+        return 1;
+
+    case GameMsg_RequestGuildNoticeSubject: {
+        const char* val = reinterpret_cast<const char*>(lparam);
+        if (g_windowMgr.m_guildWnd && val) {
+            g_windowMgr.m_guildWnd->SetPendingNoticeSubject(val);
+            // Chain to body prompt.
+            if (auto* input = static_cast<UINpcInputWnd*>(
+                    g_windowMgr.MakeWindow(UIWindowMgr::WID_NPCINPUTWND))) {
+                input->OpenGameStringPrompt(
+                    "Guild notice body",
+                    GameMsg_RequestGuildNoticeBody, 0);
+            }
+        }
+        return 1;
+    }
+
+    case GameMsg_RequestGuildNoticeBody: {
+        const char* val = reinterpret_cast<const char*>(lparam);
+        if (g_windowMgr.m_guildWnd && val) {
+            g_windowMgr.m_guildWnd->SetPendingNoticeBody(val);
+            SendMsg(GameMsg_RequestGuildNoticeSubmit, 0, 0, 0);
+        }
+        return 1;
+    }
+
+    case GameMsg_RequestGuildNoticeSubmit:
+        if (g_windowMgr.m_guildWnd && g_session.IsInGuild()) {
+            extern bool RequestGuildSetNotice(int, const char*, const char*);
+            RequestGuildSetNotice(g_session.m_guildId,
+                                  g_windowMgr.m_guildWnd->GetPendingNoticeSubject().c_str(),
+                                  g_windowMgr.m_guildWnd->GetPendingNoticeBody().c_str());
+        }
+        return 1;
+
     case GameMsg_ResetCamera:
         if (m_view) {
             m_view->ResetToDefaultOrientation();
@@ -10855,6 +11149,12 @@ msgresult_t CGameMode::SendMsg(int msg, msgparam_t wparam, msgparam_t lparam, ms
                 return 0;
             }
             return SendDealRequest(targetAid) ? 1 : 0;
+        }
+        if (action == PlayerContext_BrowseShop) {
+            if (targetAid == 0) {
+                return 0;
+            }
+            return SendVendingBuyRequest(targetAid) ? 1 : 0;
         }
         if (action == PlayerContext_RegisterFriend) {
             // The context menu was opened on a hovered player; the name was

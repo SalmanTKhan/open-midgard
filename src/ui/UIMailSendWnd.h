@@ -36,9 +36,34 @@ public:
     void SetAttach(unsigned int inventoryIndex, int amount) { m_attachInventoryIndex = inventoryIndex; m_attachAmount = amount; }
     bool GetDisplayDataForQt(DisplayData* outData) const;
 
+    // Builds and sends CZ_MAIL_SEND (0x0248) using current draft fields. On
+    // success the window hides and clears its draft state; the server's
+    // ZC_MAIL_SEND_RESULT (0x0249) confirms via chat.
+    bool SubmitSend();
+
 private:
     void ToggleMinimized();
     void BuildSystemButtons(std::vector<SystemButton>* out) const;
+
+    enum FieldRowId {
+        FieldRecipient = 1,
+        FieldSubject,
+        FieldBody,
+        FieldZeny,
+    };
+
+    enum ActionButtonId {
+        ButtonSend = 1,
+        ButtonCancel,
+        ButtonResetAttach,
+    };
+
+    struct InteractRect { int x; int y; int w; int h; };
+    InteractRect GetFieldRect(int fieldId) const;
+    InteractRect GetActionButtonRect(int buttonId) const;
+    int HitTestField(int x, int y) const;
+    int HitTestActionButton(int x, int y) const;
+    void OpenFieldEditor(int fieldId);
 
     std::string m_recipient;
     std::string m_subject;

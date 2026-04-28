@@ -3,6 +3,7 @@
 #include "gamemode/GameMode.h"
 #include "gamemode/Mode.h"
 #include "UIShortCutWnd.h"
+#include "UISkillUpConfirmWnd.h"
 #include "UIWindowMgr.h"
 #include "core/File.h"
 #include "main/WinMain.h"
@@ -414,6 +415,9 @@ UISkillListWnd::UISkillListWnd()
     m_h = kWindowHeight;
     m_bottomButtons[kBottomButtonUse].label = "use";
     m_bottomButtons[kBottomButtonClose].label = "close";
+    m_filterTabs[0].label = "all";
+    m_filterTabs[1].label = "active";
+    m_filterTabs[2].label = "passive";
     Move(281, 121);
     int savedX = m_x;
     int savedY = m_y;
@@ -597,6 +601,32 @@ void UISkillListWnd::OnDraw()
                 }
             }
 
+            const u32 cooldownRemainingMs = g_session.GetSkillCooldownRemainingMs(skill->SKID);
+            if (cooldownRemainingMs > 0) {
+                // 4x4 tile of premultiplied 50% black; stretched over the icon by AlphaBlend.
+                static const unsigned int kCooldownOverlayPixels[16] = {
+                    0x80000000u, 0x80000000u, 0x80000000u, 0x80000000u,
+                    0x80000000u, 0x80000000u, 0x80000000u, 0x80000000u,
+                    0x80000000u, 0x80000000u, 0x80000000u, 0x80000000u,
+                    0x80000000u, 0x80000000u, 0x80000000u, 0x80000000u,
+                };
+                AlphaBlendArgbToHdc(hdc,
+                                    iconRect.left,
+                                    iconRect.top,
+                                    iconRect.right - iconRect.left,
+                                    iconRect.bottom - iconRect.top,
+                                    kCooldownOverlayPixels,
+                                    4,
+                                    4);
+                const unsigned int wholeSecs = (cooldownRemainingMs + 999u) / 1000u;
+                const std::string label = std::to_string(wholeSecs);
+                DrawTextLine(hdc,
+                             iconRect.left + 4,
+                             iconRect.top + 4,
+                             RGB(255, 230, 110),
+                             label);
+            }
+
             const std::string skillName = skill->skillName.empty() ? skill->skillIdName : skill->skillName;
             const int textLeft = iconCellRect.right + 12;
             DrawTextLine(hdc, textLeft, rowRect.top + 3, RGB(0, 0, 0), skillName);
@@ -625,6 +655,9 @@ void UISkillListWnd::OnDraw()
 
     for (const TextButton& button : m_bottomButtons) {
         DrawBottomButton(hdc, button);
+    }
+    for (size_t i = 0; i < m_filterTabs.size(); ++i) {
+        DrawFilterTab(hdc, m_filterTabs[i], static_cast<int>(i) == m_filterMode);
     }
 
     DrawChildrenToHdc(hdc);
@@ -685,6 +718,12 @@ void UISkillListWnd::OnLBtnDown(int x, int y)
     const int bottomButtonIndex = HitTestBottomButton(x, y);
     if (bottomButtonIndex >= 0) {
         m_bottomButtons[bottomButtonIndex].pressed = true;
+        return;
+    }
+
+    const int filterTabIndex = HitTestFilterTab(x, y);
+    if (filterTabIndex >= 0) {
+        m_filterTabs[filterTabIndex].pressed = true;
         return;
     }
 
@@ -773,11 +812,39 @@ void UISkillListWnd::OnLBtnUp(int x, int y)
             if (IsInsideRect(visible.upgradeRect, x, y) &&
                 visible.skill->upgradable != 0 &&
                 g_session.GetPlayerSkillPointCount() > 0) {
-                g_modeMgr.SendMsg(CGameMode::GameMsg_RequestUpgradeSkillLevel, m_pressedUpgradeSkillId, 0, 0);
+                // Open confirmation dialog instead of firing immediately. The
+                // dialog forwards GameMsg_RequestUpgradeSkillLevel on accept.
+                if (auto* dialog = static_cast<UISkillUpConfirmWnd*>(
+                        g_windowMgr.MakeWindow(UIWindowMgr::WID_SKILLUPCONFIRMWND))) {
+                    const std::string skillName = visible.skill->skillName.empty()
+                        ? visible.skill->skillIdName : visible.skill->skillName;
+                    int maxLv = visible.skill->skillMaxLv;
+                    if (maxLv == 0) {
+                        if (const JobSkillEntry* tree = g_skillMgr.GetJobSkillEntry(
+                                g_session.m_playerJob, visible.skill->SKID)) {
+                            maxLv = tree->maxLevel;
+                        }
+                    }
+                    dialog->OpenConfirm(visible.skill->SKID, skillName.c_str(),
+                                        visible.skill->level, maxLv);
+                }
             }
             break;
         }
     }
+    const int filterTabHit = HitTestFilterTab(x, y);
+    for (size_t i = 0; i < m_filterTabs.size(); ++i) {
+        const bool activate = m_filterTabs[i].pressed && static_cast<int>(i) == filterTabHit;
+        m_filterTabs[i].pressed = false;
+        if (activate) {
+            if (m_filterMode != static_cast<int>(i)) {
+                m_filterMode = static_cast<int>(i);
+                m_viewOffset = 0;
+                Invalidate();
+            }
+        }
+    }
+
     m_pressedUpgradeSkillId = 0;
     m_dragArmed = false;
     m_dragSkillId = 0;
@@ -834,6 +901,10 @@ void UISkillListWnd::OnMouseMove(int x, int y)
     }
     for (size_t index = 0; index < m_bottomButtons.size(); ++index) {
         m_bottomButtons[index].hovered = (static_cast<int>(index) == HitTestBottomButton(x, y));
+    }
+    const int hoveredTab = HitTestFilterTab(x, y);
+    for (size_t i = 0; i < m_filterTabs.size(); ++i) {
+        m_filterTabs[i].hovered = (static_cast<int>(i) == hoveredTab);
     }
 }
 
@@ -1008,6 +1079,15 @@ void UISkillListWnd::LayoutChildren()
     const int bottomY = m_y + m_h - 28;
     m_bottomButtons[kBottomButtonClose].rect = RECT{ m_x + m_w - 56, bottomY, m_x + m_w - 12, bottomY + 20 };
     m_bottomButtons[kBottomButtonUse].rect = RECT{ m_bottomButtons[kBottomButtonClose].rect.left - 44, bottomY, m_bottomButtons[kBottomButtonClose].rect.left, bottomY + 20 };
+
+    // Filter tabs run along the LEFT side of the bottom bar.
+    const int tabWidth = 38;
+    const int tabGap = 2;
+    int tabLeft = m_x + 12;
+    for (TextButton& tab : m_filterTabs) {
+        tab.rect = RECT{ tabLeft, bottomY, tabLeft + tabWidth, bottomY + 20 };
+        tabLeft += tabWidth + tabGap;
+    }
 }
 
 void UISkillListWnd::LoadAssets()
@@ -1181,6 +1261,35 @@ int UISkillListWnd::HitTestBottomButton(int globalX, int globalY) const
     return -1;
 }
 
+int UISkillListWnd::HitTestFilterTab(int globalX, int globalY) const
+{
+    for (size_t index = 0; index < m_filterTabs.size(); ++index) {
+        if (IsInsideRect(m_filterTabs[index].rect, globalX, globalY)) {
+            return static_cast<int>(index);
+        }
+    }
+    return -1;
+}
+
+void UISkillListWnd::DrawFilterTab(HDC hdc, const TextButton& tab, bool selected) const
+{
+    const COLORREF fill = selected
+        ? RGB(176, 152, 92)
+        : (tab.pressed ? RGB(160, 142, 82)
+                       : (tab.hovered ? RGB(220, 210, 170) : RGB(204, 192, 158)));
+    HBRUSH brush = CreateSolidBrush(fill);
+    FillRect(hdc, &tab.rect, brush);
+    DeleteObject(brush);
+    HBRUSH frameBrush = CreateSolidBrush(RGB(80, 60, 30));
+    FrameRect(hdc, &tab.rect, frameBrush);
+    DeleteObject(frameBrush);
+    SetBkMode(hdc, TRANSPARENT);
+    SetTextColor(hdc, selected ? RGB(255, 248, 220) : RGB(20, 20, 20));
+    RECT textRect = tab.rect;
+    DrawTextA(hdc, tab.label.c_str(), static_cast<int>(tab.label.size()),
+              &textRect, DT_CENTER | DT_SINGLELINE | DT_VCENTER);
+}
+
 RECT UISkillListWnd::GetScrollTrackRect() const
 {
     return RECT{
@@ -1236,6 +1345,9 @@ std::vector<const PLAYER_SKILL_INFO*> UISkillListWnd::GetSortedSkills() const
         if (skill.upgradable == 0 && skill.level <= 0) {
             continue;
         }
+        const bool isPassive = (skill.spcost <= 0);
+        if (m_filterMode == 1 && isPassive) continue;   // Active only
+        if (m_filterMode == 2 && !isPassive) continue;  // Passive only
         out.push_back(&skill);
     }
 
@@ -1297,6 +1409,11 @@ unsigned long long UISkillListWnd::BuildVisualStateToken() const
     HashTokenValue(&hash, static_cast<unsigned long long>(m_selectedSkillId));
     HashTokenValue(&hash, static_cast<unsigned long long>(m_pressedUpgradeSkillId));
     HashTokenValue(&hash, static_cast<unsigned long long>(m_isDraggingScrollThumb));
+    HashTokenValue(&hash, static_cast<unsigned long long>(m_filterMode));
+    for (const TextButton& tab : m_filterTabs) {
+        HashTokenValue(&hash, tab.hovered ? 1ull : 0ull);
+        HashTokenValue(&hash, tab.pressed ? 1ull : 0ull);
+    }
     HashTokenValue(&hash, static_cast<unsigned long long>(g_session.GetPlayerSkillPointCount()));
     if (const CGameMode* gameMode = g_modeMgr.GetCurrentGameMode()) {
         HashTokenValue(&hash, static_cast<unsigned long long>(gameMode->m_dragType));
@@ -1319,6 +1436,11 @@ unsigned long long UISkillListWnd::BuildVisualStateToken() const
         HashTokenValue(&hash, static_cast<unsigned long long>(skill.skillMaxLv));
         HashTokenString(&hash, skill.skillIdName);
         HashTokenString(&hash, skill.skillName);
+        // Quantize cooldown remaining to whole seconds so the overlay redraws
+        // once per second while cooling without thrashing the cache when idle.
+        const u32 cooldownRemainingMs = g_session.GetSkillCooldownRemainingMs(skill.SKID);
+        const u32 cooldownBucket = (cooldownRemainingMs + 999u) / 1000u;
+        HashTokenValue(&hash, static_cast<unsigned long long>(cooldownBucket));
     }
 
     return hash;

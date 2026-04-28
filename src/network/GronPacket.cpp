@@ -224,8 +224,10 @@ void FillPacketSizeTable(PacketSizeTable& packetSizeTable)
     SetPacketSize(0x00EA, 5);
     SetPacketSize(0x00EB, 2);
     SetPacketSize(0x00EC, 3);
+    SetPacketSize(0x00ED, 2);
     SetPacketSize(0x00EE, 2);
     SetPacketSize(0x00EF, 2);
+    SetPacketSize(0x00F0, 3);
     SetPacketSize(0x00F2, 6);
         SetPacketSize(0x00A5, kVariablePacketSize);
         SetPacketSize(0x00A6, kVariablePacketSize);
@@ -243,7 +245,11 @@ void FillPacketSizeTable(PacketSizeTable& packetSizeTable)
     SetPacketSize(0x00FD, 27);
     SetPacketSize(0x00FE, 30);
     SetPacketSize(0x00FF, 10);
+    SetPacketSize(0x025A, kVariablePacketSize);  // ZC_MAKABLEITEMLIST
     SetPacketSize(0x02B0, 85);
+    SetPacketSize(0x02B3, 107);                  // ZC_ADD_QUEST (Ref/eAthena packet_db)
+    SetPacketSize(0x02B4, 6);                    // ZC_DEL_QUEST
+    SetPacketSize(0x02B5, kVariablePacketSize);  // ZC_UPDATE_MISSION_HUNT
     SetPacketSize(0x02B1, kVariablePacketSize);
     SetPacketSize(0x02B2, kVariablePacketSize);
     SetPacketSize(0x02C5, 30);
@@ -273,11 +279,19 @@ void FillPacketSizeTable(PacketSizeTable& packetSizeTable)
     SetPacketSize(0x0120, 6);
     SetPacketSize(0x0121, 14);             // ZC_UPDATE_CARTINFO
     SetPacketSize(0x012B, 2);              // ZC_CLEAR_CART
-    SetPacketSize(0x012F, kVariablePacketSize);
-    SetPacketSize(0x0147, 39);              // ZC_AUTORUN_SKILL (e.g. Magnifier -> MC_IDENTIFY)
-    SetPacketSize(0x0130, 6);
-    SetPacketSize(0x0131, 86);
-    SetPacketSize(0x0132, 6);
+    SetPacketSize(0x012D, 4);                          // ZC_OPENSTORE
+    SetPacketSize(0x012E, 2);                          // CZ_REQ_CLOSESTORE
+    SetPacketSize(0x012F, kVariablePacketSize);        // CZ_REQ_OPENSTORE
+    SetPacketSize(0x0147, 39);                         // ZC_AUTORUN_SKILL (e.g. Magnifier -> MC_IDENTIFY)
+    SetPacketSize(0x0130, 6);                          // CZ_REQ_BUY_FROMMC
+    SetPacketSize(0x0131, 86);                         // ZC_STORE_ENTRY
+    SetPacketSize(0x0132, 6);                          // ZC_DISAPPEAR_ENTRY
+    SetPacketSize(0x0133, kVariablePacketSize);        // ZC_PC_PURCHASE_ITEMLIST_FROMMC
+    SetPacketSize(0x0134, kVariablePacketSize);        // CZ_PC_PURCHASE_ITEMLIST_FROMMC
+    SetPacketSize(0x0135, 7);                          // ZC_PC_PURCHASE_RESULT_FROMMC
+    SetPacketSize(0x0136, kVariablePacketSize);        // ZC_PC_PURCHASE_MYITEMLIST
+    SetPacketSize(0x0137, 6);                          // ZC_DELETEITEM_FROMMC
+    SetPacketSize(0x0138, 3);                          // ZC_BAN_VENDING
     SetPacketSize(0x0139, 16);
     SetPacketSize(0x013A, 4);
     SetPacketSize(0x013B, 4);
@@ -309,6 +323,7 @@ void FillPacketSizeTable(PacketSizeTable& packetSizeTable)
     SetPacketSize(0x016C, 114);                 // ZC_UPDATE_GDID (basic info pre-renewal)
     SetPacketSize(0x016D, 14);                  // ZC_UPDATE_CHARSTAT
     SetPacketSize(0x016F, 182);                 // ZC_GUILD_NOTICE
+    SetPacketSize(0x016E, 186);                 // CZ_GUILD_NOTICE
     SetPacketSize(0x0170, 14);
     SetPacketSize(0x0171, 30);
     SetPacketSize(0x0172, 10);
@@ -346,6 +361,10 @@ void FillPacketSizeTable(PacketSizeTable& packetSizeTable)
     SetPacketSize(0x01B1, 7);
     SetPacketSize(0x01B2, kVariablePacketSize);
     SetPacketSize(0x01B3, 67);
+    SetPacketSize(0x0145, 19);             // ZC_SHOW_IMAGE (cutin)
+    SetPacketSize(0x0221, kVariablePacketSize); // ZC_NOTIFY_WEAPONITEMLIST
+    SetPacketSize(0x0222, 6);              // CZ_REQ_WEAPONREFINE
+    SetPacketSize(0x0223, 8);              // ZC_ACK_WEAPONREFINE
     SetPacketSize(0x01B4, 12);
     SetPacketSize(0x01B5, 18);
     SetPacketSize(0x01B6, 114);

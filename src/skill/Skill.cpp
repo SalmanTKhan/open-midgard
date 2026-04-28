@@ -195,7 +195,99 @@ bool CSkillMgr::LoadSkillMetadata()
     LoadSkillDisplayNames();
     LoadSkillDescriptions();
     LoadSkillLevelSpCosts();
+    LoadSkillTree();
     return !m_byId.empty();
+}
+
+const JobSkillEntry* CSkillMgr::GetJobSkillEntry(int jobId, int skillId) const
+{
+    const auto jobIt = m_skillTreeByJob.find(jobId);
+    if (jobIt == m_skillTreeByJob.end()) {
+        return nullptr;
+    }
+    const auto skillIt = jobIt->second.find(skillId);
+    if (skillIt == jobIt->second.end()) {
+        return nullptr;
+    }
+    return &skillIt->second;
+}
+
+void CSkillMgr::LoadSkillTree()
+{
+    m_skillTreeByJob.clear();
+
+    // Authoritative file lives under Ref/eAthena/db, not the GRF data root.
+#ifdef RO_SOURCE_ROOT
+    const std::filesystem::path treePath = std::filesystem::path(RO_SOURCE_ROOT)
+        / "Ref" / "eAthena" / "db" / "skill_tree.txt";
+#else
+    const std::filesystem::path treePath = std::filesystem::current_path()
+        / "Ref" / "eAthena" / "db" / "skill_tree.txt";
+#endif
+
+    std::vector<std::string> lines;
+    if (!ReadLinesFromFilesystem(treePath, lines)) {
+        return;
+    }
+
+    auto splitCsv = [](const std::string& s) {
+        std::vector<std::string> out;
+        std::string cur;
+        for (char ch : s) {
+            if (ch == ',') {
+                out.push_back(TrimAscii(cur));
+                cur.clear();
+            } else {
+                cur.push_back(ch);
+            }
+        }
+        out.push_back(TrimAscii(cur));
+        return out;
+    };
+
+    for (const std::string& rawLine : lines) {
+        // Strip "//..." trailing comments while preserving the data prefix.
+        std::string line = rawLine;
+        const size_t commentAt = line.find("//");
+        if (commentAt != std::string::npos) {
+            line.erase(commentAt);
+        }
+        line = TrimAscii(line);
+        if (line.empty()) {
+            continue;
+        }
+
+        const std::vector<std::string> tokens = splitCsv(line);
+        // Format: jobId, skillId, maxLv [, jobLv], prereqId1, prereqLv1, ... up to 5 pairs.
+        // Some rows have 13 fields (with jobLv), some have 12 (without). Both are supported.
+        if (tokens.size() < 12) {
+            continue;
+        }
+        const int jobId = std::atoi(tokens[0].c_str());
+        const int skillId = std::atoi(tokens[1].c_str());
+        const int maxLv = std::atoi(tokens[2].c_str());
+        if (skillId <= 0) {
+            continue;
+        }
+
+        JobSkillEntry entry;
+        entry.maxLevel = maxLv;
+
+        size_t pairStart = 3;
+        if (tokens.size() >= 13) {
+            entry.jobLevelRequired = std::atoi(tokens[3].c_str());
+            pairStart = 4;
+        }
+        for (size_t i = pairStart; i + 1 < tokens.size(); i += 2) {
+            const int prereqId = std::atoi(tokens[i].c_str());
+            const int prereqLv = std::atoi(tokens[i + 1].c_str());
+            if (prereqId == 0) {
+                continue;
+            }
+            entry.prerequisites.emplace_back(prereqId, prereqLv);
+        }
+        m_skillTreeByJob[jobId][skillId] = std::move(entry);
+    }
 }
 
 bool CSkillMgr::BuildSkillIdMapFromNameTable()

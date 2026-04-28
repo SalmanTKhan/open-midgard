@@ -81,6 +81,60 @@ struct ACTIVE_STATUS_ICON {
     u32 expireServerTime = 0;
 };
 
+struct QUEST_HUNT_INFO {
+    u32 monsterId = 0;
+    u32 count = 0;
+    u32 maxCount = 0;
+    std::string monsterName;
+};
+
+struct QUEST_INFO {
+    u32 questId = 0;
+    bool active = false;
+    u32 startServerTime = 0;
+    u32 endServerTime = 0;
+    std::vector<QUEST_HUNT_INFO> hunts;
+};
+
+struct TRADE_PANE {
+    std::list<ITEM_INFO> items;
+    int zeny = 0;
+    bool ready = false;
+};
+
+struct TRADE_STATE {
+    bool active = false;
+    bool finalConfirmAvailable = false;  // both sides hit Ready -> Commit allowed
+    std::string partnerName;
+    TRADE_PANE mine;
+    TRADE_PANE theirs;
+};
+
+struct VENDING_ITEM {
+    u32 amount = 0;
+    u32 price = 0;
+    u16 inventoryIndex = 0;
+    u16 itemId = 0;
+    u8 identified = 0;
+    u8 damaged = 0;
+    u8 refine = 0;
+    int slot[4] = { 0, 0, 0, 0 };
+    int itemType = 0;
+};
+
+struct VENDING_STATE {                  // I am the seller
+    bool active = false;
+    std::string shopTitle;
+    std::vector<VENDING_ITEM> items;
+};
+
+struct VENDING_SHOP_BROWSE_STATE {      // I am the buyer
+    bool active = false;
+    u32 partnerAid = 0;
+    std::string partnerShopTitle;
+    std::vector<VENDING_ITEM> items;
+};
+
 struct GUILD_MEMBER {
     u32 aid = 0;
     u32 gid = 0;
@@ -250,6 +304,8 @@ public:
     int m_guildEmblemId = 0;
     char m_guildName[25] = {};
     char m_guildMasterName[25] = {};
+    char m_guildNoticeSubject[60] = {};
+    char m_guildNoticeBody[120] = {};
     std::vector<GUILD_MEMBER> m_guildMembers;
     bool m_mailBoxOpen = false;
     std::vector<MAIL_HEADER> m_mailHeaders;
@@ -308,6 +364,7 @@ public:
     void ClearMerc();
     bool IsMercActive() const;
     void SetGuildBasic(int guildId, int emblemId, const char* name, const char* masterName);
+    void SetGuildNotice(const char* subject, const char* body);
     void ClearGuild();
     bool IsInGuild() const;
     void SetGuildMembers(std::vector<GUILD_MEMBER> members);
@@ -370,6 +427,32 @@ public:
     void ClearActiveStatusIcons();
     void SetActiveStatusIcon(int statusType, bool active, u32 remainingMs);
     void PruneExpiredStatusIcons(u32 serverTime);
+    void SetSkillCooldown(int skillId, u32 durationMs);
+    void ClearAllSkillCooldowns();
+    u32 GetSkillCooldownRemainingMs(int skillId) const;
+    void ClearQuests();
+    void AddQuest(const QUEST_INFO& info);
+    void RemoveQuest(u32 questId);
+    void UpdateQuestHunt(u32 questId, u32 monsterId, u32 newCount);
+    const std::vector<QUEST_INFO>& GetQuests() const;
+    void BeginTrade(const std::string& partnerName);
+    void EndTrade();
+    bool IsTradeActive() const;
+    TRADE_STATE& GetTradeState();
+    const TRADE_STATE& GetTradeState() const;
+    void BeginVending(const std::string& shopTitle);
+    void EndVending();
+    bool IsVendingActive() const;
+    VENDING_STATE& GetVendingState();
+    const VENDING_STATE& GetVendingState() const;
+    void BeginVendingBrowse(u32 partnerAid, const std::string& shopTitle);
+    void EndVendingBrowse();
+    bool IsVendingBrowseActive() const;
+    VENDING_SHOP_BROWSE_STATE& GetVendingBrowseState();
+    const VENDING_SHOP_BROWSE_STATE& GetVendingBrowseState() const;
+    void SetActorShopTitle(u32 aid, const std::string& title);
+    void ClearActorShopTitle(u32 aid);
+    std::string GetActorShopTitle(u32 aid) const;
     int GetShortcutPage() const;
     void SetShortcutPage(int page);
     int GetShortcutSlotAbsoluteIndex(int visibleSlot) const;
@@ -438,6 +521,12 @@ private:
     mutable std::mutex m_jobDisplayNameMutex;
     mutable std::unordered_map<int, std::string> m_jobDisplayNameCache;
     std::vector<ACTIVE_STATUS_ICON> m_activeStatusIcons;
+    std::unordered_map<int, u32> m_skillCooldownEndServerTime;
+    std::vector<QUEST_INFO> m_quests;
+    TRADE_STATE m_tradeState;
+    VENDING_STATE m_vendingState;
+    VENDING_SHOP_BROWSE_STATE m_vendingBrowseState;
+    std::unordered_map<u32, std::string> m_actorShopTitles;
     bool m_fogParameterTableLoaded;
     std::unordered_map<std::string, SessionFogParameter> m_fogParameterTable;
     bool m_accessoryNameTableLoaded;

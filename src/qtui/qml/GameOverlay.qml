@@ -239,6 +239,7 @@ Item {
         delegate: Item {
             required property var modelData
             property bool isPartyHpBar: modelData.kind === "partyHpBar"
+            property bool isActorStatusStrip: modelData.kind === "actorStatusStrip"
             property int bubblePaddingX: modelData.showBubble === false ? 0 : (modelData.paddingX || 12)
             property int bubblePaddingY: modelData.showBubble === false ? 0 : (modelData.paddingY || 8)
             property int maxTextWidth: modelData.maxTextWidth || 0
@@ -256,8 +257,12 @@ Item {
             x: root.clampOverlayX(anchorX, width)
             y: root.clampOverlayY(anchorY, height)
             z: modelData.z || 2000
-            width: isPartyHpBar ? (modelData.width || 60) : (textWidth + bubblePaddingX)
-            height: isPartyHpBar ? (modelData.height || 5) : (Math.max(1, Math.ceil(label.implicitHeight)) + bubblePaddingY)
+            width: isPartyHpBar
+                ? (modelData.width || 60)
+                : (isActorStatusStrip ? (modelData.width || 0) : (textWidth + bubblePaddingX))
+            height: isPartyHpBar
+                ? (modelData.height || 5)
+                : (isActorStatusStrip ? (modelData.height || 18) : (Math.max(1, Math.ceil(label.implicitHeight)) + bubblePaddingY))
 
             Rectangle {
                 visible: parent.isPartyHpBar
@@ -292,7 +297,7 @@ Item {
                 anchors.fill: parent
                 radius: modelData.radius || 6
                 color: modelData.background
-                visible: !parent.isPartyHpBar && modelData.showBubble !== false
+                visible: !parent.isPartyHpBar && !parent.isActorStatusStrip && modelData.showBubble !== false
                 border.width: 1
                 border.color: modelData.borderColor || "#80ffffff"
             }
@@ -303,12 +308,55 @@ Item {
                 y: Math.floor(parent.bubblePaddingY / 2)
                 width: parent.textWidth
                 text: modelData.text
-                visible: !parent.isPartyHpBar
+                visible: !parent.isPartyHpBar && !parent.isActorStatusStrip
                 color: modelData.foreground
                 font.pixelSize: modelData.fontPixelSize || 14
                 font.bold: modelData.bold !== false
                 wrapMode: parent.wrapText ? Text.Wrap : Text.NoWrap
                 horizontalAlignment: Text.AlignHCenter
+            }
+
+            // Per-actor status icon strip (over-head). Icons render with the
+            // legacy tga via statusIconSource(); rows without a mapped tga
+            // fall back to a colored badge with the short label.
+            Row {
+                id: stripRow
+                visible: parent.isActorStatusStrip
+                spacing: modelData.iconSpacing || 2
+                readonly property int stripIconSize: modelData.iconSize || 18
+                readonly property var stripIcons: modelData.icons || []
+                Repeater {
+                    model: stripRow.stripIcons
+                    delegate: Item {
+                        required property var modelData
+                        width: stripRow.stripIconSize
+                        height: stripRow.stripIconSize
+                        Image {
+                            id: stripIconImage
+                            anchors.fill: parent
+                            source: statusIconSource(modelData.statusType || 0)
+                            visible: source !== "" && status === Image.Ready
+                            smooth: false
+                            cache: false
+                        }
+                        Rectangle {
+                            anchors.fill: parent
+                            visible: !stripIconImage.visible
+                            color: "#704555"
+                            radius: 3
+                            border.width: 1
+                            border.color: "#cfb072"
+                        }
+                        Text {
+                            anchors.centerIn: parent
+                            visible: !stripIconImage.visible
+                            text: modelData.shortName || "?"
+                            color: "#f6f1e0"
+                            font.pixelSize: 9
+                            font.bold: true
+                        }
+                    }
+                }
             }
         }
     }
@@ -2736,6 +2784,353 @@ Item {
                     }
                 }
             }
+        }
+    }
+
+    // Vending seller mirror (read-only). Canonical interaction lives in the
+    // legacy UIVendingWnd; this is parity for the Qt overlay.
+    Rectangle {
+        id: vendingSellerMirror
+        readonly property var data: uiState.vendingPanel || ({})
+        readonly property bool sellerActive: data.active === true
+
+        x: 12
+        y: 100
+        width: 260
+        height: sellerActive ? Math.min(root.height - 120, 50 + (data.items || []).length * 16) : 0
+        radius: 4
+        color: rgbaColor(20, 25, 40, 0.82)
+        border.width: 1
+        border.color: rgbaColor(190, 165, 90, 0.9)
+        visible: sellerActive
+        z: 74
+
+        Text {
+            anchors.left: parent.left
+            anchors.top: parent.top
+            anchors.leftMargin: 8
+            anchors.topMargin: 4
+            text: "Vending: " + (vendingSellerMirror.data.shopTitle || "(unnamed)")
+            color: "#f5c85a"
+            font.pixelSize: 12
+            font.bold: true
+        }
+
+        Column {
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.top: parent.top
+            anchors.topMargin: 22
+            anchors.leftMargin: 6
+            anchors.rightMargin: 6
+            spacing: 1
+
+            Repeater {
+                model: vendingSellerMirror.data.items || []
+                delegate: Text {
+                    required property var modelData
+                    text: (modelData.name || ("#" + (modelData.itemId || 0))) +
+                          "  x" + (modelData.amount || 0) +
+                          "  @" + (modelData.price || 0) + "z"
+                    color: "#f6f1e0"
+                    font.pixelSize: 10
+                    elide: Text.ElideRight
+                    width: parent.width
+                }
+            }
+        }
+    }
+
+    // Vending shop browse mirror (read-only). Same anchor logic as seller mirror.
+    Rectangle {
+        id: vendingShopMirror
+        readonly property var data: uiState.vendingShopPanel || ({})
+        readonly property bool browseActive: data.active === true
+
+        x: root.width - width - 12
+        y: 240
+        width: 260
+        height: browseActive ? Math.min(root.height - 240, 50 + (data.items || []).length * 16) : 0
+        radius: 4
+        color: rgbaColor(20, 25, 40, 0.82)
+        border.width: 1
+        border.color: rgbaColor(190, 165, 90, 0.9)
+        visible: browseActive
+        z: 74
+
+        Text {
+            anchors.left: parent.left
+            anchors.top: parent.top
+            anchors.leftMargin: 8
+            anchors.topMargin: 4
+            text: "Browsing: " + (vendingShopMirror.data.partnerShopTitle || "(unnamed)")
+            color: "#f5c85a"
+            font.pixelSize: 12
+            font.bold: true
+        }
+
+        Column {
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.top: parent.top
+            anchors.topMargin: 22
+            anchors.leftMargin: 6
+            anchors.rightMargin: 6
+            spacing: 1
+
+            Repeater {
+                model: vendingShopMirror.data.items || []
+                delegate: Text {
+                    required property var modelData
+                    text: (modelData.name || ("#" + (modelData.itemId || 0))) +
+                          "  x" + (modelData.amount || 0) +
+                          "  @" + (modelData.price || 0) + "z"
+                    color: "#f6f1e0"
+                    font.pixelSize: 10
+                    elide: Text.ElideRight
+                    width: parent.width
+                }
+            }
+        }
+    }
+
+    // Trade panel mirror (read-only). The canonical interaction surface is the
+    // legacy UITradeWnd; this Qt panel just reflects the current trade state so
+    // the Qt overlay shows what's in flight. Hidden when no trade is active.
+    Rectangle {
+        id: tradePanelMirror
+        readonly property var tradeData: uiState.tradePanel || ({})
+        readonly property bool tradeActive: tradeData.active === true
+
+        x: Math.round((root.width - width) / 2)
+        y: 60
+        width: 380
+        height: tradeActive ? 200 : 0
+        radius: 4
+        color: rgbaColor(20, 25, 40, 0.82)
+        border.width: 1
+        border.color: rgbaColor(190, 165, 90, 0.9)
+        visible: tradeActive
+        z: 74
+
+        Text {
+            anchors.left: parent.left
+            anchors.top: parent.top
+            anchors.leftMargin: 10
+            anchors.topMargin: 6
+            text: "Trade — " + (tradePanelMirror.tradeData.partnerName || "Partner")
+            color: "#f5c85a"
+            font.pixelSize: 13
+            font.bold: true
+        }
+
+        Row {
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.top: parent.top
+            anchors.bottom: parent.bottom
+            anchors.topMargin: 28
+            anchors.leftMargin: 10
+            anchors.rightMargin: 10
+            anchors.bottomMargin: 10
+            spacing: 10
+
+            Repeater {
+                model: [
+                    { label: "You", paneRef: tradePanelMirror.tradeData.mine || ({}) },
+                    { label: tradePanelMirror.tradeData.partnerName || "Partner", paneRef: tradePanelMirror.tradeData.theirs || ({}) }
+                ]
+
+                delegate: Rectangle {
+                    required property var modelData
+
+                    width: (parent.width - 10) / 2
+                    height: parent.height
+                    radius: 3
+                    color: rgbaColor(40, 55, 75, 0.6)
+                    border.width: 1
+                    border.color: rgbaColor(120, 110, 70, 0.7)
+
+                    Text {
+                        anchors.left: parent.left
+                        anchors.top: parent.top
+                        anchors.leftMargin: 6
+                        anchors.topMargin: 4
+                        text: modelData.label + ((modelData.paneRef.ready === true) ? "  • Ready" : "")
+                        color: (modelData.paneRef.ready === true) ? "#7ce47c" : "#cfd9e3"
+                        font.pixelSize: 11
+                        font.bold: true
+                    }
+
+                    Column {
+                        anchors.left: parent.left
+                        anchors.right: parent.right
+                        anchors.top: parent.top
+                        anchors.topMargin: 24
+                        anchors.leftMargin: 6
+                        anchors.rightMargin: 6
+                        spacing: 1
+
+                        Repeater {
+                            model: modelData.paneRef.items || []
+
+                            delegate: Text {
+                                required property var modelData
+                                text: (modelData.name || ("#" + (modelData.itemId || 0))) + "  x" + (modelData.count || 0)
+                                color: "#f6f1e0"
+                                font.pixelSize: 10
+                                elide: Text.ElideRight
+                                width: parent.width
+                            }
+                        }
+                    }
+
+                    Text {
+                        anchors.left: parent.left
+                        anchors.bottom: parent.bottom
+                        anchors.leftMargin: 6
+                        anchors.bottomMargin: 4
+                        text: "Zeny: " + (modelData.paneRef.zeny || 0)
+                        color: "#e7c87c"
+                        font.pixelSize: 10
+                    }
+                }
+            }
+        }
+    }
+
+    // Quest log compact panel. Visible whenever uiState.quests has entries.
+    // Anchored top-right of the root so it sits clear of the minimap; the
+    // host can hide it via uiState updates if needed.
+    Rectangle {
+        id: questLogPanel
+        readonly property var questList: uiState.quests || []
+        readonly property bool hasQuests: questList.length > 0
+
+        x: root.width - width - 12
+        y: 12
+        width: 240
+        height: hasQuests ? Math.min(root.height - 24, 38 + questList.length * 56) : 0
+        radius: 4
+        color: rgbaColor(20, 25, 40, 0.78)
+        border.width: 1
+        border.color: rgbaColor(190, 165, 90, 0.85)
+        visible: hasQuests
+        z: 71
+
+        Text {
+            anchors.left: parent.left
+            anchors.top: parent.top
+            anchors.leftMargin: 8
+            anchors.topMargin: 6
+            text: "Quests (" + questLogPanel.questList.length + ")"
+            color: "#f5c85a"
+            font.pixelSize: 13
+            font.bold: true
+        }
+
+        Column {
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.top: parent.top
+            anchors.topMargin: 28
+            anchors.leftMargin: 6
+            anchors.rightMargin: 6
+            spacing: 4
+
+            Repeater {
+                model: questLogPanel.questList
+
+                delegate: Rectangle {
+                    required property var modelData
+
+                    width: parent.width
+                    height: 50
+                    radius: 3
+                    color: modelData.active ? rgbaColor(50, 70, 90, 0.6) : rgbaColor(35, 40, 55, 0.5)
+                    border.width: 1
+                    border.color: rgbaColor(120, 110, 70, 0.7)
+
+                    Text {
+                        anchors.left: parent.left
+                        anchors.top: parent.top
+                        anchors.leftMargin: 6
+                        anchors.topMargin: 4
+                        text: "Quest #" + (modelData.questId || 0) + (modelData.active ? "" : "  (inactive)")
+                        color: "#f6f1e0"
+                        font.pixelSize: 11
+                        font.bold: true
+                    }
+
+                    Text {
+                        anchors.left: parent.left
+                        anchors.right: parent.right
+                        anchors.bottom: parent.bottom
+                        anchors.leftMargin: 6
+                        anchors.rightMargin: 6
+                        anchors.bottomMargin: 4
+                        elide: Text.ElideRight
+                        wrapMode: Text.NoWrap
+                        text: {
+                            const hunts = modelData.hunts || []
+                            if (hunts.length === 0) {
+                                return "(no hunt targets)"
+                            }
+                            const parts = []
+                            for (let i = 0; i < hunts.length; ++i) {
+                                const h = hunts[i]
+                                const name = h.monsterName || ("Mob#" + (h.monsterId || 0))
+                                parts.push(name + " " + (h.count || 0) + "/" + (h.maxCount || 0))
+                            }
+                            return parts.join("  •  ")
+                        }
+                        color: "#cfd9e3"
+                        font.pixelSize: 10
+                    }
+                }
+            }
+        }
+    }
+
+    // Cast progress bar (HUD-anchored, bottom-center of root). Driven by
+    // QtUiState::castBar which mirrors CGameActor::m_cast{Start,End}Tick on the
+    // local player. Hidden whenever the local player isn't casting.
+    Item {
+        id: castBarHud
+        readonly property var castData: uiState.castBar || ({})
+        readonly property bool castActive: castData.active === true
+
+        width: 220
+        height: 22
+        x: Math.round((root.width - width) / 2)
+        y: Math.round(root.height * 0.62)
+        visible: castActive
+        z: 73
+
+        Rectangle {
+            anchors.fill: parent
+            radius: 3
+            color: rgbaColor(20, 25, 40, 0.78)
+            border.width: 1
+            border.color: rgbaColor(190, 165, 90, 0.85)
+        }
+
+        Rectangle {
+            x: 2
+            y: 2
+            width: Math.max(0, (parent.width - 4) * Math.max(0, Math.min(1, castBarHud.castData.progress || 0)))
+            height: parent.height - 4
+            radius: 2
+            color: rgbaColor(245, 200, 90, 0.9)
+        }
+
+        Text {
+            anchors.centerIn: parent
+            text: (castBarHud.castData.skillName || "Casting") +
+                  "  " + Math.max(0, Math.ceil(((castBarHud.castData.remainingMs || 0) / 1000.0) * 10) / 10).toFixed(1) + "s"
+            color: "#f6f1e0"
+            font.pixelSize: 12
+            font.bold: true
         }
     }
 
