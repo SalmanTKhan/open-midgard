@@ -136,6 +136,10 @@ add_library(ro_ui STATIC
     UIWorldMapWnd.cpp
     UISkillCastIndicatorWnd.h
     UISkillCastIndicatorWnd.cpp
+    UIPartyWnd.h
+    UIPartyWnd.cpp
+    UIWhisperWnd.h
+    UIWhisperWnd.cpp
 )
 
 target_include_directories(ro_ui PUBLIC 

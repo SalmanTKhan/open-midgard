@@ -23,6 +23,8 @@
 #include "UISkillUpConfirmWnd.h"
 #include "UIMessengerGroupWnd.h"
 #include "UIPartyOptionWnd.h"
+#include "UIPartyWnd.h"
+#include "UIWhisperWnd.h"
 #include "UINpcInputWnd.h"
 #include "UIChooseWnd.h"
 #include "UIEmotionWnd.h"
@@ -631,6 +633,54 @@ UIWindowMgr::~UIWindowMgr() {
     Reset();
 }
 
+namespace {
+std::string ToLowerKey(const std::string& s)
+{
+    std::string r = s;
+    std::transform(r.begin(), r.end(), r.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    return r;
+}
+}  // namespace
+
+UIWhisperWnd* UIWindowMgr::FindWhisperWindow(const std::string& target)
+{
+    if (target.empty()) return nullptr;
+    auto it = m_whisperWindows.find(ToLowerKey(target));
+    if (it == m_whisperWindows.end()) return nullptr;
+    return it->second;
+}
+
+UIWhisperWnd* UIWindowMgr::OpenWhisperWindow(const std::string& target)
+{
+    if (target.empty()) return nullptr;
+    const std::string key = ToLowerKey(target);
+    auto it = m_whisperWindows.find(key);
+    UIWhisperWnd* wnd = (it != m_whisperWindows.end()) ? it->second : nullptr;
+    if (!wnd) {
+        wnd = new UIWhisperWnd();
+        int defaultX = 60;
+        int defaultY = 60;
+        if (g_hMainWnd) {
+            RECT clientRect{};
+            if (GetClientRect(g_hMainWnd, &clientRect)) {
+                defaultX = ((clientRect.right - clientRect.left) - 320) / 2
+                           + 16 * static_cast<int>(m_whisperWindows.size());
+                defaultY = ((clientRect.bottom - clientRect.top) - 220) / 2
+                           + 16 * static_cast<int>(m_whisperWindows.size());
+            }
+        }
+        wnd->OnCreate(defaultX, defaultY);
+        wnd->SetTarget(target);
+        m_children.push_back(wnd);
+        m_whisperWindows[key] = wnd;
+    }
+    m_children.remove(wnd);
+    m_children.push_back(wnd);
+    wnd->SetShow(1);
+    return wnd;
+}
+
 void UIWindowMgr::ClampWindowToClient(int* x, int* y, int w, int h) const
 {
     ClampWindowToLogicalClientRect(
@@ -1102,6 +1152,26 @@ UIWindow* UIWindowMgr::MakeWindow(int windowId)
         m_children.push_back(m_partyOptionWnd);
         m_partyOptionWnd->SetShow(1);
         return m_partyOptionWnd;
+
+    case WID_PARTYWND:
+        if (!m_partyWnd) {
+            m_partyWnd = new UIPartyWnd();
+            int defaultX = 0;
+            int defaultY = 0;
+            if (g_hMainWnd) {
+                RECT clientRect{};
+                if (GetClientRect(g_hMainWnd, &clientRect)) {
+                    defaultX = ((clientRect.right - clientRect.left) - 360) / 2;
+                    defaultY = ((clientRect.bottom - clientRect.top) - 320) / 2;
+                }
+            }
+            m_partyWnd->OnCreate(defaultX, defaultY);
+            m_children.push_back(m_partyWnd);
+        }
+        m_children.remove(m_partyWnd);
+        m_children.push_back(m_partyWnd);
+        m_partyWnd->SetShow(1);
+        return m_partyWnd;
 
     case WID_EMOTIONWND:
         if (!m_emotionWnd) {
@@ -1769,6 +1839,16 @@ void UIWindowMgr::DeleteWindow(UIWindow* window)
     if (window == m_mercInfoWnd) {
         m_mercInfoWnd = nullptr;
     }
+    if (window == m_partyWnd) {
+        m_partyWnd = nullptr;
+    }
+    for (auto it = m_whisperWindows.begin(); it != m_whisperWindows.end(); ) {
+        if (it->second == window) {
+            it = m_whisperWindows.erase(it);
+        } else {
+            ++it;
+        }
+    }
 
     delete window;
 }
@@ -1878,6 +1958,8 @@ void UIWindowMgr::RemoveAllWindows()
     m_notifyLevelUpWnd = nullptr;
     m_notifyJobLevelUpWnd = nullptr;
     m_loginWnd = nullptr;
+    m_partyWnd = nullptr;
+    m_whisperWindows.clear();
     m_selectServerWnd = nullptr;
     m_selectCharWnd = nullptr;
     m_makeCharWnd = nullptr;

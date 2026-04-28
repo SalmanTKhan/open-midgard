@@ -23,6 +23,7 @@
 #include "res/Sprite.h"
 #include "res/WorldRes.h"
 #include "session/Session.h"
+#include "session/MapNameResolver.h"
 #include "ui/UIMinimapWnd.h"
 #include "ui/UiScale.h"
 #include "ui/UIPlayerContextMenuWnd.h"
@@ -32,6 +33,7 @@
 #include "ui/UINpcInputWnd.h"
 #include "ui/UIWindow.h"
 #include "ui/UIWindowMgr.h"
+#include "ui/UIWhisperWnd.h"
 #include "render/DrawUtil.h"
 #include "render/Prim.h"
 #include "render/Renderer.h"
@@ -9805,6 +9807,31 @@ bool RequestGuildLeave(int guildId, const char* reason)
     return CRagConnection::instance()->SendPacket(packet, 54) != 0;
 }
 
+// CZ_REQ_LEAVE_GROUP (0x0100, 2 bytes per Ref/eAthena/db/packet_db.txt — header
+// only; the server uses the player's session AID to identify the leaver).
+bool RequestPartyLeave()
+{
+    if (g_session.m_partyName.empty() && g_session.GetPartyList().empty()) {
+        return false;
+    }
+    char packet[2] = {};
+    *reinterpret_cast<u16*>(packet + 0) = PacketProfile::ActivePartySend::kLeaveParty;
+    return CRagConnection::instance()->SendPacket(packet, 2) != 0;
+}
+
+// CZ_REQ_EXPEL_GROUP_MEMBER (0x0103, 30 bytes): header + accountId.L + name(24).
+bool RequestPartyExpel(unsigned int accountId, const char* characterName)
+{
+    if (!g_session.m_amIPartyMaster || accountId == 0 || !characterName) {
+        return false;
+    }
+    char packet[30] = {};
+    *reinterpret_cast<u16*>(packet + 0) = PacketProfile::ActivePartySend::kRemovePartyMember;
+    *reinterpret_cast<u32*>(packet + 2) = static_cast<u32>(accountId);
+    std::strncpy(packet + 6, characterName, 23);
+    return CRagConnection::instance()->SendPacket(packet, 30) != 0;
+}
+
 // Trade CZ senders. Must live at file scope (outside the outer anonymous
 // namespace that wraps most of GameMode.cpp) so UITradeWnd.cpp can link to
 // them across translation units.
@@ -10815,6 +10842,53 @@ msgresult_t CGameMode::SendMsg(int msg, msgparam_t wparam, msgparam_t lparam, ms
             g_windowMgr.MakeWindow(UIWindowMgr::WID_WORLDMAPWND);
             return 1;
         }
+        if (command == "/party") {
+            g_windowMgr.MakeWindow(UIWindowMgr::WID_PARTYWND);
+            return 1;
+        }
+        if (command == "/where") {
+            const std::string mapId = g_session.m_curMap;
+            const std::string mapDisp = mapname::ResolveMapDisplayName(mapId);
+            char buf[160] = {};
+            std::snprintf(buf, sizeof(buf), "%s (%s) %d, %d",
+                          mapDisp.c_str(),
+                          mapId.empty() ? "?" : mapId.c_str(),
+                          g_session.m_playerPosX,
+                          g_session.m_playerPosY);
+            g_windowMgr.PushChatEvent(buf, 0x00FFFF00u, 6);
+            return 1;
+        }
+        if (command == "/effect") {
+            g_session.m_isEffectOn = !g_session.m_isEffectOn;
+            g_windowMgr.PushChatEvent(
+                g_session.m_isEffectOn ? "Effects: ON" : "Effects: OFF",
+                0x0000C000u, 6);
+            return 1;
+        }
+        if (command == "/skipbgm") {
+            static bool s_bgmPaused = false;
+            s_bgmPaused = !s_bgmPaused;
+            if (CAudio* audio = CAudio::GetInstance()) {
+                audio->SetBgmPaused(s_bgmPaused);
+            }
+            g_windowMgr.PushChatEvent(
+                s_bgmPaused ? "BGM: paused" : "BGM: resumed",
+                0x0000C000u, 6);
+            return 1;
+        }
+        if (command == "/memo") {
+            // AL_WARP (skill id 26) self-cast records the memo on the
+            // server. If the player doesn't have the skill, the server
+            // returns a standard skill-fail packet which the existing
+            // handler surfaces in chat.
+            constexpr u16 kAlWarpSkillId = 26;
+            const bool sent = SendUseSkillToIdPacket(
+                kAlWarpSkillId, 1, ResolveSelfSkillTargetId());
+            return sent ? 1 : 0;
+        }
+        if (command == "/q" || command == "/quit") {
+            return RequestReturnToCharSelect() ? 1 : 0;
+        }
         if (command == "/stand") {
             return SendSitStandRequest(*this, false) ? 1 : 0;
         }
@@ -11057,6 +11131,26 @@ msgresult_t CGameMode::SendMsg(int msg, msgparam_t wparam, msgparam_t lparam, ms
         if (g_windowMgr.m_guildWnd && val) {
             g_windowMgr.m_guildWnd->SetPendingNoticeBody(val);
             SendMsg(GameMsg_RequestGuildNoticeSubmit, 0, 0, 0);
+        }
+        return 1;
+    }
+
+    case GameMsg_RequestWhisperSendMessage: {
+        const char* val = reinterpret_cast<const char*>(lparam);
+        auto* wnd = reinterpret_cast<UIWhisperWnd*>(wparam);
+        if (!val || *val == '\0') return 1;
+        if (!wnd) return 0;
+        // Sanity check: pointer must still be a registered whisper window.
+        UIWhisperWnd* known = g_windowMgr.FindWhisperWindow(wnd->GetTargetName());
+        if (known != wnd) return 0;
+        const std::string& target = wnd->GetTargetName();
+        if (target.empty()) return 0;
+        if (SendWhisperChatMessage(target, val)) {
+            wnd->AppendOutgoing(val);
+            m_lastWhisperName = target;
+            m_lastWhisper = val;
+        } else {
+            wnd->AppendSystem("(failed to send)");
         }
         return 1;
     }

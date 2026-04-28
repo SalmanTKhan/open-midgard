@@ -2791,13 +2791,13 @@ Item {
     // legacy UIVendingWnd; this is parity for the Qt overlay.
     Rectangle {
         id: vendingSellerMirror
-        readonly property var data: uiState.vendingPanel || ({})
-        readonly property bool sellerActive: data.active === true
+        readonly property var panel: uiState.vendingPanel || ({})
+        readonly property bool sellerActive: panel.active === true
 
         x: 12
         y: 100
         width: 260
-        height: sellerActive ? Math.min(root.height - 120, 50 + (data.items || []).length * 16) : 0
+        height: sellerActive ? Math.min(root.height - 120, 50 + (panel.items || []).length * 16) : 0
         radius: 4
         color: rgbaColor(20, 25, 40, 0.82)
         border.width: 1
@@ -2810,7 +2810,7 @@ Item {
             anchors.top: parent.top
             anchors.leftMargin: 8
             anchors.topMargin: 4
-            text: "Vending: " + (vendingSellerMirror.data.shopTitle || "(unnamed)")
+            text: "Vending: " + (vendingSellerMirror.panel.shopTitle || "(unnamed)")
             color: "#f5c85a"
             font.pixelSize: 12
             font.bold: true
@@ -2826,7 +2826,7 @@ Item {
             spacing: 1
 
             Repeater {
-                model: vendingSellerMirror.data.items || []
+                model: vendingSellerMirror.panel.items || []
                 delegate: Text {
                     required property var modelData
                     text: (modelData.name || ("#" + (modelData.itemId || 0))) +
@@ -2844,13 +2844,13 @@ Item {
     // Vending shop browse mirror (read-only). Same anchor logic as seller mirror.
     Rectangle {
         id: vendingShopMirror
-        readonly property var data: uiState.vendingShopPanel || ({})
-        readonly property bool browseActive: data.active === true
+        readonly property var panel: uiState.vendingShopPanel || ({})
+        readonly property bool browseActive: panel.active === true
 
         x: root.width - width - 12
         y: 240
         width: 260
-        height: browseActive ? Math.min(root.height - 240, 50 + (data.items || []).length * 16) : 0
+        height: browseActive ? Math.min(root.height - 240, 50 + (panel.items || []).length * 16) : 0
         radius: 4
         color: rgbaColor(20, 25, 40, 0.82)
         border.width: 1
@@ -2863,7 +2863,7 @@ Item {
             anchors.top: parent.top
             anchors.leftMargin: 8
             anchors.topMargin: 4
-            text: "Browsing: " + (vendingShopMirror.data.partnerShopTitle || "(unnamed)")
+            text: "Browsing: " + (vendingShopMirror.panel.partnerShopTitle || "(unnamed)")
             color: "#f5c85a"
             font.pixelSize: 12
             font.bold: true
@@ -2879,7 +2879,7 @@ Item {
             spacing: 1
 
             Repeater {
-                model: vendingShopMirror.data.items || []
+                model: vendingShopMirror.panel.items || []
                 delegate: Text {
                     required property var modelData
                     text: (modelData.name || ("#" + (modelData.itemId || 0))) +

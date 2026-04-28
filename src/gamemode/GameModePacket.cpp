@@ -44,6 +44,7 @@
 #include "ui/UIShortCutWnd.h"
 #include "ui/UIStatusWnd.h"
 #include "ui/UIWindowMgr.h"
+#include "ui/UIWhisperWnd.h"
 #include "world/GameActor.h"
 #include "world/MsgEffect.h"
 #include "world/RagEffect.h"
@@ -8250,6 +8251,10 @@ void HandleWhisper(CGameMode& mode, const PacketView& packet)
     mode.m_lastWhisper = msg;
 
     if (!name.empty() && !msg.empty()) {
+        if (UIWhisperWnd* wnd = g_windowMgr.FindWhisperWindow(name)) {
+            wnd->AppendIncoming(msg);
+            return;
+        }
         RecordChat(mode, std::string("(From ") + name + ") " + msg, 0x00FFFF00, kChatChannelWhisper);
     } else if (!msg.empty()) {
         RecordChat(mode, msg, 0x00FFFF00, kChatChannelWhisper);

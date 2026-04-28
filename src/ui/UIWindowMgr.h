@@ -42,6 +42,8 @@ class UIVendingShopWnd;
 class UISkillUpConfirmWnd;
 class UIMessengerGroupWnd;
 class UIPartyOptionWnd;
+class UIPartyWnd;
+class UIWhisperWnd;
 class UINpcInputWnd;
 class UIChooseWnd;
 class UIEmotionWnd;
@@ -138,6 +140,8 @@ public:
         WID_MAPNAMEBANNERWND  = 71,
         WID_WORLDMAPWND       = 72,
         WID_SKILLCASTINDICATORWND = 0xC0,
+        WID_PARTYWND          = 0xC1,
+        WID_WHISPERWND        = 0xC2,
     };
 
     UIWindowMgr();
@@ -291,6 +295,13 @@ public:
     UIMapNameBannerWnd* m_mapNameBannerWnd = nullptr;
     UIWorldMapWnd* m_worldMapWnd = nullptr;
     UISkillCastIndicatorWnd* m_skillCastIndicatorWnd = nullptr;
+    UIPartyWnd* m_partyWnd = nullptr;
+
+    // Per-target whisper windows keyed by lowercase target name. Owned by
+    // m_children for input/draw routing; this map is the lookup index.
+    std::map<std::string, UIWhisperWnd*> m_whisperWindows;
+    UIWhisperWnd* OpenWhisperWindow(const std::string& target);
+    UIWhisperWnd* FindWhisperWindow(const std::string& target);
     std::string m_loginStatus;
     std::string m_loginWallpaper;
     std::string m_loadedWallpaperPath;

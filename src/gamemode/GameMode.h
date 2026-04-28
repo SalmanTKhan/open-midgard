@@ -140,6 +140,7 @@ public:
         GameMsg_RequestGuildNoticeSubject = 20060,
         GameMsg_RequestGuildNoticeBody = 20061,
         GameMsg_RequestGuildNoticeSubmit = 20062,
+        GameMsg_RequestWhisperSendMessage = 20063,
 
         GameMsg_RequestMoveDelta = 20100,
     };
