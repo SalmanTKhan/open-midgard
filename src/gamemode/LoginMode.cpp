@@ -1,5 +1,7 @@
 #include <winsock2.h>
+#if RO_PLATFORM_WINDOWS
 #include <shellapi.h>
+#endif
 #include "CursorRenderer.h"
 #include "LoginMode.h"
 #include "ui/UIWindowMgr.h"
@@ -1688,12 +1690,20 @@ msgresult_t CLoginMode::SendMsg(int msg, msgparam_t wparam, msgparam_t lparam, m
     case LoginMsg_RequestAccount: {
         const ClientInfoConnection* connection = GetSelectedClientInfoConnection();
         if (connection && !connection->registrationWeb.empty()) {
+#if RO_PLATFORM_WINDOWS
             ShellExecuteA(nullptr,
                 "open",
                 connection->registrationWeb.c_str(),
                 nullptr,
                 nullptr,
                 SW_SHOWNORMAL);
+#elif RO_PLATFORM_MACOS
+            const std::string macCmd = "open \"" + connection->registrationWeb + "\"";
+            std::system(macCmd.c_str());
+#else
+            const std::string linuxCmd = "xdg-open \"" + connection->registrationWeb + "\"";
+            std::system(linuxCmd.c_str());
+#endif
             char status[256] = {};
             std::snprintf(status, sizeof(status),
                 "Opening account registration: %s",
