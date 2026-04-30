@@ -1,6 +1,7 @@
 #include "MapSendProfile.h"
 
 #include "Packet.h"
+#include "PacketRegistry.h"
 #include "core/ClientInfoLocale.h"
 #include "core/SettingsIni.h"
 #include "DebugLog.h"
@@ -58,6 +59,16 @@ AccountLoginPacketProfile MakeLoginProfile(PacketVersionId id, const char* name)
 
 CharacterPacketProfile MakeCharacterProfile(PacketVersionId id, const char* name)
 {
+    if (id == PacketVersionId::PacketVer200) {
+        return {
+            id,
+            name,
+            PacketProfile::SabineBeta1LoginChain::kCharServerEnter,
+            PacketProfile::SabineBeta1LoginChain::kSelectCharacter,
+            PacketProfile::SabineBeta1LoginChain::kMakeCharacter,
+            PacketProfile::SabineBeta1LoginChain::kDeleteCharacter,
+        };
+    }
     return {
         id,
         name,
@@ -790,6 +801,142 @@ struct ResolvedPacketProfiles {
     const MapGameplaySendProfile* gameplayProfile = nullptr;
 };
 
+// One-shot cross-check: when the resolved profile uses one of the registry's
+// canonical version tracks (PV22/PV23/PV200) and no override is in play
+// (Legacy/Padded22 zone, Legacy gameplay), every send opcode in the profile
+// should match what GetOpcode() returns from the version table. Mismatches
+// here mean the registry's semantic mapping in PacketRegistry.cpp drifted
+// from MakePacketVer*Profile() and the registry can't yet be trusted as a
+// source of truth for that field.
+void ValidateRegistryAgainstProfile(const PacketProfileSet& packetProfile,
+    const ZonePacketProfile& zoneProfile,
+    const MapGameplaySendProfile& gameplayProfile)
+{
+    const bool zoneIsCanonical = zoneProfile.wantToConnection == packetProfile.zone.wantToConnection
+        && zoneProfile.wantToConnectionLayout == packetProfile.zone.wantToConnectionLayout;
+    const bool gameplayIsCanonical = gameplayProfile.id != MapGameplaySendProfileId::Legacy;
+    if (!zoneIsCanonical || !gameplayIsCanonical) {
+        return;
+    }
+
+    const VersionTable& table = GetVersionTable(packetProfile.id);
+
+    auto check = [&](const char* field, SemanticPacket sem, u16 expected) {
+        if (expected == 0) {
+            return;
+        }
+        const u16 actual = GetOpcode(table, sem);
+        if (actual != expected) {
+            DbgLog("[PacketRegistry] mismatch on %s (version=%s): profile=0x%04X registry=0x%04X\n",
+                field,
+                packetProfile.name,
+                static_cast<unsigned int>(expected),
+                static_cast<unsigned int>(actual));
+        }
+    };
+
+    check("wantToConnection", SemanticPacket::WantToConnection, zoneProfile.wantToConnection);
+    check("actionRequest", SemanticPacket::ActionRequest, gameplayProfile.actionRequest);
+    check("useSkillToId", SemanticPacket::UseSkillToId, gameplayProfile.useSkillToId);
+    check("cartOff", SemanticPacket::CartOff, gameplayProfile.cartOff);
+    check("changeCart", SemanticPacket::ChangeCart, gameplayProfile.changeCart);
+    check("useSkillToPos", SemanticPacket::UseSkillToPos, gameplayProfile.useSkillToPos);
+    check("useSkillMap", SemanticPacket::UseSkillMap, gameplayProfile.useSkillMap);
+    check("useItem", SemanticPacket::UseItem, gameplayProfile.useItem);
+    check("takeItem", SemanticPacket::TakeItem, gameplayProfile.takeItem);
+    check("dropItem", SemanticPacket::DropItem, gameplayProfile.dropItem);
+    check("itemCompositionList", SemanticPacket::ItemCompositionList, gameplayProfile.itemCompositionList);
+    check("itemComposition", SemanticPacket::ItemComposition, gameplayProfile.itemComposition);
+    check("itemIdentify", SemanticPacket::ItemIdentify, gameplayProfile.itemIdentify);
+    check("skillUp", SemanticPacket::SkillUp, gameplayProfile.skillUp);
+    check("equipItem", SemanticPacket::EquipItem, gameplayProfile.equipItem);
+    check("unequipItem", SemanticPacket::UnequipItem, gameplayProfile.unequipItem);
+    check("walkToXY", SemanticPacket::WalkToXY, gameplayProfile.walkToXY);
+    check("changeDir", SemanticPacket::ChangeDir, gameplayProfile.changeDir);
+    check("tickSend", SemanticPacket::TickSend, gameplayProfile.tickSend);
+    check("notifyActorInit", SemanticPacket::NotifyActorInit, gameplayProfile.notifyActorInit);
+    check("getCharNameRequest", SemanticPacket::GetCharNameRequest, gameplayProfile.getCharNameRequest);
+    check("whisper", SemanticPacket::Whisper, gameplayProfile.whisper);
+    check("globalMessage", SemanticPacket::GlobalMessage, gameplayProfile.globalMessage);
+
+    const MapReceiveProfile& receive = packetProfile.mapReceive;
+    check("acceptEnterLegacy", SemanticPacket::AcceptEnterLegacy, receive.acceptEnterLegacy);
+    check("acceptEnterModern", SemanticPacket::AcceptEnterModern, receive.acceptEnterModern);
+    check("notifyTime", SemanticPacket::NotifyTime, receive.notifyTime);
+    check("mapChangeBasic", SemanticPacket::MapChangeBasic, receive.mapChangeBasic);
+    check("mapChangeServerMove", SemanticPacket::MapChangeServerMove, receive.mapChangeServerMove);
+    check("actorActionNotifyBasic", SemanticPacket::ActorActionNotifyBasic, receive.actorActionNotifyBasic);
+    check("actorActionNotifyExtended", SemanticPacket::ActorActionNotifyExtended, receive.actorActionNotifyExtended);
+    check("actorSetPositionBasic", SemanticPacket::ActorSetPositionBasic, receive.actorSetPositionBasic);
+    check("actorSetPositionHighJump", SemanticPacket::ActorSetPositionHighJump, receive.actorSetPositionHighJump);
+    check("selfMoveAck", SemanticPacket::SelfMoveAck, receive.selfMoveAck);
+    check("broadcastBasic", SemanticPacket::BroadcastBasic, receive.broadcastBasic);
+    check("broadcastColored", SemanticPacket::BroadcastColored, receive.broadcastColored);
+    check("groundItemEntryExisting", SemanticPacket::GroundItemEntryExisting, receive.groundItemEntryExisting);
+    check("groundItemEntryDropped", SemanticPacket::GroundItemEntryDropped, receive.groundItemEntryDropped);
+    check("itemPickupAckBasic", SemanticPacket::ItemPickupAckBasic, receive.itemPickupAckBasic);
+    check("itemPickupAckExtended", SemanticPacket::ItemPickupAckExtended, receive.itemPickupAckExtended);
+    check("normalInventoryListBasic", SemanticPacket::NormalInventoryListBasic, receive.normalInventoryListBasic);
+    check("normalInventoryListCardSlots", SemanticPacket::NormalInventoryListCardSlots, receive.normalInventoryListCardSlots);
+    check("normalInventoryListTimed", SemanticPacket::NormalInventoryListTimed, receive.normalInventoryListTimed);
+    check("equipInventoryListBasic", SemanticPacket::EquipInventoryListBasic, receive.equipInventoryListBasic);
+    check("equipInventoryListTimed", SemanticPacket::EquipInventoryListTimed, receive.equipInventoryListTimed);
+    check("equipInventoryListTimedOwned", SemanticPacket::EquipInventoryListTimedOwned, receive.equipInventoryListTimedOwned);
+    check("normalStorageListBasic", SemanticPacket::NormalStorageListBasic, receive.normalStorageListBasic);
+    check("normalStorageListCardSlots", SemanticPacket::NormalStorageListCardSlots, receive.normalStorageListCardSlots);
+    check("normalStorageListTimed", SemanticPacket::NormalStorageListTimed, receive.normalStorageListTimed);
+    check("equipStorageListBasic", SemanticPacket::EquipStorageListBasic, receive.equipStorageListBasic);
+    check("equipStorageListTimedOwned", SemanticPacket::EquipStorageListTimedOwned, receive.equipStorageListTimedOwned);
+    check("storageItemAddedBasic", SemanticPacket::StorageItemAddedBasic, receive.storageItemAddedBasic);
+    check("storageItemAddedTyped", SemanticPacket::StorageItemAddedTyped, receive.storageItemAddedTyped);
+    check("useItemAckBasic", SemanticPacket::UseItemAckBasic, receive.useItemAckBasic);
+    check("useItemAckExtended", SemanticPacket::UseItemAckExtended, receive.useItemAckExtended);
+    check("itemRemoveBasic", SemanticPacket::ItemRemoveBasic, receive.itemRemoveBasic);
+    check("itemRemoveExtended", SemanticPacket::ItemRemoveExtended, receive.itemRemoveExtended);
+    check("partyInviteAckBasic", SemanticPacket::PartyInviteAckBasic, receive.partyInviteAckBasic);
+    check("partyInviteAckExtended", SemanticPacket::PartyInviteAckExtended, receive.partyInviteAckExtended);
+    check("partyInviteRequestBasic", SemanticPacket::PartyInviteRequestBasic, receive.partyInviteRequestBasic);
+    check("partyInviteRequestExtended", SemanticPacket::PartyInviteRequestExtended, receive.partyInviteRequestExtended);
+    check("skillDamagePositionNotify", SemanticPacket::SkillDamagePositionNotify, receive.skillDamagePositionNotify);
+    check("groundSkillNotify", SemanticPacket::GroundSkillNotify, receive.groundSkillNotify);
+    check("skillNoDamageNotify", SemanticPacket::SkillNoDamageNotify, receive.skillNoDamageNotify);
+    check("skillUnitSetBasic", SemanticPacket::SkillUnitSetBasic, receive.skillUnitSetBasic);
+    check("skillUnitSetExtended", SemanticPacket::SkillUnitSetExtended, receive.skillUnitSetExtended);
+    check("notifyEffectBasic", SemanticPacket::NotifyEffectBasic, receive.notifyEffectBasic);
+    check("notifyEffectDirect", SemanticPacket::NotifyEffectDirect, receive.notifyEffectDirect);
+    check("actorSpawnLegacyIdle", SemanticPacket::ActorSpawnLegacyIdle, receive.actorSpawnLegacyIdle);
+    check("actorSpawnLegacySpawn", SemanticPacket::ActorSpawnLegacySpawn, receive.actorSpawnLegacySpawn);
+    check("actorSpawnLegacyAlt", SemanticPacket::ActorSpawnLegacyAlt, receive.actorSpawnLegacyAlt);
+    check("actorSpawnLegacyNpc", SemanticPacket::ActorSpawnLegacyNpc, receive.actorSpawnLegacyNpc);
+    check("actorSpawnLegacyIdleShifted", SemanticPacket::ActorSpawnLegacyIdleShifted, receive.actorSpawnLegacyIdleShifted);
+    check("actorSpawnLegacySpawnShifted", SemanticPacket::ActorSpawnLegacySpawnShifted, receive.actorSpawnLegacySpawnShifted);
+    check("actorMoveLegacy", SemanticPacket::ActorMoveLegacy, receive.actorMoveLegacy);
+    check("actorMoveLegacyShifted", SemanticPacket::ActorMoveLegacyShifted, receive.actorMoveLegacyShifted);
+    check("actorSpawnVariableIdle", SemanticPacket::ActorSpawnVariableIdle, receive.actorSpawnVariableIdle);
+    check("actorSpawnVariableSpawn", SemanticPacket::ActorSpawnVariableSpawn, receive.actorSpawnVariableSpawn);
+    check("actorSpawnVariableIdleRobe", SemanticPacket::ActorSpawnVariableIdleRobe, receive.actorSpawnVariableIdleRobe);
+    check("actorSpawnVariableSpawnRobe", SemanticPacket::ActorSpawnVariableSpawnRobe, receive.actorSpawnVariableSpawnRobe);
+    check("actorMoveVariable", SemanticPacket::ActorMoveVariable, receive.actorMoveVariable);
+    check("actorMoveVariableRobe", SemanticPacket::ActorMoveVariableRobe, receive.actorMoveVariableRobe);
+    check("actorSpawnModernIdle", SemanticPacket::ActorSpawnModernIdle, receive.actorSpawnModernIdle);
+    check("actorSpawnModernSpawn", SemanticPacket::ActorSpawnModernSpawn, receive.actorSpawnModernSpawn);
+    check("actorSpawnModernIdleFont", SemanticPacket::ActorSpawnModernIdleFont, receive.actorSpawnModernIdleFont);
+    check("actorSpawnModernSpawnFont", SemanticPacket::ActorSpawnModernSpawnFont, receive.actorSpawnModernSpawnFont);
+    check("actorMoveModern", SemanticPacket::ActorMoveModern, receive.actorMoveModern);
+    check("actorMoveModernFont", SemanticPacket::ActorMoveModernFont, receive.actorMoveModernFont);
+    check("actorNameAckBasic", SemanticPacket::ActorNameAckBasic, receive.actorNameAckBasic);
+    check("actorNameAckParty", SemanticPacket::ActorNameAckParty, receive.actorNameAckParty);
+    check("actorNameAckFull", SemanticPacket::ActorNameAckFull, receive.actorNameAckFull);
+    check("actorStateChangeBasic", SemanticPacket::ActorStateChangeBasic, receive.actorStateChangeBasic);
+    check("actorStateChangeExtended", SemanticPacket::ActorStateChangeExtended, receive.actorStateChangeExtended);
+    check("partyMemberAddedBasic", SemanticPacket::PartyMemberAddedBasic, receive.partyMemberAddedBasic);
+    check("partyMemberAddedExtended", SemanticPacket::PartyMemberAddedExtended, receive.partyMemberAddedExtended);
+    check("partyHpUpdateBasic", SemanticPacket::PartyHpUpdateBasic, receive.partyHpUpdateBasic);
+    check("partyHpUpdateExtended", SemanticPacket::PartyHpUpdateExtended, receive.partyHpUpdateExtended);
+    check("skillDamageNotifyBasic", SemanticPacket::SkillDamageNotifyBasic, receive.skillDamageNotifyBasic);
+    check("skillDamageNotifyExtended", SemanticPacket::SkillDamageNotifyExtended, receive.skillDamageNotifyExtended);
+}
+
 ResolvedPacketProfiles& GetResolvedPacketProfiles()
 {
     static ResolvedPacketProfiles cache;
@@ -802,6 +949,8 @@ ResolvedPacketProfiles& GetResolvedPacketProfiles()
     cache.zoneProfile = &ResolveConfiguredZoneProfile(*cache.packetProfile);
     cache.gameplayProfile = &ResolveConfiguredGameplaySendProfile(*cache.packetProfile, *cache.zoneProfile);
     cache.generation = generation;
+
+    ValidateRegistryAgainstProfile(*cache.packetProfile, *cache.zoneProfile, *cache.gameplayProfile);
 
     const MapReceiveProfile& receiveProfile = cache.packetProfile->mapReceive;
     DbgLog("[PacketProfile] active packet profile=%s\n", cache.packetProfile->name);

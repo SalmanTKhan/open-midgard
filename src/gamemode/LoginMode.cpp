@@ -1809,24 +1809,46 @@ msgresult_t CLoginMode::SendMsg(int msg, msgparam_t wparam, msgparam_t lparam, m
             return 0;
         }
 
-        PACKET_CZ_MAKE_CHAR pkt{};
-        pkt.PacketType = ro::net::GetActiveCharacterPacketProfile().makeCharacter;
-        CopyCString(pkt.name, sizeof(pkt.name), m_makingCharName);
-        pkt.Str = static_cast<u8>(m_charParam[0]);
-        pkt.Agi = static_cast<u8>(m_charParam[1]);
-        pkt.Vit = static_cast<u8>(m_charParam[2]);
-        pkt.Int = static_cast<u8>(m_charParam[3]);
-        pkt.Dex = static_cast<u8>(m_charParam[4]);
-        pkt.Luk = static_cast<u8>(m_charParam[5]);
-        pkt.CharNum = static_cast<u8>(m_selectedCharSlot);
-        pkt.hairColor = static_cast<u16>(m_charParam[6]);
-        pkt.hairStyle = static_cast<u16>(m_charParam[7]);
+        const auto& charProfile = ro::net::GetActiveCharacterPacketProfile();
+        if (charProfile.id == ro::net::PacketVersionId::PacketVer200) {
+            PACKET_CZ_MAKE_CHAR_Beta1 pkt{};
+            pkt.PacketType = charProfile.makeCharacter;
+            CopyCString(pkt.name, sizeof(pkt.name), m_makingCharName);
+            pkt.Str = static_cast<u8>(m_charParam[0]);
+            pkt.Agi = static_cast<u8>(m_charParam[1]);
+            pkt.Vit = static_cast<u8>(m_charParam[2]);
+            pkt.Int = static_cast<u8>(m_charParam[3]);
+            pkt.Dex = static_cast<u8>(m_charParam[4]);
+            pkt.Luk = static_cast<u8>(m_charParam[5]);
+            pkt.CharNum = static_cast<u8>(m_selectedCharSlot);
+            // Beta1 collapses hairColor/hairStyle into a single HairId byte; use hairStyle.
+            pkt.HairId = static_cast<u8>(m_charParam[7]);
 
-        CRagConnection::instance()->SendPacket(reinterpret_cast<const char*>(&pkt), static_cast<int>(sizeof(pkt)));
-        DbgLog("[Login] CH_MAKE_CHAR sent: name='%.24s' stats=%d/%d/%d/%d/%d/%d slot=%d hairColor=%d hairStyle=%d\n",
-               pkt.name,
-               (int)pkt.Str, (int)pkt.Agi, (int)pkt.Vit, (int)pkt.Int, (int)pkt.Dex, (int)pkt.Luk,
-               (int)pkt.CharNum, (int)pkt.hairColor, (int)pkt.hairStyle);
+            CRagConnection::instance()->SendPacket(reinterpret_cast<const char*>(&pkt), static_cast<int>(sizeof(pkt)));
+            DbgLog("[Login] CH_MAKE_CHAR (Beta1) sent: name='%.24s' stats=%d/%d/%d/%d/%d/%d slot=%d hair=%d\n",
+                   pkt.name,
+                   (int)pkt.Str, (int)pkt.Agi, (int)pkt.Vit, (int)pkt.Int, (int)pkt.Dex, (int)pkt.Luk,
+                   (int)pkt.CharNum, (int)pkt.HairId);
+        } else {
+            PACKET_CZ_MAKE_CHAR pkt{};
+            pkt.PacketType = charProfile.makeCharacter;
+            CopyCString(pkt.name, sizeof(pkt.name), m_makingCharName);
+            pkt.Str = static_cast<u8>(m_charParam[0]);
+            pkt.Agi = static_cast<u8>(m_charParam[1]);
+            pkt.Vit = static_cast<u8>(m_charParam[2]);
+            pkt.Int = static_cast<u8>(m_charParam[3]);
+            pkt.Dex = static_cast<u8>(m_charParam[4]);
+            pkt.Luk = static_cast<u8>(m_charParam[5]);
+            pkt.CharNum = static_cast<u8>(m_selectedCharSlot);
+            pkt.hairColor = static_cast<u16>(m_charParam[6]);
+            pkt.hairStyle = static_cast<u16>(m_charParam[7]);
+
+            CRagConnection::instance()->SendPacket(reinterpret_cast<const char*>(&pkt), static_cast<int>(sizeof(pkt)));
+            DbgLog("[Login] CH_MAKE_CHAR sent: name='%.24s' stats=%d/%d/%d/%d/%d/%d slot=%d hairColor=%d hairStyle=%d\n",
+                   pkt.name,
+                   (int)pkt.Str, (int)pkt.Agi, (int)pkt.Vit, (int)pkt.Int, (int)pkt.Dex, (int)pkt.Luk,
+                   (int)pkt.CharNum, (int)pkt.hairColor, (int)pkt.hairStyle);
+        }
 
         m_wndWait = static_cast<UIWaitWnd*>(g_windowMgr.MakeWindow(UIWindowMgr::WID_WAITWND));
         if (m_wndWait) {

@@ -78,6 +78,7 @@ constexpr int kItemBillboardComposeHeight = 96;
 constexpr int kItemBillboardAnchorX = 48;
 constexpr int kItemBillboardAnchorY = 72;
 constexpr float kGroundItemScreenScale = 1.6f;
+constexpr float kItemBillboardWorldHeightScale = 1.4f;
 constexpr bool kLogActLoad = false;
 constexpr int kJobWarpNpc = 0x2D;
 constexpr int kJobWarpNpcCompat = 0x20;
@@ -3451,9 +3452,9 @@ bool DrawNonPcBillboard(BillboardComposeSurface& bitmap,
     const CMotion* spriteMotion = nullptr;
     if (!ResolveNonPcBillboardMotion(actor, bodyAction, motion, &actRes, &sprRes, &spriteMotion)) {
         if (IsPortalFallbackJob(actor.m_job)) {
-            return false;
+            return DrawWarpPortalFallback(bitmap, actor, outJob);
         }
-        return DrawWarpPortalFallback(bitmap, actor, outJob);
+        return false;
     }
 
     if (!spriteMotion) {
@@ -5554,6 +5555,62 @@ void CItem::Render(matrix* viewMatrix)
         return;
     }
 
+    const float zoom = g_world.m_ground
+        ? g_world.m_ground->m_zoom
+        : (g_world.m_attr ? static_cast<float>(g_world.m_attr->m_zoom) : 5.0f);
+
+    const float textureWidth = static_cast<float>((std::max)(1, m_billboardTextureWidth));
+    const float textureHeight = static_cast<float>((std::max)(1, m_billboardTextureHeight));
+    const float anchorX = static_cast<float>(m_billboardAnchorX);
+    const float anchorY = static_cast<float>((std::max)(1, m_billboardAnchorY));
+
+    const float worldHeight = zoom * kItemBillboardWorldHeightScale;
+    const float unitsPerPixel = worldHeight / (std::max)(1.0f, anchorY);
+    const float leftUnits = anchorX * unitsPerPixel;
+    const float rightUnits = (textureWidth - anchorX) * unitsPerPixel;
+    const float topUnits = anchorY * unitsPerPixel;
+    const float bottomUnits = (textureHeight - anchorY) * unitsPerPixel;
+
+    vector3d renderUp = NormalizeVec3Item(ScaleVec3Item(g_renderer.m_eyeUp, -1.0f));
+    vector3d renderRight = NormalizeVec3Item(g_renderer.m_eyeRight);
+    if (std::fabs(renderUp.x) < 0.0001f && std::fabs(renderUp.y) < 0.0001f && std::fabs(renderUp.z) < 0.0001f) {
+        renderUp = vector3d{ 0.0f, -1.0f, 0.0f };
+    }
+    if (std::fabs(renderRight.x) < 0.0001f && std::fabs(renderRight.y) < 0.0001f && std::fabs(renderRight.z) < 0.0001f) {
+        renderRight = vector3d{ 1.0f, 0.0f, 0.0f };
+    }
+
+    const vector3d worldVerts[4] = {
+        AddVec3Item(AddVec3Item(base, ScaleVec3Item(renderUp, topUnits)),    ScaleVec3Item(renderRight, -leftUnits)),
+        AddVec3Item(AddVec3Item(base, ScaleVec3Item(renderUp, topUnits)),    ScaleVec3Item(renderRight, rightUnits)),
+        AddVec3Item(AddVec3Item(base, ScaleVec3Item(renderUp, -bottomUnits)),ScaleVec3Item(renderRight, -leftUnits)),
+        AddVec3Item(AddVec3Item(base, ScaleVec3Item(renderUp, -bottomUnits)),ScaleVec3Item(renderRight, rightUnits)),
+    };
+
+    tlvertex3d projVerts[4]{};
+    for (int i = 0; i < 4; ++i) {
+        if (!ProjectItemPoint(*viewMatrix, worldVerts[i], &projVerts[i])) {
+            return;
+        }
+    }
+
+    // Cheap screen-rect cull — if all 4 projected corners are off-screen on the
+    // same side (with a small margin), skip the draw entirely.
+    {
+        const float margin = 32.0f;
+        const float screenLeft = -margin;
+        const float screenTop = -margin;
+        const float screenRight = static_cast<float>(g_renderer.m_width) + margin;
+        const float screenBottom = static_cast<float>(g_renderer.m_height) + margin;
+        const bool allLeft   = projVerts[0].x < screenLeft   && projVerts[1].x < screenLeft   && projVerts[2].x < screenLeft   && projVerts[3].x < screenLeft;
+        const bool allRight  = projVerts[0].x > screenRight  && projVerts[1].x > screenRight  && projVerts[2].x > screenRight  && projVerts[3].x > screenRight;
+        const bool allAbove  = projVerts[0].y < screenTop    && projVerts[1].y < screenTop    && projVerts[2].y < screenTop    && projVerts[3].y < screenTop;
+        const bool allBelow  = projVerts[0].y > screenBottom && projVerts[1].y > screenBottom && projVerts[2].y > screenBottom && projVerts[3].y > screenBottom;
+        if (allLeft || allRight || allAbove || allBelow) {
+            return;
+        }
+    }
+
     RPFace* face = g_renderer.BorrowNullRP();
     if (!face) {
         return;
@@ -5571,26 +5628,11 @@ void CItem::Render(matrix* viewMatrix)
     face->destAlphaMode = D3DBLEND_INVSRCALPHA;
     face->alphaSortKey = projectedBase.oow;
 
-    const float scaledAnchorX = static_cast<float>(m_billboardAnchorX) * kGroundItemScreenScale;
-    const float scaledAnchorY = static_cast<float>(m_billboardAnchorY) * kGroundItemScreenScale;
-    const float scaledWidth = static_cast<float>(m_billboardTextureWidth) * kGroundItemScreenScale;
-    const float scaledHeight = static_cast<float>(m_billboardTextureHeight) * kGroundItemScreenScale;
-    const float left = projectedBase.x - scaledAnchorX;
-    const float top = projectedBase.y - scaledAnchorY;
-    const float right = left + scaledWidth;
-    const float bottom = top + scaledHeight;
-
-    face->m_verts[0].x = left;
-    face->m_verts[0].y = top;
-    face->m_verts[1].x = right;
-    face->m_verts[1].y = top;
-    face->m_verts[2].x = left;
-    face->m_verts[2].y = bottom;
-    face->m_verts[3].x = right;
-    face->m_verts[3].y = bottom;
-
+    const float flatDepth = (std::max)(0.0f, projectedBase.z - kItemBillboardDepthBias);
     for (int index = 0; index < 4; ++index) {
-        face->m_verts[index].z = (std::max)(0.0f, projectedBase.z - kItemBillboardDepthBias);
+        face->m_verts[index].x = projVerts[index].x;
+        face->m_verts[index].y = projVerts[index].y;
+        face->m_verts[index].z = flatDepth;
         face->m_verts[index].oow = projectedBase.oow;
         face->m_verts[index].color = 0xFFFFFFFFu;
         face->m_verts[index].specular = 0xFF000000u;

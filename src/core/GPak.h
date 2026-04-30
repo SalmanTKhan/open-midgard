@@ -18,7 +18,7 @@ struct PakPack
     unsigned int m_dataSize;        // Size of the encrypted/compressed block
     unsigned int m_size;            // Original (uncompressed) size
     uint8_t      m_type;            // GRF flags or Alpha entry type
-    unsigned int m_Offset;          // Byte offset inside the archive
+    uint64_t     m_Offset;          // Byte offset inside the archive (u64 for GRF 0x300)
 };
 
 // Comparator used for binary search (sort by CHash)
@@ -59,7 +59,8 @@ protected:
 
     bool OpenPakAlpha(); // Alpha client archive format (v0x12 trailer table)
     bool OpenPak01();   // GRF version 0x100–0x103 (DES encrypted index)
-    bool OpenPak02();   // GRF version 0x200 (zlib compressed index)
+    bool OpenPak02();   // GRF version 0x200 (zlib compressed index, u32 offsets)
+    bool OpenPak03();   // GRF version 0x300 (zlib compressed index, u64 offsets)
 
     // Bit-swap all nibbles in a filename to obfuscate it
     static char ChangeLHBit_BYTE(char ch)

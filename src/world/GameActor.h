@@ -197,6 +197,9 @@ public:
     CGameActor();
     virtual ~CGameActor();
 
+    virtual class CPc* AsPc() { return nullptr; }
+    virtual const class CPc* AsPc() const { return nullptr; }
+
     void SetChatBubbleText(const std::string& text, u32 untilTick);
     void ClearChatBubbleText();
     bool HasActiveChatBubble(u32 now) const;
@@ -390,6 +393,10 @@ class CPc : public CGameActor {
 public:
     CPc();
     virtual ~CPc();
+
+    CPc* AsPc() override { return this; }
+    const CPc* AsPc() const override { return this; }
+
     virtual void SetState(int state) override;
     virtual void SetModifyFactorOfmotionSpeed(int attackMT) override;
 

@@ -164,9 +164,9 @@ Resolution flow:
 - `Packets.MapGameplaySendProfile=inherit` → `packetver200` (`EarlyMapServerSend::*`)
 - Receive table: `MakePacketVer200ReceiveProfile` in `src/network/MapSendProfile.cpp`
   (standalone, does **not** inherit PV23)
-- Framer size table: `g_packetSizePacketVer200` in `src/network/GronPacket.cpp`,
-  built from the shared fill + `ApplyPacketVer200Overrides` for the
-  `0x0058`/`0x00B0..0x00BB` range that collides with PV23 semantics
+- Framer size table: `PopulatePv200` in `src/network/PacketRegistry.cpp`,
+  built from scratch using `PacketTable.0100_Alpha.cs` + `PacketTable.0200_Beta1.cs`
+  (Sabine) as authority — independent of PV23, no shared fallthrough
 
 Key inbound opcode/size map (Alpha numbers, Beta1 resized payloads):
 

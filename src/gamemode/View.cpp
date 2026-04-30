@@ -5,6 +5,10 @@
 #include "DebugLog.h"
 #include "session/Session.h"
 #include "world/World.h"
+#include "ui/UIWindowMgr.h"
+
+#include <cstdio>
+#include <cstdlib>
 
 #include <windows.h>
 #include <algorithm>
@@ -110,6 +114,15 @@ void LogViewMovePerfIfNeeded()
     g_viewMovePerfStats = ViewMovePerfStats{};
 }
 
+bool IsPerfHudEnabled()
+{
+    static const bool s_enabled = []() {
+        const char* value = std::getenv("OPEN_MIDGARD_PERF_HUD");
+        return value && *value && value[0] != '0';
+    }();
+    return s_enabled;
+}
+
 void LogViewHiResPerfIfNeeded(const CWorld* world)
 {
     if (!world || g_viewHiResStats.frames == 0 || (g_viewHiResStats.frames % kPerfLogIntervalFrames) != 0) {
@@ -117,6 +130,19 @@ void LogViewHiResPerfIfNeeded(const CWorld* world)
     }
 
     const double frameCount = static_cast<double>(g_viewHiResStats.frames);
+    if (IsPerfHudEnabled()) {
+        char hud[224] = {};
+        std::snprintf(hud, sizeof(hud),
+            "[perf] gnd=%.2f act=%.2f bg=%.2f flush=%.2f present=%.2f draws=%u bb=%.0f",
+            g_viewHiResStats.groundMs / frameCount,
+            g_viewHiResStats.actorMs / frameCount,
+            g_viewHiResStats.backgroundMs / frameCount,
+            g_renderer.m_lastFrameFlushMs,
+            g_renderer.m_lastFramePresentMs,
+            g_renderer.m_lastFrameDrawCalls,
+            static_cast<double>(g_viewHiResStats.renderedBillboards) / frameCount);
+        g_windowMgr.PushChatEvent(hud, 0x00C0FFC0u, 6);
+    }
     DbgLog("[ViewPerfHiRes] frames=%llu ground=%.3fms hover=%.3fms actors=%.3fms background=%.3fms actorObj=%.3fms actorItems=%.3fms actorPortal=%.3fms bbBuild=%.3fms bbSort=%.3fms bbDraw=%.3fms bgDraw=%.3fms gameObjects=%.2f fixedEffects=%.2f items=%.2f billboards=%.2f bgObjs=%.2f bgTinySkip=%.2f portalActors=%.2f\n",
         static_cast<unsigned long long>(g_viewHiResStats.frames),
         g_viewHiResStats.groundMs / frameCount,
@@ -562,6 +588,7 @@ void CView::ResetToDefaultOrientation()
 {
     m_dest.longitude = ClampLongitude(m_constraints.defaultLongitude);
     m_dest.latitude = ClampFloat(m_constraints.defaultLatitude, m_constraints.minLatitude, m_constraints.maxLatitude);
+    m_dest.distance = ClampFloat(m_constraints.defaultDistance, m_constraints.minDistance, m_constraints.maxDistance);
 }
 
 void CView::UpdateHoverCellFromScreen(int screenX, int screenY)
@@ -580,6 +607,13 @@ void CView::ClearHoverCell()
 {
     m_hoverAttrX = -1;
     m_hoverAttrY = -1;
+}
+
+void CView::SetClickMarker(int attrX, int attrY)
+{
+    m_clickMarkerAttrX = attrX;
+    m_clickMarkerAttrY = attrY;
+    m_clickMarkerSpawnTick = GetTickCount();
 }
 
 bool CView::ScreenToHoveredAttrCell(int screenX, int screenY, int* outAttrX, int* outAttrY) const
@@ -933,6 +967,24 @@ void CView::OnRender()
     const double hoverHiResStartMs = QpcNowMs();
     if (m_hoverAttrX >= 0 && m_hoverAttrY >= 0 && IsWalkableAttrCell(m_world->m_attr, m_hoverAttrX, m_hoverAttrY)) {
         m_world->m_ground->RenderAttrTile(m_viewMatrix, m_hoverAttrX, m_hoverAttrY, 0x70FFFFFFu);
+    }
+    // Click destination marker — pulses + fades over a short lifetime so the
+    // user sees where they clicked even when the path is short.
+    if (m_clickMarkerAttrX >= 0 && m_clickMarkerAttrY >= 0 && m_clickMarkerSpawnTick != 0) {
+        constexpr DWORD kClickMarkerLifetimeMs = 600;
+        const DWORD nowTick = GetTickCount();
+        const DWORD age = nowTick - m_clickMarkerSpawnTick;
+        if (age < kClickMarkerLifetimeMs) {
+            const float t = static_cast<float>(age) / static_cast<float>(kClickMarkerLifetimeMs);
+            const float pulse = 0.5f + 0.5f * std::cos(t * 6.2831853f);
+            const u32 alpha = static_cast<u32>((1.0f - t) * 200.0f + pulse * 30.0f) & 0xFFu;
+            const u32 color = (alpha << 24) | 0x00FFE060u;  // warm yellow
+            m_world->m_ground->RenderAttrTile(m_viewMatrix, m_clickMarkerAttrX, m_clickMarkerAttrY, color);
+        } else {
+            m_clickMarkerAttrX = -1;
+            m_clickMarkerAttrY = -1;
+            m_clickMarkerSpawnTick = 0;
+        }
     }
     const DWORD hoverEnd = GetTickCount();
     g_viewHiResStats.hoverMs += QpcNowMs() - hoverHiResStartMs;

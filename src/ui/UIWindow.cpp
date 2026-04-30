@@ -530,6 +530,13 @@ UIWindow* UIWindow::HitTestDeep(int x, int y)
             return hit;
         }
     }
+    // Windows that transmit mouse input (e.g. chat message log) are
+    // click-through: their own bounds don't capture clicks, but their
+    // children (input field, buttons, scrollbar) still do via the recursion
+    // above.
+    if (IsTransmitMouseInput()) {
+        return nullptr;
+    }
     // Check self bounds
     if (m_w > 0 && m_h > 0 &&
         x >= m_x && x < m_x + m_w &&

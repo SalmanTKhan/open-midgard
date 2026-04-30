@@ -5,6 +5,8 @@ add_library(ro_network STATIC
     GronPacket.cpp
     MapSendProfile.h
     MapSendProfile.cpp
+    PacketRegistry.h
+    PacketRegistry.cpp
     PacketQueue.h
     PacketQueue.cpp
     Connection.h

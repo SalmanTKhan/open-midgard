@@ -275,10 +275,22 @@ void DrawChatTextQt(HDC hdc, const RECT& rect, const std::string& text, COLORREF
     painter.setRenderHint(QPainter::Antialiasing, false);
     painter.setRenderHint(QPainter::TextAntialiasing, false);
     painter.setFont(font);
-    painter.setPen(QColor(GetRValue(color), GetGValue(color), GetBValue(color)));
     const int flags = wrap
         ? (Qt::AlignLeft | Qt::AlignTop | Qt::TextWordWrap)
         : (Qt::AlignLeft | Qt::AlignVCenter | Qt::TextSingleLine);
+
+    // Black 1-px outline so the text stays legible on the now-transparent
+    // chat history (which lets the world tiles show through). Drawing the
+    // string four times shifted by ±1 px is cheap and gives the classic
+    // 2008-client look without a real shader pass.
+    painter.setPen(QColor(0, 0, 0));
+    for (int dx = -1; dx <= 1; ++dx) {
+        for (int dy = -1; dy <= 1; ++dy) {
+            if (dx == 0 && dy == 0) continue;
+            painter.drawText(QRect(dx, dy, width, height), flags, label);
+        }
+    }
+    painter.setPen(QColor(GetRValue(color), GetGValue(color), GetBValue(color)));
     painter.drawText(QRect(0, 0, width, height), flags, label);
     AlphaBlendArgbToHdc(hdc, rect.left, rect.top, width, height, pixels.data(), width, height);
 }
@@ -790,6 +802,48 @@ bool UINewChatWnd::IsQtInteractionPoint(int x, int y) const
     return m_configVisible != 0 && RectIsValid(layout.configPanel) && PointInRectXY(layout.configPanel, x, y);
 }
 
+UIWindow* UINewChatWnd::HitTestDeep(int x, int y)
+{
+    if (m_show == 0) {
+        return nullptr;
+    }
+
+    const ChatLayoutRects layout = BuildChatLayoutRects(m_x, m_y, m_w, m_h);
+
+    // Resize edges always capture so the user can drag the chat border.
+    if (GetChatResizeEdgesForPoint(layout, x, y) != ChatResizeEdge_None) {
+        return this;
+    }
+
+    // Config panel (when visible) captures.
+    if (m_configVisible != 0 && RectIsValid(layout.configPanel) && PointInRectXY(layout.configPanel, x, y)) {
+        return this;
+    }
+
+    // Interactive regions inside the panel (header, tabs, gear, inputs) capture.
+    if (PointInRectXY(layout.header, x, y)) {
+        return this;
+    }
+    if (PointInRectXY(layout.gearButton, x, y)) {
+        return this;
+    }
+    for (const RECT& tab : layout.tabs) {
+        if (PointInRectXY(tab, x, y)) {
+            return this;
+        }
+    }
+    if (PointInRectXY(layout.whisperInput, x, y)) {
+        return this;
+    }
+    if (PointInRectXY(layout.messageInput, x, y)) {
+        return this;
+    }
+
+    // Anything else (message log/history area, panel padding) is click-through
+    // so world clicks reach the player movement handler.
+    return nullptr;
+}
+
 bool UINewChatWnd::IsQtMainPanelPoint(int x, int y) const
 {
     if (m_show == 0) {
@@ -990,7 +1044,10 @@ void UINewChatWnd::OnDraw()
     FillRectStippled(hdc, rightStrip);
     FillRectStippled(hdc, middleStrip);
     FillRectStippled(hdc, bottomStrip);
-    FillRectStippled(hdc, historyRc);
+    // Message-log area stays transparent so the player can see (and click,
+    // via UINewChatWnd::HitTestDeep) the world tiles behind the chat history.
+    // Chat lines are drawn with outlines below so they remain legible against
+    // any background.
     FrameRect(hdc, &panelRc, static_cast<HBRUSH>(GetStockObject(WHITE_BRUSH)));
 
     const int historyClipDc = SaveDC(hdc);

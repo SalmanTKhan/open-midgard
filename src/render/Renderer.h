@@ -207,6 +207,11 @@ public:
     unsigned int m_curFrame;
     unsigned int m_fpsFrameCount;
     unsigned int m_fpsStartTick;
+    unsigned int m_frameDrawCalls = 0u;
+    unsigned int m_lastFrameDrawCalls = 0u;
+    // GPU-side timing buckets, sampled per frame — surfaced via the perf HUD.
+    double m_lastFrameFlushMs = 0.0;
+    double m_lastFramePresentMs = 0.0;
 
     std::vector<RPFace*> m_rpFaceList;
     std::vector<RPFace*> m_rpLMGroundList;

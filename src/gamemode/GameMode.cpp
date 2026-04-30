@@ -127,6 +127,7 @@ constexpr float kLockedTargetArrowBouncePerMs = 0.0045f;
 constexpr float kLockedTargetArrowBouncePixels = 4.0f;
 constexpr u32 kHoverNameRequestCooldownMs = 1000;
 constexpr u32 kMovingOverlayRefreshMs = 200;
+constexpr u32 kDirtyOverlayRefreshMs = 33;
 constexpr int kEnemyCursorMagnetRadius = 36;
 constexpr int kEnemyCursorMagnetMaxStep = 5;
 constexpr int kEnemyCursorMagnetDeadzone = 4;
@@ -982,6 +983,7 @@ bool QueueModernOverlayQuad(CGameMode& mode, int cursorActNum, u32 mouseAnimStar
     static std::uint64_t s_overlayStateToken = 0ull;
     static bool s_overlayTextureValid = false;
     static u32 s_lastMovingOverlayRefreshTick = 0;
+    static u32 s_lastDirtyOverlayRefreshTick = 0;
     const bool qtRuntimeEnabled = IsQtUiRuntimeEnabled();
 
     static CTexture* s_overlayTexture = nullptr;
@@ -1042,9 +1044,14 @@ bool QueueModernOverlayQuad(CGameMode& mode, int cursorActNum, u32 mouseAnimStar
     const bool allowMovingOverlayRefresh = !trackMovePerf
         || s_lastMovingOverlayRefreshTick == 0
         || now - s_lastMovingOverlayRefreshTick >= kMovingOverlayRefreshMs;
-    const bool needOverlayRefresh = !s_overlayTextureValid
+    const bool allowDirtyOverlayRefresh = s_lastDirtyOverlayRefreshTick == 0
+        || now - s_lastDirtyOverlayRefreshTick >= kDirtyOverlayRefreshMs;
+    const bool haveActiveOverlayTexture = qtRuntimeEnabled
+        ? s_qtOverlayTextureValid
+        : s_overlayTextureValid;
+    const bool needOverlayRefresh = !haveActiveOverlayTexture
         || overlayIsAnimated
-        || uiDirty
+        || (uiDirty && allowDirtyOverlayRefresh)
         || (overlayStateChanged && allowMovingOverlayRefresh);
 
     if (needOverlayRefresh) {
@@ -1157,6 +1164,9 @@ bool QueueModernOverlayQuad(CGameMode& mode, int cursorActNum, u32 mouseAnimStar
         s_overlayStateToken = overlayStateToken;
         if (overlayStateChanged) {
             s_lastMovingOverlayRefreshTick = now;
+        }
+        if (uiDirty) {
+            s_lastDirtyOverlayRefreshTick = now;
         }
     }
 
@@ -1477,12 +1487,13 @@ bool QueueLockedTargetOverlayQuad(CGameMode& mode)
     }
 
     int centerX = 0;
+    int topY = 0;
     int labelY = 0;
     if (!mode.m_world->GetActorScreenMarker(mode.m_view->GetViewMatrix(),
         mode.m_view->GetCameraLongitude(),
         mode.m_lastLockOnMonGid,
         &centerX,
-        nullptr,
+        &topY,
         &labelY)) {
         return false;
     }
@@ -1558,16 +1569,22 @@ bool QueueLockedTargetOverlayQuad(CGameMode& mode)
     int arrowDrawY = 0;
     int arrowScaledWidth = 0;
     int arrowScaledHeight = 0;
+    // Anchor the arrow above the actor's head (topY) rather than its feet
+    // (labelY). For a tall PC the result matches the legacy feet-based lift,
+    // but for short monsters (e.g. a Poring) the arrow no longer overlaps the
+    // sprite. Use the larger of the two anchors so very tall sprites still
+    // get a comfortable lift.
+    const int headAnchorY = (std::min)(topY, labelY - kLockedTargetArrowBaseLift);
     if (hasArrowBitmap) {
         arrowScaledWidth = (std::max)(1, static_cast<int>(std::lround(static_cast<float>(s_arrowWidth) * kLockedTargetArrowScale)));
         arrowScaledHeight = (std::max)(1, static_cast<int>(std::lround(static_cast<float>(s_arrowHeight) * kLockedTargetArrowScale)));
         arrowDrawX = centerX - (arrowScaledWidth / 2);
-        arrowDrawY = labelY - kLockedTargetArrowBaseLift - arrowScaledHeight - kLockedTargetArrowYOffset - bounce;
+        arrowDrawY = headAnchorY - arrowScaledHeight - kLockedTargetArrowYOffset - bounce;
         const int drawX = arrowDrawX;
         const int drawY = arrowDrawY;
         arrowRect = { drawX - 2, drawY - 2, drawX + arrowScaledWidth + 2, drawY + arrowScaledHeight + 2 };
     } else {
-        const int tipY = labelY - kLockedTargetArrowBaseLift - bounce;
+        const int tipY = headAnchorY - bounce;
         arrowRect = { centerX - 9, tipY - 13, centerX + 9, tipY + 2 };
     }
 
@@ -1762,7 +1779,7 @@ bool QueueLockedTargetOverlayQuad(CGameMode& mode)
             lockedTargetTextColor);
     }
     if (!hasArrowBitmap) {
-        const int tipY = labelY - kLockedTargetArrowBaseLift - bounce;
+        const int tipY = headAnchorY - bounce;
         DrawFallbackLockedTargetArrowToPixels(
             targetPixels,
             width,
@@ -2803,6 +2820,13 @@ struct FramePerfStats {
     u64 drawSceneMs = 0;
     u64 uiDrawMs = 0;
     u64 flipMs = 0;
+    double updateMsHi = 0.0;
+    double processUiMsHi = 0.0;
+    double renderPrepMsHi = 0.0;
+    double drawSceneMsHi = 0.0;
+    double uiDrawMsHi = 0.0;
+    double flipMsHi = 0.0;
+    double frameTotalMsHi = 0.0;
 };
 
 void LogNearbyBackgroundActorsOnce(const CGameMode& mode)
@@ -7040,6 +7064,9 @@ void UpdateHeldMoveTargetFromScreenPoint(CGameMode& mode, int screenX, int scree
     mode.m_heldMoveTargetCellX = attrX;
     mode.m_heldMoveTargetCellY = attrY;
     mode.m_hasHeldMoveTarget = 1;
+    if (mode.m_view) {
+        mode.m_view->SetClickMarker(attrX, attrY);
+    }
 }
 
 bool ShouldPreserveCurrentHeldMove(const CGameMode& mode)
@@ -10229,14 +10256,18 @@ int  CGameMode::OnRun() {
     SyncRendererToWindowSize();
 
     const bool mapLoadingWasActive = IsMapLoadingActive(*this);
+    const double frameStartHiMs = QpcNowMs();
     const DWORD updateStart = GetTickCount();
     OnUpdate();
     const DWORD updateEnd = GetTickCount();
+    const double updateEndHiMs = QpcNowMs();
     ClearQueuedMsgEffects();
 
     const DWORD processUiStart = updateEnd;
+    const double processUiStartHiMs = QpcNowMs();
     g_windowMgr.OnProcess();
     const DWORD processUiEnd = GetTickCount();
+    const double processUiEndHiMs = QpcNowMs();
     if (mapLoadingWasActive && !IsMapLoadingActive(*this)) {
         DbgLog("[GameMode] deferring first gameplay render after map loading transition for world '%s'\n", m_rswName);
         Sleep(1);
@@ -10286,14 +10317,19 @@ int  CGameMode::OnRun() {
     static u32 s_gameplayRenderFrame = 0;
     ++s_gameplayRenderFrame;
     const DWORD renderPrepStart = GetTickCount();
+    const double renderPrepStartHiMs = QpcNowMs();
     m_view->OnRender();
     const DWORD renderPrepEnd = GetTickCount();
+    const double renderPrepEndHiMs = QpcNowMs();
     DWORD uiDrawStart = renderPrepEnd;
     DWORD uiDrawEnd = renderPrepEnd;
+    double uiDrawStartHiMs = renderPrepEndHiMs;
+    double uiDrawEndHiMs = renderPrepEndHiMs;
     bool queuedModernOverlayFrame = false;
     bool queuedCursorOverlayFrame = false;
     if (!hasLegacyDevice) {
         uiDrawStart = GetTickCount();
+        uiDrawStartHiMs = QpcNowMs();
         const double modernQueueStartMs = trackMovePerfFrame ? QpcNowMs() : 0.0;
         queuedModernOverlayFrame = QueueModernOverlayQuad(*this, m_cursorActNum, m_mouseAnimStartTick);
         if (trackMovePerfFrame) {
@@ -10326,10 +10362,13 @@ int  CGameMode::OnRun() {
             g_overlayMovePerfStats.queueCursorMs += QpcNowMs() - cursorQueueStartMs;
         }
         uiDrawEnd = GetTickCount();
+        uiDrawEndHiMs = QpcNowMs();
     }
     const DWORD drawSceneStart = GetTickCount();
+    const double drawSceneStartHiMs = QpcNowMs();
     g_renderer.DrawScene();
     const DWORD drawSceneEnd = GetTickCount();
+    const double drawSceneEndHiMs = QpcNowMs();
     if (hasLegacyDevice) {
         const DWORD flipStart = GetTickCount();
         const double flipStartMs = trackMovePerfFrame ? QpcNowMs() : 0.0;
@@ -10363,8 +10402,10 @@ int  CGameMode::OnRun() {
         bool composedModernOverlayFrame = queuedModernOverlayFrame;
         const DWORD flipStart = GetTickCount();
         const double flipStartMs = trackMovePerfFrame ? QpcNowMs() : 0.0;
+        const double flipStartHiMs = QpcNowMs();
         g_renderer.Flip(false);
         const DWORD flipEnd = GetTickCount();
+        const double flipEndHiMs = QpcNowMs();
         if (trackMovePerfFrame) {
             g_overlayMovePerfStats.flipMs += QpcNowMs() - flipStartMs;
         }
@@ -10386,6 +10427,13 @@ int  CGameMode::OnRun() {
         g_framePerfStats.drawSceneMs += static_cast<u64>(drawSceneEnd - drawSceneStart);
         g_framePerfStats.uiDrawMs += static_cast<u64>(uiDrawEnd - uiDrawStart);
         g_framePerfStats.flipMs += static_cast<u64>(flipEnd - flipStart);
+        g_framePerfStats.updateMsHi += updateEndHiMs - frameStartHiMs;
+        g_framePerfStats.processUiMsHi += processUiEndHiMs - processUiStartHiMs;
+        g_framePerfStats.renderPrepMsHi += renderPrepEndHiMs - renderPrepStartHiMs;
+        g_framePerfStats.drawSceneMsHi += drawSceneEndHiMs - drawSceneStartHiMs;
+        g_framePerfStats.uiDrawMsHi += uiDrawEndHiMs - uiDrawStartHiMs;
+        g_framePerfStats.flipMsHi += flipEndHiMs - flipStartHiMs;
+        g_framePerfStats.frameTotalMsHi += flipEndHiMs - frameStartHiMs;
 
         if (s_gameplayRenderFrame <= 20 || (s_gameplayRenderFrame % 120u) == 0) {
             DbgLog("[GameMode] frame=%u legacy=0 update=%lu ui=%lu prep=%lu draw=%lu overlay=%lu flip=%lu composed=%d\n",
@@ -10397,6 +10445,19 @@ int  CGameMode::OnRun() {
                 static_cast<unsigned long>(uiDrawEnd - uiDrawStart),
                 static_cast<unsigned long>(flipEnd - flipStart),
                 composedModernOverlayFrame ? 1 : 0);
+        }
+        if (g_framePerfStats.frames > 0 && (g_framePerfStats.frames % 120u) == 0) {
+            const double n = static_cast<double>(g_framePerfStats.frames);
+            DbgLog("[FramePerfHiRes] frames=%llu total=%.3fms update=%.3fms procUi=%.3fms prep=%.3fms draw=%.3fms overlay=%.3fms flip=%.3fms\n",
+                static_cast<unsigned long long>(g_framePerfStats.frames),
+                g_framePerfStats.frameTotalMsHi / n,
+                g_framePerfStats.updateMsHi / n,
+                g_framePerfStats.processUiMsHi / n,
+                g_framePerfStats.renderPrepMsHi / n,
+                g_framePerfStats.drawSceneMsHi / n,
+                g_framePerfStats.uiDrawMsHi / n,
+                g_framePerfStats.flipMsHi / n);
+            g_framePerfStats = FramePerfStats{};
         }
     }
 
@@ -10865,6 +10926,27 @@ msgresult_t CGameMode::SendMsg(int msg, msgparam_t wparam, msgparam_t lparam, ms
                 0x0000C000u, 6);
             return 1;
         }
+        // /playstr <effectId> — spawn a .str effect on the local player. Used
+        // for visually verifying CRagEffect/CEZeffectRes integration when
+        // adding/repairing effect handlers.
+        if (command.compare(0, 9, "/playstr ") == 0) {
+            if (!m_world || !m_world->m_player) {
+                return 0;
+            }
+            const int effectId = std::atoi(command.c_str() + 9);
+            if (effectId <= 0) {
+                g_windowMgr.PushChatEvent("Usage: /playstr <effectId>", 0x00FF8080u, 6);
+                return 0;
+            }
+            CRagEffect* effect = m_world->m_player->LaunchEffect(
+                effectId, vector3d{ 0.0f, 0.0f, 0.0f }, 0.0f);
+            char info[96] = {};
+            std::snprintf(info, sizeof(info),
+                effect ? "Spawned effect %d" : "Effect %d failed to launch",
+                effectId);
+            g_windowMgr.PushChatEvent(info, effect ? 0x0000C000u : 0x00FF8080u, 6);
+            return effect ? 1 : 0;
+        }
         if (command == "/skipbgm") {
             static bool s_bgmPaused = false;
             s_bgmPaused = !s_bgmPaused;
@@ -10912,6 +10994,12 @@ msgresult_t CGameMode::SendMsg(int msg, msgparam_t wparam, msgparam_t lparam, ms
         int emotionType = -1;
         if (TryResolveEmotionCommand(command, emotionType)) {
             return SendEmotionRequest(*this, emotionType) ? 1 : 0;
+        }
+        if (text[0] == '/') {
+            char unknown[160] = {};
+            std::snprintf(unknown, sizeof(unknown), "Unknown command: %s", text);
+            g_windowMgr.PushChatEvent(unknown, 0x00FF8080u, 6);
+            return 0;
         }
         const bool sent = SendGlobalChatMessage(g_session.GetPlayerName(), text);
         if (sent) {

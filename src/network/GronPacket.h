@@ -1,6 +1,7 @@
 #pragma once
 //===========================================================================
-// GronPacket.h  –  Ragnarok packet-size table and helpers
+// GronPacket.h  -  thin wrapper over the per-version PacketRegistry.
+// The actual size tables live in PacketRegistry.{h,cpp}.
 //===========================================================================
 #include "Types.h"
 
@@ -8,15 +9,14 @@ namespace ro::net {
 
 constexpr s16 kVariablePacketSize = -1;
 
-// Initialize the known packet-size tables for the supported receive profiles.
+// Forces eager construction of the active version's packet table. Optional —
+// GetPacketSize() will lazily build on first access.
 void InitializePacketSize();
-void ReloadPacketSizeForVersion(int clientVersion);
-void ReloadPacketSizeForVersion(int clientVersion);
 
 // Returns:
 //  > 0  fixed packet byte length
-// == -1 variable length (size is encoded in bytes 2..3)
-// == 0  unknown / unregistered packet id
+// == -1 variable length (size encoded in bytes 2..3 of the packet)
+// == 0  unknown / unregistered packet id for the active version
 s16 GetPacketSize(u16 packetId);
 
 bool IsVariableLengthPacket(u16 packetId);

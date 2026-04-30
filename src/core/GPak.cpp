@@ -171,16 +171,42 @@ bool CGPak::Open(CMemFile* memFile)
         return false;
     }
 
-    m_PakInfoOffset = ReadLe32(hdr + 30) + 46;
-    m_FileCount     = ReadLe32(hdr + 38) - ReadLe32(hdr + 34) - 7;
     m_FileVer       = ReadLe32(hdr + 42);
+    const unsigned int verClass = m_FileVer & 0xFF00u;
+
+    // GRF 0x300 with int64 file-table offset — top 3 bytes of the 8-byte
+    // offset must be zero (caps archive size at ~1 TB). When present, byte 34
+    // becomes part of the offset rather than the seed/count adjustment.
+    // Reference: GRFEditor GrfHeader.cs (2024-10-25).
+    const bool is300Int64 = (verClass == 0x300)
+        && (hdr[35] == 0u && hdr[36] == 0u && hdr[37] == 0u);
+    if (is300Int64) {
+        const uint64_t tableOffset =
+              static_cast<uint64_t>(hdr[30])
+            | (static_cast<uint64_t>(hdr[31]) << 8)
+            | (static_cast<uint64_t>(hdr[32]) << 16)
+            | (static_cast<uint64_t>(hdr[33]) << 24)
+            | (static_cast<uint64_t>(hdr[34]) << 32)
+            | (static_cast<uint64_t>(hdr[35]) << 40)
+            | (static_cast<uint64_t>(hdr[36]) << 48)
+            | (static_cast<uint64_t>(hdr[37]) << 56);
+        const uint64_t absOffset = tableOffset + 46u;
+        if (absOffset > 0xFFFFFFFFull) {
+            DbgLog("[GPak::Open] FAIL: 0x300 file-table offset exceeds u32 range (%llu)\n",
+                   static_cast<unsigned long long>(absOffset));
+            return false;
+        }
+        m_PakInfoOffset = static_cast<unsigned int>(absOffset);
+        m_FileCount = ReadLe32(hdr + 38);
+    } else {
+        m_PakInfoOffset = ReadLe32(hdr + 30) + 46;
+        m_FileCount     = ReadLe32(hdr + 38) - ReadLe32(hdr + 34) - 7;
+    }
 
     DbgLog("[GPak::Open] GRF version: 0x%X, files: %u, pakInfoOffset: %u\n",
            m_FileVer, m_FileCount, m_PakInfoOffset);
 
     m_PakPack.resize(m_FileCount);
-
-    const unsigned int verClass = m_FileVer & 0xFF00u;
     bool ok = false;
     if (verClass == 0x100)
     {
@@ -192,6 +218,11 @@ bool CGPak::Open(CMemFile* memFile)
         DbgLog("[GPak::Open] Dispatching to OpenPak02, uncompress=%p\n",
                (void*)uncompress);
         ok = OpenPak02();
+    }
+    else if (verClass == 0x300)
+    {
+        DbgLog("[GPak::Open] Dispatching to OpenPak03 (v0x%X)\n", m_FileVer);
+        ok = OpenPak03();
     }
     else
     {
@@ -471,6 +502,57 @@ bool CGPak::OpenPak02()
 }
 
 // ---------------------------------------------------------------------------
+// OpenPak03  –  Parse GRF 0x300 (zlib-compressed file table, u64 offsets)
+// Per-entry layout matches 0x200 but the trailing offset is 8 bytes (int64)
+// instead of 4 bytes — 21 bytes of metadata after the null-terminated name.
+// Reference: GRFEditor FileEntry.cs (IsCompatibleWith(3, 0) branch).
+// ---------------------------------------------------------------------------
+bool CGPak::OpenPak03()
+{
+    const unsigned char* header = m_memFile->read(m_PakInfoOffset, 8);
+    if (!header) return false;
+
+    uint32_t compSz  = *reinterpret_cast<const uint32_t*>(header);
+    uint32_t plainSz = *reinterpret_cast<const uint32_t*>(header + 4);
+
+    const unsigned char* compressed = m_memFile->read(m_PakInfoOffset + 8, compSz);
+    if (!compressed) return false;
+
+    std::vector<uint8_t> plain(plainSz + 8);
+    uLongf destLen = static_cast<uLongf>(plainSz + 8);
+    const uLong sourceLen = static_cast<uLong>(compSz);
+    if (uncompress(plain.data(), &destLen, compressed, sourceLen) != Z_OK)
+        return false;
+
+    const unsigned char* iter = plain.data();
+    unsigned maxDecBufSize = 0;
+
+    for (unsigned int i = 0; i < m_FileCount && i < m_PakPack.size(); ++i)
+    {
+        const char* name = reinterpret_cast<const char*>(iter);
+        size_t nameLen   = std::strlen(name) + 1;
+
+        const unsigned char* meta = iter + nameLen;
+        iter = meta + 21;  // 21-byte meta block for 0x300
+
+        PakPack& pp = m_PakPack[i];
+        pp.m_compressSize = *reinterpret_cast<const uint32_t*>(meta);
+        pp.m_dataSize     = *reinterpret_cast<const uint32_t*>(meta + 4);
+        pp.m_size         = *reinterpret_cast<const uint32_t*>(meta + 8);
+        pp.m_type         = meta[12];
+        pp.m_Offset       = *reinterpret_cast<const uint64_t*>(meta + 13);
+        pp.m_fName.SetString(name);
+
+        if (maxDecBufSize < pp.m_dataSize)
+            maxDecBufSize = pp.m_dataSize;
+    }
+
+    std::sort(m_PakPack.begin(), m_PakPack.end(), PakPrtLess{});
+    m_pDecBuf.resize(maxDecBufSize);
+    return true;
+}
+
+// ---------------------------------------------------------------------------
 // GetInfo  –  Binary search for a filename hash
 // ---------------------------------------------------------------------------
 bool CGPak::GetInfo(const CHash& key, PakPack* out) const
@@ -531,7 +613,10 @@ void CGPak::CollectFileNamesByExtension(const char* ext, std::vector<std::string
 bool CGPak::GetData(const PakPack& pack, void* buffer)
 {
     if (m_FileVer < 0x100u) {
-        const unsigned char* raw = m_memFile->read(pack.m_Offset, pack.m_dataSize);
+        if (pack.m_Offset > 0xFFFFFFFFull) {
+            return false;
+        }
+        const unsigned char* raw = m_memFile->read(static_cast<u32>(pack.m_Offset), pack.m_dataSize);
         if (!raw) {
             return false;
         }
@@ -552,7 +637,11 @@ bool CGPak::GetData(const PakPack& pack, void* buffer)
         return false;
     }
 
-    const unsigned char* raw = m_memFile->read(pack.m_Offset + 46, pack.m_dataSize);
+    const uint64_t absOffset = pack.m_Offset + 46u;
+    if (absOffset > 0xFFFFFFFFull) {
+        return false;
+    }
+    const unsigned char* raw = m_memFile->read(static_cast<u32>(absOffset), pack.m_dataSize);
     if (!raw) return false;
 
     // Ensure decrypt scratch buffer is large enough

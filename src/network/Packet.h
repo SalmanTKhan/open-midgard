@@ -86,6 +86,18 @@ constexpr u16 kDeleteCharacter = PACKETID_CH_DELETE_CHAR;
 constexpr u16 kNotifyError = PACKETID_AC_NOTIFY_ERROR;
 }
 
+// Sabine Beta1 (2002-02-20 Ragexe) login/char chain. Authoritative source:
+// PacketTable.0100_Alpha.cs + PacketTable.0200_Beta1.cs in Sabine.
+namespace SabineBeta1LoginChain {
+constexpr u32 kClientDate = kSabineVersionBeta1; // 200
+constexpr u16 kAccountLogin = 0x0000;            // CA_LOGIN
+constexpr u16 kCharServerEnter = 0x0001;         // CH_ENTER
+constexpr u16 kSelectCharacter = 0x0002;         // CH_SELECT_CHAR
+constexpr u16 kMakeCharacter = 0x0003;           // CH_MAKE_CHAR (34 bytes)
+constexpr u16 kDeleteCharacter = 0x0004;         // CH_DELETE_CHAR
+constexpr u16 kNotifyError = 0x0006;             // AC_REFUSE_LOGIN (Beta1 has no AC_NOTIFY_ERROR)
+}
+
 namespace ActiveLoginChain {
 constexpr u32 kClientDate = PacketVer23LoginChain::kClientDate;
 constexpr u16 kAccountLogin = PacketVer23LoginChain::kAccountLogin;
@@ -661,6 +673,21 @@ struct PACKET_CZ_MAKE_CHAR {
     u8   CharNum;
     u16  hairColor;
     u16  hairStyle;
+};
+
+// CH_MAKE_CHAR: Sabine Beta1 layout [34 bytes] — single hair byte instead of
+// hairColor+hairStyle. Pre-Beta2 clients didn't have separate color/style.
+struct PACKET_CZ_MAKE_CHAR_Beta1 {
+    u16 PacketType;    // 0x0003
+    char name[24];
+    u8   Str;
+    u8   Agi;
+    u8   Vit;
+    u8   Int;
+    u8   Dex;
+    u8   Luk;
+    u8   CharNum;
+    u8   HairId;
 };
 
 struct PACKET_CH_DELETE_CHAR {

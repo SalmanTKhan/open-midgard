@@ -827,9 +827,19 @@ bool CRenderer::DrawScene() {
 
     ApplyFogState();
 
+    LARGE_INTEGER freq{};
+    QueryPerformanceFrequency(&freq);
+    LARGE_INTEGER flushStart{};
+    QueryPerformanceCounter(&flushStart);
     FlushRenderList();
+    LARGE_INTEGER flushEnd{};
+    QueryPerformanceCounter(&flushEnd);
+    m_lastFrameFlushMs = static_cast<double>(flushEnd.QuadPart - flushStart.QuadPart)
+        * 1000.0 / static_cast<double>(freq.QuadPart);
 
     m_renderDevice->EndScene();
+    m_lastFrameDrawCalls = m_frameDrawCalls;
+    m_frameDrawCalls = 0u;
     return true;
 }
 
@@ -837,7 +847,16 @@ void CRenderer::Flip(bool vertSync) {
     m_curFrame++;
     m_fpsFrameCount++;
 
+    LARGE_INTEGER freq{};
+    QueryPerformanceFrequency(&freq);
+    LARGE_INTEGER presentStart{};
+    QueryPerformanceCounter(&presentStart);
     GetRenderDevice().Present(vertSync);
+    LARGE_INTEGER presentEnd{};
+    QueryPerformanceCounter(&presentEnd);
+    m_lastFramePresentMs = static_cast<double>(presentEnd.QuadPart - presentStart.QuadPart)
+        * 1000.0 / static_cast<double>(freq.QuadPart);
+
 #if RO_ENABLE_CAPTURE
     capture::OnFramePresented();
 #endif
@@ -846,6 +865,7 @@ void CRenderer::Flip(bool vertSync) {
 void CRenderer::AddRP(RPFace* face, int renderFlag) {
     if (face) {
         ApplyFogToVertices(face->verts, face->numVerts, m_isFoggy, m_fogPara);
+        ++m_frameDrawCalls;
     }
     if (renderFlag & 1) { // Alpha
         float sortKey = face->alphaSortKey;
@@ -881,6 +901,7 @@ void CRenderer::AddRP(RPFace* face, int renderFlag) {
 void CRenderer::AddLmRP(RPLmFace* face, int renderFlag) {
     if (face) {
         ApplyFogToLightmapVertices(face->lmverts, face->numVerts, m_isFoggy, m_fogPara);
+        ++m_frameDrawCalls;
     }
     m_rpLmList.push_back(face);
 }
@@ -888,6 +909,7 @@ void CRenderer::AddLmRP(RPLmFace* face, int renderFlag) {
 void CRenderer::AddRawRP(RPRaw* face, int renderFlag) {
     if (face) {
         ApplyFogToVertices(face->verts, face->numVerts, m_isFoggy, m_fogPara);
+        ++m_frameDrawCalls;
     }
     if (renderFlag & 1) {
         m_rpRawAlphaList.push_back(face);

@@ -4,6 +4,7 @@
 //===========================================================================
 #include "File.h"
 #include "GPak.h"
+#include "ThorPak.h"
 #include "Types.h"
 #include <string.h>
 #include <algorithm>
@@ -272,6 +273,35 @@ CFileMgr::~CFileMgr()
         delete pak;
     }
     m_pakList.clear();
+    for (auto& [memFile, thor] : m_thorList)
+    {
+        delete memFile;
+        delete thor;
+    }
+    m_thorList.clear();
+}
+
+void CFileMgr::AddThor(const char* thorName)
+{
+    DbgLog("[AddThor] Trying to open: %s\n", thorName ? thorName : "(null)");
+    auto* thor    = new CThorPak();
+    auto* memFile = new CMemMapFile();
+    if (!memFile->open(thorName)) {
+        DbgLog("[AddThor] FAIL: open failed for '%s' (last error: %lu)\n",
+            thorName, GetLastError());
+        delete thor;
+        delete memFile;
+        return;
+    }
+    if (!thor->Open(memFile)) {
+        DbgLog("[AddThor] FAIL: parse failed for '%s'\n", thorName);
+        delete thor;
+        delete memFile;
+        return;
+    }
+    DbgLog("[AddThor] SUCCESS: '%s' loaded (target='%s' merge=%d)\n",
+        thorName, thor->TargetGrf().c_str(), thor->UseGrfMerging() ? 1 : 0);
+    m_thorList.emplace_front(memFile, thor);
 }
 
 void CFileMgr::AddPak(const char* pakName)
@@ -310,6 +340,14 @@ bool CFileMgr::IsDataExist(const char* fileName)
     }
 
     CHash key(fileName);
+    for (const auto& [memFile, thor] : m_thorList)
+    {
+        (void)memFile;
+        if (!thor) continue;
+        if (thor->GetInfo(key, nullptr)) return true;
+        // Tombstone: this THOR removes the file. Skip the base GRFs.
+        if (thor->IsRemoved(key)) return false;
+    }
     for (const auto& [memFile, pak] : m_pakList)
     {
         if (pak->GetInfo(key, nullptr))
@@ -342,6 +380,29 @@ unsigned char* CFileMgr::GetData(const char* fileName, int* outSize)
     }
 
     CHash key(fileName);
+    for (auto& [memFile, thor] : m_thorList)
+    {
+        (void)memFile;
+        if (!thor) continue;
+        PakPack pack{};
+        if (thor->GetInfo(key, &pack)) {
+            if (outSize) *outSize = (int)pack.m_size;
+            unsigned char* buf = new unsigned char[pack.m_size + 1];
+            if (!buf) continue;
+
+            if (thor->GetData(pack, buf)) {
+                buf[pack.m_size] = 0;
+                LogDataSourceOnce(fileName, "thor", static_cast<int>(pack.m_size));
+                return buf;
+            }
+            delete[] buf;
+        } else if (thor->IsRemoved(key)) {
+            // Tombstoned by this THOR — don't fall through to base GRFs or
+            // disk. The patch explicitly hid this file.
+            if (outSize) *outSize = 0;
+            return nullptr;
+        }
+    }
     for (auto& [memFile, pak] : m_pakList)
     {
         PakPack pack{};
@@ -382,6 +443,13 @@ unsigned char* CFileMgr::GetData(const char* fileName, int* outSize)
 
 void CFileMgr::CollectDataNamesByExtension(const char* ext, std::vector<std::string>& out)
 {
+    for (const auto& [memFile, thor] : m_thorList)
+    {
+        (void)memFile;
+        if (thor) {
+            thor->CollectFileNamesByExtension(ext, out);
+        }
+    }
     for (const auto& [memFile, pak] : m_pakList)
     {
         (void)memFile;

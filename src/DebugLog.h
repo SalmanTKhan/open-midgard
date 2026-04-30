@@ -1,5 +1,5 @@
 #pragma once
-// Minimal debug logger – writes to a per-process log file in the working directory.
+// Minimal debug logger – writes to a per-process log file under log/<launch-date>/.
 // Each call also writes to a per-tag file (debug_hp_{PID}_<tag>.log) so noisy tags
 // can be filtered out of the combined log without losing them.
 #include "platform/WindowsCompat.h"
@@ -8,8 +8,10 @@
 #include <cstdlib>
 #include <cstring>
 #include <cctype>
+#include <ctime>
 #include <mutex>
 #include <string>
+#include <sys/stat.h>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -149,6 +151,33 @@ inline FILE* OpenOrGetLocked(Sink& s, const std::string& key, const char* path)
     return nullptr;
 }
 
+inline const std::string& LaunchLogDir()
+{
+    static const std::string dir = []() -> std::string {
+        std::time_t now = std::time(nullptr);
+        std::tm tm{};
+#if RO_PLATFORM_WINDOWS
+        localtime_s(&tm, &now);
+#else
+        localtime_r(&now, &tm);
+#endif
+        char date[16];
+        std::strftime(date, sizeof(date), "%Y%m%d", &tm);
+
+#if RO_PLATFORM_WINDOWS
+        CreateDirectoryA("log", nullptr);
+        std::string path = std::string("log\\") + date;
+        CreateDirectoryA(path.c_str(), nullptr);
+#else
+        mkdir("log", 0755);
+        std::string path = std::string("log/") + date;
+        mkdir(path.c_str(), 0755);
+#endif
+        return path;
+    }();
+    return dir;
+}
+
 } // namespace ro_debuglog_detail
 
 inline void SetDbgLogPerTagFilesEnabled(bool enabled)
@@ -208,10 +237,18 @@ inline void DbgLog(const char* fmt, ...)
     // Always mirror to debugger output (visible in VS Output / debug console).
     OutputDebugStringA(line);
 
+    const std::string& logDir = ro_debuglog_detail::LaunchLogDir();
+#if RO_PLATFORM_WINDOWS
+    const char sep = '\\';
+#else
+    const char sep = '/';
+#endif
+
     const bool inCombinedDisabled = !tag.empty() && sink.combinedDisabled.count(tag) != 0;
     if (sink.combinedEnabled && !inCombinedDisabled) {
         char combinedPath[MAX_PATH];
-        _snprintf_s(combinedPath, sizeof(combinedPath), _TRUNCATE, "debug_hp_%lu.log",
+        _snprintf_s(combinedPath, sizeof(combinedPath), _TRUNCATE, "%s%cdebug_hp_%lu.log",
+            logDir.c_str(), sep,
             static_cast<unsigned long>(pid));
         if (FILE* f = ro_debuglog_detail::OpenOrGetLocked(sink, std::string(), combinedPath)) {
             std::fputs(line, f);
@@ -221,7 +258,8 @@ inline void DbgLog(const char* fmt, ...)
 
     if (sink.perTagEnabled && !tag.empty()) {
         char tagPath[MAX_PATH];
-        _snprintf_s(tagPath, sizeof(tagPath), _TRUNCATE, "debug_hp_%lu_%s.log",
+        _snprintf_s(tagPath, sizeof(tagPath), _TRUNCATE, "%s%cdebug_hp_%lu_%s.log",
+            logDir.c_str(), sep,
             static_cast<unsigned long>(pid),
             tag.c_str());
         if (FILE* f = ro_debuglog_detail::OpenOrGetLocked(sink, tag, tagPath)) {

@@ -617,11 +617,13 @@ void UIBasicInfoWnd::OnDraw()
         DrawBar(hdc, m_x + 110, m_y + 43, data.maxSp > 0 ? (data.sp * 100) / data.maxSp : 0, false);
 
         char text[128] = {};
-        std::snprintf(text, sizeof(text), "HP      %3d  /  %3d", data.hp, data.maxHp);
-        DrawWindowText(hdc, m_x + 95, m_y + 30, text, RGB(0, 0, 0), DT_LEFT | DT_TOP | DT_SINGLELINE, GetBasicInfoSmallFont(), 15);
+        DrawWindowText(hdc, m_x + 95, m_y + 22, "HP", RGB(0, 0, 0), DT_LEFT | DT_TOP | DT_SINGLELINE, GetBasicInfoSmallFont(), kBarHeight + 2);
+        std::snprintf(text, sizeof(text), "%d / %d", data.hp, data.maxHp);
+        DrawWindowText(hdc, m_x + 110, m_y + 22, text, RGB(0, 0, 0), DT_CENTER | DT_VCENTER | DT_SINGLELINE, GetBasicInfoSmallFont(), kBarHeight + 2, kBarWidth);
 
-        std::snprintf(text, sizeof(text), "SP      %3d  /  %3d", data.sp, data.maxSp);
-        DrawWindowText(hdc, m_x + 95, m_y + 51, text, RGB(0, 0, 0), DT_LEFT | DT_TOP | DT_SINGLELINE, GetBasicInfoSmallFont(), 15);
+        DrawWindowText(hdc, m_x + 95, m_y + 43, "SP", RGB(0, 0, 0), DT_LEFT | DT_TOP | DT_SINGLELINE, GetBasicInfoSmallFont(), kBarHeight + 2);
+        std::snprintf(text, sizeof(text), "%d / %d", data.sp, data.maxSp);
+        DrawWindowText(hdc, m_x + 110, m_y + 43, text, RGB(0, 0, 0), DT_CENTER | DT_VCENTER | DT_SINGLELINE, GetBasicInfoSmallFont(), kBarHeight + 2, kBarWidth);
 
         std::snprintf(text, sizeof(text), "Base Lv. %d", data.level);
         DrawWindowText(hdc, m_x + 17, m_y + 72, text, RGB(0, 0, 0));
@@ -1007,9 +1009,10 @@ void UIBasicInfoWnd::DrawExpBar(HDC hdc, int x, int y, int percent) const
     DeleteObject(fillBrush);
 }
 
-void UIBasicInfoWnd::DrawWindowText(HDC hdc, int x, int y, const char* text, COLORREF color, UINT format, HFONT font, int height) const
+void UIBasicInfoWnd::DrawWindowText(HDC hdc, int x, int y, const char* text, COLORREF color, UINT format, HFONT font, int height, int width) const
 {
-    RECT rect = { x, y, m_x + m_w - 4, y + height };
+    const int right = (width > 0) ? (x + width) : (m_x + m_w - 4);
+    RECT rect = { x, y, right, y + height };
     SetBkMode(hdc, TRANSPARENT);
     SetTextColor(hdc, color);
     HGDIOBJ oldFont = SelectObject(hdc, font ? font : GetStockObject(DEFAULT_GUI_FONT));

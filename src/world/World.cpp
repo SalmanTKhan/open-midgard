@@ -65,6 +65,7 @@ constexpr int kActorSpeechBubbleHeadGapPx = 26;
 constexpr int kActorSpeechBubbleMinOffsetPx = 88;
 constexpr int kActorSpeechBubbleMaxOffsetPx = 164;
 constexpr float kGroundItemScreenScale = 1.6f;
+constexpr float kItemBillboardWorldHeightScale = 1.4f;
 constexpr unsigned short kGroundQuadIndices[6] = { 0, 1, 2, 0, 2, 3 };
 constexpr bool kSubmitGroundSideFaces = true;
 constexpr bool kDebugGroundFlatColors = false;
@@ -243,14 +244,62 @@ bool GetGroundItemScreenRect(const matrix& viewMatrix,
         return false;
     }
 
-    const float scaledAnchorX = static_cast<float>(item.m_billboardAnchorX) * kGroundItemScreenScale;
-    const float scaledAnchorY = static_cast<float>(item.m_billboardAnchorY) * kGroundItemScreenScale;
-    const float scaledWidth = static_cast<float>(item.m_billboardTextureWidth) * kGroundItemScreenScale;
-    const float scaledHeight = static_cast<float>(item.m_billboardTextureHeight) * kGroundItemScreenScale;
-    const float left = projectedBase.x - scaledAnchorX;
-    const float top = projectedBase.y - scaledAnchorY;
-    const float right = left + scaledWidth;
-    const float bottom = top + scaledHeight;
+    const float zoom = g_world.m_ground
+        ? g_world.m_ground->m_zoom
+        : (g_world.m_attr ? static_cast<float>(g_world.m_attr->m_zoom) : 5.0f);
+
+    const float textureWidth = static_cast<float>((std::max)(1, item.m_billboardTextureWidth));
+    const float textureHeight = static_cast<float>((std::max)(1, item.m_billboardTextureHeight));
+    const float anchorX = static_cast<float>(item.m_billboardAnchorX);
+    const float anchorY = static_cast<float>((std::max)(1, item.m_billboardAnchorY));
+
+    const float worldHeight = zoom * kItemBillboardWorldHeightScale;
+    const float unitsPerPixel = worldHeight / (std::max)(1.0f, anchorY);
+    const float leftUnits = anchorX * unitsPerPixel;
+    const float rightUnits = (textureWidth - anchorX) * unitsPerPixel;
+    const float topUnits = anchorY * unitsPerPixel;
+    const float bottomUnits = (textureHeight - anchorY) * unitsPerPixel;
+
+    vector3d billUp = NormalizeVec3(ScaleVec3(g_renderer.m_eyeUp, -1.0f));
+    vector3d billRight = NormalizeVec3(g_renderer.m_eyeRight);
+    if (std::fabs(billUp.x) < 0.0001f && std::fabs(billUp.y) < 0.0001f && std::fabs(billUp.z) < 0.0001f) {
+        billUp = vector3d{ 0.0f, -1.0f, 0.0f };
+    }
+    if (std::fabs(billRight.x) < 0.0001f && std::fabs(billRight.y) < 0.0001f && std::fabs(billRight.z) < 0.0001f) {
+        billRight = vector3d{ 1.0f, 0.0f, 0.0f };
+    }
+
+    const vector3d corners[4] = {
+        AddVec3(AddVec3(item.m_pos, ScaleVec3(billUp, topUnits)),     ScaleVec3(billRight, -leftUnits)),
+        AddVec3(AddVec3(item.m_pos, ScaleVec3(billUp, topUnits)),     ScaleVec3(billRight, rightUnits)),
+        AddVec3(AddVec3(item.m_pos, ScaleVec3(billUp, -bottomUnits)), ScaleVec3(billRight, -leftUnits)),
+        AddVec3(AddVec3(item.m_pos, ScaleVec3(billUp, -bottomUnits)), ScaleVec3(billRight, rightUnits)),
+    };
+
+    float left = projectedBase.x;
+    float top = projectedBase.y;
+    float right = projectedBase.x;
+    float bottom = projectedBase.y;
+    bool projectedAny = false;
+    for (int i = 0; i < 4; ++i) {
+        tlvertex3d projected{};
+        if (!ProjectPoint(g_renderer, viewMatrix, corners[i], &projected)) {
+            continue;
+        }
+        if (!projectedAny) {
+            left = right = projected.x;
+            top = bottom = projected.y;
+            projectedAny = true;
+        } else {
+            left = (std::min)(left, projected.x);
+            right = (std::max)(right, projected.x);
+            top = (std::min)(top, projected.y);
+            bottom = (std::max)(bottom, projected.y);
+        }
+    }
+    if (!projectedAny) {
+        return false;
+    }
     if (!std::isfinite(left) || !std::isfinite(top) || !std::isfinite(right) || !std::isfinite(bottom)) {
         return false;
     }
@@ -4751,8 +4800,14 @@ void C3dGround::FlushGround(const matrix& viewMatrix)
     int submittedTopFaces = 0;
     int submittedFrontFaces = 0;
     int submittedRightFaces = 0;
-    std::vector<unsigned char> viewportTextureFlags(m_textureNames.size(), 0);
-    std::vector<int> viewportTextureIds;
+    // Reuse scratch buffers across frames; the legacy per-frame std::vector
+    // allocations were a measurable cost in town maps.
+    static thread_local std::vector<unsigned char> s_viewportTextureFlags;
+    static thread_local std::vector<int> s_viewportTextureIds;
+    s_viewportTextureFlags.assign(m_textureNames.size(), 0);
+    s_viewportTextureIds.clear();
+    auto& viewportTextureFlags = s_viewportTextureFlags;
+    auto& viewportTextureIds = s_viewportTextureIds;
     bool capturedSample = false;
     tlvertex3d sampleVerts[4]{};
     const CGroundSurface* sampleSurfaceInfo = nullptr;
@@ -4782,10 +4837,6 @@ void C3dGround::FlushGround(const matrix& viewMatrix)
             verts = g_renderer.BorrowVerts(4);
         }
         bool visible = true;
-        const vector3d surfaceNormal = NormalizeVec3(CrossVec3(
-            SubtractVec3(worldVerts[1], worldVerts[0]),
-            SubtractVec3(worldVerts[2], worldVerts[0])));
-        (void)surfaceNormal;
         const u32 litColor = MakeGroundVertexColor(surface->color, groundEnvDiff);
         for (int i = 0; i < 4; ++i) {
             tlvertex3d projected{};
@@ -5314,7 +5365,7 @@ void CWorld::UpdateBillboardActorFingerprint()
         if (!a || !a->m_isVisible) {
             return;
         }
-        CPc* pc = dynamic_cast<CPc*>(a);
+        CPc* pc = a->AsPc();
         if (!pc || IsPortalActorJob(pc->m_job)) {
             return;
         }
@@ -5354,7 +5405,7 @@ void CWorld::EnsureBillboardFrameCache(const matrix& viewMatrix, float cameraLon
             return;
         }
 
-        CPc* pc = dynamic_cast<CPc*>(actor);
+        CPc* pc = actor->AsPc();
         if (!pc || IsPortalActorJob(pc->m_job)) {
             return;
         }
@@ -5901,7 +5952,7 @@ void CWorld::ProcessActorSkillRechargeGages(const matrix& viewMatrix, float came
         int topY = 0;
         int labelY = 0;
         if (!GetActorScreenMarker(viewMatrix, cameraLongitude, actor->m_gid, &centerX, &topY, &labelY)) {
-            if (CPc* pcActor = dynamic_cast<CPc*>(actor)) {
+            if (CPc* pcActor = actor->AsPc()) {
                 if (pcActor->m_gage) {
                     pcActor->m_gage->Move(-100, -100);
                 }
@@ -5913,7 +5964,7 @@ void CWorld::ProcessActorSkillRechargeGages(const matrix& viewMatrix, float came
             actor->ProcessSkillRechargeGageOverlay(centerX, topY, clientHeight);
         }
 
-        if (CPc* pcActor = dynamic_cast<CPc*>(actor)) {
+        if (CPc* pcActor = actor->AsPc()) {
             if (pcActor->m_gage) {
                 const float scale = (actor->m_lastPixelRatio > 0.0f) ? actor->m_lastPixelRatio : 1.0f;
                 const int yOffset = static_cast<int>((12.0f * static_cast<float>(clientHeight) / 480.0f) * scale);
@@ -6003,24 +6054,14 @@ void CWorld::RenderActors(const matrix& viewMatrix, float cameraLongitude)
         if (!actor) {
             continue;
         }
-        CPc* pc = dynamic_cast<CPc*>(actor);
-        if (pc) {
+        if (CPc* pc = actor->AsPc()) {
             portalBootstrapActors += 1;
             ensurePortalActorEffect(pc);
-        }
-        if (!actor->m_isVisible) {
-            continue;
-        }
-        if (actor == m_player) {
-            continue;
-        }
-        if (!pc) {
-            continue;
         }
     }
 
     if (m_player) {
-        CPc* pc = dynamic_cast<CPc*>(m_player);
+        CPc* pc = m_player->AsPc();
         if (pc) {
             portalBootstrapActors += 1;
         }
@@ -6034,8 +6075,9 @@ void CWorld::RenderActors(const matrix& viewMatrix, float cameraLongitude)
     // moving-camera smoothing does not reuse coarse cached quads long enough to
     // visibly "stick then snap" NPC sprites. The shared coarse cache is still
     // kept for hover/label queries where tiny projection error is acceptable.
-    std::vector<BillboardScreenEntry> renderEntries;
-    renderEntries.reserve(m_actorList.size() + (m_player ? 1u : 0u));
+    std::vector<BillboardScreenEntry>& renderEntries = m_billboardRenderScratch;
+    renderEntries.clear();
+    renderEntries.reserve((std::max)(renderEntries.capacity(), m_actorList.size() + (m_player ? 1u : 0u)));
     const double billboardBuildStartMs = WorldNowMs();
 
     auto enqueueRenderActor = [&](CGameActor* actor) {
@@ -6043,7 +6085,7 @@ void CWorld::RenderActors(const matrix& viewMatrix, float cameraLongitude)
             return;
         }
 
-        CPc* pc = dynamic_cast<CPc*>(actor);
+        CPc* pc = actor->AsPc();
         if (!pc || IsPortalActorJob(pc->m_job)) {
             return;
         }
@@ -6076,17 +6118,6 @@ void CWorld::RenderActors(const matrix& viewMatrix, float cameraLongitude)
     for (const BillboardScreenEntry& entry : renderEntries) {
         RenderCachedActorShadow(entry, viewMatrix, zoom);
         if (entry.actor && entry.actor->m_cartEffect) {
-            static std::map<u32, int> s_cartRenderLoopLogs;
-            if (entry.actor->m_gid != g_session.m_gid && s_cartRenderLoopLogs[entry.actor->m_gid] < 8) {
-                ++s_cartRenderLoopLogs[entry.actor->m_gid];
-                DbgLog("[CartEffect] render loop gid=%u actor=%p effect=%p depth=%.4f screenY=%.2f visible=%d\n",
-                    static_cast<unsigned int>(entry.actor->m_gid),
-                    static_cast<void*>(entry.actor),
-                    static_cast<void*>(entry.actor->m_cartEffect),
-                    entry.depthKey,
-                    entry.screenY,
-                    entry.actor->m_isVisible);
-            }
             RenderAttachedActorEffectPass(*entry.actor->m_cartEffect,
                 const_cast<matrix*>(&viewMatrix),
                 entry.depthKey,
@@ -6121,7 +6152,7 @@ bool CWorld::GetPlayerScreenLabel(const matrix& viewMatrix,
         *outLabelY = 0;
     }
 
-    CPc* pc = dynamic_cast<CPc*>(m_player);
+    CPc* pc = m_player ? m_player->AsPc() : nullptr;
     if (!pc) {
         return false;
     }
@@ -6173,7 +6204,7 @@ bool CWorld::GetActorScreenMarker(const matrix& viewMatrix,
         return false;
     }
 
-    if (CPc* pc = dynamic_cast<CPc*>(actor)) {
+    if (CPc* pc = actor->AsPc()) {
         BillboardScreenEntry liveEntry{};
         const float zoom = m_ground ? m_ground->m_zoom : static_cast<float>(m_attr ? m_attr->m_zoom : 5);
         if (BuildBillboardRenderEntry(pc, viewMatrix, cameraLongitude, zoom, &liveEntry)) {
@@ -6280,7 +6311,7 @@ bool CWorld::FindHoveredActorScreen(const matrix& viewMatrix,
     const float mouseX = static_cast<float>(screenX);
     const float mouseY = static_cast<float>(screenY);
 
-    if (CPc* playerPc = dynamic_cast<CPc*>(m_player)) {
+    if (CPc* playerPc = m_player ? m_player->AsPc() : nullptr) {
         const float zoom = m_ground ? m_ground->m_zoom : static_cast<float>(m_attr ? m_attr->m_zoom : 5);
         BillboardScreenEntry playerEntry{};
         if (BuildBillboardRenderEntry(playerPc, viewMatrix, cameraLongitude, zoom, &playerEntry)
@@ -6462,7 +6493,7 @@ bool CWorld::HasWarpAtAttrCell(int attrX, int attrY) const
     }
 
     auto actorCoversCell = [&](const CGameActor* actor) -> bool {
-        const CPc* pc = dynamic_cast<const CPc*>(actor);
+        const CPc* pc = actor ? actor->AsPc() : nullptr;
         if (!pc || !pc->m_isVisible || !IsPortalActorJob(pc->m_job)) {
             return false;
         }

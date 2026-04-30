@@ -237,6 +237,7 @@ public:
     SceneGraphNode m_rootNode;
     SceneGraphNode* m_Calculated;
     mutable std::vector<BillboardScreenEntry> m_billboardFrameEntries;
+    mutable std::vector<BillboardScreenEntry> m_billboardRenderScratch;
     mutable std::map<u32, size_t> m_billboardFrameEntryByGid;
     mutable float m_billboardFrameZoom;
     mutable u64 m_billboardActorFingerprint;

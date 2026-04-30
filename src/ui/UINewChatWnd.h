@@ -44,6 +44,7 @@ public:
     ~UINewChatWnd() override;
 
     bool IsFrameWnd() override { return true; }
+    UIWindow* HitTestDeep(int x, int y) override;
     void OnProcess() override;
     void OnDraw() override;
     void OnLBtnDown(int x, int y) override;

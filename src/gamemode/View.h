@@ -38,6 +38,7 @@ public:
     void ResetToDefaultOrientation();
     void UpdateHoverCellFromScreen(int screenX, int screenY);
     void ClearHoverCell();
+    void SetClickMarker(int attrX, int attrY);
     bool ScreenToHoveredAttrCell(int screenX, int screenY, int* outAttrX, int* outAttrY) const;
     const matrix& GetViewMatrix() const { return m_viewMatrix; }
     float GetCameraLongitude() const { return m_cur.longitude; }
@@ -74,6 +75,9 @@ private:
     u64 m_viewSnapTag;
     int m_hoverAttrX;
     int m_hoverAttrY;
+    int m_clickMarkerAttrX = -1;
+    int m_clickMarkerAttrY = -1;
+    DWORD m_clickMarkerSpawnTick = 0;
     mutable u64 m_hoverCacheRevision;
     mutable DWORD m_hoverCacheTick;
     mutable int m_hoverCacheScreenX;

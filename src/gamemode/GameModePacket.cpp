@@ -6472,6 +6472,15 @@ bool IsNpcLikeJob(int job)
     return job >= 45 && job < 4000;
 }
 
+// Mirrors GameActor.cpp:82-85 (kJobWarpNpcCompat / kJobWarpNpc / kJobWarpPortal /
+// kJobPreWarpPortal). Beta1 (Sabine) emits warps via ZC_NOTIFY_STANDENTRY (0x0014)
+// with class 32, which sits below IsNpcLikeJob's 45-floor; without this predicate
+// the classifier resolves them to a PC actor.
+bool IsWarpPortalJob(int job)
+{
+    return job == 32 || job == 45 || job == 128 || job == 129;
+}
+
 bool IsMonsterLikeJob(int job)
 {
     return job >= 1000 && (job < 6001 || job > 6047);
@@ -6484,6 +6493,10 @@ bool IsHomunOrMercenaryJob(int job)
 
 bool ShouldTreatActorAsPc(u8 objectType, int job)
 {
+    if (IsWarpPortalJob(job)) {
+        return false;
+    }
+
     if (!IsPotentialPcObjectType(objectType)) {
         return false;
     }
@@ -6506,6 +6519,10 @@ bool ShouldTreatActorAsPc(u8 objectType, int job)
 bool ShouldUseSpriteBillboardActor(u8 objectType, int job)
 {
     if (ShouldTreatActorAsPc(objectType, job)) {
+        return true;
+    }
+
+    if (IsWarpPortalJob(job)) {
         return true;
     }
 
@@ -10189,7 +10206,7 @@ void RegisterDefaultGameModePacketHandlers(CGameModePacketRouter& router)
     RegisterHandlerIfValid(router, receiveProfile.actorSpawnVariableSpawnRobe, HandleActorSpawnSkeleton);
 
     // Sabine Beta1 handlers: all Alpha opcodes >= 0x0027 shift +1; opcodes in the
-    // 0x009C-0x00AA Alpha range shift +3 (see GronPacket.cpp ApplyPacketVer200Overrides).
+    // 0x009C-0x00AA Alpha range shift +3 (see PacketRegistry.cpp PopulatePv200).
     // Opcodes already wired via MapReceiveProfile fields (actorSpawn*, actorMove*, etc.)
     // are not repeated here — only extras not covered by a profile field.
     if (receiveProfile.id == ro::net::PacketVersionId::PacketVer200) {

@@ -6,6 +6,7 @@ add_library(ro_core STATIC
     SettingsIni.h SettingsIni.cpp
     ClientFeature.h ClientFeature.cpp
     GPak.h      GPak.cpp
+    ThorPak.h   ThorPak.cpp
     File.h      File.cpp
     Globals.h   Globals.cpp
     ClientInfoLocale.h Locale.cpp

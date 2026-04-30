@@ -97,6 +97,8 @@ protected:
 //===========================================================================
 // CFileMgr – Manages PAK/GRF archives and file priority
 //===========================================================================
+class CThorPak;
+
 class CFileMgr
 {
 public:
@@ -104,6 +106,9 @@ public:
     ~CFileMgr();
 
     void AddPak(const char* pakName);
+    // Register a THOR patch archive. THOR entries take priority over GRFs so
+    // the patch can override base assets.
+    void AddThor(const char* thorName);
     bool IsDataExist(const char* fileName);
     bool IsExist(const char* fileName); // Local alias for compatibility
 
@@ -115,6 +120,7 @@ public:
 
 private:
     std::list<std::pair<CMemFile*, CGPak*>> m_pakList;
+    std::list<std::pair<CMemFile*, CThorPak*>> m_thorList;
 };
 
 // ---------------------------------------------------------------------------

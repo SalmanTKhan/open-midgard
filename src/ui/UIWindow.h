@@ -84,7 +84,7 @@ public:
     virtual bool CanReceiveKeyInput() const;
 
     // Recursive hit test: returns deepest visible window at (x,y), nullptr if none
-    UIWindow* HitTestDeep(int x, int y);
+    virtual UIWindow* HitTestDeep(int x, int y);
 
     // Memory layout from HighPriest.exe.h:8962
     UIWindow* m_parent;
