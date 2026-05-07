@@ -119,6 +119,11 @@ QtUiTheme::Palette QtUiTheme::LightPalette()
     p.chatWhisper    = QColor(168, 72, 168);
     p.chatParty      = QColor(48, 128, 168);
     p.chatGuild      = QColor(64, 128, 64);
+
+    p.tooltipBg      = QColor(28, 22, 14, 235);
+    p.tooltipBorder  = QColor(175, 160, 128);
+    p.frameDragHandle= QColor(210, 200, 176, 230);
+    p.frameShadow    = QColor(0, 0, 0, 110);
     return p;
 }
 
@@ -159,6 +164,11 @@ QtUiTheme::Palette QtUiTheme::DarkPalette()
     p.chatWhisper    = QColor(224, 144, 224);
     p.chatParty      = QColor(110, 190, 230);
     p.chatGuild      = QColor(130, 210, 130);
+
+    p.tooltipBg      = QColor(14, 16, 22, 240);
+    p.tooltipBorder  = QColor(110, 124, 150);
+    p.frameDragHandle= QColor(72, 84, 108, 235);
+    p.frameShadow    = QColor(0, 0, 0, 160);
     return p;
 }
 
@@ -199,6 +209,11 @@ QtUiTheme::Palette QtUiTheme::MidnightPalette()
     p.chatWhisper    = QColor(232, 152, 232);
     p.chatParty      = QColor(120, 204, 240);
     p.chatGuild      = QColor(144, 228, 152);
+
+    p.tooltipBg      = QColor(6, 10, 18, 245);
+    p.tooltipBorder  = QColor(72, 128, 176);
+    p.frameDragHandle= QColor(44, 60, 88, 240);
+    p.frameShadow    = QColor(0, 0, 0, 180);
     return p;
 }
 
@@ -239,6 +254,11 @@ QtUiTheme::Palette QtUiTheme::SlatePalette()
     p.chatWhisper    = QColor(224, 152, 224);
     p.chatParty      = QColor(120, 196, 232);
     p.chatGuild      = QColor(140, 216, 140);
+
+    p.tooltipBg      = QColor(28, 32, 40, 240);
+    p.tooltipBorder  = QColor(132, 150, 172);
+    p.frameDragHandle= QColor(100, 116, 136, 235);
+    p.frameShadow    = QColor(0, 0, 0, 140);
     return p;
 }
 
@@ -279,6 +299,11 @@ QtUiTheme::Palette QtUiTheme::ForestPalette()
     p.chatWhisper    = QColor(216, 160, 216);
     p.chatParty      = QColor(128, 192, 208);
     p.chatGuild      = QColor(176, 216, 120);
+
+    p.tooltipBg      = QColor(18, 28, 22, 240);
+    p.tooltipBorder  = QColor(136, 112, 64);
+    p.frameDragHandle= QColor(76, 100, 76, 236);
+    p.frameShadow    = QColor(0, 0, 0, 150);
     return p;
 }
 
@@ -319,5 +344,10 @@ QtUiTheme::Palette QtUiTheme::ParchmentPalette()
     p.chatWhisper    = QColor(144, 56, 144);
     p.chatParty      = QColor(40, 104, 144);
     p.chatGuild      = QColor(64, 112, 48);
+
+    p.tooltipBg      = QColor(46, 28, 12, 235);
+    p.tooltipBorder  = QColor(128, 88, 48);
+    p.frameDragHandle= QColor(200, 176, 128, 232);
+    p.frameShadow    = QColor(40, 24, 10, 130);
     return p;
 }

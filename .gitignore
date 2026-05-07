@@ -31,3 +31,7 @@ build_output*.txt
 
 screenshots/
 /server
+/build-android-arm64-qt
+/build-android-arm64
+/build-android-x86_64-qt
+/out

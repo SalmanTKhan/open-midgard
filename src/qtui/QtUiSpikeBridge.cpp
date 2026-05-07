@@ -61,7 +61,10 @@
 #include <QQuickRenderControl>
 #include <QQuickRenderTarget>
 #include <QQuickWindow>
+#include <QElapsedTimer>
 #include <QResource>
+#include <QThread>
+#include <QTimer>
 #include <QSGRendererInterface>
 #include <vulkan/vulkan.h>
 #include <QVulkanInstance>
@@ -1670,6 +1673,12 @@ private:
                     SaveConfiguredTextScalePercent(next);
                     uiStateObj->setTextScale(static_cast<double>(next) / 100.0);
                 });
+            QObject::connect(uiStateObj, &QtUiState::debugChatRequested,
+                uiStateObj, [](const QString& message) {
+                    const QByteArray utf8 = message.toUtf8();
+                    DbgLog("%s\n", utf8.constData());
+                    g_windowMgr.PushChatEvent(utf8.constData(), 0x00C0FFFFu, 6);
+                });
         }
 
         QQmlComponent component(m_engine, QUrl(QStringLiteral("qrc:/qtui/qml/GameOverlay.qml")));
@@ -1754,6 +1763,335 @@ public:
              | (static_cast<quint32>(c.red()) << 16)
              | (static_cast<quint32>(c.green()) << 8)
              | static_cast<quint32>(c.blue());
+    }
+
+    void requestCaptureAllWindows(const QString& outputDir)
+    {
+        captureAllWindowsImpl(outputDir, /*forceAll=*/false);
+    }
+
+    void requestCaptureAllWindowsForced(const QString& outputDir)
+    {
+        // The forced flow needs game-loop time so the QML scene composites onto
+        // the HWND before we PrintWindow it. Run force-show now, then schedule
+        // the actual grab + restore for ~500ms later via a QTimer that ticks
+        // after the game has had a chance to render frames.
+        forceShowAllWindowsForCapture();
+        QTimer::singleShot(500, m_quickWindow ? static_cast<QObject*>(m_quickWindow) : qApp,
+            [this, outputDir]() {
+                grabAndCropAllWindows(outputDir);
+                restoreForcedWindows();
+            });
+    }
+
+    struct ForcedSaved { QQuickItem* item; };
+    QList<ForcedSaved> m_forcedSaved;
+
+    void captureAllWindowsImpl(const QString& outputDir, bool forceAll)
+    {
+        DbgLog("[uishots] bridge captureAllWindowsImpl dir='%s' force=%d rootItem=%p mainWindow=%p\n",
+            outputDir.toLocal8Bit().constData(),
+            forceAll ? 1 : 0,
+            static_cast<void*>(m_rootItem),
+            static_cast<void*>(m_mainWindow));
+
+        if (!m_rootItem) {
+            DbgLog("[uishots] missing rootItem; aborting\n");
+            return;
+        }
+
+        const QList<QQuickItem*> all = m_rootItem->findChildren<QQuickItem*>();
+
+        // In forceAll mode, temporarily set every WindowFrame visible so we can
+        // capture chrome even for windows that haven't been triggered in-game.
+        // The QML bindings will re-assert on the next sync; we capture and
+        // restore within this single call.
+        struct Saved { QQuickItem* item; bool prev; };
+        QList<Saved> savedVisible;
+        if (forceAll) {
+            for (QQuickItem* item : all) {
+                const QVariant nameVar = item->property("windowName");
+                if (!nameVar.isValid()) continue;
+                const QString wname = nameVar.toString();
+                if (wname.isEmpty()) continue;
+                if (item->isVisible()) continue;
+                savedVisible.append({ item, item->isVisible() });
+
+                const int tileW = 360;
+                const int tileH = 240;
+                const int idx = savedVisible.size() - 1;
+                const int cols = qMax(1, int(m_rootItem->width()) / tileW);
+                const int row = idx / cols;
+                const int col = idx % cols;
+                const int px = 8 + col * tileW;
+                const int py = 40 + row * tileH;
+                int pw = qMax(0, int(item->width()));
+                int ph = qMax(0, int(item->height()));
+                if (pw == 0) pw = tileW - 16;
+                if (ph == 0) ph = tileH - 16;
+
+                // Call into QML's forceShowAt() so JS assigns the values and
+                // breaks the existing visible: / width: / height: bindings.
+                const bool ok = QMetaObject::invokeMethod(
+                    item, "forceShowAt",
+                    Q_ARG(QVariant, px),
+                    Q_ARG(QVariant, py),
+                    Q_ARG(QVariant, pw),
+                    Q_ARG(QVariant, ph));
+                DbgLog("[uishots] force '%s' invoke=%d at %d,%d %dx%d\n",
+                    wname.toLocal8Bit().constData(), ok ? 1 : 0, px, py, pw, ph);
+            }
+            DbgLog("[uishots] force-shown %d additional windows\n", savedVisible.size());
+            // The WindowFrame fade+slide-in animations run for ~170ms, so a
+            // single render catches them at opacity 0. Pump events + render
+            // for long enough that all animations settle before we grab.
+            QElapsedTimer settleTimer;
+            settleTimer.start();
+            int frames = 0;
+            while (settleTimer.elapsed() < 350) {
+                processEvents();
+                if (m_renderControl && m_quickWindow) {
+                    m_renderControl->polishItems();
+                    m_renderControl->sync();
+                    m_renderControl->render();
+                }
+                ++frames;
+                QThread::msleep(15);
+            }
+            DbgLog("[uishots] settled after %d render passes (%lld ms)\n",
+                frames, static_cast<long long>(settleTimer.elapsed()));
+        }
+
+        QImage windowImage = grabMainWindowImage();
+        if (windowImage.isNull()) {
+            DbgLog("[uishots] grabMainWindowImage returned null\n");
+        } else {
+            DbgLog("[uishots] grabbed window %dx%d format=%d\n",
+                windowImage.width(), windowImage.height(), int(windowImage.format()));
+
+            int candidates = 0;
+            int saved = 0;
+            for (QQuickItem* item : all) {
+                const QVariant nameVar = item->property("windowName");
+                if (!nameVar.isValid()) continue;
+                const QString name = nameVar.toString();
+                if (name.isEmpty()) continue;
+                ++candidates;
+                if (!item->isVisible() || item->width() <= 0 || item->height() <= 0) continue;
+
+                const QPointF tl = item->mapToScene(QPointF(0, 0));
+                QRect rect(qRound(tl.x()), qRound(tl.y()),
+                           qRound(item->width()), qRound(item->height()));
+                rect = rect.intersected(QRect(0, 0, windowImage.width(), windowImage.height()));
+                if (rect.isEmpty()) {
+                    DbgLog("[uishots] %s offscreen, skipped\n", name.toLocal8Bit().constData());
+                    continue;
+                }
+
+                const QImage cropped = windowImage.copy(rect);
+                const QString path = outputDir + QStringLiteral("/") + name + QStringLiteral(".png");
+                const bool ok = cropped.save(path, "PNG");
+                DbgLog("[uishots] %s -> %s (%dx%d at %d,%d)\n",
+                    ok ? "saved" : "FAILED",
+                    path.toLocal8Bit().constData(),
+                    rect.width(), rect.height(), rect.x(), rect.y());
+                if (ok) ++saved;
+            }
+            DbgLog("[uishots] capture done: candidates=%d saved=%d\n", candidates, saved);
+
+            if (auto* state = qobject_cast<QtUiState*>(m_stateAdapter ? m_stateAdapter->stateObject() : nullptr)) {
+                const QString summary = QStringLiteral("[uishots] saved %1/%2 windows to %3")
+                    .arg(saved).arg(candidates).arg(outputDir);
+                state->pushDebugChat(summary);
+            }
+        }
+
+        // Restore prior visibility so we don't leave forced windows on screen.
+        for (const Saved& s : savedVisible) {
+            QMetaObject::invokeMethod(s.item, "forceHide");
+        }
+    }
+
+    void forceShowAllWindowsForCapture()
+    {
+        if (!m_rootItem) return;
+        m_forcedSaved.clear();
+
+        const QList<QQuickItem*> all = m_rootItem->findChildren<QQuickItem*>();
+
+        // Tile origin past the always-visible HUD: basicInfo (top-left),
+        // minimap (top-right), chat (bottom-left). Reserve a clear band.
+        const int rootW = qMax(800, int(m_rootItem->width()));
+        const int tileOriginX = 300;     // clears basicInfo
+        const int tileOriginY = 200;     // clears basicInfo
+        const int tileMaxX = rootW - 220; // clears minimap
+        const int tileW = 340;
+        const int tileH = 220;
+        const int usableW = qMax(tileW, tileMaxX - tileOriginX);
+        const int cols = qMax(1, usableW / tileW);
+
+        int forced = 0;
+        for (QQuickItem* item : all) {
+            const QVariant nameVar = item->property("windowName");
+            if (!nameVar.isValid()) continue;
+            const QString wname = nameVar.toString();
+            if (wname.isEmpty()) continue;
+            if (item->isVisible()) continue;
+
+            const int idx = m_forcedSaved.size();
+            const int row = idx / cols;
+            const int col = idx % cols;
+            const int px = tileOriginX + col * tileW;
+            const int py = tileOriginY + row * tileH;
+            int pw = qMax(0, int(item->width()));
+            int ph = qMax(0, int(item->height()));
+            if (pw == 0 || pw > tileW - 8) pw = tileW - 8;
+            if (ph == 0 || ph > tileH - 8) ph = tileH - 8;
+
+            QMetaObject::invokeMethod(
+                item, "forceShowAt",
+                Q_ARG(QVariant, px),
+                Q_ARG(QVariant, py),
+                Q_ARG(QVariant, pw),
+                Q_ARG(QVariant, ph));
+            m_forcedSaved.append({ item });
+            ++forced;
+        }
+        DbgLog("[uishots] (deferred) force-shown %d windows; capture in 500ms\n", forced);
+    }
+
+    void grabAndCropAllWindows(const QString& outputDir)
+    {
+        if (!m_rootItem) return;
+        DbgLog("[uishots] (deferred) grab pass starting\n");
+
+        QImage windowImage = grabMainWindowImage();
+        if (windowImage.isNull()) {
+            DbgLog("[uishots] (deferred) grabMainWindowImage returned null\n");
+            return;
+        }
+        DbgLog("[uishots] (deferred) grabbed window %dx%d format=%d\n",
+            windowImage.width(), windowImage.height(), int(windowImage.format()));
+
+        const QList<QQuickItem*> all = m_rootItem->findChildren<QQuickItem*>();
+        int candidates = 0;
+        int saved = 0;
+        for (QQuickItem* item : all) {
+            const QVariant nameVar = item->property("windowName");
+            if (!nameVar.isValid()) continue;
+            const QString name = nameVar.toString();
+            if (name.isEmpty()) continue;
+            ++candidates;
+            if (!item->isVisible() || item->width() <= 0 || item->height() <= 0) continue;
+
+            const QPointF tl = item->mapToScene(QPointF(0, 0));
+            QRect rect(qRound(tl.x()), qRound(tl.y()),
+                       qRound(item->width()), qRound(item->height()));
+            rect = rect.intersected(QRect(0, 0, windowImage.width(), windowImage.height()));
+            if (rect.isEmpty()) {
+                DbgLog("[uishots] %s offscreen, skipped\n", name.toLocal8Bit().constData());
+                continue;
+            }
+
+            const QImage cropped = windowImage.copy(rect);
+            const QString path = outputDir + QStringLiteral("/") + name + QStringLiteral(".png");
+            const bool ok = cropped.save(path, "PNG");
+            DbgLog("[uishots] %s -> %s (%dx%d at %d,%d)\n",
+                ok ? "saved" : "FAILED",
+                path.toLocal8Bit().constData(),
+                rect.width(), rect.height(), rect.x(), rect.y());
+            if (ok) ++saved;
+        }
+        DbgLog("[uishots] (deferred) capture done: candidates=%d saved=%d\n", candidates, saved);
+
+        if (auto* state = qobject_cast<QtUiState*>(m_stateAdapter ? m_stateAdapter->stateObject() : nullptr)) {
+            const QString summary = QStringLiteral("[uishots] saved %1/%2 windows to %3")
+                .arg(saved).arg(candidates).arg(outputDir);
+            state->pushDebugChat(summary);
+        }
+    }
+
+    void restoreForcedWindows()
+    {
+        for (const ForcedSaved& s : m_forcedSaved) {
+            if (s.item) {
+                QMetaObject::invokeMethod(s.item, "forceHide");
+            }
+        }
+        DbgLog("[uishots] (deferred) restored %d forced windows\n", m_forcedSaved.size());
+        m_forcedSaved.clear();
+    }
+
+    QImage grabMainWindowImage()
+    {
+#if RO_PLATFORM_WINDOWS
+        HWND hwnd = static_cast<HWND>(m_mainWindow);
+        if (!hwnd || !IsWindow(hwnd)) {
+            DbgLog("[uishots] no valid HWND\n");
+            return QImage();
+        }
+
+        // PrintWindow paints the *full* window (title bar + borders + client)
+        // starting at (0,0). To end up with a client-area image whose
+        // coordinates match QML's mapToScene output, capture full-window then
+        // crop to the client rect.
+        RECT wr{};
+        if (!GetWindowRect(hwnd, &wr)) return QImage();
+        const int fullW = wr.right - wr.left;
+        const int fullH = wr.bottom - wr.top;
+        if (fullW <= 0 || fullH <= 0) return QImage();
+
+        RECT cr{};
+        if (!GetClientRect(hwnd, &cr)) return QImage();
+        const int clientW = cr.right - cr.left;
+        const int clientH = cr.bottom - cr.top;
+        if (clientW <= 0 || clientH <= 0) return QImage();
+
+        // Translate client (0,0) into window-local coords. ClientToScreen +
+        // subtraction of window origin gives the offset of the client area
+        // inside the full window bitmap.
+        POINT clientOrigin{ 0, 0 };
+        ClientToScreen(hwnd, &clientOrigin);
+        const int clientOffsetX = clientOrigin.x - wr.left;
+        const int clientOffsetY = clientOrigin.y - wr.top;
+
+        HDC hdcWin = GetDC(hwnd);
+        HDC hdcMem = CreateCompatibleDC(hdcWin);
+        HBITMAP bmp = CreateCompatibleBitmap(hdcWin, fullW, fullH);
+        HGDIOBJ oldBmp = SelectObject(hdcMem, bmp);
+
+        BOOL ok = PrintWindow(hwnd, hdcMem, /*PW_RENDERFULLCONTENT=*/0x00000002);
+        DbgLog("[uishots] PrintWindow returned %d window=%dx%d client=%dx%d offset=%d,%d\n",
+            int(ok), fullW, fullH, clientW, clientH, clientOffsetX, clientOffsetY);
+
+        QImage fullImg(fullW, fullH, QImage::Format_ARGB32);
+        BITMAPINFO bi{};
+        bi.bmiHeader.biSize = sizeof(bi.bmiHeader);
+        bi.bmiHeader.biWidth = fullW;
+        bi.bmiHeader.biHeight = -fullH; // top-down
+        bi.bmiHeader.biPlanes = 1;
+        bi.bmiHeader.biBitCount = 32;
+        bi.bmiHeader.biCompression = BI_RGB;
+        const int scanned = GetDIBits(hdcMem, bmp, 0, fullH, fullImg.bits(), &bi, DIB_RGB_COLORS);
+        DbgLog("[uishots] GetDIBits scanned=%d expected=%d\n", scanned, fullH);
+
+        SelectObject(hdcMem, oldBmp);
+        DeleteObject(bmp);
+        DeleteDC(hdcMem);
+        ReleaseDC(hwnd, hdcWin);
+
+        if (!ok || scanned == 0) {
+            return QImage();
+        }
+
+        // Crop to client area so QML scene coords (which start at client 0,0)
+        // line up with the returned image.
+        QRect clientRect(clientOffsetX, clientOffsetY, clientW, clientH);
+        clientRect = clientRect.intersected(QRect(0, 0, fullW, fullH));
+        return fullImg.copy(clientRect);
+#else
+        return QImage();
+#endif
     }
 
 private:
@@ -2169,6 +2507,24 @@ std::uint32_t GetQtUiRuntimeThemeTextArgb()
     return Runtime().themeTextArgb();
 #else
     return 0xFF1E1810u;
+#endif
+}
+
+void RequestQtUiCaptureAllWindows(const char* outputDir)
+{
+#if RO_ENABLE_QT6_UI
+    Runtime().requestCaptureAllWindows(QString::fromUtf8(outputDir ? outputDir : ""));
+#else
+    (void)outputDir;
+#endif
+}
+
+void RequestQtUiCaptureAllWindowsForced(const char* outputDir)
+{
+#if RO_ENABLE_QT6_UI
+    Runtime().requestCaptureAllWindowsForced(QString::fromUtf8(outputDir ? outputDir : ""));
+#else
+    (void)outputDir;
 #endif
 }
 

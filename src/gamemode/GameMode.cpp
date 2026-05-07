@@ -49,6 +49,7 @@
 #include <windows.h>
 
 #include <algorithm>
+#include <filesystem>
 #include <array>
 #include <cctype>
 #include <cmath>
@@ -10905,6 +10906,51 @@ msgresult_t CGameMode::SendMsg(int msg, msgparam_t wparam, msgparam_t lparam, ms
         }
         if (command == "/party") {
             g_windowMgr.MakeWindow(UIWindowMgr::WID_PARTYWND);
+            return 1;
+        }
+        if (command == "/uishots" || command.compare(0, 9, "/uishots ") == 0) {
+            DbgLog("[uishots] slash command entered, raw='%s'\n", command.c_str());
+            std::string args = command.size() > 9 ? command.substr(9) : std::string();
+            const size_t firstNon = args.find_first_not_of(" \t");
+            if (firstNon != std::string::npos) {
+                args = args.substr(firstNon);
+            } else {
+                args.clear();
+            }
+
+            // Optional leading 'all' keyword forces every WindowFrame visible
+            // for the capture pass so windows that haven't been triggered
+            // in-game still get a screenshot.
+            bool forceAll = false;
+            if (args.compare(0, 3, "all") == 0 && (args.size() == 3 || args[3] == ' ' || args[3] == '\t')) {
+                forceAll = true;
+                args.erase(0, 3);
+                const size_t firstNon2 = args.find_first_not_of(" \t");
+                if (firstNon2 != std::string::npos) {
+                    args = args.substr(firstNon2);
+                } else {
+                    args.clear();
+                }
+            }
+
+            std::string outDir = args.empty() ? std::string("screenshots/UI") : args;
+            std::error_code ec;
+            std::filesystem::create_directories(outDir, ec);
+            if (ec) {
+                DbgLog("[uishots] create_directories failed: %s\n", ec.message().c_str());
+            }
+            const std::filesystem::path absPath = std::filesystem::absolute(outDir, ec);
+            const std::string absStr = absPath.string();
+            DbgLog("[uishots] resolved outputDir='%s' force=%d qtRuntimeEnabled=%d\n",
+                absStr.c_str(), forceAll ? 1 : 0, IsQtUiRuntimeEnabled() ? 1 : 0);
+            if (forceAll) {
+                RequestQtUiCaptureAllWindowsForced(absStr.c_str());
+            } else {
+                RequestQtUiCaptureAllWindows(absStr.c_str());
+            }
+            const std::string msg = std::string("Capturing UI windows ")
+                + (forceAll ? "(forced) -> " : "-> ") + absStr;
+            g_windowMgr.PushChatEvent(msg.c_str(), 0x0000C000u, 6);
             return 1;
         }
         if (command == "/where") {

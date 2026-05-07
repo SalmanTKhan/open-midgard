@@ -1,7 +1,12 @@
+// winsock2.h must be included before windows.h to avoid the winsock1
+// collision warning. UINpcMenuWnd.h transitively pulls in windows.h via
+// UIFrameWnd.h, so winsock2.h goes ahead of every other include.
+#if defined(_WIN32) || defined(RO_PLATFORM_WINDOWS)
+#include <winsock2.h>
+#endif
+
 #include "UINpcMenuWnd.h"
 
-// network/Connection.h pulls in winsock2.h, which must be included before
-// windows.h to avoid the WIN32_LEAN_AND_MEAN / winsock1 collision warning.
 #include "network/Connection.h"
 
 #include "NpcDialogColoredText.h"

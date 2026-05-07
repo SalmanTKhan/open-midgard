@@ -1,4 +1,5 @@
 import QtQuick 2.15
+import "components"
 
 Item {
     id: root
@@ -478,9 +479,10 @@ Item {
         }
     }
 
-    Rectangle {
-        x: uiState.npcMenuX
-        y: uiState.npcMenuY
+    WindowFrame {
+        windowName: "npcMenu"
+        initialX: uiState.npcMenuX
+        initialY: uiState.npcMenuY
         width: uiState.npcMenuWidth
         height: uiState.npcMenuHeight
         radius: 10
@@ -488,6 +490,9 @@ Item {
         border.width: 1
         border.color: "#828282"
         visible: uiState.npcMenuVisible
+        showTitleBar: false
+        showCloseButton: false
+        dragHandleHeight: 24
 
         Column {
             x: 10
@@ -546,9 +551,10 @@ Item {
         }
     }
 
-    Rectangle {
-        x: uiState.sayDialogX
-        y: uiState.sayDialogY
+    WindowFrame {
+        windowName: "sayDialog"
+        initialX: uiState.sayDialogX
+        initialY: uiState.sayDialogY
         width: uiState.sayDialogWidth
         height: uiState.sayDialogHeight
         radius: 10
@@ -556,6 +562,9 @@ Item {
         border.width: 1
         border.color: Theme.borderStrong
         visible: uiState.sayDialogVisible
+        showTitleBar: false
+        showCloseButton: false
+        dragHandleHeight: 26
 
         readonly property string dialogTitle: uiState.sayDialogTitle || "NPC"
         readonly property real textScale: Math.max(0.75, uiState.textScale || 1.0)
@@ -673,9 +682,10 @@ Item {
         }
     }
 
-    Rectangle {
-        x: uiState.npcInputX
-        y: uiState.npcInputY
+    WindowFrame {
+        windowName: "npcInput"
+        initialX: uiState.npcInputX
+        initialY: uiState.npcInputY
         width: uiState.npcInputWidth
         height: uiState.npcInputHeight
         radius: 10
@@ -683,6 +693,9 @@ Item {
         border.width: 1
         border.color: Theme.borderStrong
         visible: uiState.npcInputVisible
+        showTitleBar: false
+        showCloseButton: false
+        dragHandleHeight: 22
 
         Text {
             x: 10
@@ -739,9 +752,10 @@ Item {
         }
     }
 
-    Rectangle {
-        x: uiState.chooseMenuX
-        y: uiState.chooseMenuY
+    WindowFrame {
+        windowName: "chooseMenu"
+        initialX: uiState.chooseMenuX
+        initialY: uiState.chooseMenuY
         width: uiState.chooseMenuWidth
         height: uiState.chooseMenuHeight
         radius: 8
@@ -749,6 +763,9 @@ Item {
         border.width: 1
         border.color: Theme.borderStrong
         visible: uiState.chooseMenuVisible
+        showTitleBar: false
+        showCloseButton: false
+        dragHandleHeight: 20
 
         Repeater {
             model: uiState.chooseMenuOptions
@@ -777,10 +794,11 @@ Item {
         }
     }
 
-    Rectangle {
+    WindowFrame {
         id: itemShopWindow
-        x: uiState.itemShopX
-        y: uiState.itemShopY
+        windowName: "itemShop"
+        initialX: uiState.itemShopX
+        initialY: uiState.itemShopY
         width: uiState.itemShopWidth
         height: uiState.itemShopHeight
         radius: 8
@@ -789,6 +807,9 @@ Item {
         border.width: 1
         border.color: Theme.borderStrong
         visible: uiState.itemShopVisible
+        showTitleBar: false
+        showCloseButton: false
+        dragHandleHeight: 22
 
         readonly property bool showQuantity: uiState.itemShopData.showQuantity || false
         readonly property int qtyColX: 188
@@ -940,10 +961,11 @@ Item {
         }
     }
 
-    Rectangle {
+    WindowFrame {
         id: itemPurchaseWindow
-        x: uiState.itemPurchaseX
-        y: uiState.itemPurchaseY
+        windowName: "itemPurchase"
+        initialX: uiState.itemPurchaseX
+        initialY: uiState.itemPurchaseY
         width: uiState.itemPurchaseWidth
         height: uiState.itemPurchaseHeight
         radius: 8
@@ -952,6 +974,9 @@ Item {
         border.width: 1
         border.color: Theme.borderStrong
         visible: uiState.itemPurchaseVisible
+        showTitleBar: false
+        showCloseButton: false
+        dragHandleHeight: 22
 
         readonly property int qtyColX: 132
         readonly property int qtyColWidth: 36
@@ -1152,15 +1177,19 @@ Item {
         }
     }
 
-    Rectangle {
+    WindowFrame {
         id: itemSellWindow
-        x: uiState.itemSellX
-        y: uiState.itemSellY
+        windowName: "itemSell"
+        initialX: uiState.itemSellX
+        initialY: uiState.itemSellY
         width: uiState.itemSellWidth
         height: uiState.itemSellHeight
         radius: 8
         clip: true
         color: Theme.background
+        showTitleBar: false
+        showCloseButton: false
+        dragHandleHeight: 22
         border.width: 1
         border.color: Theme.borderStrong
         visible: uiState.itemSellVisible
@@ -1452,9 +1481,10 @@ Item {
         }
     }
 
-    Rectangle {
-        x: uiState.basicInfoX
-        y: uiState.basicInfoY
+    WindowFrame {
+        windowName: "basicInfo"
+        initialX: uiState.basicInfoX
+        initialY: uiState.basicInfoY
         width: uiState.basicInfoWidth
         height: uiState.basicInfoHeight
         radius: 8
@@ -1462,6 +1492,9 @@ Item {
         border.width: 1
         border.color: Theme.border
         visible: uiState.basicInfoVisible
+        showTitleBar: false
+        showCloseButton: false
+        dragHandleHeight: 18
 
         Rectangle {
             x: 1
@@ -1718,9 +1751,10 @@ Item {
         }
     }
 
-    Rectangle {
-        x: uiState.statusX
-        y: uiState.statusY
+    WindowFrame {
+        windowName: "status"
+        initialX: uiState.statusX
+        initialY: uiState.statusY
         width: uiState.statusWidth
         height: uiState.statusHeight
         radius: 8
@@ -1728,6 +1762,9 @@ Item {
         border.width: 1
         border.color: Theme.border
         visible: uiState.statusVisible
+        showTitleBar: false
+        showCloseButton: false
+        dragHandleHeight: 18
 
         Rectangle {
             x: 1
@@ -2073,16 +2110,20 @@ Item {
         }
     }
 
-    Rectangle {
+    WindowFrame {
         id: chatWindowChrome
-        x: uiState.chatWindowX
-        y: uiState.chatWindowY
+        windowName: "chat"
+        initialX: uiState.chatWindowX
+        initialY: uiState.chatWindowY
         width: uiState.chatWindowWidth
         height: uiState.chatWindowHeight
         radius: 14
         border.width: 1
         border.color: Theme.borderStrong
         visible: uiState.chatWindowVisible
+        showTitleBar: false
+        showCloseButton: false
+        dragHandleHeight: 50
 
         readonly property var chatUi: uiState.chatWindowUi || ({})
         readonly property var scrollBar: uiState.chatWindowScrollBar || ({})
@@ -2587,9 +2628,10 @@ Item {
         }
     }
 
-    Rectangle {
-        x: uiState.minimapX
-        y: uiState.minimapY
+    WindowFrame {
+        windowName: "minimap"
+        initialX: uiState.minimapX
+        initialY: uiState.minimapY
         width: uiState.minimapWidth
         height: uiState.minimapHeight
         radius: 9
@@ -2597,6 +2639,9 @@ Item {
         border.width: 1
         border.color: Theme.borderStrong
         visible: uiState.minimapVisible
+        showTitleBar: false
+        showCloseButton: false
+        dragHandleHeight: 18
 
         Rectangle {
             x: 1
@@ -3134,9 +3179,10 @@ Item {
         }
     }
 
-    Rectangle {
-        x: uiState.inventoryX
-        y: uiState.inventoryY
+    WindowFrame {
+        windowName: "inventory"
+        initialX: uiState.inventoryX
+        initialY: uiState.inventoryY
         width: uiState.inventoryWidth
         height: uiState.inventoryHeight
         radius: 8
@@ -3144,6 +3190,9 @@ Item {
         border.width: 1
         border.color: Theme.border
         visible: uiState.inventoryVisible
+        showTitleBar: false
+        showCloseButton: false
+        dragHandleHeight: 18
 
         Rectangle {
             x: 1
@@ -3285,6 +3334,30 @@ Item {
                         font.bold: true
                     }
                     }
+
+                    MouseArea {
+                        anchors.fill: parent
+                        hoverEnabled: modelData.occupied === true
+                        acceptedButtons: Qt.NoButton
+                        onEntered: {
+                            if (!modelData.occupied) return
+                            var p = mapToItem(root, width, 0)
+                            uiState.showTooltip({
+                                kind: "item",
+                                id: modelData.itemId || 0,
+                                title: modelData.label || ("Item #" + (modelData.itemId || 0)),
+                                iconSource: ((modelData.itemId || 0) > 0 || (modelData.itemIndex || 0) > 0)
+                                    ? root.itemIconSource(modelData.itemId || 0, modelData.itemIndex || 0)
+                                    : "",
+                                richBody: (modelData.count || 0) > 1
+                                    ? ("Quantity: <b>" + modelData.count + "</b>")
+                                    : "",
+                                anchorX: p.x,
+                                anchorY: p.y
+                            })
+                        }
+                        onExited: uiState.clearTooltip()
+                    }
                 }
             }
 
@@ -3330,9 +3403,10 @@ Item {
         }
     }
 
-    Rectangle {
-        x: uiState.storageX
-        y: uiState.storageY
+    WindowFrame {
+        windowName: "storage"
+        initialX: uiState.storageX
+        initialY: uiState.storageY
         width: uiState.storageWidth
         height: uiState.storageHeight
         radius: 4
@@ -3340,6 +3414,9 @@ Item {
         border.width: 1
         border.color: "#7a6d57"
         visible: uiState.storageVisible
+        showTitleBar: false
+        showCloseButton: false
+        dragHandleHeight: 18
 
         Rectangle {
             x: 1
@@ -3564,9 +3641,10 @@ Item {
         }
     }
 
-    Rectangle {
-        x: uiState.equipX
-        y: uiState.equipY
+    WindowFrame {
+        windowName: "equip"
+        initialX: uiState.equipX
+        initialY: uiState.equipY
         width: uiState.equipWidth
         height: uiState.equipHeight
         radius: 8
@@ -3574,6 +3652,9 @@ Item {
         border.width: 1
         border.color: Theme.border
         visible: uiState.equipVisible
+        showTitleBar: false
+        showCloseButton: false
+        dragHandleHeight: 18
 
         Rectangle {
             x: 1
@@ -3734,9 +3815,10 @@ Item {
         }
     }
 
-    Rectangle {
-        x: uiState.friendPartyX
-        y: uiState.friendPartyY
+    WindowFrame {
+        windowName: "friendParty"
+        initialX: uiState.friendPartyX
+        initialY: uiState.friendPartyY
         width: uiState.friendPartyWidth
         height: uiState.friendPartyHeight
         radius: 4
@@ -3744,6 +3826,9 @@ Item {
         border.width: 1
         border.color: Theme.border
         visible: uiState.friendPartyVisible
+        showTitleBar: false
+        showCloseButton: false
+        dragHandleHeight: 18
 
         Rectangle {
             x: 1
@@ -4009,9 +4094,10 @@ Item {
         }
     }
 
-    Rectangle {
-        x: uiState.partySetupX
-        y: uiState.partySetupY
+    WindowFrame {
+        windowName: "partySetup"
+        initialX: uiState.partySetupX
+        initialY: uiState.partySetupY
         width: uiState.partySetupWidth
         height: uiState.partySetupHeight
         radius: 4
@@ -4019,6 +4105,9 @@ Item {
         border.width: 1
         border.color: Theme.border
         visible: uiState.partySetupVisible
+        showTitleBar: false
+        showCloseButton: false
+        dragHandleHeight: 18
 
         Rectangle {
             x: 1
@@ -4194,9 +4283,10 @@ Item {
         }
     }
 
-    Rectangle {
-        x: uiState.partyInviteX
-        y: uiState.partyInviteY
+    WindowFrame {
+        windowName: "partyInvite"
+        initialX: uiState.partyInviteX
+        initialY: uiState.partyInviteY
         width: uiState.partyInviteWidth
         height: uiState.partyInviteHeight
         radius: 4
@@ -4204,6 +4294,9 @@ Item {
         border.width: 1
         border.color: Theme.border
         visible: uiState.partyInviteVisible
+        showTitleBar: false
+        showCloseButton: false
+        dragHandleHeight: 18
 
         Rectangle {
             x: 1
@@ -4274,9 +4367,10 @@ Item {
         }
     }
 
-    Rectangle {
-        x: uiState.skillListX
-        y: uiState.skillListY
+    WindowFrame {
+        windowName: "skillList"
+        initialX: uiState.skillListX
+        initialY: uiState.skillListY
         width: uiState.skillListWidth
         height: uiState.skillListHeight
         radius: 8
@@ -4284,6 +4378,9 @@ Item {
         border.width: 1
         border.color: Theme.border
         visible: uiState.skillListVisible
+        showTitleBar: false
+        showCloseButton: false
+        dragHandleHeight: 18
 
         Rectangle {
             x: 1
@@ -4431,6 +4528,29 @@ Item {
                         font.bold: true
                     }
                 }
+
+                MouseArea {
+                    anchors.fill: parent
+                    hoverEnabled: (modelData.skillId || 0) > 0
+                    acceptedButtons: Qt.NoButton
+                    onEntered: {
+                        if (!((modelData.skillId || 0) > 0)) return
+                        var p = mapToItem(root, width, 0)
+                        var bodyParts = []
+                        if (modelData.levelText) bodyParts.push("<b>" + modelData.levelText + "</b>")
+                        if (modelData.rightText) bodyParts.push(modelData.rightText)
+                        uiState.showTooltip({
+                            kind: "skill",
+                            id: modelData.skillId || 0,
+                            title: modelData.name || ("Skill #" + (modelData.skillId || 0)),
+                            iconSource: root.skillIconSource(modelData.skillId || 0),
+                            richBody: bodyParts.join("<br/>"),
+                            anchorX: p.x,
+                            anchorY: p.y
+                        })
+                    }
+                    onExited: uiState.clearTooltip()
+                }
             }
         }
 
@@ -4498,9 +4618,10 @@ Item {
         }
     }
 
-    Rectangle {
-        x: uiState.itemInfoX
-        y: uiState.itemInfoY
+    WindowFrame {
+        windowName: "itemInfo"
+        initialX: uiState.itemInfoX
+        initialY: uiState.itemInfoY
         width: uiState.itemInfoWidth
         height: uiState.itemInfoHeight
         readonly property var closeButtonData: root.asObject(uiState.itemInfoData.closeButton)
@@ -4511,6 +4632,9 @@ Item {
         border.color: Theme.border
         visible: uiState.itemInfoVisible
         z: 40
+        showTitleBar: false
+        showCloseButton: false
+        dragHandleHeight: 18
 
         Rectangle {
             x: 1
@@ -4683,9 +4807,10 @@ Item {
         }
     }
 
-    Rectangle {
-        x: uiState.skillDescribeX
-        y: uiState.skillDescribeY
+    WindowFrame {
+        windowName: "skillDescribe"
+        initialX: uiState.skillDescribeX
+        initialY: uiState.skillDescribeY
         width: uiState.skillDescribeWidth
         height: uiState.skillDescribeHeight
         readonly property var closeButtonData: root.asObject(uiState.skillDescribeData.closeButton)
@@ -4694,6 +4819,9 @@ Item {
         color: Theme.background
         border.width: 1
         border.color: Theme.border
+        showTitleBar: false
+        showCloseButton: false
+        dragHandleHeight: 18
         visible: uiState.skillDescribeVisible
         z: 41
 
@@ -4830,9 +4958,10 @@ Item {
         }
     }
 
-    Rectangle {
-        x: uiState.itemCollectionX
-        y: uiState.itemCollectionY
+    WindowFrame {
+        windowName: "itemCollection"
+        initialX: uiState.itemCollectionX
+        initialY: uiState.itemCollectionY
         width: uiState.itemCollectionWidth
         height: uiState.itemCollectionHeight
         readonly property var closeButtonData: root.asObject(uiState.itemCollectionData.closeButton)
@@ -4841,6 +4970,9 @@ Item {
         border.width: 1
         border.color: Theme.border
         visible: uiState.itemCollectionVisible
+        showTitleBar: false
+        showCloseButton: false
+        dragHandleHeight: 18
         z: 42
 
         Rectangle {
@@ -4906,19 +5038,23 @@ Item {
         }
     }
 
-    Rectangle {
-        x: uiState.itemIdentifyX
-        y: uiState.itemIdentifyY
+    WindowFrame {
+        windowName: "itemIdentify"
+        initialX: uiState.itemIdentifyX
+        initialY: uiState.itemIdentifyY
         width: uiState.itemIdentifyWidth
         height: uiState.itemIdentifyHeight
         readonly property var closeButtonData: root.asObject(uiState.itemIdentifyData.closeButton)
         readonly property var scrollBarData: root.asObject(uiState.itemIdentifyData.scrollBar)
         readonly property var okButtonData: root.asObject(uiState.itemIdentifyData.okButton)
         readonly property var cancelButtonData: root.asObject(uiState.itemIdentifyData.cancelButton)
+        showTitleBar: false
+        showCloseButton: false
+        dragHandleHeight: 18
         radius: 4
-        color: "#ede9df"
+        color: Theme.background
         border.width: 1
-        border.color: "#6b675f"
+        border.color: Theme.borderStrong
         visible: uiState.itemIdentifyVisible
         z: 43
 
@@ -5096,9 +5232,10 @@ Item {
         }
     }
 
-    Rectangle {
-        x: uiState.itemCompositionX
-        y: uiState.itemCompositionY
+    WindowFrame {
+        windowName: "itemComposition"
+        initialX: uiState.itemCompositionX
+        initialY: uiState.itemCompositionY
         width: uiState.itemCompositionWidth
         height: uiState.itemCompositionHeight
         readonly property var closeButtonData: root.asObject(uiState.itemCompositionData.closeButton)
@@ -5106,10 +5243,13 @@ Item {
         readonly property var okButtonData: root.asObject(uiState.itemCompositionData.okButton)
         readonly property var cancelButtonData: root.asObject(uiState.itemCompositionData.cancelButton)
         radius: 4
-        color: "#ede9df"
+        color: Theme.background
         border.width: 1
-        border.color: "#6b675f"
+        border.color: Theme.borderStrong
         visible: uiState.itemCompositionVisible
+        showTitleBar: false
+        showCloseButton: false
+        dragHandleHeight: 18
         z: 43
 
         Rectangle {
@@ -5286,9 +5426,10 @@ Item {
         }
     }
 
-    Rectangle {
-        x: uiState.optionX
-        y: uiState.optionY
+    WindowFrame {
+        windowName: "options"
+        initialX: uiState.optionX
+        initialY: uiState.optionY
         width: uiState.optionWidth
         height: uiState.optionHeight
         radius: 8
@@ -5296,6 +5437,9 @@ Item {
         border.width: 1
         border.color: Theme.borderStrong
         visible: uiState.optionVisible
+        showTitleBar: false
+        showCloseButton: false
+        dragHandleHeight: 17
 
         Rectangle {
             x: 0
@@ -5597,9 +5741,10 @@ Item {
         }
     }
 
-    Rectangle {
-        x: uiState.shopChoiceX
-        y: uiState.shopChoiceY
+    WindowFrame {
+        windowName: "shopChoice"
+        initialX: uiState.shopChoiceX
+        initialY: uiState.shopChoiceY
         width: uiState.shopChoiceWidth
         height: uiState.shopChoiceHeight
         radius: 10
@@ -5607,6 +5752,9 @@ Item {
         border.width: 1
         border.color: Theme.borderStrong
         visible: uiState.shopChoiceVisible
+        showTitleBar: false
+        showCloseButton: false
+        dragHandleHeight: 24
 
         Text {
             x: 12
@@ -5653,10 +5801,11 @@ Item {
         }
     }
 
-    Rectangle {
+    WindowFrame {
         id: controllerPanel
-        x: uiState.controllerX
-        y: uiState.controllerY
+        windowName: "controller"
+        initialX: uiState.controllerX
+        initialY: uiState.controllerY
         width: uiState.controllerWidth
         height: uiState.controllerHeight
         radius: 10
@@ -5665,6 +5814,9 @@ Item {
         border.color: Theme.borderStrong
         visible: uiState.controllerVisible
         clip: true
+        showTitleBar: false
+        showCloseButton: false
+        dragHandleHeight: 22
 
         readonly property var _rows: uiState.controllerData.rows || []
         readonly property var _tabs: uiState.controllerData.tabs || []
@@ -6024,10 +6176,11 @@ Item {
         }
     }
 
-    Rectangle {
+    WindowFrame {
         id: emotionPanel
-        x: uiState.emotionData.x || 0
-        y: uiState.emotionData.y || 0
+        windowName: "emotion"
+        initialX: uiState.emotionData.x || 0
+        initialY: uiState.emotionData.y || 0
         width: uiState.emotionData.width || 0
         height: uiState.emotionData.height || 0
         radius: 10
@@ -6036,6 +6189,9 @@ Item {
         border.color: Theme.borderStrong
         visible: uiState.emotionVisible
         clip: true
+        showTitleBar: false
+        showCloseButton: false
+        dragHandleHeight: 32
 
         readonly property var _buttons: uiState.emotionData.buttons || []
         readonly property string _title: uiState.emotionData.title || "Emotion Picker"
@@ -6549,16 +6705,20 @@ Item {
     }
 
     // Cart panel
-    Rectangle {
+    WindowFrame {
+        windowName: "cart"
         visible: (uiState.cartPanelData.visible || false)
-        x: uiState.cartPanelData.x || 0
-        y: uiState.cartPanelData.y || 0
+        initialX: uiState.cartPanelData.x || 0
+        initialY: uiState.cartPanelData.y || 0
         width: uiState.cartPanelData.width || 180
         height: uiState.cartPanelData.height || 240
         radius: 4
         color: Theme.background
         border.width: 1
         border.color: Theme.border
+        showTitleBar: false
+        showCloseButton: false
+        dragHandleHeight: 18
         Rectangle {
             x: 1; y: 1; width: parent.width - 2; height: 16
             radius: 3
@@ -6694,16 +6854,20 @@ Item {
     }
 
     // MailBox panel
-    Rectangle {
+    WindowFrame {
+        windowName: "mailBox"
         visible: (uiState.mailBoxPanelData.visible || false)
-        x: uiState.mailBoxPanelData.x || 0
-        y: uiState.mailBoxPanelData.y || 0
+        initialX: uiState.mailBoxPanelData.x || 0
+        initialY: uiState.mailBoxPanelData.y || 0
         width: uiState.mailBoxPanelData.width || 320
         height: uiState.mailBoxPanelData.height || 240
         radius: 4
         color: Theme.background
         border.width: 1
         border.color: Theme.border
+        showTitleBar: false
+        showCloseButton: false
+        dragHandleHeight: 18
         Rectangle {
             x: 1; y: 1; width: parent.width - 2; height: 16
             radius: 3
@@ -6751,16 +6915,20 @@ Item {
     }
 
     // MailRead panel
-    Rectangle {
+    WindowFrame {
+        windowName: "mailRead"
         visible: (uiState.mailReadPanelData.visible || false)
-        x: uiState.mailReadPanelData.x || 0
-        y: uiState.mailReadPanelData.y || 0
+        initialX: uiState.mailReadPanelData.x || 0
+        initialY: uiState.mailReadPanelData.y || 0
         width: uiState.mailReadPanelData.width || 320
         height: uiState.mailReadPanelData.height || 280
         radius: 4
         color: Theme.background
         border.width: 1
         border.color: Theme.border
+        showTitleBar: false
+        showCloseButton: false
+        dragHandleHeight: 18
         Rectangle {
             x: 1; y: 1; width: parent.width - 2; height: 16
             radius: 3
@@ -6812,16 +6980,20 @@ Item {
     }
 
     // MailSend panel
-    Rectangle {
+    WindowFrame {
+        windowName: "mailSend"
         visible: (uiState.mailSendPanelData.visible || false)
-        x: uiState.mailSendPanelData.x || 0
-        y: uiState.mailSendPanelData.y || 0
+        initialX: uiState.mailSendPanelData.x || 0
+        initialY: uiState.mailSendPanelData.y || 0
         width: uiState.mailSendPanelData.width || 320
         height: uiState.mailSendPanelData.height || 280
         radius: 4
         color: Theme.background
         border.width: 1
         border.color: Theme.border
+        showTitleBar: false
+        showCloseButton: false
+        dragHandleHeight: 18
         Rectangle {
             x: 1; y: 1; width: parent.width - 2; height: 16
             radius: 3
@@ -7174,5 +7346,74 @@ Item {
             }
         }
     }
+    }
+
+    // Shared tooltip overlay — last so it always renders above other windows.
+    Tooltip {
+        id: sharedTooltip
+        anchors.fill: undefined
+    }
+
+    // Startup ping — proves the new GameOverlay.qml is actually loaded in this
+    // build (vs. a stale qrc cache). Fires once at QML construction.
+    Item {
+        Component.onCompleted: {
+            uiState.pushDebugChat("[uishots] GameOverlay.qml v3 loaded; signal handler armed")
+        }
+    }
+
+    // Screenshot pipeline: when C++ requests capture, walk the QML subtree
+    // and grabToImage() every WindowFrame found to <outputDir>/<windowName>.png.
+    // WindowFrames are nested inside uiLayer rather than direct children of
+    // root, so the walk is recursive.
+    Connections {
+        target: uiState
+        function onCaptureWindowsRequested(outputDir) {
+            uiState.pushDebugChat("[uishots] handler entered, dir=" + outputDir)
+            var dir = String(outputDir || "")
+            if (dir.length === 0) {
+                uiState.pushDebugChat("[uishots] empty outputDir, aborting")
+                return
+            }
+            var sep = (dir.indexOf("\\") >= 0) ? "\\" : "/"
+            if (dir.charAt(dir.length - 1) !== sep) dir += sep
+
+            var visibleWith = 0
+            var totalFrames = 0
+            var skippedHidden = []
+            function walk(item) {
+                if (!item) return
+                if (item.windowName !== undefined
+                    && typeof item.windowName === "string"
+                    && item.windowName.length > 0) {
+                    totalFrames++
+                    if (item.visible && item.width > 0 && item.height > 0) {
+                        visibleWith++
+                        var name = item.windowName
+                        var path = dir + name + ".png"
+                        item.grabToImage(function(result) {
+                            if (!result) {
+                                uiState.pushDebugChat("[uishots] grab failed: " + name)
+                                return
+                            }
+                            var ok = result.saveToFile(path)
+                            uiState.pushDebugChat("[uishots] " + (ok ? "saved " : "FAILED ") + path)
+                        })
+                    } else {
+                        skippedHidden.push(item.windowName)
+                    }
+                }
+                var kids = item.children
+                if (kids) {
+                    for (var i = 0; i < kids.length; i++) {
+                        walk(kids[i])
+                    }
+                }
+            }
+            walk(root)
+            uiState.pushDebugChat("[uishots] frames found=" + totalFrames
+                + " visible=" + visibleWith
+                + " hidden=[" + skippedHidden.join(",") + "]")
+        }
     }
 }

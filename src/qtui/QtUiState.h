@@ -2,10 +2,13 @@
 
 #include <algorithm>
 #include <cmath>
+#include <QHash>
 #include <QObject>
+#include <QRect>
 #include <QString>
 #include <QStringList>
 #include <QVariantList>
+#include <QVariantMap>
 
 class QtUiState : public QObject {
     Q_OBJECT
@@ -308,6 +311,7 @@ class QtUiState : public QObject {
     Q_PROPERTY(QVariantList shopChoiceButtons READ shopChoiceButtons NOTIFY shopChoiceButtonsChanged)
     Q_PROPERTY(QVariantList notifications READ notifications NOTIFY notificationsChanged)
     Q_PROPERTY(QVariantList anchors READ anchors NOTIFY anchorsChanged)
+    Q_PROPERTY(QVariantMap tooltipPayload READ tooltipPayload NOTIFY tooltipPayloadChanged)
 
 public:
     explicit QtUiState(QObject* parent = nullptr)
@@ -2169,6 +2173,123 @@ public:
         emit anchorsChanged();
     }
 
+    // ---- WindowFrame: user-placed geometry overrides, focus z-order, tooltips ----
+
+    Q_INVOKABLE void setWindowGeometry(const QString& name, int x, int y, int width, int height) {
+        if (name.isEmpty()) {
+            return;
+        }
+        const QRect rect(x, y, width, height);
+        auto it = m_windowGeometryOverride.find(name);
+        if (it != m_windowGeometryOverride.end() && it.value() == rect) {
+            return;
+        }
+        m_windowGeometryOverride.insert(name, rect);
+        emit windowGeometryChanged(name);
+    }
+
+    Q_INVOKABLE QVariantMap windowGeometryOverride(const QString& name) const {
+        QVariantMap out;
+        auto it = m_windowGeometryOverride.find(name);
+        if (it == m_windowGeometryOverride.end()) {
+            out["valid"] = false;
+            return out;
+        }
+        const QRect& r = it.value();
+        out["valid"] = true;
+        out["x"] = r.x();
+        out["y"] = r.y();
+        out["width"] = r.width();
+        out["height"] = r.height();
+        return out;
+    }
+
+    Q_INVOKABLE bool hasWindowGeometryOverride(const QString& name) const {
+        return m_windowGeometryOverride.contains(name);
+    }
+
+    Q_INVOKABLE void clearWindowGeometry(const QString& name) {
+        if (m_windowGeometryOverride.remove(name) > 0) {
+            emit windowGeometryChanged(name);
+        }
+    }
+
+    Q_INVOKABLE void raiseWindow(const QString& name) {
+        if (name.isEmpty()) {
+            return;
+        }
+        ++m_zOrderCounter;
+        m_windowZOrder.insert(name, m_zOrderCounter);
+        emit windowZOrderChanged(name);
+    }
+
+    Q_INVOKABLE int zOrderFor(const QString& name) const {
+        auto it = m_windowZOrder.find(name);
+        return it == m_windowZOrder.end() ? 0 : it.value();
+    }
+
+    const QVariantMap& tooltipPayload() const { return m_tooltipPayload; }
+
+    Q_INVOKABLE void requestTooltip(const QString& kind, int id, qreal anchorX, qreal anchorY) {
+        QVariantMap payload;
+        payload["kind"] = kind;
+        payload["id"] = id;
+        payload["anchorX"] = anchorX;
+        payload["anchorY"] = anchorY;
+        payload["visible"] = true;
+        // Resolved metadata (title/body/iconSource) is filled in by the adapter
+        // listening on tooltipRequested. Until that lands, QML still has enough
+        // to render a minimal tooltip (kind + id).
+        m_tooltipPayload = payload;
+        emit tooltipPayloadChanged();
+        emit tooltipRequested(kind, id, anchorX, anchorY);
+    }
+
+    Q_INVOKABLE void showTooltip(const QVariantMap& payload) {
+        QVariantMap merged = payload;
+        if (!merged.contains("visible")) {
+            merged["visible"] = true;
+        }
+        if (m_tooltipPayload == merged) {
+            return;
+        }
+        m_tooltipPayload = merged;
+        emit tooltipPayloadChanged();
+    }
+
+    Q_INVOKABLE void requestCaptureAllWindows(const QString& outputDir) {
+        emit captureWindowsRequested(outputDir);
+    }
+
+    int captureWindowsRequestedReceiverCount() const {
+        return receivers(SIGNAL(captureWindowsRequested(QString)));
+    }
+    int debugChatRequestedReceiverCount() const {
+        return receivers(SIGNAL(debugChatRequested(QString)));
+    }
+
+    Q_INVOKABLE void pushDebugChat(const QString& message) {
+        emit debugChatRequested(message);
+    }
+
+    Q_INVOKABLE void clearTooltip() {
+        if (m_tooltipPayload.isEmpty() && !m_tooltipPayload.value("visible").toBool()) {
+            return;
+        }
+        m_tooltipPayload.clear();
+        m_tooltipPayload["visible"] = false;
+        emit tooltipPayloadChanged();
+        emit tooltipCleared();
+    }
+
+    void setTooltipPayload(const QVariantMap& value) {
+        if (m_tooltipPayload == value) {
+            return;
+        }
+        m_tooltipPayload = value;
+        emit tooltipPayloadChanged();
+    }
+
 signals:
     void backendNameChanged();
     void modeNameChanged();
@@ -2350,6 +2471,13 @@ signals:
     void shopChoiceButtonsChanged();
     void notificationsChanged();
     void anchorsChanged();
+    void tooltipPayloadChanged();
+    void tooltipRequested(const QString& kind, int id, qreal anchorX, qreal anchorY);
+    void tooltipCleared();
+    void windowGeometryChanged(const QString& name);
+    void windowZOrderChanged(const QString& name);
+    void captureWindowsRequested(const QString& outputDir);
+    void debugChatRequested(const QString& message);
 
 private:
     QString m_backendName;
@@ -2651,4 +2779,8 @@ private:
     QVariantList m_shopChoiceButtons;
     QVariantList m_notifications;
     QVariantList m_anchors;
+    QVariantMap m_tooltipPayload;
+    QHash<QString, QRect> m_windowGeometryOverride;
+    QHash<QString, int> m_windowZOrder;
+    int m_zOrderCounter = 0;
 };

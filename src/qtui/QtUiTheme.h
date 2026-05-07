@@ -44,6 +44,11 @@ class QtUiTheme : public QObject {
     Q_PROPERTY(QColor chatParty READ chatParty NOTIFY changed)
     Q_PROPERTY(QColor chatGuild READ chatGuild NOTIFY changed)
 
+    Q_PROPERTY(QColor tooltipBg READ tooltipBg NOTIFY changed)
+    Q_PROPERTY(QColor tooltipBorder READ tooltipBorder NOTIFY changed)
+    Q_PROPERTY(QColor frameDragHandle READ frameDragHandle NOTIFY changed)
+    Q_PROPERTY(QColor frameShadow READ frameShadow NOTIFY changed)
+
 public:
     enum class Mode { Light, Dark, Midnight, Slate, Forest, Parchment };
 
@@ -90,6 +95,11 @@ public:
     QColor chatParty() const     { return m_p.chatParty; }
     QColor chatGuild() const     { return m_p.chatGuild; }
 
+    QColor tooltipBg() const       { return m_p.tooltipBg; }
+    QColor tooltipBorder() const   { return m_p.tooltipBorder; }
+    QColor frameDragHandle() const { return m_p.frameDragHandle; }
+    QColor frameShadow() const     { return m_p.frameShadow; }
+
 signals:
     void changed();
 
@@ -123,6 +133,10 @@ private:
         QColor chatWhisper;
         QColor chatParty;
         QColor chatGuild;
+        QColor tooltipBg;
+        QColor tooltipBorder;
+        QColor frameDragHandle;
+        QColor frameShadow;
     };
 
     static Palette LightPalette();

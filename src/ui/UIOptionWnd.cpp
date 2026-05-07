@@ -63,7 +63,7 @@ constexpr char kUiSkinValue[] = "Skin";
 constexpr char kUiThemeValue[] = "Theme";
 
 constexpr int kDefaultWidth = 308;
-constexpr int kDefaultHeight = 290;
+constexpr int kDefaultHeight = 320;
 constexpr int kCollapsedHeight = 17;
 constexpr int kTitleBarHeight = 17;
 constexpr int kDefaultX = 185;
@@ -1346,15 +1346,18 @@ RECT UIOptionWnd::GetSoundSliderRect() const
 
 RECT UIOptionWnd::GetTextScaleSliderRect() const
 {
+    // 6 game toggles take 16..(16 + 5 * 26 + kToggleSize) ≈ 16..162 of the
+    // content rect. Push the Text scale slider below that so the row labels
+    // stop colliding with the toggle list.
     RECT contentRect = GetContentRect();
-    RECT rc = { contentRect.left + 66, contentRect.top + 150, contentRect.right - 52, contentRect.top + 164 };
+    RECT rc = { contentRect.left + 66, contentRect.top + 178, contentRect.right - 52, contentRect.top + 192 };
     return rc;
 }
 
 RECT UIOptionWnd::GetGuiScaleSliderRect() const
 {
     RECT contentRect = GetContentRect();
-    RECT rc = { contentRect.left + 66, contentRect.top + 186, contentRect.right - 52, contentRect.top + 200 };
+    RECT rc = { contentRect.left + 66, contentRect.top + 214, contentRect.right - 52, contentRect.top + 228 };
     return rc;
 }
 

@@ -35,6 +35,8 @@ void SetQtUiRuntimeThemeMode(const char* mode);
 const char* GetQtUiRuntimeThemeMode();
 std::uint32_t GetQtUiRuntimeThemeBackgroundArgb();
 std::uint32_t GetQtUiRuntimeThemeTextArgb();
+void RequestQtUiCaptureAllWindows(const char* outputDir);
+void RequestQtUiCaptureAllWindowsForced(const char* outputDir);
 #else
 inline bool IsQtUiRuntimeCompiled() { return false; }
 inline bool IsQtUiRuntimeEnabled() { return false; }
@@ -52,4 +54,6 @@ inline void SetQtUiRuntimeThemeMode(const char*) {}
 inline const char* GetQtUiRuntimeThemeMode() { return "light"; }
 inline std::uint32_t GetQtUiRuntimeThemeBackgroundArgb() { return 0xFFF3F0E7u; }
 inline std::uint32_t GetQtUiRuntimeThemeTextArgb() { return 0xFF1E1810u; }
+inline void RequestQtUiCaptureAllWindows(const char*) {}
+inline void RequestQtUiCaptureAllWindowsForced(const char*) {}
 #endif
